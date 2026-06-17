@@ -7,9 +7,9 @@ questions needing Alex.
 
 ## Current State
 
-- **Phase:** 02b — DB package (generated Kysely schema + drift check, `pnpm check`
-  green, PR open).
-- **Active branch:** `codex/local-brain-02b-db` (base `…-02a-schema`).
+- **Phase:** 02c — Rust IPC DB bridge (`db_query`/`db_execute`/`db_batch`,
+  cargo-verified, PR open).
+- **Active branch:** `codex/local-brain-02c-bridge` (base `…-02b-db`).
 - **Mode:** Sequential. This session builds the stack layer by layer; no parallel
   worker sessions are spawned. (Within a layer, read-only research may fan out, but
   commits are made sequentially from this session.)
@@ -29,6 +29,27 @@ questions needing Alex.
   `cargo check --workspace` ✓, `cargo test --workspace` ✓ (5 brain-schema tests);
   **#3** the same plus 9 brain-schema tests. Pushed (#2 fast-forward, #3
   force-with-lease) and left explanatory PR comments.
+
+### 2026-06-17 — Phase 02c: Rust IPC DB bridge
+- Split the original Plan-02c (Rust IPC + core actions + seed) into **02c** (the Rust
+  bridge, cargo-verified) and **02d** (the TypeScript domain layer + seed,
+  `pnpm check`-verified) so each PR is one language/concern. Recorded in
+  [manifest.md](manifest.md) and [decisions.md](decisions.md) (DEC-2); shifted the
+  bases of layers 03–09 up by one.
+- Built `apps/desktop/src-tauri/src/db`: a managed `DbState` (the single durable
+  `rusqlite::Connection` behind a `Mutex`); `db_query` runs read-only statements only
+  (rejects anything `!stmt.readonly()`), `db_execute` runs one write, and `db_batch`
+  runs every statement inside one transaction that rolls back on any error. Added
+  JSON↔SQLite param/row conversion (scalars map directly; arrays/objects round-trip as
+  JSON text for `json()` columns) and `From<rusqlite::Error>`/`From<SchemaError>` for
+  `AppError`. `lib.rs` now opens + migrates the database at startup (path resolved like
+  the CLI: `$BRAIN_DB` → platform data dir) and registers the three commands; the
+  desktop's Kysely runner already targets `db_query`.
+- **Verification:** `cargo fmt --all -- --check` ✓; `cargo check --workspace` ✓;
+  `cargo test --workspace` ✓ — 6 new desktop bridge tests (execute+query round-trip,
+  read-path write rejection, NULL serialization, JSON-param round-trip, atomic batch
+  commit, batch rollback on a FK violation) plus 9 brain-schema tests; `git diff
+  --check` ✓; `pnpm check` ✓ (unaffected).
 
 ### 2026-06-17 — Phase 02b: DB package (Kysely codegen + drift check)
 - Authored `packages/db/scripts/generate-schema.mjs`: replays the
@@ -113,14 +134,14 @@ questions needing Alex.
 - Committed (`5c02ab5`), pushed, opened **PR #1** (base `master`).
 
 ### Next
-- **02c** (`packages/core` + Rust IPC): `db_query`/`db_execute`/`db_batch` Tauri
-  commands over the Rust-owned connection, transaction-scoped multi-table writes,
-  `packages/core` domain getters/setters (people, projects, tasks, documents,
-  interactions), and seed/demo data. Verifiable with `pnpm check` + `cargo test`.
-- Four PRs open and awaiting review: **#1** (supervisor), **#2** (foundation, all
+- **02d** (`packages/core` + seed): a shared Kysely client over the bridge, typed
+  `dbQuery`/`dbExecute`/`dbBatch` bindings, ULID id generation, domain getters/setters
+  (people, projects, tasks, documents, interactions), transaction-scoped multi-table
+  writes via `db_batch`, and seed/demo data. Verifiable with `pnpm check`.
+- Five PRs open and awaiting review: **#1** (supervisor), **#2** (foundation, all
   gates green), **#3** (schema, sqlite3 + cargo verified), **#4** (db package,
-  `pnpm check` green). When #1 merges to `master`, rebase the stack and retarget
-  bases upward.
+  `pnpm check` green), **#5** (Rust IPC bridge, cargo-verified). When #1 merges to
+  `master`, rebase the stack and retarget bases upward.
 
 ## Verification ledger
 

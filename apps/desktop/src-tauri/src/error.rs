@@ -86,3 +86,15 @@ impl From<serde_json::Error> for AppError {
         AppError::parse(err.to_string())
     }
 }
+
+impl From<rusqlite::Error> for AppError {
+    fn from(err: rusqlite::Error) -> Self {
+        AppError::io(err.to_string())
+    }
+}
+
+impl From<brain_schema::SchemaError> for AppError {
+    fn from(err: brain_schema::SchemaError) -> Self {
+        AppError::no_database(err.to_string())
+    }
+}

@@ -27,9 +27,13 @@ None at this checkpoint.
   stack, with the relationship recorded in `manifest.md`. Rebase + retarget to `master`
   as lower layers merge.
 
-### DEC-2 — Plan 02 split into 02a/02b/02c
-- Schema crate (Rust) / db package (Kysely + IPC) / core actions + seed are separated for
-  reviewability, per the supervisor brief's allowance to split the DB layer.
+### DEC-2 — Plan 02 split into 02a/02b/02c/02d
+- Schema crate (Rust) / Kysely codegen (TS) / Rust IPC bridge / core actions + seed are
+  separated for reviewability, per the supervisor brief's allowance to split the DB
+  layer. `02c` (the Rust `db_query`/`db_execute`/`db_batch` bridge, cargo-verified) was
+  split from `02d` (the TypeScript domain layer + seed, `pnpm check`-verified) so each
+  PR is a single language/concern. Subsequent layers' bases shift up by one
+  (`03` now bases on `…-02d-core-db`).
 
 ### DEC-3 — Package + binary names
 - Default to `@local-brain/*` packages and `brain` CLI (per Plan 01 open question) until
