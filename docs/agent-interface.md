@@ -1,131 +1,106 @@
 # Agent Interface
 
-Local Brain should be useful even when the user never opens the app. Local agents should
-be able to ingest, query, and cite the user's local memory through stable commands.
+Local Brain is primarily operated by local agents. The first agent contract is a
+`brain` CLI plus a local Codex skill.
 
-The app should not ask every agent to understand the raw SQLite schema. Instead, ship a
-small CLI and local skills.
+The desktop UI exists, but agents should not scrape it. A Codex daily automation should
+be able to update the brain, generate a report, and produce a todo list through the CLI
+or approved local database access.
 
-## CLI Shape
+## Principles
 
-Working command name: `brain`.
+- Query before writing.
+- Write typed records: documents, interactions, tasks, and hidden memories.
+- Use people, organizations, projects, and tasks as the main links.
+- Store readable imported text in SQLite through the CLI.
+- Preserve provenance directly on documents, interactions, tasks, memories, and
+  evidence references.
+- Prefer cited answers over uncited summaries.
+- Never invent context. Add uncertain details as low-confidence memories or skip them.
+
+## Example Commands
+
+Status and diagnostics:
 
 ```bash
 brain status
-brain ingest ./meeting-notes.md
-brain ingest-folder ~/Documents/Transcripts
-brain remember "Alex prefers concise investor updates"
-brain search "what did I promise Sarah?"
-brain ask "what projects are blocked?"
-brain today
-brain entity "Sarah Chen"
-brain task add "Follow up with Sarah about the deck"
-brain export --format json
+brain doctor --json
+brain path
 ```
 
-## Skill Shape
-
-Install skills for local agents such as Codex, Claude Code, and Cursor.
-
-The skill should teach agents:
-
-- Search Local Brain before answering questions that depend on user context.
-- Use `brain remember` only when the user asks to remember something or when a workflow
-  clearly creates durable facts.
-- Use `brain ingest` for files, transcripts, meeting notes, and summaries.
-- Prefer cited answers.
-- Respect privacy fields.
-- Avoid writing raw SQL unless the user explicitly asks.
-- Write memories directly when useful, with provenance and confidence.
-
-## Agent Write Policy
-
-Agent writes should be visible and reversible.
-
-Every write should record:
-
-- source,
-- created records,
-- confidence,
-- created by,
-- created by agent where applicable.
-- confidence.
-
-The default write path should create active memories with provenance and confidence. The
-user should be able to correct or delete those memories later.
-
-## Agent Read Policy
-
-Agents should retrieve through high-level commands:
+Add records:
 
 ```bash
-brain search "query"
-brain context --about "project name"
+brain add document --title "Kitchen remodel notes" --text-file notes.md
+brain add interaction --kind meeting --title "Call with Maya" --text-file transcript.txt
+brain add task --title "Send Maya the revised budget" --project "Kitchen remodel"
+brain remember --kind decision --claim "Maya approved the revised budget range" --link person:maya
+```
+
+Query records:
+
+```bash
+brain search "revised budget"
+brain ask "What did I promise Maya last week?"
 brain today --json
-brain entity "person or project" --json
+brain report daily --json
+brain tasks plan-day --json
+brain graph --center self --json
+brain show person maya --json
+brain show project "Kitchen remodel"
 ```
 
-The CLI should return compact JSON with citations:
+## Document Versus Interaction
 
-```json
-{
-  "answer": "You promised Sarah a revised deck by Friday.",
-  "citations": [
-    {
-      "source_id": "src_...",
-      "memory_id": "mem_...",
-      "excerpt": "Alex: I'll send the revised deck by Friday."
-    }
-  ]
-}
-```
+Use a document for user-readable reference material:
 
-## Local API
+- notes
+- PDFs and text files
+- specs and plans
+- webpages
+- receipts
+- long-form reference text
 
-The desktop app can expose an optional localhost API later, but the first stable agent
-contract should be the CLI. CLI contracts are easier for local agents, shell scripts, and
-skills to discover.
+Use an interaction for a human exchange:
 
-## Privacy
+- meeting transcript
+- call transcript
+- email body or thread
+- message thread
+- chat transcript
+- voice note
+- event notes
 
-The CLI should expose privacy-aware modes:
+## Agent Write Rules
 
-```bash
-brain search "query" --local-only
-brain ask "query" --cloud-ok
-brain ask "query" --never-external
-```
+Before adding a record:
 
-Default behavior should be conservative. If a command might send retrieved context to a
-cloud model, it should be explicit in either the command or user settings.
+1. Search for likely duplicates.
+2. Reuse existing people, organizations, projects, and tasks when possible.
+3. Include title, kind, date, and provenance metadata when known.
+4. Link the new record to relevant people, organizations, projects, or tasks.
+5. Let extraction create hidden memories unless the agent has an explicit atomic claim
+   to store.
 
-## Installation
+When adding a memory:
 
-The Tauri app should install:
+- Keep it atomic.
+- Use one of: fact, preference, decision, commitment, instruction, risk, idea.
+- Link it to visible records.
+- Add evidence when the claim came from a document or interaction.
 
-- the `brain` CLI sidecar,
-- local agent skills,
-- shell PATH instructions if needed,
-- a simple `brain doctor` diagnostic command.
+## Skill Contract
 
-The user should be able to see which agents have been configured.
+The local skill should teach agents:
 
-## Minimal First Skill
+- the product nouns,
+- when to create documents versus interactions,
+- how to query before writing,
+- how to add tasks and memories,
+- how to run daily update/report/todo workflows,
+- how to query the user-centered graph,
+- how to request JSON output,
+- how to cite evidence,
+- how to avoid duplicate records.
 
-The first Codex-oriented skill can be extremely small:
-
-```text
-Use Local Brain when the user asks about personal context, prior decisions, people,
-projects, commitments, preferences, or asks you to remember something.
-
-Before answering, run:
-  brain search "<query>" --json
-
-When the user asks you to remember something, run:
-  brain remember "<memory>" --source agent --json
-
-Never send `never_external` context to cloud tools.
-Prefer answers with citations.
-```
-
-That is enough to prove whether agents can become the product's daily acquisition loop.
+Agents should treat the CLI as the main supported operating path for launch.

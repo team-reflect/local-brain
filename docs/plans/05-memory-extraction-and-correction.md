@@ -1,66 +1,86 @@
-# Plan 05 - Memory Extraction and Correction
+# Plan 05 - Memory Extraction and Linking
 
-**Goal:** Turn sources into useful memories, entities, tasks, events, and relationships
-automatically, while making correction, deletion, and audit easy.
+**Goal:** Extract useful structured context from documents and interactions without
+creating a mandatory review queue.
 
-**Depends on:** Plan 02, Plan 04.
+**Depends on:** Plans 01-04.
 
-**Unlocks:** Plan 03 richer UI states, Plan 06 retrieval, Plan 07 agent writes, Plan 08
-deletion semantics.
+**Unlocks:** Plans 06-08.
 
 ## Scope
 
-**In:** extraction pipeline, direct memory writes, entity matching, task/event
-extraction, correction flows, provenance metadata.
+**In:** extraction prompts/pipelines, candidate people and organizations, project and
+task detection, hidden atomic memories, evidence refs, link creation, correction from
+detail pages.
 
-**Out:** full email/calendar integrations, complex ontology, and default triage queues.
+**Out:** automatic inbox review, hosted extraction service, email/calendar sync.
 
 ## Key Decisions
 
-- Memories are extracted beliefs, not raw evidence.
-- The default extraction output status is `active`.
-- AI extraction writes directly when useful.
-- Generic `entities` remain the primary model; do not add typed people/org/project
-  tables.
-- Contradictory or lower-confidence facts should preserve confidence and provenance
-  instead of blocking behind review.
-- The user corrects memory from the place they encounter it: source detail, entity page,
-  Today, Ask/Search citations, or memory detail.
+- Extraction writes visible records when confidence is high enough.
+- Low-confidence extracted links can remain suggestions in the relevant detail context,
+  but there is no global review queue.
+- Memories are hidden atomic claims, not a sidebar surface.
+- Memories link to visible records through `memory_links`.
+- Memories and extracted tasks cite evidence through `evidence_refs`.
+- Corrections happen where the user notices them: person, organization, project, task,
+  document, interaction, or Ask citation views.
 
 ## Implementation Steps
 
-1. Define extraction result schemas in `packages/core` using Zod.
-2. Add a deterministic extraction adapter interface so local rules and model-backed
-   extraction can share the same output shape.
-3. Start with local/rule-based extraction for obvious tasks, dates, and simple entity
-   mentions where practical.
-4. Add BYOK model-backed extraction behind explicit settings once provider keys exist.
-5. Match extracted entities against aliases and canonical keys.
-6. Write active memories, entities, tasks, events, and relationships transactionally.
-7. Store confidence, source excerpt, extraction metadata, and creator metadata.
-8. Build correction actions: edit memory, mark stale, archive, delete, merge entity, and
-   unlink a bad relationship.
-9. Ensure extracted records can be traced back to the source and extraction metadata.
+1. Define extraction outputs:
+   - people
+   - organizations
+   - affiliations
+   - projects
+   - tasks
+   - memories
+   - record links
+   - evidence refs
+2. Build deterministic pre-processing:
+   - chunk selection
+   - date extraction
+   - sender/participant hints
+   - duplicate candidate lookup
+3. Build model extraction for documents and interactions.
+4. Add merge/upsert logic for people and organizations.
+5. Add task extraction with status, due date, project/person/org links, and evidence.
+6. Add memory extraction for facts, preferences, decisions, commitments, instructions,
+   risks, and ideas.
+7. Link memories to relevant people, organizations, projects, tasks, documents, and
+   interactions.
+8. Add correction flows:
+   - unlink wrong person/org/project/task
+   - edit extracted task
+   - archive or edit memory
+   - fix citation/evidence link
+9. Update relationship-intelligence hints from interactions and tasks:
+   - last interaction date
+   - reconnect suggestions
+   - relationship strength
+   - important dates
+10. Add extraction job status on the imported record or job table if needed for UI
+   progress.
 
 ## Acceptance Criteria
 
-- Ingested sources can produce active memories and entities.
-- Extracted memories are usable immediately in search and entity pages.
-- Users can correct, archive, delete, or mark memories stale.
-- Corrections preserve provenance and history.
-- Entity matching prevents obvious duplicate people/projects/topics.
-- Tasks and events can be extracted directly.
+- A meeting transcript can create or update people, organizations, tasks, projects,
+  and hidden memories.
+- Extracted tasks and memories cite chunks from the originating document or
+  interaction.
+- The user can correct wrong links from the affected detail page.
+- There is no mandatory extraction review inbox.
+- The system avoids obvious duplicates for people, organizations, and tasks.
+- Relationship follow-up hints update after relevant interactions.
 
 ## Tests or Verification
 
-- Unit tests for extraction output validation.
-- Tests for entity canonicalization and alias matching.
-- Transaction tests for memory correction, archival, deletion, and entity merge.
-- UI tests for correcting a memory from source detail, entity page, and citation detail.
-- Regression test that durable sources remain intact when extracted memories are
-  corrected or deleted.
+- Unit test merge/upsert matching.
+- Unit test task and memory evidence creation.
+- Golden tests for representative meeting, email, note, and document inputs.
+- Manual test: import text, inspect Today/Tasks/Network/Projects, correct one mistake.
 
 ## Open Questions
 
-- Exact model provider for extraction is undecided. Default to adapter interfaces and
-  no hosted Local Brain API.
+- Whether extraction runs fully locally or via BYOK model adapters can be finalized
+  when model quality and speed are tested.

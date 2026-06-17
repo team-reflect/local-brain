@@ -1,178 +1,133 @@
 # Reflect Open Technology Base
 
-Local Brain should be based on Reflect Open's technology, not its exact storage model.
+Local Brain should borrow heavily from Reflect Open's local-first desktop architecture,
+but not its markdown-as-truth storage model.
 
-Reflect Open is a strong base because it already solves the hard local-app constraints:
-
-- Tauri 2 desktop shell instead of Electron.
-- React + TypeScript frontend.
-- Rust native layer for file system, SQLite, embeddings, secrets, watchers, and sidecars.
-- SQLite opened in Rust through `rusqlite`.
-- Kysely in TypeScript as a typed SQL builder over a Tauri IPC bridge.
-- FTS5 lexical search.
-- `sqlite-vec` style local vector search.
-- Local embedding runtime in Rust.
-- BYOK generative AI, with no Reflect-hosted API dependency.
-- Secrets stored in the OS keychain.
-- Durable chat history in SQLite.
-- Open-source conventions and CLI sidecars.
-
-## What to Reuse Directly
-
-### App Shell
-
-Use Tauri with a React/TypeScript frontend and Rust backend. Keep the native process in
-charge of SQLite, file access, embeddings, secrets, and sidecars.
-
-### SQLite in Rust
-
-SQLite should run in Rust, not in the WebView. This preserves:
-
-- native extensions,
-- reliable filesystem access,
-- real local DB files,
-- WAL locking,
-- CLI access,
-- better performance for vector/search work.
-
-The frontend can compile typed SQL using Kysely and send `{ sql, params }` through a
-small IPC bridge, following Reflect Open's pattern.
-
-### Local AI Infrastructure
-
-Reuse the split between:
-
-- local embeddings for retrieval,
-- BYOK cloud or local model providers for generation,
-- OS keychain for API keys,
-- explicit privacy gates before sending user context outside the machine.
-
-### CLI Sidecar
-
-Reflect Open's CLI sidecar idea is central. Local Brain should ship a local CLI such as
-`brain`, installed with the app and discoverable by local agents.
-
-### Generated DB Types
-
-Reflect Open generates TypeScript schema types from SQLite migrations. Keep that
-discipline so the DB contract does not drift.
-
-## What to Change
-
-### SQLite Is the Source of Truth
-
-Reflect Open treats SQLite as a mostly rebuildable projection over markdown files.
-Local Brain should treat SQLite as the durable source of truth.
-
-This changes the architecture:
-
-- Index rebuilds repair derived tables, FTS, and vectors, not the whole user's memory.
-- Backups must include the SQLite database.
-- Imports can preserve raw source files, but product state lives in tables.
-- Migrations become more important because they change durable user data.
-
-### Sources Are Not Only Markdown
-
-The ingestion layer should expect many source kinds:
-
-- markdown notes,
-- plain text,
-- PDFs,
-- webpages,
-- transcripts,
-- emails,
-- calendar events,
-- chats,
-- audio transcripts,
-- screenshots,
-- manual memories.
-
-### Graph Is Structured, Not Note-Link Based
-
-Reflect's graph is built from wiki links and note aliases. Local Brain's graph should be
-built from entities, relationships, memories, events, and tasks.
-
-### Privacy Is Per Source and Memory
-
-Reflect uses `private: true` frontmatter as a hard cloud-AI block. Local Brain should
-make privacy a database field on sources, chunks, memories, entities, tasks, and chats.
-
-Suggested values:
+Reference repo:
 
 ```text
-local
-cloud_allowed
-sensitive
-never_external
+/Users/alex/repos/reflect-open
 ```
 
-The exact names can change, but the core rule should not: retrieval must know whether a
-piece of context can leave the machine.
+## What To Borrow
 
-## Suggested Monorepo Shape
+- Tauri desktop app shape.
+- React/TypeScript frontend.
+- Rust native layer for file-system, keychain, local processes, and database access.
+- Local-first defaults.
+- Sidecar CLI pattern.
+- BYOK model/provider setup.
+- Local embeddings direction where practical.
+- Practical workspace tooling and command discipline.
 
-This mirrors Reflect Open without committing to code yet:
+## What To Change
+
+Reflect Open is a note app. Local Brain is a personal CRM and memory layer.
+
+Reflect Open can treat markdown files as durable knowledge and SQLite as an index.
+Local Brain should treat SQLite as durable knowledge:
+
+- typed people, organizations, projects, tasks, documents, interactions, and memories
+- direct SQL migrations
+- generated TypeScript DB types
+- Rust-owned database access
+- export as a portability feature, not the canonical store
+
+## Desktop Architecture
+
+Expected shape:
 
 ```text
-local-brain/
-  apps/
-    desktop/            Tauri app
-    cli/                brain CLI sidecar
-  packages/
-    core/               product logic, ingestion, retrieval, AI policies
-    db/                 SQLite schema types and Kysely bridge
-    skills/             local agent skill templates
-  crates/
-    index-schema/       SQLite migrations and codegen input
-  docs/
+Tauri window
+  React UI
+  typed IPC commands
+Rust native layer
+  SQLite
+  migrations
+  keychain
+  file import/export
+  sidecar CLI
 ```
 
-## Architecture Loop
+The frontend should feel like a real local app: fast navigation, optimistic edits where
+reasonable, clear diagnostics, and no dependence on a hosted account.
 
-```text
-React UI
-  -> typed commands and Kysely query builders
-  -> Tauri IPC
-  -> Rust commands
-  -> SQLite / local files / keychain / embeddings
-  -> JSON rows and events
-  -> TypeScript core policies
-```
+## Database Direction
 
-## Durability Model
+Use SQLite for:
 
-Because SQLite is durable here, the app should separate tables into classes:
+- durable personal CRM records
+- imported readable text
+- hidden memories
+- chat history
+- settings
+- FTS indexes
+- optional vector index
 
-- **Durable:** sources, memories, entities, tasks, events, chats, relationships.
-- **Derived:** chunks, FTS rows, embedding vectors, and denormalized search views.
-- **Device-local:** window state, provider keys, recent paths, temporary queues.
+Derived indexes can be rebuilt. Durable records cannot depend on generated markdown.
 
-Derived tables can be rebuilt. Durable tables cannot be casually wiped.
+## AI Direction
 
-## Privacy Model
+Use AI for:
 
-The retrieval layer must filter context before any AI call.
+- extraction from documents and interactions
+- Ask over local context
+- summarization for detail pages
+- task suggestion
+- memory cleanup
 
-Local-only operations may read all allowed local data. Cloud model calls must exclude
-anything marked `never_external` or `sensitive` unless the user explicitly approves a
-one-off override.
+AI outputs should write structured data through the same database layer as the app and
+CLI. Factual answers should cite evidence references to chunks from documents or
+interactions.
 
-Every assistant answer should be able to display:
+## Agent Direction
 
-- which sources were used,
-- which memories were used,
-- whether any context left the machine,
-- which model/provider handled the request.
+Local agents should use the `brain` CLI, not the app UI. This is the primary operating
+path for the product: agents write most updates and perform most reads for reports,
+briefings, todo lists, and cited answers.
 
-## Reflect Open Docs to Keep Close
+The CLI should expose:
 
-The implementation should stay aligned with these Reflect Open documents:
+- status and diagnostics
+- add document
+- add interaction
+- add task
+- remember atomic claim
+- search
+- ask
+- today
+- daily report
+- todo planning
+- changed records
+- show record
 
-- `AGENTS.md`
-- `docs/reflect-v2-product-vision.md`
-- `docs/reflect-v2-indexing-strategy.md`
-- `docs/plans/04-local-index-sqlite.md`
-- `docs/reflect-v2-sync-strategy.md`
+This mirrors Reflect Open's useful sidecar pattern while giving agents a schema-aware
+contract.
 
-The biggest intentional divergence is storage truth: markdown in Reflect, SQLite in
-Local Brain.
+## UI Direction
+
+Borrow Reflect Open's preference for a fast desktop app, but let the Picardo internal
+UI influence the product surfaces:
+
+- compact sidebar
+- dense tables
+- Picardo-style node graph centered on the user
+- split panes
+- detail pages
+- restrained styling
+- powerful search
+
+Local Brain's sidebar is Today, Tasks, Network, Projects, Graph, Ask, and Settings.
+
+## Security And Boundaries
+
+For launch:
+
+- no hosted Local Brain service
+- provider keys stored in the OS keychain
+- Settings controls whether external model calls are enabled
+- Ask and extraction should send only the context needed for the operation
+- backup/export is explicit and user-controlled
+
+Future sync, git portability, or deeper privacy controls should be designed after the
+local product loop works.

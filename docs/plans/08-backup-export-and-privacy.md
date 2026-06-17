@@ -1,61 +1,107 @@
-# Plan 08 - Settings, Backup, Export, and Privacy
+# Plan 08 - Settings, Backup, Export, and Privacy Boundaries
 
-**Goal:** Make Settings the home for local data portability, recovery, deletion,
-diagnostics, and privacy boundaries for agents and model providers.
+**Goal:** Put storage controls, backup/export, diagnostics, model keys, and skill setup
+under Settings.
 
-**Depends on:** Plan 02, Plan 04, Plan 05, Plan 06.
+**Depends on:** Plans 01-07.
 
-**Unlocks:** Plan 09 launch readiness.
+**Unlocks:** Plan 09.
 
 ## Scope
 
-**In:** Settings UI, SQLite backup, JSON export, source deletion semantics,
-derived-data cleanup, privacy states, keychain rules, context-use metadata.
+**In:** SQLite backup, JSON export, deletion/archive semantics, keychain secrets,
+diagnostics, external-model boundary settings, skill setup.
 
-**Out:** hosted sync, collaboration, mobile sync, Git-based multi-device sync.
+**Out:** hosted sync, git sync, encrypted cloud backup, row-level sensitivity labels.
 
 ## Key Decisions
 
-- The SQLite database is durable and must be backed up.
-- JSON export ships as the first portable interchange format.
-- Secrets live in the OS keychain, not SQLite.
-- Deleting a source must address derived chunks, embeddings, memories, and citations.
-- Privacy states from the launch schema drive retrieval and cloud-model eligibility.
-- No hosted Local Brain sync is required for MVP.
+- Settings owns backup and export.
+- SQLite backup is the first portability story.
+- JSON export is the first inspectable interchange format.
+- Keychain stores provider keys and local secrets.
+- Launch privacy is app-level and model-boundary based.
+- Deletion should be explicit and predictable.
+- Backup/export should use product states rather than storage jargon.
+- Future git sync is deferred; do not design launch UI around Git.
 
 ## Implementation Steps
 
-1. Add backup commands for safe SQLite file copy using SQLite backup APIs or an
-   equivalent consistent snapshot mechanism.
-2. Add JSON export for durable tables and selected metadata.
-3. Add source deletion flow:
-   - delete source only,
-   - delete source plus derived memories,
-   - archive instead of hard delete when safer.
-4. Add derived cleanup for chunks, FTS rows, and embeddings.
-5. Add settings UI for privacy defaults and model provider behavior.
-6. Add answer/context metadata showing sources, memories, provider, model, and
-   external-context status.
-7. Add recovery documentation for restoring a backup/export.
+1. Add Settings sections:
+   - storage location
+   - model keys
+   - backup/export
+   - diagnostics
+   - agent skill setup
+2. Add SQLite backup:
+   - choose destination
+   - create consistent backup
+   - verify backup can open
+   - write atomically to avoid corrupt partial backups
+   - include app/schema version metadata
+3. Add JSON export:
+   - people
+   - organizations
+   - affiliations
+   - projects
+   - tasks
+   - interactions
+   - documents
+   - memories
+   - tags
+   - chat metadata
+   - evidence refs and links
+   - schema/export version
+4. Add deletion/archive rules:
+   - archive visible records by default
+   - hard delete only behind confirmation
+   - cascade or detach links predictably
+   - rebuild derived search/chunk data after destructive operations
+5. Add checkpoint rules:
+   - create a SQLite backup before broad destructive operations where practical
+   - create a checkpoint before high-risk AI or agent write batches
+   - expose restore instructions in diagnostics
+6. Add keychain integration for provider keys.
+7. Add model boundary settings:
+   - external model calls enabled/disabled
+   - selected provider/model
+   - diagnostics showing whether Ask can run
+8. Add backup/export states:
+   - Backed up
+   - Exporting
+   - Offline
+   - Needs review
+   - Backup failed
+9. Add diagnostics:
+   - database path and migration status
+   - FTS/vector availability
+   - keychain/provider status
+   - CLI/skill installation status
+   - recent failed jobs, if a jobs table exists
 
 ## Acceptance Criteria
 
-- A user can create a SQLite backup without corrupting an open DB.
-- A user can export durable memory to JSON.
-- A user can delete or archive a source with clear derived-data choices.
-- Provider keys are stored in the OS keychain only.
-- Cloud AI calls exclude `never_external` context.
-- Settings exposes backup, export, privacy, model keys, diagnostics, and skill setup.
-- The UI can explain whether context left the machine for a given answer.
+- A user can create a restorable SQLite backup from Settings.
+- A user can export JSON from Settings.
+- Backup/export writes are atomic and versioned.
+- Provider keys are not stored in plain settings rows.
+- Destructive deletion behavior is explicit.
+- High-risk write batches have a checkpoint story.
+- Diagnostics explain common failures clearly.
+- No launch code depends on row-level sensitivity labels.
 
 ## Tests or Verification
 
-- Backup/restore smoke test.
-- JSON export schema test.
-- Deletion tests covering source-only, source-plus-derived, and archive paths.
-- Privacy filter tests against retrieval and AI calls.
-- Keychain mock tests for provider credentials.
+- Backup/restore integration test.
+- JSON export snapshot test.
+- Keychain mock test.
+- Deletion/archive cascade tests.
+- Atomic backup failure test.
+- Restore-from-backup smoke test.
+- Manual Settings smoke test.
 
 ## Open Questions
 
-- The first backup destination UX is unresolved. Default: user-chosen local file export.
+- Future git sync is deferred and should not block the launch backup/export story.
+- Cloud-folder sync should not be recommended for the SQLite database unless/until it
+  has a tested locking and conflict story.

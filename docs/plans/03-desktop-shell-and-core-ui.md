@@ -1,80 +1,142 @@
 # Plan 03 - Desktop Shell and Core UI
 
-**Goal:** Build the initial Tauri desktop app and a Picardo-inspired shell for personal
-memory: grouped sidebar, thin command topbar, dense lists, detail pages, and graph/search
-surfaces.
+**Goal:** Build the first usable desktop shell and core personal-CRM surfaces.
 
-**Depends on:** Plan 01, Plan 02.
+**Depends on:** Plans 01-02.
 
-**Unlocks:** Plan 04 (manual ingestion UI), Plan 05 (correction UI), Plan 06 (ask/search UI),
-Plan 08 (privacy/export UI).
+**Unlocks:** Plans 04-08.
 
 ## Scope
 
-**In:** Tauri shell, app routing/state, design system baseline, empty and loaded states,
-core views connected to local DB reads, Picardo-inspired navigation and detail layouts.
+**In:** Tauri app shell, React routes, sidebar, global search entry, Today, Tasks,
+Network, Projects, Graph, Ask, Settings, shared UI primitives, basic record detail
+pages.
 
-**Out:** extraction logic, model calls, production packaging, generic table editor.
+**Out:** full extraction, advanced retrieval, packaging.
 
 ## Key Decisions
 
-- The first target is macOS desktop.
-- The app uses React + TypeScript in a Tauri WebView.
-- The default product surface is not a database browser or chat landing page.
-- Follow [UI Direction](../ui-direction.md), taking explicit inspiration from
-  `/Users/alex/repos/picardo-internal-ui`.
-- UI routes:
-  - Today
-  - Tasks
-  - People
-  - Projects
-  - Places
-  - Topics
-  - Sources
-  - Memories
-  - Ask
-  - Graph
-  - Settings
-- Keep the design quiet, dense, keyboard-friendly, and closer to Picardo's editorial
-  data-tool feel than a sparse consumer app.
+- The UI takes inspiration from the Picardo internal app: compact sidebar, dense
+  tables, split panes, clear detail pages, and little marketing chrome.
+- The UI is secondary to the CLI/skill operating path. Optimize it for browsing,
+  correction, inspection, and demo.
+- Shared UI should use shadcn components themed through `globals.css`, following
+  [Design System](../design-system.md).
+- Sidebar sections are Today, Tasks, Network, Projects, Graph, Ask, and Settings.
+- Network has People and Organizations tabs.
+- Documents and interactions are browsed inside related detail pages and through search
+  or Ask.
+- Settings owns backup, export, diagnostics, model keys, and skill setup.
+- Graph is a Picardo-inspired node graph with the user at the center.
+- Use a typed route model and central command/keymap registry, following Reflect Open's
+  routing and shortcut pattern.
+- No top-level automation log surface.
 
 ## Implementation Steps
 
-1. Create the Tauri desktop app shell and register basic Rust commands for app status
-   and DB availability.
-2. Add a small design system foundation: typography, colors, spacing, buttons, inputs,
-   dialogs, menus, and tooltips.
-3. Add app-level navigation with grouped sidebar sections: Workspace, Memory, AI, and
-   System.
-4. Implement Today with read-only sections for due tasks, upcoming events, recent
-   memories, and follow-ups.
-5. Implement list/detail patterns for People, Projects, Places, Topics, Sources,
-   Memories, and Tasks.
-6. Implement Ask as a query/answer workspace with citations rather than a full-screen
-   chatbot.
-7. Implement Graph as a real navigation and sensemaking surface.
-8. Add first-run empty states that explain the source-to-memory loop without marketing
-   page styling.
+1. Create the Tauri window and React router.
+2. Build app layout:
+   - fixed sidebar
+   - top search/command field
+   - main content region
+   - optional right-side detail pane
+3. Define typed routes:
+   - `{ kind: 'today' }`
+   - `{ kind: 'tasks' }`
+   - `{ kind: 'network'; tab: 'people' | 'organizations' }`
+   - `{ kind: 'person'; id: string }`
+   - `{ kind: 'organization'; id: string }`
+   - `{ kind: 'projects' }`
+   - `{ kind: 'project'; id: string }`
+   - `{ kind: 'task'; id: string }`
+   - `{ kind: 'document'; id: string }`
+   - `{ kind: 'interaction'; id: string }`
+   - `{ kind: 'graph' }`
+   - `{ kind: 'ask'; conversationId?: string }`
+   - `{ kind: 'settings'; section?: string }`
+4. Add URL mappings:
+   - `/today`
+   - `/tasks`
+   - `/network?tab=people`
+   - `/network?tab=organizations`
+   - `/projects`
+   - `/graph`
+   - `/ask`
+   - `/settings`
+5. Add route history:
+   - back/forward
+   - focus restore
+   - selected row/detail restore
+   - deep-link-safe record ids
+6. Add a central command/keymap registry:
+   - go to Today
+   - open command palette
+   - back/forward
+   - new document
+   - new interaction
+   - new task
+   - run daily report
+   - open Graph
+7. Add detail routes or drawers for:
+   - person
+   - organization
+   - project
+   - task
+   - document
+   - interaction
+8. Build shared components:
+   - sidebar item
+   - table/list view
+   - filters
+   - empty state
+   - detail header
+   - linked-record section
+   - citation list
+   - settings section
+9. Add shadcn components needed for the MVP and theme them through `globals.css`.
+10. Build Today from real queries:
+   - AI daily brief
+   - due tasks
+   - scheduled tasks
+   - waiting items
+   - relationship follow-ups
+   - recent interactions
+   - active project updates
+11. Build Tasks with status filters and inline completion.
+12. Build Network tables and detail pages.
+13. Build Projects table/detail pages.
+14. Build Graph from typed records and links:
+    - center on the user's own person row
+    - show people, organizations, projects, tasks, documents, interactions, and memories
+    - open related detail pages from nodes
+15. Build Ask shell with conversation list, chat panel, and citations.
+16. Build Settings sections for model keys, local database, backup/export,
+    diagnostics, and skill setup.
 
 ## Acceptance Criteria
 
-- The Tauri app launches locally.
-- The app can open or create the local SQLite brain.
-- Navigation works from keyboard and mouse.
-- Empty states guide the user to add a source.
-- The UI reads real DB rows where available and handles an empty database gracefully.
-- No route exposes a raw table editor as the main product path.
-- The shell supports expanded sidebar, collapsed icon rail, mobile drawer, and command
-  search trigger.
+- The app opens to Today.
+- Today reads like a generated operating brief, not just a task list.
+- Sidebar matches [UI Direction](../ui-direction.md).
+- Graph renders a user-centered node map from seed data.
+- Document and interaction records are reachable from detail pages and search.
+- A user can create/edit people, organizations, projects, and tasks.
+- A user can quickly inspect what an automation changed or cited.
+- Detail pages show linked tasks, documents, interactions, and memories where relevant.
+- Ask UI can display cited answers once Plan 06 supplies retrieval.
+- Back/forward and command-palette navigation use the typed route model.
+- Global keyboard shortcuts are registered once and covered by duplicate-binding tests.
 
 ## Tests or Verification
 
-- Run `pnpm check`.
-- Run desktop UI tests for route rendering and empty states.
-- Run a smoke test that opens the app with an empty DB.
-- Manually verify text does not overflow at desktop and narrow widths.
+- Run component tests for route rendering.
+- Run IPC-backed smoke tests against seed data.
+- Verify desktop and narrow window layouts do not overlap.
+- Verify keyboard navigation for sidebar, search, and main tables.
+- Test route serialization/deserialization and history restoration.
 
 ## Open Questions
 
-- Exact visual identity is unresolved. Default to Picardo's dense editorial data-tool
-  posture, translated away from corporate CRM language.
+- Exact global search keyboard shortcut can be chosen during implementation.
+- Graph filters by node type, time range, project, and relationship strength are useful
+  follow-up once the base graph is working.

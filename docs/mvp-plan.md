@@ -1,94 +1,79 @@
 # MVP Plan
 
-The first version should prove the core loop:
+The MVP should prove that an AI-operated local brain can maintain useful personal
+context through a CLI/skill contract, with a desktop UI for browsing, correction, and
+demonstration.
 
-> Add sources. Extract memories. Review them. Ask useful questions. Let local agents use
-> the same memory.
+## Phase 1 - Repository and Shell
 
-## Phase 1: Docs and Schema
+- Create the Tauri/React/Rust/pnpm/Turbo scaffold.
+- Establish app layout, package boundaries, and quality commands.
+- Open a local SQLite database from Rust.
+- Render the Picardo-inspired shell with Today, Tasks, Network, Projects, Graph, Ask, and
+  Settings.
 
-- Product thesis.
-- Reflect Open technology mapping.
-- SQLite launch schema.
-- CLI and skill contract.
-- Open questions.
+## Phase 2 - Durable Schema
 
-## Phase 2: Skeleton App
+- Add migrations for people, organizations, affiliations, projects, tasks,
+  interactions, documents, content chunks, memories, links, tags, chat, and settings.
+- Generate TypeScript database types.
+- Add Rust-owned SQLite access and a typed IPC bridge.
+- Add seed/demo data for local development.
 
-- Tauri desktop app.
-- React UI.
-- Rust SQLite layer.
-- Kysely query bridge.
-- SQLite migrations and generated types.
-- OS keychain integration for model keys.
-- `brain` CLI sidecar.
+## Phase 3 - Manual Capture
 
-## Phase 3: Manual Sources
+- Add paste/import flows that create documents or interactions directly.
+- Support text, markdown, transcript text, and simple file import.
+- Store readable text in SQLite.
+- Preserve original path, URL, and hash metadata when available.
+- Create chunks for imported documents and interactions.
 
-Support only simple ingestion:
+## Phase 4 - Extraction
 
-- paste text,
-- markdown/plain text files,
-- transcript files,
-- folder import.
+- Extract candidate people, organizations, projects, tasks, and hidden atomic memories
+  from documents and interactions.
+- Link extracted records back to their evidence.
+- Apply high-confidence changes directly.
+- Let users correct extracted data from visible detail pages instead of forcing a
+  review queue.
 
-No email, calendar, browser, or account integrations yet.
+## Phase 5 - Core UI
 
-## Phase 4: Extraction Pipeline
+- Today shows an AI daily brief with due tasks, scheduled items, waiting items,
+  relationship follow-ups, recent interactions, and active project changes.
+- Tasks supports filtering, sorting, editing, and linked evidence.
+- Network supports People and Organizations tabs plus detail pages.
+- Projects supports a list and detail pages with tasks, people, organizations,
+  interactions, and documents.
+- Graph shows a user-centered node map derived from typed records and links. Filters by
+  node type, time, strength, and project are optional follow-up.
+- Ask supports cited answers over the local brain.
+- Settings owns model keys, backup/export, diagnostics, and skill setup.
+- The UI is optimized for quick browsing and inspection, not bulk data entry.
 
-For each source:
+## Phase 6 - Agent Interface
 
-1. Chunk source.
-2. Index with FTS5.
-3. Generate local embeddings if available.
-4. Extract memories, entities, tasks, events, and relationships.
-5. Write useful memory directly with provenance and confidence.
-6. Let the user correct, archive, delete, or merge when they notice something wrong.
+- Ship a `brain` CLI for local agents.
+- Support adding documents, interactions, tasks, and memories.
+- Support search, Ask, Today, and record lookup commands.
+- Support daily report and todo-list generation for Codex automations.
+- Install a local Codex skill that teaches agents how to use the CLI safely.
 
-## Phase 5: Useful UI
+## Phase 7 - Packaging
 
-Use a Picardo-inspired app shell rather than a sparse consumer layout:
-
-- **Grouped sidebar:** Workspace, Memory, AI, and System sections.
-- **Today:** open tasks, upcoming events, recent memories, and follow-ups.
-- **Entity sections:** people, projects, places, topics, and related detail pages.
-- **Sources and memories:** dense catalog/list pages with rich details.
-- **Ask and Graph:** cited AI answers plus visual relationship exploration.
-- **Settings:** privacy, model keys, backup, export, diagnostics, and skill setup.
-
-Advanced database inspection can come later behind a developer toggle.
-
-## Phase 6: Local Agent Integration
-
-- Install `brain` CLI.
-- Install one Codex skill.
-- Add commands for search, remember, ingest, today, and entity context.
-- Ensure agent writes include source/provenance metadata.
+- Package the macOS desktop app.
+- Bundle or install the CLI.
+- Add first-run setup and diagnostics.
+- Document backup/export and local storage behavior.
 
 ## Launch Criteria
 
-The product is launchable when a technical user can:
-
-- import a folder of notes or transcripts,
-- see extracted memories appear automatically,
-- correct and edit memories,
-- ask questions with citations,
-- see a useful Today view,
-- install a local agent skill,
-- have an agent remember something,
-- export the SQLite DB and JSON backup,
-- understand what, if anything, was sent to a cloud model.
-
-## Things to Avoid in V1
-
-- Full email ingestion.
-- Calendar OAuth.
-- Browser extension.
-- Mobile.
-- Hosted sync.
-- Collaboration.
-- Generic database editor as the main UI.
-- Complex ontologies.
-- Marketplace/plugin system.
-
-These can all be good later. They are distracting before the local memory loop works.
+- A user can add a meeting transcript, email body, note, or reference document.
+- The app extracts useful tasks, people, organizations, projects, and memories.
+- The user can browse by Today, Tasks, Network, and Projects.
+- The user can inspect a graph view centered on themselves.
+- Ask answers questions with citations to documents or interactions.
+- A local agent can add and query context through the CLI.
+- A Codex daily automation can update the brain and generate a daily report/todo list.
+- The daily report includes relationship follow-ups and stale relationships.
+- Backup/export is discoverable in Settings.

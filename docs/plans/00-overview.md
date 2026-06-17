@@ -1,7 +1,8 @@
 # Plan 00 - Overview
 
-**Goal:** Define the implementation roadmap for Local Brain: a Tauri desktop app with
-SQLite as durable local storage, a human UI, and a CLI/skill contract for agents.
+**Goal:** Define the implementation roadmap for Local Brain: an agent-operated local
+brain with SQLite as durable local storage, a CLI/skill contract, and a browsable
+desktop UI.
 
 **Depends on:** Existing product docs in `docs/`.
 
@@ -22,6 +23,7 @@ Read these first:
 - [Launch Schema](../launch-schema.md)
 - [Agent Interface](../agent-interface.md)
 - [UI Direction](../ui-direction.md)
+- [Design System](../design-system.md)
 - [MVP Plan](../mvp-plan.md)
 - [Open Questions](../open-questions.md)
 
@@ -36,11 +38,11 @@ and uses SQLite as a projection. Local Brain stores durable structured memory in
 1. [Foundation and Toolchain](01-foundation-and-toolchain.md)
 2. [SQLite Schema and DB Layer](02-sqlite-schema-and-db-layer.md)
 3. [Desktop Shell and Core UI](03-desktop-shell-and-core-ui.md)
-4. [Source Ingestion](04-source-ingestion.md)
-5. [Memory Extraction and Correction](05-memory-extraction-and-correction.md)
+4. [Record Ingestion](04-record-ingestion.md)
+5. [Memory Extraction and Linking](05-memory-extraction-and-correction.md)
 6. [Search, Retrieval, and AI](06-search-retrieval-and-ai.md)
 7. [CLI and Agent Skills](07-cli-and-agent-skills.md)
-8. [Settings, Backup, Export, and Privacy](08-backup-export-and-privacy.md)
+8. [Settings, Backup, Export, and Privacy Boundaries](08-backup-export-and-privacy.md)
 9. [Packaging and Launch](09-packaging-and-launch.md)
 
 Support docs:
@@ -54,11 +56,18 @@ Support docs:
 - The implementation starts as a Local Brain repo scaffold, not a direct Reflect Open
   fork.
 - SQLite is the durable local store.
-- Raw sources may be preserved for auditability, but product state lives in SQLite.
+- Imported text becomes a document or interaction directly.
 - The first audience is agent-native technical users.
-- The first user-visible surfaces follow the Picardo-inspired shell: Today, Tasks,
-  People, Projects, Sources, Memories, Ask, Graph, and Settings.
+- The primary operating path is local AI agents reading and writing through the CLI and
+  skills.
+- The first user-visible surfaces are Today, Tasks, Network, Projects, Graph, Ask, and
+  Settings.
+- Network contains People and Organizations.
+- Document and interaction records are first-class, but top-level navigation stays
+  focused on the main work surfaces.
+- Graph is a derived user-centered visualization over typed records and links.
 - The first agent interface is the `brain` CLI plus local skills.
+- The desktop UI is for browsing, correction, inspection, and demonstration.
 - No hosted Local Brain service is required for the core product.
 
 ## Implementation Steps
@@ -68,13 +77,14 @@ Support docs:
    subset of earlier work.
 3. When implementation begins, create code in the structure described by
    [Architecture Conventions](architecture-conventions.md).
-4. Preserve the distinction between durable data and derived/search/vector data in every
-   plan.
+4. Preserve the distinction between durable records and derived search/vector data in
+   every plan.
 
 ## Acceptance Criteria
 
 - Every MVP phase in [MVP Plan](../mvp-plan.md) maps to at least one numbered plan.
 - No plan assumes markdown is the durable source of truth.
+- No plan treats documents or interactions as sidebar sections.
 - Every numbered plan has Goal, Depends on / unlocks, Scope, Key decisions,
   Implementation steps, Acceptance criteria, Tests or verification, and Open questions.
 - The roadmap is usable by another engineer or agent without asking for plan order.

@@ -1,61 +1,132 @@
 # Plan 07 - CLI and Agent Skills
 
-**Goal:** Ship the `brain` CLI and local agent skills so Codex and other local agents
-can ingest, query, and write memories safely.
+**Goal:** Make the CLI and local skills the primary operating interface for adding to,
+querying, and reporting from the user's local brain.
 
-**Depends on:** Plan 01, Plan 02, Plan 04, Plan 05, Plan 06.
+**Depends on:** Plans 01-06.
 
-**Unlocks:** Plan 09 launch loop for agent-native users.
+**Unlocks:** Plans 08-09.
 
 ## Scope
 
-**In:** CLI binary, JSON output contracts, search/remember/ingest/today/entity commands,
-skill templates, install diagnostics, provenance metadata.
+**In:** `brain` CLI, JSON output, local skill docs, add/search/ask/today/report/graph
+commands, record lookup, database path resolution, sidecar bundling, installation
+checks.
 
-**Out:** local HTTP API, plugin marketplace, multi-user permissions.
+**Out:** hosted API, plugin marketplace, automatic external app sync.
 
 ## Key Decisions
 
-- The CLI is the first stable agent contract.
-- Agents should not use raw SQL as the default interface.
-- CLI output must be machine-readable with `--json`.
-- Default agent writes create active memories with provenance and confidence.
+- The CLI is the agent contract.
+- The CLI is expected to handle most writes and reads.
+- The CLI is a self-contained Rust binary, not a Node wrapper.
+- CLI writes use the same SQLite schema/migration crate as the desktop app.
+- The CLI opens the SQLite database directly; it does not require the desktop app to be
+  running and does not use Tauri IPC.
+- Agents can add documents, interactions, tasks, and memories with direct provenance.
+- Agents can search and ask, but cited answers still come from document or interaction
+  chunks.
+- stdout carries data only; diagnostics and warnings go to stderr.
+- `--json` output shapes are stable and snapshot-tested.
+- There is no top-level automation log table or UI surface for launch.
+
+## Reflect Open Patterns To Reuse
+
+- Cargo workspace with `apps/cli` and a shared schema crate.
+- Same bundled rusqlite/SQLite version for desktop and CLI.
+- Read/write DB opens use WAL, busy timeout, and clear errors.
+- Sidecar bundling through Tauri `bundle.externalBin` in desktop platform configs.
+- Sidecar build script runs before Tauri dev/build and uses the target triple.
+- CLI JSON contracts are documented and snapshot-tested.
 
 ## Implementation Steps
 
-1. Add the `brain` CLI crate with DB discovery/opening, command parsing, JSON output,
-   and human-readable output.
-2. Implement commands:
+1. Add `apps/cli` Rust binary:
+   - package `brain-cli`
+   - binary name `brain`
+   - `clap` command surface
+   - shared error-to-exit-code mapping
+2. Add database resolution:
+   - explicit `--db <path>`
+   - `BRAIN_DB` environment variable
+   - configured default path from app settings when available
+   - clear error if no brain database exists
+3. Add SQLite open behavior:
+   - use `crates/brain-schema`
+   - check schema version
+   - open with WAL/busy timeout
+   - write commands run in transactions
+   - read commands tolerate a busy desktop writer where possible
+4. Add configuration commands:
    - `brain status`
-   - `brain ingest <path>`
-   - `brain remember <text>`
-   - `brain search <query> --json`
-   - `brain ask <query> --json`
-   - `brain today --json`
-   - `brain entity <name> --json`
    - `brain doctor`
-3. Ensure CLI writes use the same core validation and DB transaction rules as the app.
-4. Add skill templates in `packages/skills` for Codex first.
-5. Add app UI to show installed/configured agent skills.
-6. Add diagnostics for missing CLI, missing DB, locked DB, and missing provider keys.
+   - `brain path`
+5. Add write commands:
+   - `brain add document --title ... --text-file ...`
+   - `brain add interaction --kind meeting --title ... --text-file ...`
+   - `brain add task --title ...`
+   - `brain remember --kind fact --claim ... --link person:...`
+6. Add read/query commands:
+   - `brain search "..."`
+   - `brain ask "..."`
+   - `brain today`
+   - `brain report daily`
+   - `brain tasks plan-day`
+   - `brain relationships followups`
+   - `brain changes --since ...`
+   - `brain graph --center self`
+   - `brain show person ...`
+   - `brain show organization ...`
+   - `brain show project ...`
+   - `brain show task ...`
+7. Define output contracts:
+   - stdout data only
+   - stderr diagnostics only
+   - documented exit codes
+   - stable `--json` camelCase shapes
+8. Add sidecar bundling:
+   - build script for target-suffixed binary
+   - Tauri desktop platform config with `bundle.externalBin`
+   - generated binaries ignored by git
+   - dev and build commands both stage the sidecar
+9. Add Codex/local-agent skill:
+   - when to add a document versus interaction
+   - how to cite evidence
+   - how to avoid duplicate records
+   - how to query before writing
+   - how to run a daily automation
+   - how to produce a report and todo list
+   - how to query graph context
+   - what not to store
+10. Add install/setup flow in Settings:
+   - detect sidecar
+   - optional symlink/install command into PATH on macOS
+   - show exact command path if not installed globally
+11. Add CLI integration tests against a temporary SQLite database.
 
 ## Acceptance Criteria
 
-- A local agent can search memory with `brain search`.
-- A local agent can add an active memory with `brain remember`.
-- CLI commands return stable JSON suitable for skills.
-- `brain doctor` reports actionable local setup issues.
-- Agent-originated changes are visible in the app with source/provenance metadata.
-- The first Codex skill explains search, remember, ingest, citations, and privacy rules.
+- An agent can add a meeting transcript as an interaction.
+- An agent can add a reference note as a document.
+- An agent can add a task linked to a person/project.
+- An agent can ask a cited question from the terminal.
+- An agent can generate a daily report and todo list from the terminal.
+- An agent can list relationship follow-ups from the terminal.
+- An agent can query the user-centered graph as JSON.
+- The CLI works with the desktop app closed.
+- The CLI and desktop use the same migration/schema version.
+- The skill explains the schema nouns and safe write behavior.
+- Settings can detect whether the CLI and skill are installed.
 
 ## Tests or Verification
 
-- CLI integration tests against a fixture SQLite DB.
-- JSON schema tests for command outputs.
-- Tests for provenance metadata on agent-originated writes.
-- Skill text review for privacy and provenance instructions.
-- Manual test: run a Codex-like workflow using only the CLI.
+- CLI snapshot tests for JSON output.
+- CLI integration tests for add/search/ask/today/show.
+- CLI concurrent-open test with desktop-style WAL settings.
+- Sidecar staging smoke test.
+- Skill lint/readthrough by another agent.
+- Manual Codex test using the local skill.
 
 ## Open Questions
 
-- Whether to expose a localhost API later is unresolved. Default: CLI only for MVP.
+- Exact command syntax can change during implementation, but the noun model should not.

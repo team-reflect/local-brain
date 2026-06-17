@@ -1,473 +1,433 @@
 # Launch Schema
 
-This is a proposed SQLite launch schema for a consumer local brain.
+SQLite is the durable source of truth for Local Brain. The launch schema is a personal
+CRM with first-class people, organizations, projects, tasks, interactions, documents,
+hidden atomic memories, tags, AI chat, and settings.
 
-The goal is not to model every part of life. The goal is to give the app and local
-agents enough structure to answer useful questions with provenance.
+The schema should make everyday questions easy:
 
-## Design Rules
+- Who did I talk to, and what did we decide?
+- What am I waiting on?
+- What projects are active?
+- What documents and conversations explain this?
+- What does my AI know, and what evidence supports it?
 
-- Use SQLite as the durable source of truth.
-- Use `TEXT` IDs, preferably ULIDs or UUIDv7-style sortable IDs.
-- Store timestamps as ISO-8601 `TEXT`.
-- Store flexible data as JSON text with validation at the application boundary.
-- Keep source evidence separate from extracted memories.
-- Make privacy and provenance first-class.
-- Treat FTS and vectors as derived indexes.
-- Make tasks first-class because day-to-day usefulness depends on them.
-- Avoid separate person/org/project tables until usage proves the need.
+## Schema Principles
 
-## Core Relationship Diagram
+- Use typed tables for product nouns instead of a generic graph-node layer.
+- Store imported readable text directly in SQLite.
+- Preserve provenance on the record that owns the text.
+- Derive chunks for search and embeddings from documents and interactions.
+- Keep memories hidden by default and link them to visible records.
+- Cite answers through evidence references to document or interaction chunks.
+- Keep launch privacy simple: no row-level sensitivity labels.
 
-```text
-sources
-  |--< source_chunks
-  |       |--< embeddings
-  |
-  |--< memories >-- memory_entities >-- entities
-  |       |                              |--< entity_aliases
-  |       |                              |--< relationships >-- entities
-  |       |
-  |       |-- task.source_memory_id
-  |       |-- event.source_memory_id
-  |
-  |--< tasks
-  |--< events
-chat_conversations -> chat_messages
-```
+## Core Tables
 
-## Tables
+### `people`
 
-### `sources`
+People the user knows or needs to remember.
 
-Raw evidence imported by the user, an app integration, or an agent.
+Key columns:
 
-```sql
-CREATE TABLE sources (
-  id TEXT PRIMARY KEY,
-  kind TEXT NOT NULL,
-  title TEXT NOT NULL,
-  body TEXT,
-  body_format TEXT NOT NULL DEFAULT 'plain_text',
-  uri TEXT,
-  file_path TEXT,
-  external_id TEXT,
-  source_app TEXT,
-  source_account TEXT,
-  captured_at TEXT,
-  occurred_at TEXT,
-  content_hash TEXT,
-  language TEXT,
-  privacy TEXT NOT NULL DEFAULT 'local',
-  metadata_json TEXT NOT NULL DEFAULT '{}',
-  archived_at TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  CHECK (kind IN (
-    'manual',
-    'note',
-    'file',
-    'pdf',
-    'webpage',
-    'transcript',
-    'email',
-    'calendar_event',
-    'chat',
-    'audio',
-    'screenshot',
-    'agent'
-  )),
-  CHECK (privacy IN ('local', 'cloud_allowed', 'sensitive', 'never_external'))
-);
-```
+- `id`
+- `full_name`
+- `preferred_name`
+- `headline`
+- `primary_email`
+- `primary_phone`
+- `location`
+- `is_self`
+- `relationship_strength`
+- `reconnect_interval_days`
+- `last_interaction_at`
+- `next_reconnect_at`
+- `important_dates_json`
+- `summary`
+- `notes`
+- `current_organization_id`
+- `created_at`
+- `updated_at`
+- `archived_at`
 
-Why it matters: sources are the evidence trail. If a memory cannot point to evidence, the
-UI should treat it as weaker.
+### `organizations`
 
-### `source_chunks`
+Companies, teams, schools, clubs, vendors, government bodies, and other groups.
 
-Searchable and embeddable pieces of a source.
+Key columns:
 
-```sql
-CREATE TABLE source_chunks (
-  id TEXT PRIMARY KEY,
-  source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
-  chunk_index INTEGER NOT NULL,
-  heading TEXT,
-  text TEXT NOT NULL,
-  char_start INTEGER,
-  char_end INTEGER,
-  token_count INTEGER,
-  content_hash TEXT NOT NULL,
-  privacy TEXT NOT NULL DEFAULT 'local',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  UNIQUE (source_id, chunk_index)
-);
-```
+- `id`
+- `name`
+- `kind`
+- `domain`
+- `location`
+- `summary`
+- `notes`
+- `created_at`
+- `updated_at`
+- `archived_at`
 
-### `entities`
+### `affiliations`
 
-The nouns in the user's life.
+Time-bound links between people and organizations.
 
-```sql
-CREATE TABLE entities (
-  id TEXT PRIMARY KEY,
-  type TEXT NOT NULL,
-  name TEXT NOT NULL,
-  canonical_key TEXT NOT NULL,
-  summary TEXT,
-  importance INTEGER NOT NULL DEFAULT 0,
-  privacy TEXT NOT NULL DEFAULT 'local',
-  metadata_json TEXT NOT NULL DEFAULT '{}',
-  archived_at TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  CHECK (type IN (
-    'person',
-    'organization',
-    'project',
-    'place',
-    'topic',
-    'product',
-    'account',
-    'file',
-    'event',
-    'other'
-  ))
-);
+Key columns:
 
-CREATE UNIQUE INDEX entities_type_canonical_key
-  ON entities(type, canonical_key)
-  WHERE archived_at IS NULL;
-```
+- `id`
+- `person_id`
+- `organization_id`
+- `title`
+- `role`
+- `started_on`
+- `ended_on`
+- `is_current`
+- `notes`
+- `created_at`
+- `updated_at`
 
-Do not launch with separate `people`, `organizations`, and `projects` tables. Use
-generic entities first, then add typed profile tables once the product shows which
-fields matter.
+### `projects`
 
-### `entity_aliases`
+Personal or professional work areas.
 
-Alternate names used for matching and display.
+Key columns:
 
-```sql
-CREATE TABLE entity_aliases (
-  id TEXT PRIMARY KEY,
-  entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-  alias TEXT NOT NULL,
-  alias_key TEXT NOT NULL,
-  source_id TEXT REFERENCES sources(id) ON DELETE SET NULL,
-  created_at TEXT NOT NULL,
-  UNIQUE (entity_id, alias_key)
-);
-```
+- `id`
+- `name`
+- `status`
+- `kind`
+- `summary`
+- `notes`
+- `started_on`
+- `target_date`
+- `completed_on`
+- `archived_at`
+- `created_at`
+- `updated_at`
 
-### `memories`
-
-Atomic beliefs extracted from sources or written manually.
-
-```sql
-CREATE TABLE memories (
-  id TEXT PRIMARY KEY,
-  kind TEXT NOT NULL,
-  subject_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL,
-  title TEXT,
-  body TEXT NOT NULL,
-  value_json TEXT,
-  status TEXT NOT NULL DEFAULT 'active',
-  confidence REAL,
-  importance INTEGER NOT NULL DEFAULT 0,
-  source_id TEXT REFERENCES sources(id) ON DELETE SET NULL,
-  source_chunk_id TEXT REFERENCES source_chunks(id) ON DELETE SET NULL,
-  source_excerpt TEXT,
-  observed_at TEXT,
-  valid_from TEXT,
-  valid_until TEXT,
-  forgotten_at TEXT,
-  privacy TEXT NOT NULL DEFAULT 'local',
-  created_by TEXT NOT NULL DEFAULT 'user',
-  created_by_agent TEXT,
-  metadata_json TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  CHECK (kind IN (
-    'fact',
-    'preference',
-    'decision',
-    'commitment',
-    'summary',
-    'reminder',
-    'question',
-    'risk',
-    'idea',
-    'instruction',
-    'other'
-  )),
-  CHECK (status IN ('active', 'rejected', 'stale', 'archived')),
-  CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1))
-);
-```
-
-This is the heart of the system. A good memory is small, cited, typed, time-aware, and
-easy to correct.
-
-### `memory_entities`
-
-Many-to-many links between memories and entities.
-
-```sql
-CREATE TABLE memory_entities (
-  memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
-  entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-  role TEXT NOT NULL DEFAULT 'mentioned',
-  created_at TEXT NOT NULL,
-  PRIMARY KEY (memory_id, entity_id, role)
-);
-```
-
-Suggested roles: `subject`, `mentioned`, `owner`, `participant`, `location`, `related`.
-
-### `relationships`
-
-Typed edges between entities.
-
-```sql
-CREATE TABLE relationships (
-  id TEXT PRIMARY KEY,
-  source_entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-  target_entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-  type TEXT NOT NULL,
-  label TEXT,
-  strength REAL,
-  status TEXT NOT NULL DEFAULT 'active',
-  source_id TEXT REFERENCES sources(id) ON DELETE SET NULL,
-  source_memory_id TEXT REFERENCES memories(id) ON DELETE SET NULL,
-  observed_at TEXT,
-  valid_from TEXT,
-  valid_until TEXT,
-  privacy TEXT NOT NULL DEFAULT 'local',
-  metadata_json TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  CHECK (source_entity_id <> target_entity_id),
-  CHECK (status IN ('active', 'inactive', 'rejected', 'archived'))
-);
-```
-
-Examples: `works_with`, `friend_of`, `member_of`, `reports_to`, `owns`, `uses`,
-`lives_in`, `introduced_by`, `related_to`.
+Suggested `status` values: `active`, `waiting`, `paused`, `done`, `archived`.
 
 ### `tasks`
 
-Operational commitments and to-dos, manual or extracted.
+Commitments, follow-ups, reminders, and waiting items.
 
-```sql
-CREATE TABLE tasks (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL,
-  notes TEXT,
-  status TEXT NOT NULL DEFAULT 'open',
-  priority INTEGER NOT NULL DEFAULT 0,
-  due_at TEXT,
-  scheduled_for TEXT,
-  completed_at TEXT,
-  canceled_at TEXT,
-  project_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL,
-  assignee_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL,
-  source_id TEXT REFERENCES sources(id) ON DELETE SET NULL,
-  source_memory_id TEXT REFERENCES memories(id) ON DELETE SET NULL,
-  created_by TEXT NOT NULL DEFAULT 'user',
-  created_by_agent TEXT,
-  metadata_json TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  CHECK (status IN ('open', 'waiting', 'scheduled', 'done', 'canceled', 'archived')),
-  CHECK (priority >= 0 AND priority <= 4)
-);
-```
+Key columns:
 
-### `events`
+- `id`
+- `title`
+- `description`
+- `status`
+- `priority`
+- `project_id`
+- `due_at`
+- `scheduled_for`
+- `completed_at`
+- `origin_document_id`
+- `origin_interaction_id`
+- `created_at`
+- `updated_at`
+- `archived_at`
 
-Meetings, calls, trips, deadlines, personal events, and important dates.
+Suggested `status` values: `open`, `waiting`, `scheduled`, `done`, `canceled`,
+`archived`.
 
-```sql
-CREATE TABLE events (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL,
-  kind TEXT NOT NULL DEFAULT 'event',
-  description TEXT,
-  starts_at TEXT,
-  ends_at TEXT,
-  all_day INTEGER NOT NULL DEFAULT 0,
-  location_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL,
-  source_id TEXT REFERENCES sources(id) ON DELETE SET NULL,
-  source_memory_id TEXT REFERENCES memories(id) ON DELETE SET NULL,
-  privacy TEXT NOT NULL DEFAULT 'local',
-  metadata_json TEXT NOT NULL DEFAULT '{}',
-  archived_at TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-```
+### `interactions`
 
-### `event_entities`
+Human exchanges: meetings, calls, emails, messages, chats, voice notes, notes, and
+events. Email bodies and meeting transcripts live here.
 
-Participants and related entities for events.
+Key columns:
 
-```sql
-CREATE TABLE event_entities (
-  event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-  entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-  role TEXT NOT NULL DEFAULT 'participant',
-  created_at TEXT NOT NULL,
-  PRIMARY KEY (event_id, entity_id, role)
-);
-```
+- `id`
+- `kind`
+- `title`
+- `body_text`
+- `summary`
+- `occurred_at`
+- `ended_at`
+- `location`
+- `external_id`
+- `original_path`
+- `original_url`
+- `content_hash`
+- `created_at`
+- `updated_at`
+- `archived_at`
+
+Suggested `kind` values: `meeting`, `call`, `email`, `message`, `chat`, `voice_note`,
+`note`, `event`, `other`.
+
+### `documents`
+
+User-readable artifacts and reference material. Imported text is stored directly in
+SQLite, with optional metadata for the original file or URL.
+
+Key columns:
+
+- `id`
+- `kind`
+- `title`
+- `body_text`
+- `summary`
+- `mime_type`
+- `original_path`
+- `original_url`
+- `content_hash`
+- `authored_at`
+- `created_at`
+- `updated_at`
+- `archived_at`
+
+Suggested `kind` values: `note`, `file`, `pdf`, `webpage`, `plan`, `receipt`, `text`,
+`other`.
+
+### `content_chunks`
+
+Derived chunks for lexical search, embeddings, and citations.
+
+Key columns:
+
+- `id`
+- `record_type`
+- `record_id`
+- `chunk_index`
+- `text`
+- `token_count`
+- `content_hash`
+- `created_at`
+
+Allowed `record_type` values for launch: `document`, `interaction`.
+
+### `memories`
+
+Hidden atomic claims extracted from documents, interactions, tasks, and chat.
+
+Key columns:
+
+- `id`
+- `kind`
+- `claim`
+- `confidence`
+- `valid_from`
+- `valid_to`
+- `created_at`
+- `updated_at`
+- `archived_at`
+
+Suggested `kind` values: `fact`, `preference`, `decision`, `commitment`,
+`instruction`, `risk`, `idea`.
+
+### `memory_links`
+
+Generic links from hidden memories to visible records.
+
+Key columns:
+
+- `id`
+- `memory_id`
+- `record_type`
+- `record_id`
+- `role`
+- `created_at`
+
+Allowed `record_type` values: `person`, `organization`, `project`, `task`,
+`document`, `interaction`.
+
+### `evidence_refs`
+
+Citation links from memories, tasks, and AI answers to exact document or interaction
+chunks.
+
+Key columns:
+
+- `id`
+- `subject_type`
+- `subject_id`
+- `chunk_id`
+- `quote_start`
+- `quote_end`
+- `note`
+- `created_at`
+
+Allowed `subject_type` values: `memory`, `task`, `chat_message`.
+
+### `tags` and `taggings`
+
+Lightweight user-defined grouping.
+
+`tags` key columns:
+
+- `id`
+- `name`
+- `color`
+- `created_at`
+- `updated_at`
+
+`taggings` key columns:
+
+- `id`
+- `tag_id`
+- `record_type`
+- `record_id`
+- `created_at`
+
+Allowed `record_type` values: `person`, `organization`, `project`, `task`,
+`document`, `interaction`, `memory`.
 
 ### `chat_conversations` and `chat_messages`
 
-Durable AI chat history.
+Ask conversations and answer history.
 
-```sql
-CREATE TABLE chat_conversations (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
+`chat_conversations` key columns:
 
-CREATE TABLE chat_messages (
-  id TEXT PRIMARY KEY,
-  conversation_id TEXT NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
-  seq INTEGER NOT NULL,
-  role TEXT NOT NULL,
-  body TEXT NOT NULL,
-  model TEXT,
-  provider TEXT,
-  context_json TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL,
-  UNIQUE (conversation_id, seq)
-);
-```
+- `id`
+- `title`
+- `created_at`
+- `updated_at`
+- `archived_at`
 
-### `embeddings`
+`chat_messages` key columns:
 
-Derived vectors for retrieval.
+- `id`
+- `conversation_id`
+- `role`
+- `content`
+- `model`
+- `created_at`
 
-```sql
-CREATE TABLE embeddings (
-  id TEXT PRIMARY KEY,
-  target_type TEXT NOT NULL,
-  target_id TEXT NOT NULL,
-  chunk_id TEXT,
-  model TEXT NOT NULL,
-  dimension INTEGER NOT NULL,
-  content_hash TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-```
-
-The vector payload itself may live in a `sqlite-vec` virtual table keyed by this row ID.
+Assistant messages can be cited through `evidence_refs`.
 
 ### `settings`
 
-Non-secret local settings.
+Local configuration.
 
-```sql
-CREATE TABLE settings (
-  key TEXT PRIMARY KEY,
-  value_json TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-```
+Key columns:
 
-Secrets belong in the OS keychain, not in SQLite.
+- `key`
+- `value_json`
+- `updated_at`
 
-## Search Tables
+Settings owns model keys, local paths, backup/export preferences, diagnostics, and
+skill setup flags.
 
-Use FTS5 virtual tables for lexical search:
+## Join Tables
 
-```sql
-CREATE VIRTUAL TABLE source_chunks_fts
-USING fts5(source_id UNINDEXED, chunk_id UNINDEXED, title, body);
+Use explicit typed join tables where they make the UI faster and clearer:
 
-CREATE VIRTUAL TABLE memories_fts
-USING fts5(memory_id UNINDEXED, title, body, source_excerpt);
+- `interaction_participants`: people in an interaction.
+- `interaction_organizations`: organizations involved in an interaction.
+- `interaction_projects`: projects discussed in an interaction.
+- `project_people`: people linked to a project.
+- `project_organizations`: organizations linked to a project.
+- `project_documents`: documents linked to a project.
+- `project_interactions`: interactions linked to a project.
+- `project_tasks`: tasks linked to a project when the task's direct `project_id` is
+  not enough for cross-project work.
+- `document_people`: people mentioned by or related to a document.
+- `document_organizations`: organizations mentioned by or related to a document.
+- `document_projects`: projects related to a document.
+- `document_interactions`: interactions that explain, produced, or reference a
+  document.
+- `task_people`: people linked to a task.
+- `task_organizations`: organizations linked to a task.
+- `task_documents`: documents that explain a task.
+- `task_interactions`: interactions that created or changed a task.
 
-CREATE VIRTUAL TABLE entities_fts
-USING fts5(entity_id UNINDEXED, name, summary, aliases);
+Each join table should include:
 
-CREATE VIRTUAL TABLE tasks_fts
-USING fts5(task_id UNINDEXED, title, notes);
-```
+- `id`
+- the two foreign keys
+- `role`
+- `created_at`
 
-These should be derived and rebuildable.
-
-## Important Indexes
-
-```sql
-CREATE INDEX sources_kind_occurred ON sources(kind, occurred_at);
-CREATE INDEX source_chunks_source ON source_chunks(source_id, chunk_index);
-CREATE INDEX memories_status_kind ON memories(status, kind);
-CREATE INDEX memories_subject ON memories(subject_entity_id);
-CREATE INDEX memories_observed ON memories(observed_at);
-CREATE INDEX memory_entities_entity ON memory_entities(entity_id);
-CREATE INDEX relationships_source ON relationships(source_entity_id);
-CREATE INDEX relationships_target ON relationships(target_entity_id);
-CREATE INDEX tasks_status_due ON tasks(status, due_at);
-CREATE INDEX events_starts ON events(starts_at);
-```
-
-## Day-to-Day Query Examples
-
-### Today's useful context
+## Schema Diagram
 
 ```text
-open tasks due today
-+ upcoming events
-+ recent active memories
-+ people/projects mentioned in the last few days
+                         +----------------+
+                         |    settings    |
+                         +----------------+
+
++--------+       +---------------+       +---------------+
+| people |<----->| affiliations  |<----->| organizations |
++--------+       +---------------+       +---------------+
+   ^  ^                    ^                    ^   ^
+   |  |                    |                    |   |
+   |  +---------+----------+----------+---------+   |
+   |            |                     |             |
+   |       +----------+          +----------+        |
+   |       | projects |<-------->|  tasks   |        |
+   |       +----------+          +----------+        |
+   |        ^   ^   ^              ^   ^            |
+   |        |   |   |              |   |            |
+   |        |   |   +--------------+   |            |
+   |        |   |                      |            |
+   |        |   +----------+-----------+            |
+   |        |              |                        |
+   v        v              v                        v
++----------------+     +----------------+     +----------+
+| interactions   |<--->|   documents    |<--->|   tags   |
++----------------+     +----------------+     +----------+
+        ^                     ^                    ^
+        |                     |                    |
+        +----------+----------+--------------------+
+                   |
+          +----------------+
+          | content_chunks |
+          +----------------+
+                   ^
+                   |
+          +----------------+
+          | evidence_refs  |
+          +----------------+
+            ^      ^     ^
+            |      |     |
+       +---------+ | +--------------------+
+       | memories| | |  chat_messages     |
+       +---------+ | +--------------------+
+            ^      |          ^
+            |      |          |
+       +--------------+ +--------------------+
+       | memory_links | | chat_conversations |
+       +--------------+ +--------------------+
 ```
 
-### What did I promise Sarah?
+## Derived Indexes
 
-```text
-find entity alias "Sarah"
--> memories where kind = commitment and linked to Sarah
--> tasks linked to Sarah
--> sources/chunks citing those commitments
-```
+- FTS5 tables over `documents.body_text`, `interactions.body_text`,
+  `content_chunks.text`, task titles/descriptions, people names, organization names,
+  and project names.
+- Vector index over `content_chunks`.
+- Optional denormalized search view that unions visible records for global search.
+- Derived graph view centered on the `people.is_self` row, with nodes for typed records
+  and edges from affiliations, join tables, task origins, memory links, evidence refs,
+  and tags.
 
-### What is this project about?
+Derived indexes can be rebuilt from durable tables.
 
-```text
-entity project page
--> summary memories
--> open tasks
--> recent events
--> related people/orgs
--> source timeline
-```
+## Launch Omissions
 
-### What can my agent safely know?
+The launch schema intentionally omits:
 
-```text
-retrieval filter excludes privacy = never_external
-cloud model filter excludes sensitive unless user approves
-local-only model can use more context
-answer records context_json in chat_messages
-```
+- A top-level ingestion bucket for raw material.
+- A generic graph-node table as the primary model.
+- A generic edge table as the primary link model.
+- A top-level automation log table or surface.
+- Row-level sensitivity labels.
+- Hosted sync tables.
+- Browser/email/calendar OAuth integration tables.
 
-## Tables to Delay
+## Relationship Intelligence
 
-Do not add these until the product proves the need:
+Relationship intelligence is derived from typed records, especially people,
+interactions, tasks, affiliations, projects, and memories.
 
-- Separate `people` profiles.
-- Separate `organizations` profiles.
-- Separate `projects` profiles.
-- Full email/calendar/browser integration tables.
-- Complex sync tables.
-- Collaboration/multi-user access control.
-- A generic table-editor metadata layer.
+Launch should support:
 
-The launch schema should be compact enough that local agents can use it without fear.
+- recency through `people.last_interaction_at`
+- cadence through `people.reconnect_interval_days` and `people.next_reconnect_at`
+- strength through `people.relationship_strength`
+- important dates through `people.important_dates_json`
+- prompts for Today: people to follow up with, stale relationships, upcoming important
+  dates, and relationship-linked waiting items
+
+These fields are hints for agents and UI. They should be recomputable from durable
+interactions and tasks where possible.

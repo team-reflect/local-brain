@@ -1,135 +1,102 @@
 # Product Thesis
 
-Local Brain is a consumer memory app for people and their local AI agents.
+Local Brain is an agent-operated local brain for a person's work and life. It gives
+local AI agents a shared context layer they can read and write with citations, backed
+by a private personal CRM schema.
 
-It should help a user answer questions about their work and personal life:
+The product should feel closer to an operating system for personal context than a
+generic database browser. The schema matters because the schema is the product: the
+system should know what a person, project, task, meeting, email, note, and document
+are.
 
-- What did I promise someone?
-- What decisions did I make last week?
-- What projects are stuck?
-- Who should I follow up with today?
-- What do I know about this person, company, trip, doctor, school, house, product, or idea?
-- What have I repeatedly said I care about?
-- What private context should my local agents know before helping me?
+## Why Now
 
-## Positioning
+- Local desktop agents are becoming normal.
+- Those agents need durable user context that survives any one chat thread.
+- Users need inspectable memory, not opaque model recall.
+- SQLite, Tauri, local embeddings, and BYOK model calls make a local-first product
+  realistic.
 
-Local Brain is not a generic database editor, a traditional CRM, or another notes app.
-It is:
+## Core Loop
 
-> A local-first personal database that turns sources into trustworthy memory.
+1. A local agent, daily automation, or user adds a document or interaction.
+2. Local Brain stores the readable content directly in SQLite.
+3. AI extracts useful tasks, people, organizations, projects, and hidden atomic
+   memories.
+4. Agents read from the brain to produce daily reports, todo lists, briefings, and
+   cited answers.
+5. The UI lets the user browse, correct, inspect, and demonstrate the brain.
 
-The product should hide the database by default and expose it only as an advanced
-inspection surface. The main UI is a Picardo-inspired local data tool: grouped sidebar,
-thin command topbar, dense lists, rich detail pages, graph/search surfaces, and clear
-correction controls.
+The app should not require reviewing every extraction. Corrections should happen where
+the user naturally sees a mistake: a person page, project page, task, document, or
+answer citation.
 
-## Mental Model
+## Product Model
 
-Everything starts as a source.
+- **People:** contacts, collaborators, friends, family, service providers, and anyone
+  else the user may need to remember.
+- **Relationship intelligence:** recency, cadence, strength, important dates, and
+  follow-up suggestions derived from interactions and tasks.
+- **Organizations:** companies, schools, teams, vendors, clubs, government bodies, and
+  other groups.
+- **Affiliations:** time-bound links between people and organizations.
+- **Projects:** areas of active or archived work, from professional deals to home
+  projects or travel planning.
+- **Tasks:** commitments, follow-ups, reminders, waiting items, and scheduled actions.
+- **Graph:** a derived visual map of the user's brain, with the user at the center and
+  connected people, organizations, projects, tasks, documents, interactions, and
+  memories around them.
+- **Interactions:** human exchanges: meetings, calls, emails, messages, chats, voice
+  notes, notes, and events.
+- **Documents:** user-readable artifacts and reference material: notes, PDFs, text
+  files, webpages, plans, specs, receipts, and imported transcripts when they are
+  treated as artifacts.
+- **Memories:** hidden atomic claims extracted from records: facts, preferences,
+  decisions, commitments, instructions, risks, and ideas.
+- **Ask:** AI chat over the local brain with cited answers.
+- **Settings:** model keys, local paths, backup/export, diagnostics, and skill setup.
 
-```text
-source
-  -> chunks
-  -> extracted memories
-  -> linked entities, tasks, events, and relationships
-  -> trusted context with provenance
-  -> answers with citations
-```
+## User Experience
 
-The system should keep evidence separate from belief:
+The app should borrow the quiet density and navigation confidence of the Picardo
+internal UI, while becoming more personal and less corporate.
 
-- **Sources** are raw evidence: files, transcripts, emails, notes, webpages, chats,
-  calendar events, audio, screenshots, manual entries.
-- **Memories** are extracted beliefs: facts, decisions, preferences, commitments,
-  summaries, risks, ideas, reminders.
-- **Entities** are the nouns that memories attach to: people, organizations, projects,
-  places, topics, products, accounts, files.
-- **Tasks and events** are day-to-day operational objects derived from sources and
-  memories.
+The UI is not the primary write path. It is the visible window into a brain mostly
+maintained and queried by local agents. It should make the product legible: what the
+brain knows, why it knows it, what changed recently, and what the user can do next.
 
-The product becomes trustworthy when every memory can answer: where did this come from?
+Top-level navigation:
 
-## Principles
+- Today
+- Tasks
+- Network
+- Projects
+- Graph
+- Ask
+- Settings
 
-### Local by Default
+Documents and interactions are first-class data, but not top-level navigation. They
+appear inside detail pages and through search or Ask.
 
-The user's data lives on their machine. The app should not require a hosted account,
-cloud database, or vendor-owned memory API.
+## Technical Bet
 
-### SQLite as the Durable Store
+Reflect Open is the technology base: Tauri, React, Rust native capabilities, SQLite,
+local search, local embeddings where practical, keychain secrets, and sidecar tools.
 
-Unlike Reflect Open, SQLite is not just a rebuildable projection over markdown files.
-SQLite is the source of truth for structured memory.
+Local Brain diverges in storage philosophy. Reflect Open treats markdown as durable
+knowledge and SQLite as a projection. Local Brain treats SQLite as durable knowledge
+and uses exports as portability features.
 
-Raw imported files may stay on disk for portability and auditability, but the canonical
-product data model is SQLite.
+The most important integration is the local agent contract: a `brain` CLI and skills
+that let Codex or other agents update records, search context, ask cited questions, and
+produce recurring reports.
 
-### Human UI, Agent Contract
+## Non-Goals for Launch
 
-The UI should be friendly enough for a person to use every day. The CLI and local agent
-skills should be stable enough that Codex, Claude Code, Cursor, and scripts can read and
-write memories without learning the whole schema.
-
-### Provenance Before Cleverness
-
-The app should prefer a cited, modest answer over a magical answer with no provenance.
-Memories should preserve source links, excerpts, timestamps, creator, and confidence.
-
-### Make Correction Easy
-
-The app should trust AI extraction enough to write useful memory directly. The safety
-mechanism is provenance, confidence, correction history, easy correction, and easy
-deletion.
-
-### Simple First Screen
-
-The first screen should not be a database browser or a chat landing page. It should feel
-like a calm operating dashboard and answer:
-
-- What needs my attention?
-- What did the system learn?
-- What can I ask?
-- What should I follow up on?
-
-### Dense Personal Data Tool
-
-Local Brain should look more like Picardo Internal UI than a lightweight consumer notes
-app. Borrow the grouped sidebar, compact topbar, table/list density, detail aside,
-badges, command palette, and graph/search posture. Translate corporate CRM language into
-personal-memory language.
-
-## Non-Goals for the First Version
-
-- Team collaboration.
-- Hosted sync service.
-- Generic Postgres/TablePlus competitor.
-- Email/calendar/browser integrations before the core loop works.
-- A broad plugin marketplace.
-- A full task manager replacement.
-- A perfect ontology for all human life.
-
-## Relationship to Existing Projects
-
-### Reflect Open
-
-Reflect Open is the closest technology base: Tauri desktop shell, React UI, Rust native
-capabilities, local SQLite, FTS5, local embeddings, BYOK AI, OS keychain secrets, and an
-open-source local-first posture.
-
-The product difference is that Reflect is markdown-first personal writing. Local Brain
-is SQLite-first structured memory.
-
-### Company Brain
-
-Company Brain provides the durable ideas around people, organizations, interactions,
-tasks, extracted facts, provenance, and embeddings.
-
-The product difference is that Company Brain is organizational and CRM-shaped. Local
-Brain is personal and life-shaped.
-
-### Picardo Internal UI
-
-The internal UI proves that structured memory benefits from a readable browser. Local
-Brain should inherit the inspection idea, but the default UI should be simpler and more
-personal.
+- Hosted sync.
+- Team accounts.
+- A generic table editor.
+- A browser extension.
+- Fully automatic email/calendar integrations.
+- A top-level automation log.
+- Row-level sensitivity labels.

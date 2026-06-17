@@ -1,191 +1,228 @@
 # UI Direction
 
-Local Brain should borrow heavily from `/Users/alex/repos/picardo-internal-ui`, while
-translating the corporate CRM parts into a consumer personal-memory product.
+Local Brain should borrow the calm, dense, data-first feel of the Picardo internal UI,
+but translate it into a personal context app. The UI is a window into a brain mostly
+written and read by AI agents through the CLI and local skills.
 
-The target feel is:
+The UI should support quick browsing, correction, inspection, and demonstration. It is
+not the primary bulk-entry or reporting interface.
 
-> A calm local data tool for your life and agents; more research notebook than chat app.
+Use [Design System](design-system.md) for concrete component, token, typography, graph,
+and shadcn guidance.
 
-## What to Borrow from Picardo Internal UI
+## Navigation
 
-- **Persistent left sidebar:** grouped navigation, brand block, icon + label items,
-  collapsed icon rail, mobile drawer, keyboard toggle.
-- **Thin topbar:** sidebar toggle, command/search trigger, small utility controls.
-- **Dense data surfaces:** compact rows, sticky headers, mono metadata, fast scanning.
-- **List/detail rhythm:** list pages lead to rich detail pages.
-- **Detail aside:** entity/source/detail pages use a right rail for identity, metadata,
-  provenance, quick links, and actions.
-- **Command palette:** global jump/search should feel central, not secondary.
-- **Editorial data styling:** quiet paper/ink palette, serif for headings/prose, sans for
-  UI, mono for IDs, dates, confidence, and source keys.
-- **Semantic primitives:** badges, tags, chips, link rows, key/value grids, virtualized
-  tables, prose blocks, empty states.
-- **Graph as a real surface:** graph view is a navigation and sensemaking tool, not a
-  decorative visualization.
-
-## What Not to Copy
-
-- Corporate CRM language.
-- Partnership/integration-specific workflows.
-- Admin-heavy framing.
-- Auth/account chrome as a central product idea.
-- Read-only posture; Local Brain is a writeable local memory app.
-- Raw database or SQL affordances in the main UI.
-
-## Navigation Model
-
-Use grouped sidebar navigation, closer to Picardo than the earlier simple sketch.
+Sidebar:
 
 ```text
-+---------------------------+-----------------------------------------------+
-| Local Brain               |  [=]  Search or ask anything...      Cmd-K * |
-| personal memory           +-----------------------------------------------+
-|                           |                                               |
-| WORKSPACE                 |  Current route                                 |
-|  Today                    |                                               |
-|  Tasks                    |  Dense lists, feeds, tables, graph, or detail |
-|  People                   |  pages live here.                             |
-|  Projects                 |                                               |
-|  Places                   |                                               |
-|                           |                                               |
-| MEMORY                    |                                               |
-|  Sources                  |                                               |
-|  Memories                 |                                               |
-|  Conversations            |                                               |
-|  Graph                    |                                               |
-|                           |                                               |
-| AI                        |                                               |
-|  Ask                      |                                               |
-|                           |                                               |
-| SYSTEM                    |                                               |
-|  Settings                 |                                               |
-|                           |                                               |
-|  You / local brain status |                                               |
-+---------------------------+-----------------------------------------------+
++------------------------------------------------------+
+| Local Brain                                      Ask  |
++----------------------+-------------------------------+
+| Today                |                               |
+| Tasks                |  Current view                 |
+| Network              |                               |
+| Projects             |                               |
+| Graph                |                               |
+| Ask                  |                               |
+| Settings             |                               |
++----------------------+-------------------------------+
 ```
 
-The collapsed rail should preserve icons and tooltips. On mobile, it becomes an
-off-canvas drawer.
+Top-level sections:
+
+- **Today:** AI daily brief with agenda, due tasks, waiting items, relationship
+  follow-ups, recent changes, and suggested next actions.
+- **Tasks:** all open, waiting, scheduled, and completed tasks.
+- **Network:** people and organizations, with tabs for each.
+- **Projects:** active, waiting, paused, done, and archived projects.
+- **Graph:** node graph of the user's brain, centered on the user.
+- **Ask:** AI chat over the local brain with citations.
+- **Settings:** model keys, local storage, backup/export, diagnostics, and skill setup.
+
+Document and interaction records are browsed inside Network, Project, and Task detail
+pages, and found through global search or Ask.
+
+## Information Architecture
+
+```text
+Today
+  - AI daily brief
+  - due and scheduled tasks
+  - waiting items
+  - people to follow up with
+  - recent interactions
+  - active project changes
+
+Tasks
+  - task table
+  - task detail
+    - linked people
+    - linked organizations
+    - linked projects
+    - related documents
+    - related interactions
+    - evidence
+
+Network
+  - People tab
+    - people table
+    - person detail
+      - profile and affiliations
+      - tasks
+      - projects
+      - interactions
+      - documents
+      - remembered facts
+  - Organizations tab
+    - organizations table
+    - organization detail
+      - profile and people
+      - projects
+      - tasks
+      - interactions
+      - documents
+
+Projects
+  - project table/board
+  - project detail
+    - overview
+    - tasks
+    - people and organizations
+    - interactions
+    - documents
+    - remembered decisions and risks
+
+Graph
+  - user-centered graph
+  - people, organizations, projects, tasks, documents, interactions, and memories
+  - optional filters by node type, time, strength, and project
+  - click a node to open the related detail page
+
+Ask
+  - chat
+  - citations
+  - linked records
+
+Settings
+  - model keys
+  - local database path
+  - backup and export
+  - diagnostics
+  - agent skill setup
+```
+
+## Visual Style
+
+- Left sidebar with compact navigation and a clear active state.
+- Main surfaces should favor tables, split panes, detail drawers, filters, and search.
+- Use cards only for repeated summary items or modals, not as the default page layout.
+- Keep density high enough for real work.
+- Use restrained color, crisp typography, and predictable spacing.
+- Prefer visible data over explanatory copy.
+- Make it obvious what changed recently and which records support an AI-generated
+  report or todo list.
 
 ## Core Screens
 
 ### Today
 
-Today should feel like Picardo's dashboard/attention center, adapted for a person.
-
 ```text
-+--------------------------------------------------------------------------+
-| TODAY                                                       Wed Jun 17    |
-+--------------------------------------------------------------------------+
-| +---------------------------+ +----------------------------------------+ |
-| | Attention                 | | Upcoming                               | |
-| | overdue / due / waiting   | | calls, events, deadlines               | |
-| | compact actionable rows   | | compact chronological rows             | |
-| +---------------------------+ +----------------------------------------+ |
-|                                                                          |
-| +---------------------------+ +----------------------------------------+ |
-| | Recent memory             | | Recent sources                         | |
-| | facts, decisions, notes   | | imports, files, transcripts            | |
-| +---------------------------+ +----------------------------------------+ |
-+--------------------------------------------------------------------------+
++----------------------+----------------------------------------------+
+| Today                | Today                                        |
+| Tasks                | Search...                              Ask   |
+| Network              +----------------------------------------------+
+| Projects             | Brief                                       |
+| Graph                |  [ ] Send proposal follow-up     Project A  |
+| Ask                  |  [ ] Book dentist appointment    Personal   |
+| Settings             |                                              |
+|                      | Relationships                               |
+|                      |  Maya - follow up on contract comments      |
+|                      |  Jordan - no interaction in 21 days         |
+|                      |                                              |
+|                      | Waiting                                      |
+|                      |  Waiting on Maya - contract comments         |
+|                      |                                              |
+|                      | Recent interactions                          |
+|                      |  9:30 AM  Call with Jordan                   |
+|                      |  Yesterday Email from Acme                   |
++----------------------+----------------------------------------------+
 ```
 
-No review queue. If something is wrong, the correction action lives on the row/detail.
-
-### Sources
-
-Sources are the evidence catalog. This should be table-first.
+### Network
 
 ```text
-+--------------------------------------------------------------------------+
-| SOURCES                                       [Import] [Folder] [Paste]    |
-| Filter sources...                                         1,284 sources    |
-+--------------------------------------------------------------------------+
-| Type        Title                         When        Memories  Privacy    |
-| transcript  Call with Sarah               Today       12        local      |
-| file        investor-notes.md             Yesterday   8         sensitive  |
-| chat        Agent session                 Jun 12      5         local      |
-+--------------------------------------------------------------------------+
++----------------------+----------------------------------------------+
+| Today                | Network                                      |
+| Tasks                | [People] [Organizations]          Search... |
+| Network              +----------------------+-----------------------+
+| Projects             | Name                 | Profile               |
+| Ask                  | Maya Chen            | Maya Chen             |
+| Settings             | Jordan Lee           | Product lead at Acme  |
+|                      | Acme Corp            |                       |
+|                      |                      | Tasks                 |
+|                      |                      | Interactions          |
+|                      |                      | Documents             |
++----------------------+----------------------------------------------+
 ```
 
-Source detail should use a main body plus aside:
+### Project Detail
 
 ```text
-+-----------------------------------------------+--------------------------+
-| Source content / chunks / extracted memories  | Evidence                 |
-|                                               | Type: transcript         |
-| Link rows to memories, tasks, people, events  | Privacy: local           |
-|                                               | Hash / path / importer   |
-|                                               | Agent event              |
-+-----------------------------------------------+--------------------------+
++----------------------+----------------------------------------------+
+| Today                | Project: Home renovation                     |
+| Tasks                | Status: active                 Ask about it |
+| Network              +----------------------------------------------+
+| Projects             | Tasks | People | Interactions | Documents    |
+| Ask                  +----------------------------------------------+
+| Settings             | [ ] Confirm contractor schedule              |
+|                      | [ ] Choose bathroom tile                     |
+|                      |                                              |
+|                      | Recent interaction                           |
+|                      | Call with Alex - budget changed              |
++----------------------+----------------------------------------------+
 ```
-
-### People, Projects, Places, Topics
-
-Entity pages should follow Picardo detail pages:
-
-- identity header,
-- summary/prose section,
-- linked memories,
-- tasks,
-- events/interactions,
-- sources,
-- right-side metadata rail.
-
-### Memories
-
-Memories should be browsable, not hidden inside chat.
-
-Rows should show kind, title/body, linked entity, confidence, source, observed date, and
-privacy. The detail view should make correction and source inspection obvious.
 
 ### Ask
 
-Ask should use the same shell, not a full-screen chatbot. Treat it like a query and
-answer workspace with citations.
-
 ```text
-+--------------------------------------------------------------------------+
-| ASK                                                                      |
-| What did I promise Sarah last week?                                      |
-+--------------------------------------------------------------------------+
-| Answer                                                                   |
-| You promised to send Sarah the revised deck by Friday.                   |
-|                                                                          |
-| Citations                                                                |
-| [1] Call transcript, Jun 12                                               |
-| [2] Memory: Follow-up commitment                                         |
-|                                                                          |
-| Context                                                                  |
-| 2 sources | 3 memories | cloud model used | never_external excluded      |
-+--------------------------------------------------------------------------+
++----------------------+----------------------------------------------+
+| Today                | Ask                                          |
+| Tasks                |                                              |
+| Network              | What did I promise Maya last week?           |
+| Projects             |                                              |
+| Ask                  | You promised to send the revised budget and  |
+| Settings             | introduce her to Jordan.                     |
+|                      |                                              |
+|                      | Citations                                    |
+|                      | - Call with Maya, Jun 10                     |
+|                      | - Email to Maya, Jun 11                      |
++----------------------+----------------------------------------------+
 ```
 
-## Visual Defaults
+### Graph
 
-- Warm neutral background with a slightly lighter panel surface.
-- Dark mode should be deep ink, not blue-black.
-- Accent should be restrained: rust/amber or another warm accent, not purple-blue.
-- Row height around 32px for dense lists.
-- Cards are simple panels, not marketing cards.
-- Use mono uppercase section labels for navigation groups and table headers.
-- Use badges for privacy, memory kind, task status, source type, and confidence bands.
-- Use stable layout dimensions so counts, badges, and row actions do not shift the UI.
+```text
++----------------------+----------------------------------------------+
+| Today                | Graph                         Filter: All   |
+| Tasks                |                                              |
+| Network              |                 [Alex]                       |
+| Projects             |              /    |    \\                    |
+| Graph                |        Maya       Home Reno       Acme        |
+| Ask                  |       /   \\          |          /  \\       |
+| Settings             | Budget  Call   Tile task   Jordan  Contract  |
+|                      |                                              |
+|                      | Selected: Home Reno                          |
+|                      | Tasks | People | Interactions | Documents    |
++----------------------+----------------------------------------------+
+```
 
-## Product Translation
+## Interaction Rules
 
-Picardo is corporate and remote-data oriented. Local Brain is personal and local. The
-translation is:
-
-- Organizations -> People / Projects / Places / Topics.
-- Documents -> Sources.
-- AI notes / extracted facts -> Memories.
-- Tasks -> Tasks.
-- Search -> Ask/Search.
-- Graph -> Graph.
-- Sources/Admin -> Settings.
-- User auth footer -> local brain status / device identity.
-
-The result should feel like a serious personal operating surface, not a consumer toy and
-not a generic database browser.
+- Search should be global and available from all main surfaces.
+- Ask should cite documents or interactions directly.
+- A user should be able to correct a task, person link, project link, or remembered
+  fact from the detail page where it appears.
+- Graph should be a derived navigation and demonstration surface, not the storage
+  model.
+- Imported text should become a document or interaction immediately.
+- No mandatory review queue for extracted data.

@@ -11,7 +11,7 @@ Tauri app without implementing product features.
 ## Scope
 
 **In:** package manager, workspace layout, TypeScript/Rust toolchain, baseline scripts,
-lint/typecheck/test conventions, minimal CI-ready checks.
+lint/typecheck/test conventions, IPC conventions, minimal CI-ready checks.
 
 **Out:** real schema migrations, UI screens, ingestion, AI calls, release signing.
 
@@ -21,6 +21,9 @@ lint/typecheck/test conventions, minimal CI-ready checks.
 - Use a Turborepo-style workspace similar to Reflect Open.
 - Use a Cargo workspace for Rust crates.
 - Use Tauri 2 for the desktop shell.
+- Use the Reflect Open split: TypeScript `core` owns product logic; Rust owns native
+  primitives.
+- Establish one IPC wrapper with zod validation and casing normalization.
 - Keep app code open-source quality from the first scaffold.
 - Start with this layout:
 
@@ -33,7 +36,7 @@ packages/
   db/
   skills/
 crates/
-  index-schema/
+  brain-schema/
 docs/
 ```
 
@@ -43,8 +46,15 @@ docs/
    TypeScript config, formatting/lint config, and root Cargo workspace config.
 2. Add empty package shells for `packages/core`, `packages/db`, and `packages/skills`
    with public entrypoints and strict TS configs.
-3. Add empty Rust crate shells for the Tauri app, CLI, and schema/migration crate.
-4. Add scripts matching the intended workflow:
+3. Add the Tauri app shell under `apps/desktop` and configure React 19, Vite,
+   Tailwind v4, shadcn/ui, lucide, zod, Kysely, React Query, and shared `cn()`.
+4. Add Rust crate shells for the Tauri app, CLI, and schema/migration crate.
+5. Add the IPC convention:
+   - Rust `#[tauri::command]` handlers return `Result<T, AppError>`
+   - frontend `call()` wrapper invokes commands, validates with zod, and normalizes
+     casing
+   - no React component imports Tauri `invoke` directly
+6. Add scripts matching the intended workflow:
    - `pnpm typecheck`
    - `pnpm lint`
    - `pnpm test`
@@ -52,9 +62,15 @@ docs/
    - `pnpm dev`
    - `pnpm tauri dev`
    - `pnpm tauri build`
-5. Add `.gitignore` entries for build artifacts, local DB files, local exports,
+7. Add `.gitignore` entries for build artifacts, local DB files, local exports,
    generated sidecars, and secrets.
-6. Document local setup in the root README once the scaffold exists.
+8. Add CI-ready checks:
+   - TypeScript typecheck
+   - lint
+   - Vitest
+   - Cargo fmt/check/test
+   - generated DB schema drift check once Plan 02 lands
+9. Document local setup in the root README once the scaffold exists.
 
 ## Acceptance Criteria
 
@@ -63,6 +79,7 @@ docs/
 - Cargo workspace metadata resolves.
 - No generated DB, real user data, or local secrets are tracked.
 - The scaffold is compatible with later Tauri sidecar bundling.
+- A trivial Tauri command is called only through the typed IPC wrapper.
 
 ## Tests or Verification
 

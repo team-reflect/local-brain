@@ -1,62 +1,143 @@
 # Plan 06 - Search, Retrieval, and AI
 
-**Goal:** Provide fast lexical search, privacy-aware retrieval, optional local
-embeddings, and cited answers over local memory.
+**Goal:** Provide fast local search, cited AI answers, and agent-readable report
+generation over the personal-CRM records.
 
-**Depends on:** Plan 02, Plan 04, Plan 05.
+**Depends on:** Plans 01-05.
 
-**Unlocks:** Plan 03 Ask/Search completion, Plan 07 CLI ask/search, Plan 08 privacy
-audit, Plan 09 launch quality.
+**Unlocks:** Plans 07-09.
 
 ## Scope
 
-**In:** FTS5 search, retrieval ranking, citation bundles, privacy filtering, chat
-history, BYOK/local model adapters, optional vector search.
+**In:** FTS5, optional vector search, retrieval policy, Ask conversations, citations,
+answer persistence, record lookup, daily report/todo retrieval, model boundary
+settings.
 
-**Out:** hosted model proxy, web search, broad plugin system, mobile AI.
+**Out:** hosted sync, browser extension search, automatic external app connectors.
 
 ## Key Decisions
 
-- FTS5 search ships before vector search if vector packaging is risky.
-- Local embeddings are preferred for semantic retrieval when distribution is reliable.
-- Generative AI uses user-approved local or BYOK providers.
-- Retrieval must filter context before any cloud model call.
-- Answers must cite sources and memories used.
-- Chat history is durable SQLite data.
+- FTS5 is the first search path.
+- Embeddings are additive and optional until packaging and speed are proven.
+- Retrieval ranks visible records and chunks from documents and interactions.
+- One `retrieve()` API serves Ask, daily reports, graph context, search enrichment, and
+  CLI reads.
+- AI answers cite `content_chunks` through `evidence_refs`.
+- Chat history lives in `chat_conversations` and `chat_messages`.
+- Daily reports and todo lists should use the same retrieval/citation machinery as Ask.
+- Settings controls model keys and whether external model calls are enabled.
+- There is no row-level sensitivity label schema for launch.
+
+## Reflect Open Patterns To Reuse
+
+- Command/search is one surface: find, navigate, and run commands from the same palette.
+- FTS uses title/body weighting, snippets, small result caps, and no filesystem scan.
+- Embeddings run locally in Rust, off the UI thread, with lexical fallback.
+- Hybrid retrieval uses one shared contract rather than separate AI/search indexes.
+- AI context assembly is transparent and cited.
+- External model payloads pass through one typed boundary so unchecked context cannot be
+  sent accidentally.
 
 ## Implementation Steps
 
-1. Implement FTS5 indexing and rebuild helpers for sources, memories, entities, and
-   tasks.
-2. Build search APIs that return typed result objects with target type, title, snippet,
-   timestamp, privacy, and citation metadata.
-3. Build retrieval APIs that assemble context bundles from sources, chunks, memories,
-   tasks, events, and entities.
-4. Add privacy policy filters for local-only and cloud-allowed retrieval modes.
-5. Add chat conversation/message persistence.
-6. Add model provider settings and keychain-backed secrets.
-7. Add Ask/Search UI that shows answers, citations, and whether context left the
-   machine.
-8. Add optional local embedding pipeline and vector table integration when stable.
+1. Add global search over:
+   - people
+   - organizations
+   - projects
+   - tasks
+   - documents
+   - interactions
+2. Add a command/search palette:
+   - Cmd/Ctrl+K opens instantly
+   - empty query shows recent/active records and useful commands
+   - typed query searches records and chunks
+   - `>` prefix or a similar convention filters to commands
+   - Enter opens a record or runs a command
+3. Add a typed command registry shared by palette, deep links, and CLI parity tests:
+   - go to Today
+   - create document
+   - create interaction
+   - create task
+   - open Graph
+   - run daily report
+   - rebuild derived indexes
+4. Add FTS over `content_chunks.text` and visible record titles/names.
+   - use `unicode61` initially
+   - rank with title/name boosts where applicable
+   - return snippets for chunk hits
+   - keep first-wave filters intentionally small
+5. Add ranking that combines:
+   - lexical match
+   - recency
+   - explicit links to active projects/tasks
+   - selected current view context
+6. Add optional embedding generation for chunks:
+   - sentence-aware chunking in `packages/core`
+   - `fastembed` runtime in Rust
+   - model downloaded on demand
+   - vectors stored in `sqlite-vec`
+   - chunk hashes skip unchanged work
+   - failure means semantic unavailable, not app failure
+7. Add retrieval API for Ask and agent workflows:
+   - question
+   - selected filters/context
+   - ranked chunks
+   - linked records
+   - mode: lexical, semantic, or hybrid
+   - citations/evidence payload
+8. Build Ask answer generation with citations.
+9. Persist conversations and messages.
+10. Create `evidence_refs` for assistant messages.
+11. Add model boundary checks:
+   - require configured key or local model
+   - show when external calls are disabled
+   - include only retrieved text needed for the answer
+   - construct external model context through one checked helper/type
+   - log/model usage metadata in chat message metadata if useful
+12. Add cited-answer UI:
+   - answer text
+   - citation list
+   - jump to document or interaction
+   - show linked people, organizations, projects, and tasks
+13. Add retrieval endpoints for agent workflows:
+   - daily report
+   - todo list
+   - changed records since timestamp
+   - waiting items
+   - relationship follow-ups
+14. Add graph data endpoint:
+   - centered on the user's own person row
+   - returns typed nodes and weighted edges
 
 ## Acceptance Criteria
 
-- Users can search sources, memories, entities, and tasks from one query box.
-- Ask/Search can answer with citations from local context.
-- The user can see which sources and memories were used.
-- `never_external` context is excluded from cloud model calls.
-- Chat history survives relaunch.
-- If embeddings are unavailable, FTS retrieval still works.
+- Global search finds records by name, title, and body text.
+- Cmd/Ctrl+K provides one keyboard-native surface for find, navigate, and command
+  execution.
+- Ask can answer a question using local documents and interactions.
+- Every factual Ask answer shows citations.
+- Citations open the exact document or interaction context.
+- Chat history is persisted.
+- An agent can request enough structured context to generate a daily report and todo
+  list.
+- Daily brief retrieval includes relationship follow-ups, stale relationships, and
+  upcoming important dates.
+- Graph data can be generated from durable typed records without a separate graph table.
+- Search and Ask both use the same retrieval contract.
+- Semantic search can be unavailable while lexical search still works.
+- The app behaves clearly when no model key or local model is configured.
 
 ## Tests or Verification
 
-- FTS fixture tests for source/memory/entity/task matches.
-- Retrieval tests for privacy filtering across local-only and cloud modes.
-- Chat persistence tests.
-- Provider adapter tests using mocked model responses.
-- UI tests for citations and context-left-machine indicators.
+- Unit test search ranking inputs.
+- Integration test FTS indexing and rebuild.
+- Unit test command registry execution and keyboard-result behavior.
+- Unit test chunk hash stability and lexical fallback when embeddings are unavailable.
+- Integration test cited answer persistence.
+- Manual test Ask across a seeded person, project, task, document, and interaction.
 
 ## Open Questions
 
-- Exact first embedding runtime/model is undecided. Default to Reflect Open's local
-  Rust embedding direction when feasible.
+- The first embedding backend remains open until packaging is tested.
+- Graph data filters by node type, date range, project, and relationship strength are
+  optional follow-up.
