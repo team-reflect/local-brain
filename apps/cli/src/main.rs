@@ -17,7 +17,11 @@ use serde::Serialize;
 use error::CliError;
 
 #[derive(Parser)]
-#[command(name = "brain", version, about = "Agent interface to a Local Brain database")]
+#[command(
+    name = "brain",
+    version,
+    about = "Agent interface to a Local Brain database"
+)]
 struct Cli {
     /// Path to the brain database (overrides $BRAIN_DB and the default location).
     #[arg(long, global = true, value_name = "PATH")]

@@ -12,8 +12,8 @@ questions needing Alex.
 - **Mode:** Sequential. This session builds the stack layer by layer; no parallel
   worker sessions are spawned. (Within a layer, read-only research may fan out, but
   commits are made sequentially from this session.)
-- **Blockers:** Rust toolchain absent — see [decisions.md](decisions.md) D1. Not blocking
-  authoring; blocks `cargo` verification.
+- **Blockers:** none. The Rust toolchain (`cargo`/`rustc` 1.96.0) is installed; D1 is
+  resolved.
 
 ## Log
 
@@ -42,8 +42,10 @@ questions needing Alex.
 - `apps/desktop/scripts/build-sidecar.mjs`: stages the `brain` sidecar.
 - **Verification:** `pnpm install` ✓; `pnpm check` ✓ (4 packages: typecheck +
   oxlint + 6 tests); migration SQL applies under `sqlite3` ✓; `node --check` on
-  the sidecar script ✓; tree clean (only intentional files). Cargo gates
-  **deferred** (D1 — no toolchain locally).
+  the sidecar script ✓; tree clean (only intentional files). Rust gates ✓ after
+  installing `cargo`/`rustc` 1.96.0 and adding the placeholder Tauri icon set
+  required by `tauri::generate_context!()`: `cargo fmt --all -- --check` ✓;
+  `cargo check --workspace` ✓; `cargo test --workspace` ✓.
 
 ### 2026-06-17 — Phase 00 start
 - Verified environment: clean tree at `f3616d3`; node v25.8.0; pnpm 11.5.2; gh 2.87.3

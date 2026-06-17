@@ -4,7 +4,8 @@
 pub enum CliError {
     /// IO / SQL / runtime failure (exit 1).
     Runtime(String),
-    /// A requested record was not found (exit 3).
+    /// A requested record was not found (exit 3). Reserved for Plan 07 commands.
+    #[allow(dead_code)]
     NotFound(String),
     /// The database is missing or unusable (exit 4).
     NoDatabase(String),

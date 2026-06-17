@@ -31,19 +31,29 @@ pub type AppResult<T> = Result<T, AppError>;
 #[allow(dead_code)]
 impl AppError {
     pub fn io(message: impl Into<String>) -> Self {
-        Self::Io { message: message.into() }
+        Self::Io {
+            message: message.into(),
+        }
     }
     pub fn not_found(message: impl Into<String>) -> Self {
-        Self::NotFound { message: message.into() }
+        Self::NotFound {
+            message: message.into(),
+        }
     }
     pub fn no_database(message: impl Into<String>) -> Self {
-        Self::NoDatabase { message: message.into() }
+        Self::NoDatabase {
+            message: message.into(),
+        }
     }
     pub fn parse(message: impl Into<String>) -> Self {
-        Self::Parse { message: message.into() }
+        Self::Parse {
+            message: message.into(),
+        }
     }
     pub fn unknown(message: impl Into<String>) -> Self {
-        Self::Unknown { message: message.into() }
+        Self::Unknown {
+            message: message.into(),
+        }
     }
 }
 

@@ -18,9 +18,8 @@ use rusqlite_migration::{Migrations, M};
 pub const LATEST_SCHEMA_VERSION: usize = 1;
 
 /// Ordered schema migrations, embedded from `migrations/*.sql`.
-static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
-    Migrations::new(vec![M::up(include_str!("../migrations/0001_init.sql"))])
-});
+static MIGRATIONS: LazyLock<Migrations<'static>> =
+    LazyLock::new(|| Migrations::new(vec![M::up(include_str!("../migrations/0001_init.sql"))]));
 
 /// A schema/open/migrate failure, surfaced to the desktop app and CLI.
 #[derive(Debug)]
@@ -34,8 +33,12 @@ impl std::fmt::Display for SchemaError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SchemaError::Open(message) => write!(f, "could not open the database: {message}"),
-            SchemaError::Pragma(message) => write!(f, "could not configure the database: {message}"),
-            SchemaError::Migration(message) => write!(f, "could not migrate the database: {message}"),
+            SchemaError::Pragma(message) => {
+                write!(f, "could not configure the database: {message}")
+            }
+            SchemaError::Migration(message) => {
+                write!(f, "could not migrate the database: {message}")
+            }
         }
     }
 }
@@ -76,7 +79,8 @@ pub fn open_and_migrate(path: &Path) -> Result<Connection, SchemaError> {
 
 /// Open an in-memory database migrated to the latest schema. Test helper.
 pub fn open_in_memory() -> Result<Connection, SchemaError> {
-    let mut conn = Connection::open_in_memory().map_err(|err| SchemaError::Open(err.to_string()))?;
+    let mut conn =
+        Connection::open_in_memory().map_err(|err| SchemaError::Open(err.to_string()))?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")
         .map_err(|err| SchemaError::Pragma(err.to_string()))?;
     migrate(&mut conn)?;
@@ -96,9 +100,11 @@ mod tests {
     fn migrates_empty_database() {
         let conn = open_in_memory().unwrap();
         let value: String = conn
-            .query_row("SELECT value FROM schema_meta WHERE key = 'app'", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT value FROM schema_meta WHERE key = 'app'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(value, "local-brain");
     }

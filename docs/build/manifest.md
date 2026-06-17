@@ -27,7 +27,8 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 | pnpm | 11.5.2 ✓ |
 | gh | 2.87.3, authed as `maccman` (ssh) ✓ |
 | remote | `git@github.com:maccman/local-brain.git` ✓ |
-| cargo / rustc / rustup | **NOT installed** — Rust crates can be authored but not built/tested in this environment. See [decisions.md](decisions.md) D1. |
+| cargo / rustc | 1.96.0, installed via Homebrew on 2026-06-17 ✓ |
+| rustup | not installed; Homebrew system toolchain is sufficient for local gates |
 | gh stack extension | not installed — using ordinary stacked PRs |
 
 ## Stack Layers
@@ -67,12 +68,11 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
   (`typecheck`/`lint`/`test`/`check`/`dev`/`tauri`), `.gitignore`.
 - **Verification:** `pnpm install` ✓; `pnpm check` ✓ (typecheck + oxlint + 6 vitest
   tests pass); migration SQL applies under `sqlite3` ✓; `node --check` on the sidecar
-  script ✓; `git status` shows only intentional files ✓. `cargo check --workspace` /
-  `cargo test --workspace` **deferred** — no cargo here (D1).
-- **Caveats:** Rust crates (`src-tauri`, `brain-cli`, `brain-schema`) authored to spec
-  but not compiled locally; CI must run the Cargo gates. App icons and sidecar
-  bundle wiring are deferred to Plans 07/09 (kept out of the bundle config so a future
-  `cargo check` is not blocked by missing icon files).
+  script ✓; `cargo fmt --all -- --check` ✓; `cargo check --workspace` ✓;
+  `cargo test --workspace` ✓.
+- **Caveats:** App icon is a generated placeholder so Tauri can compile; final icon
+  polish remains a Plan 09 packaging task. Sidecar bundle wiring is deferred to Plans
+  07/09.
 
 ### 02a — SQLite schema crate
 - **Scope (Plan 02, steps 1–7):** `crates/brain-schema` — SQL migrations for all durable
