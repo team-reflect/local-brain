@@ -19,6 +19,7 @@ work and life with citations.
 - [Launch Schema](launch-schema.md)
 - [Agent Interface](agent-interface.md)
 - [MVP Plan](mvp-plan.md)
+- [Implementation Plans](plans/00-overview.md)
 - [Open Questions](open-questions.md)
 
 ## Core Bet
