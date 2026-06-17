@@ -68,6 +68,14 @@ None at this checkpoint.
   04b) so a pasted note and an imported file with identical content produce the same
   `content_hash` and dedupe against each other.
 
+### DEC-11 — Ingestion file selection via path field, not a native picker (04c)
+- The `AddRecordDialog` takes a typed file/folder **path** rather than opening the native
+  OS picker. Rationale: the native picker needs the Tauri dialog plugin (Rust plugin +
+  capability + JS package) and only works inside the running app, which would make the
+  dialog un-renderable in jsdom tests and the dev/browser context. A path field exercises
+  the 04b Rust readers end-to-end, keeps the build hermetic and the UI render-testable, and
+  the native picker is a thin follow-up (it only needs to produce the same path string).
+
 ### DEC-7 — 03b kept as one branch; palette stays hand-rolled (no cmdk)
 - 03b (Graph, Ask, full Settings, org browsing, richer detail, palette record search,
   render tests) is additive UI + read-only getters + tests with no Rust changes, so it

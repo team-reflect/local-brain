@@ -6,6 +6,7 @@ import {
   FolderKanban,
   ListTodo,
   MessageSquare,
+  Plus,
   Search,
   Settings,
   Share2,
@@ -16,6 +17,7 @@ import { useAppShortcuts } from '../lib/commands/use-shortcuts'
 import type { CommandContext } from '../lib/commands/types'
 import { sectionForRoute, type Route } from '../routing/route'
 import { useRouter } from '../routing/router'
+import { AddRecordDialog, type AddRecordType } from './add-record-dialog'
 import { CommandPalette } from './command-palette'
 import { RouteContent } from './route-content'
 
@@ -39,12 +41,17 @@ const NAV: readonly NavItem[] = [
 export function AppShell(): ReactNode {
   const { route, navigate, back, forward, canBack, canForward } = useRouter()
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [addState, setAddState] = useState<{ open: boolean; type: AddRecordType }>({
+    open: false,
+    type: 'document',
+  })
   const activeSection = sectionForRoute(route)
 
   const openPalette = useCallback(() => setPaletteOpen(true), [])
+  const openAdd = useCallback((type: AddRecordType) => setAddState({ open: true, type }), [])
   const context = useMemo<CommandContext>(
-    () => ({ navigate, back, forward, openPalette }),
-    [navigate, back, forward, openPalette],
+    () => ({ navigate, back, forward, openPalette, openAdd }),
+    [navigate, back, forward, openPalette, openAdd],
   )
   useAppShortcuts(context)
 
@@ -108,6 +115,15 @@ export function AppShell(): ReactNode {
             <span>Search or run a command…</span>
             <kbd className="ml-auto font-mono text-[10px] text-muted-foreground">⌘K</kbd>
           </button>
+          <button
+            type="button"
+            onClick={() => openAdd('document')}
+            aria-label="Add a record"
+            className="flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs text-foreground hover:bg-secondary/60"
+          >
+            <Plus className="size-3.5" />
+            Add
+          </button>
         </header>
         <main className="flex-1 overflow-y-auto px-6 py-5">
           <RouteContent route={route} />
@@ -115,6 +131,11 @@ export function AppShell(): ReactNode {
       </div>
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} context={context} />
+      <AddRecordDialog
+        open={addState.open}
+        initialType={addState.type}
+        onClose={() => setAddState((current) => ({ ...current, open: false }))}
+      />
     </div>
   )
 }

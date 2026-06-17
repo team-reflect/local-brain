@@ -46,7 +46,7 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 | 03b | Desktop shell: Graph, Ask, full Settings, detail richness, palette | `codex/local-brain-03b-desktop-shell-ii` | `…-03-desktop-shell` | open | [#8](https://github.com/maccman/local-brain/pull/8) |
 | 04a | Ingestion core engine (chunking, hashing, ingest + links + dedupe) | `codex/local-brain-04a-ingestion-core` | `…-03b-desktop-shell-ii` | open | [#9](https://github.com/maccman/local-brain/pull/9) |
 | 04b | Rust file-read primitives (safe reads, size caps, hashing, folder enum) | `codex/local-brain-04b-ingestion-fs` | `…-04a-ingestion-core` | open | [#10](https://github.com/maccman/local-brain/pull/10) |
-| 04c | Ingestion UI (paste/import flows, folder import, Add actions) | `codex/local-brain-04c-ingestion-ui` | `…-04b-ingestion-fs` | pending | — |
+| 04c | Ingestion UI (paste/import flows, folder import, Add actions) | `codex/local-brain-04c-ingestion-ui` | `…-04b-ingestion-fs` | open | [#11](https://github.com/maccman/local-brain/pull/11) |
 | 05 | Memory extraction & linking | `codex/local-brain-05-extraction` | `…-04c-ingestion-ui` | pending | — |
 | 06 | Search, retrieval & AI | `codex/local-brain-06-search-ai` | `…-05-extraction` | pending | — |
 | 07 | CLI & agent skills | `codex/local-brain-07-cli-skills` | `…-06-search-ai` | pending | — |
@@ -215,9 +215,28 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
   unsupported/missing/binary; folder scan skipping hidden/unsupported/duplicate + recursion;
   plus the 9 existing). `pnpm check` ✓ (the new zod bindings typecheck). `git diff --check` ✓.
 
-### 04c, 05–09
-- Scope mirrors `docs/plans/04..09`: **04c** = ingestion UI (paste/import dialog, folder
-  import, Add actions from surfaces + palette); 05 = extraction; 06 = search/retrieval/Ask;
+### 04c — Ingestion UI (Plan 04 complete)
+- **Scope (Plan 04, steps 1–2, 11, language=TS/React):** `AddRecordDialog` — a modal with a
+  Document/Interaction toggle and a Paste/Import-folder mode toggle. Paste mode: title, kind,
+  date, a body textarea, an optional "load from file path" that calls `readTextFile` (04b),
+  and collapsible people/projects/organizations/tasks link pickers; Save runs
+  `ingestDocument`/`ingestInteraction` (04a), surfaces the duplicate notice, and navigates to
+  the record. Folder mode: a path field → `readTextFolder` (04b) → `ingestDocument` per file,
+  reporting imported/duplicate/skipped counts. Wired via a new `openAdd` on `CommandContext`,
+  the `new.document`/`new.interaction` palette commands, and an **Add** button in the command
+  bar. `useIngestDocument`/`useIngestInteraction` mutations invalidate broadly.
+- **Verification:** `pnpm check` ✓ — typecheck + oxlint + **61 tests** (27 core, 4 db, 30
+  desktop incl. 4 new `AddRecordDialog` render tests: compose fields + type toggle, empty-body
+  guard, paste→ingest→close, folder-mode field). `pnpm --filter @local-brain/desktop build` ✓
+  (Vite bundles 2041 modules). `cargo check --workspace` ✓ (no Rust this layer). `git diff
+  --check` ✓.
+- **Caveats:** file/folder selection is via a typed **path field** (not a native picker) so
+  the build stays hermetic and testable; wiring the Tauri dialog plugin for a native file
+  picker is a follow-up. PDF/OCR and automatic sync remain out of scope (Plan 04 open
+  questions). A full assembled `pnpm tauri dev`/`build` launch is still pending.
+
+### 05–09
+- Scope mirrors `docs/plans/05..09`: 05 = extraction; 06 = search/retrieval/Ask;
   07 = `brain` CLI + skills (sidecar via `bundle.externalBin`); 08 = settings/backup/export;
   09 = macOS packaging, first-run, signing checklist.
 
@@ -233,3 +252,4 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 - PR #8 — Build 03b desktop shell II (Graph, Ask, Settings, org browsing, detail richness, palette search) — https://github.com/maccman/local-brain/pull/8 (base `…-03-desktop-shell`, open)
 - PR #9 — Build 04a ingestion core engine (chunking, hashing, ingest + links + dedupe) — https://github.com/maccman/local-brain/pull/9 (base `…-03b-desktop-shell-ii`, open)
 - PR #10 — Build 04b Rust file-read primitives (safe reads, size caps, hashing, folder enum) — https://github.com/maccman/local-brain/pull/10 (base `…-04a-ingestion-core`, open)
+- PR #11 — Build 04c ingestion UI (paste/import dialog, folder import, Add actions) — https://github.com/maccman/local-brain/pull/11 (base `…-04b-ingestion-fs`, open)

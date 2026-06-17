@@ -19,8 +19,8 @@ export const APP_COMMANDS: readonly AppCommand[] = [
   { id: 'history.back', title: 'Back', keybinding: 'Mod-[', run: (c) => c.back() },
   { id: 'history.forward', title: 'Forward', keybinding: 'Mod-]', run: (c) => c.forward() },
   { id: 'new.task', title: 'New task', keybinding: 'Mod-Shift-T', run: (c) => c.navigate({ kind: 'tasks' }) },
-  { id: 'new.document', title: 'New document', keybinding: 'Mod-Shift-D', run: (c) => c.navigate({ kind: 'today' }) },
-  { id: 'new.interaction', title: 'New interaction', keybinding: 'Mod-Shift-I', run: (c) => c.navigate({ kind: 'today' }) },
+  { id: 'new.document', title: 'New document', keywords: ['import', 'paste', 'note'], keybinding: 'Mod-Shift-D', run: (c) => c.openAdd('document') },
+  { id: 'new.interaction', title: 'New interaction', keywords: ['meeting', 'transcript', 'call'], keybinding: 'Mod-Shift-I', run: (c) => c.openAdd('interaction') },
   { id: 'report.daily', title: 'Run daily report', keybinding: 'Mod-Shift-R', run: (c) => c.navigate({ kind: 'today' }) },
 ]
 
