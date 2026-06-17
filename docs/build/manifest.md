@@ -45,7 +45,7 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 | 03a | Desktop shell: routing, commands, core surfaces | `codex/local-brain-03-desktop-shell` | `…-02d-core-db` | open | [#7](https://github.com/maccman/local-brain/pull/7) |
 | 03b | Desktop shell: Graph, Ask, full Settings, detail richness, palette | `codex/local-brain-03b-desktop-shell-ii` | `…-03-desktop-shell` | open | [#8](https://github.com/maccman/local-brain/pull/8) |
 | 04a | Ingestion core engine (chunking, hashing, ingest + links + dedupe) | `codex/local-brain-04a-ingestion-core` | `…-03b-desktop-shell-ii` | open | [#9](https://github.com/maccman/local-brain/pull/9) |
-| 04b | Rust file-read primitives (safe reads, size caps, hashing, folder enum) | `codex/local-brain-04b-ingestion-fs` | `…-04a-ingestion-core` | pending | — |
+| 04b | Rust file-read primitives (safe reads, size caps, hashing, folder enum) | `codex/local-brain-04b-ingestion-fs` | `…-04a-ingestion-core` | open | [#10](https://github.com/maccman/local-brain/pull/10) |
 | 04c | Ingestion UI (paste/import flows, folder import, Add actions) | `codex/local-brain-04c-ingestion-ui` | `…-04b-ingestion-fs` | pending | — |
 | 05 | Memory extraction & linking | `codex/local-brain-05-extraction` | `…-04c-ingestion-ui` | pending | — |
 | 06 | Search, retrieval & AI | `codex/local-brain-06-search-ai` | `…-05-extraction` | pending | — |
@@ -197,10 +197,26 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
   `cargo check --workspace` ✓ (no Rust this layer). `git diff --check` ✓.
 - **Caveats:** UI Add/import flows are 04c; Rust safe file reads + folder import are 04b.
 
-### 04b–04c, 05–09
-- Scope mirrors `docs/plans/04..09`: **04b** = Rust file-read primitives (user-selected
-  files only, canonical-path validation, size caps, content hash, folder enumeration with
-  imported/skipped/duplicate counts); **04c** = ingestion UI (paste/import dialog, folder
+### 04b — Rust file-read primitives
+- **Scope (Plan 04, steps 3–6, language=Rust):** `apps/desktop/src-tauri/src/fs.rs` — a
+  `read_text_file` command (canonicalize the user-selected path, require a regular file,
+  enforce a 5 MiB size cap, require valid UTF-8, detect kind by extension, SHA-256 the
+  bytes) and a `read_text_folder` command (recursive scan that skips hidden / unsupported /
+  oversized / binary / duplicate files and anything that resolves outside the chosen root
+  via a symlink, with per-file skip reasons + imported/skipped counts). Registered in
+  `lib.rs`; added `sha2` to the workspace. Typed TS bindings (`readTextFile` /
+  `readTextFolder` + zod) in `packages/core/src/ipc/fs.ts`.
+- **Hashing note:** the Rust `content_hash` is SHA-256 over the file's raw UTF-8 bytes and
+  is used to flag duplicate files *within a folder scan*. The authoritative cross-record
+  dedupe hash is the 04a one, computed at ingest over *normalized* text — so the UI (04c)
+  passes `contents` to `ingestDocument`, which owns the stored hash.
+- **Verification:** `cargo fmt --all -- --check` ✓; `cargo check --workspace` ✓;
+  `cargo test --workspace` ✓ — 12 tests (3 new `fs` tests: read+hash a text file; reject
+  unsupported/missing/binary; folder scan skipping hidden/unsupported/duplicate + recursion;
+  plus the 9 existing). `pnpm check` ✓ (the new zod bindings typecheck). `git diff --check` ✓.
+
+### 04c, 05–09
+- Scope mirrors `docs/plans/04..09`: **04c** = ingestion UI (paste/import dialog, folder
   import, Add actions from surfaces + palette); 05 = extraction; 06 = search/retrieval/Ask;
   07 = `brain` CLI + skills (sidecar via `bundle.externalBin`); 08 = settings/backup/export;
   09 = macOS packaging, first-run, signing checklist.
@@ -216,3 +232,4 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 - PR #7 — Build 03a desktop shell (routing, commands, core surfaces) — https://github.com/maccman/local-brain/pull/7 (base `…-02d-core-db`, open)
 - PR #8 — Build 03b desktop shell II (Graph, Ask, Settings, org browsing, detail richness, palette search) — https://github.com/maccman/local-brain/pull/8 (base `…-03-desktop-shell`, open)
 - PR #9 — Build 04a ingestion core engine (chunking, hashing, ingest + links + dedupe) — https://github.com/maccman/local-brain/pull/9 (base `…-03b-desktop-shell-ii`, open)
+- PR #10 — Build 04b Rust file-read primitives (safe reads, size caps, hashing, folder enum) — https://github.com/maccman/local-brain/pull/10 (base `…-04a-ingestion-core`, open)

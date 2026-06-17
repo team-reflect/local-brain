@@ -1,6 +1,7 @@
 mod commands;
 mod db;
 mod error;
+mod fs;
 
 use std::path::PathBuf;
 
@@ -31,7 +32,9 @@ pub fn run() {
             commands::app_version,
             db::db_query,
             db::db_execute,
-            db::db_batch
+            db::db_batch,
+            fs::read_text_file,
+            fs::read_text_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Local Brain application");

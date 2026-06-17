@@ -2,6 +2,13 @@ export { type AppError, type AppErrorKind, isAppError, toAppError } from './erro
 export { type IpcBridge, setBridge, getBridge } from './ipc/bridge'
 export { call } from './ipc/invoke'
 export { appVersion, type AppInfo } from './ipc/commands'
+export {
+  readTextFile,
+  readTextFolder,
+  type FileImport,
+  type FolderScan,
+  type SkippedFile,
+} from './ipc/fs'
 
 // Database access layer
 export { db } from './db/client'
