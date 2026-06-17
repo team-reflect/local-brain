@@ -37,7 +37,7 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 | --- | --- | --- | --- | --- | --- |
 | 00 | Supervisor / build tracking | `codex/local-brain-00-supervisor` | `origin/master` | open | [#1](https://github.com/maccman/local-brain/pull/1) |
 | 01 | Foundation & toolchain | `codex/local-brain-01-foundation` | `…-00-supervisor` | open | [#2](https://github.com/maccman/local-brain/pull/2) |
-| 02a | SQLite schema crate (Rust migrations) | `codex/local-brain-02a-schema` | `…-01-foundation` | pending | — |
+| 02a | SQLite schema crate (Rust migrations) | `codex/local-brain-02a-schema` | `…-01-foundation` | open | [#3](https://github.com/maccman/local-brain/pull/3) |
 | 02b | DB package (Kysely + IPC dialect) | `codex/local-brain-02b-db` | `…-02a-schema` | pending | — |
 | 02c | Core DB actions + IPC commands + seed | `codex/local-brain-02c-core-db` | `…-02b-db` | pending | — |
 | 03 | Desktop shell & core UI | `codex/local-brain-03-desktop-shell` | `…-02c-core-db` | pending | — |
@@ -78,8 +78,11 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 - **Scope (Plan 02, steps 1–7):** `crates/brain-schema` — SQL migrations for all durable
   + join tables, indexes, FTS5, migration runner, `open_and_migrate`, WAL/foreign-keys/
   busy-timeout pragmas, schema version constant, temp-db test helpers.
-- **Verification:** `cargo test -p brain-schema` (migrate empty→launch; idempotent
-  re-run; FK enforcement) — **deferred** (no cargo).
+- **Verification:** validated under `sqlite3` 3.51 (FTS5) — 0001+0002 apply to a
+  fresh DB (33 base tables, 25 indexes, 9 triggers); FK + self-row-unique + enum
+  CHECK rejections fire; FTS `MATCH` returns inserted rows; cascade deletes work;
+  `integrity_check`/`foreign_key_check` `ok`. `cargo test -p brain-schema`
+  passes as part of `cargo test --workspace` (9 schema tests).
 
 ### 02b — DB package (Kysely + IPC dialect)
 - **Scope (Plan 02, step 8):** `packages/db` — generated Kysely `Database` interface,
@@ -104,3 +107,4 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 
 - PR #1 — Build 00 supervisor docs — https://github.com/maccman/local-brain/pull/1 (base `master`, open)
 - PR #2 — Build 01 foundation scaffold — https://github.com/maccman/local-brain/pull/2 (base `…-00-supervisor`, open)
+- PR #3 — Build 02a launch schema — https://github.com/maccman/local-brain/pull/3 (base `…-01-foundation`, open)

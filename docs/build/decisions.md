@@ -11,14 +11,14 @@ None at this checkpoint.
 ## Resolved
 
 ### D1 — Rust toolchain not installed in build environment
-- **Status:** RESOLVED on 2026-06-17.
-- **Impact:** Initial Plan 00/01 authoring could not run `cargo check`, `cargo test`,
-  or `cargo fmt` because `cargo`, `rustc`, and `rustup` were not on PATH.
-- **Resolution:** Installed the Homebrew Rust toolchain (`cargo 1.96.0`, `rustc
-  1.96.0`) and re-ran the Rust gates locally. The foundation Tauri shell needed a
-  placeholder icon set for `tauri::generate_context!()`; after adding it,
-  `cargo fmt --all -- --check`, `cargo check --workspace`, and `cargo test --workspace`
-  all pass.
+- **Status:** RESOLVED locally on 2026-06-17.
+- **Impact:** Initial Plan 00/01/02a authoring could not run `cargo check`,
+  `cargo test`, or `cargo fmt` because `cargo`, `rustc`, and `rustup` were not
+  on PATH.
+- **Resolution:** Installed the Homebrew Rust toolchain (`cargo 1.96.0`,
+  `rustc 1.96.0`) and re-ran the Rust gates locally. The foundation Tauri shell
+  needed a placeholder icon set for `tauri::generate_context!()`; after adding
+  it, `cargo check --workspace` and `cargo test --workspace` pass.
 
 ## Decisions (no action needed)
 
