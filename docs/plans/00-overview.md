@@ -21,6 +21,7 @@ Read these first:
 - [Reflect Open Technology Base](../reflect-open-technology-base.md)
 - [Launch Schema](../launch-schema.md)
 - [Agent Interface](../agent-interface.md)
+- [UI Direction](../ui-direction.md)
 - [MVP Plan](../mvp-plan.md)
 - [Open Questions](../open-questions.md)
 
@@ -55,7 +56,8 @@ Support docs:
 - SQLite is the durable local store.
 - Raw sources may be preserved for auditability, but product state lives in SQLite.
 - The first audience is agent-native technical users.
-- The first user-visible surfaces are Today, Ask/Search, Sources, and Entities.
+- The first user-visible surfaces follow the Picardo-inspired shell: Today, Tasks,
+  People, Projects, Sources, Memories, Ask, Graph, Agent Activity, and Settings.
 - The first agent interface is the `brain` CLI plus local skills.
 - No hosted Local Brain service is required for the core product.
 

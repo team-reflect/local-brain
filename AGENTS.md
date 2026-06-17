@@ -10,6 +10,7 @@ Before doing work here, read:
 - `docs/reflect-open-technology-base.md`
 - `docs/launch-schema.md`
 - `docs/agent-interface.md`
+- `docs/ui-direction.md`
 - `docs/mvp-plan.md`
 - `docs/open-questions.md`
 
@@ -46,7 +47,8 @@ provenance, privacy, and local ownership.
 - **Human UI, agent contract.** The app should feel simple for people, while exposing a
   stable CLI/skill contract for local agents.
 - **Do not lead with a database editor.** Advanced inspection can exist later, but the
-  front door is Today, Ask/Search, Sources, and entity pages.
+  front door is a Picardo-inspired app shell with Today, Tasks, People, Projects,
+  Sources, Memories, Ask, Graph, and Agent Activity.
 - **Privacy is a product surface.** Retrieval and AI calls must know whether context is
   local-only, cloud-allowed, sensitive, or never-external.
 - **Local-first, no hosted core API.** Do not assume a hosted Local Brain service for
@@ -55,6 +57,9 @@ provenance, privacy, and local ownership.
   models. Secrets belong in the OS keychain.
 - **Tauri, not Electron.** The desktop shell should follow Reflect Open's Tauri/Rust
   direction.
+- **Picardo-inspired shell.** The UI should borrow the dense editorial data-tool feel
+  from `/Users/alex/repos/picardo-internal-ui`: grouped sidebar, thin topbar, compact
+  tables, detail aside, command palette, badges, and graph/search surfaces.
 - **Open-source quality.** Write as if the repo will be public and reviewed closely.
 
 ## Current Repo State
@@ -181,7 +186,9 @@ When UI code exists:
 - Use React + TypeScript with the Reflect-derived design approach.
 - Prefer existing shadcn/Radix/Tailwind primitives before custom interactive widgets.
 - Use Lucide icons where appropriate.
-- Keep the default surface simple and operational: Today, Ask/Search, Sources, Entities.
+- Keep the default surface simple and operational: Today, Tasks, People, Projects,
+  Sources, Memories, Ask, Graph, Agent Activity, Settings.
+- Follow `docs/ui-direction.md` before inventing UI structure.
 - Do not make a landing page inside the app.
 - Do not put a raw table browser in the main path.
 

@@ -18,6 +18,7 @@ citations.
 - [Reflect Open Technology Base](reflect-open-technology-base.md)
 - [Launch Schema](launch-schema.md)
 - [Agent Interface](agent-interface.md)
+- [UI Direction](ui-direction.md)
 - [MVP Plan](mvp-plan.md)
 - [Implementation Plans](plans/00-overview.md)
 - [Open Questions](open-questions.md)

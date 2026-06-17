@@ -47,11 +47,14 @@ For each source:
 
 ## Phase 5: Useful UI
 
-Only three primary surfaces:
+Use a Picardo-inspired app shell rather than a sparse consumer layout:
 
+- **Grouped sidebar:** Workspace, Memory, AI, and System sections.
 - **Today:** open tasks, upcoming events, recent memories, and follow-ups.
-- **Ask/Search:** natural language search and answers with citations.
-- **Entities:** pages for people, projects, organizations, topics, and places.
+- **Entity sections:** people, projects, places, topics, and related detail pages.
+- **Sources and memories:** dense catalog/list pages with rich details.
+- **Ask and Graph:** cited AI answers plus visual relationship exploration.
+- **Agent Activity:** audit log for imports, writes, and model calls.
 
 Advanced database inspection can come later behind a developer toggle.
 

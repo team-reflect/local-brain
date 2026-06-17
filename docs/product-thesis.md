@@ -20,7 +20,9 @@ It is:
 > A local-first personal database that turns sources into trustworthy memory.
 
 The product should hide the database by default and expose it only as an advanced
-inspection surface. The main UI is Today, Ask/Search, Sources, and entity/task pages.
+inspection surface. The main UI is a Picardo-inspired local data tool: grouped sidebar,
+thin command topbar, dense lists, rich detail pages, graph/search surfaces, and clear
+correction controls.
 
 ## Mental Model
 
@@ -81,12 +83,20 @@ mechanism is provenance, confidence, audit history, easy correction, and easy de
 
 ### Simple First Screen
 
-The first screen should not be a database browser. It should answer:
+The first screen should not be a database browser or a chat landing page. It should feel
+like a calm operating dashboard and answer:
 
 - What needs my attention?
 - What did the system learn?
 - What can I ask?
 - What should I follow up on?
+
+### Dense Personal Data Tool
+
+Local Brain should look more like Picardo Internal UI than a lightweight consumer notes
+app. Borrow the grouped sidebar, compact topbar, table/list density, detail aside,
+badges, command palette, and graph/search posture. Translate corporate CRM language into
+personal-memory language.
 
 ## Non-Goals for the First Version
 

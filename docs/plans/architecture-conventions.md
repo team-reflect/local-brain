@@ -63,12 +63,20 @@ explicit policy or user approval before cloud use.
 
 ## UI
 
-The main UI is not a database browser. Build around:
+The main UI is not a database browser. Use the Picardo-inspired shell described in
+`docs/ui-direction.md` and build around:
 
 - Today
-- Ask/Search
+- Tasks
+- People
+- Projects
+- Places
+- Topics
 - Sources
-- Entities
+- Memories
+- Ask
+- Graph
+- Agent Activity
 - Settings
 
 Raw table inspection may be added later behind an advanced/developer surface.

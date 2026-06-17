@@ -1,7 +1,8 @@
 # Plan 03 - Desktop Shell and Core UI
 
-**Goal:** Build the initial Tauri desktop app and the core navigation surfaces around
-Today, Ask/Search, Sources, and Entities.
+**Goal:** Build the initial Tauri desktop app and a Picardo-inspired shell for personal
+memory: grouped sidebar, thin command topbar, dense lists, detail pages, and graph/search
+surfaces.
 
 **Depends on:** Plan 01, Plan 02.
 
@@ -11,7 +12,7 @@ Plan 08 (privacy/export UI).
 ## Scope
 
 **In:** Tauri shell, app routing/state, design system baseline, empty and loaded states,
-core views connected to local DB reads.
+core views connected to local DB reads, Picardo-inspired navigation and detail layouts.
 
 **Out:** extraction logic, model calls, production packaging, generic table editor.
 
@@ -19,15 +20,24 @@ core views connected to local DB reads.
 
 - The first target is macOS desktop.
 - The app uses React + TypeScript in a Tauri WebView.
-- The default product surface is not a database browser.
+- The default product surface is not a database browser or chat landing page.
+- Follow [UI Direction](../ui-direction.md), taking explicit inspiration from
+  `/Users/alex/repos/picardo-internal-ui`.
 - UI routes:
   - Today
-  - Ask/Search
+  - Tasks
+  - People
+  - Projects
+  - Places
+  - Topics
   - Sources
-  - Entities
+  - Memories
+  - Ask
+  - Graph
+  - Agent Activity
   - Settings
-- Keep the design quiet, operational, keyboard-friendly, and consistent with Reflect
-  Open's local-first feel.
+- Keep the design quiet, dense, keyboard-friendly, and closer to Picardo's editorial
+  data-tool feel than a sparse consumer app.
 
 ## Implementation Steps
 
@@ -35,13 +45,15 @@ core views connected to local DB reads.
    and DB availability.
 2. Add a small design system foundation: typography, colors, spacing, buttons, inputs,
    dialogs, menus, and tooltips.
-3. Add app-level navigation for Today, Ask/Search, Sources, Entities, and Settings.
+3. Add app-level navigation with grouped sidebar sections: Workspace, Memory, AI, and
+   System.
 4. Implement Today with read-only sections for due tasks, upcoming events, recent
    memories, and follow-ups.
-5. Implement Sources as import history plus source detail pages.
-6. Implement Ask/Search as a query input and placeholder results surface.
-7. Implement Entities as list/detail pages with related memories, tasks, events, and
-   relationships.
+5. Implement list/detail patterns for People, Projects, Places, Topics, Sources,
+   Memories, Tasks, and Agent Activity.
+6. Implement Ask as a query/answer workspace with citations rather than a full-screen
+   chatbot.
+7. Implement Graph as a real navigation and sensemaking surface.
 8. Add first-run empty states that explain the source-to-memory loop without marketing
    page styling.
 
@@ -53,6 +65,8 @@ core views connected to local DB reads.
 - Empty states guide the user to add a source.
 - The UI reads real DB rows where available and handles an empty database gracefully.
 - No route exposes a raw table editor as the main product path.
+- The shell supports expanded sidebar, collapsed icon rail, mobile drawer, and command
+  search trigger.
 
 ## Tests or Verification
 
@@ -63,5 +77,5 @@ core views connected to local DB reads.
 
 ## Open Questions
 
-- Exact visual identity is unresolved. Default to a restrained Reflect-derived system
-  until branding is chosen.
+- Exact visual identity is unresolved. Default to Picardo's dense editorial data-tool
+  posture, translated away from corporate CRM language.
