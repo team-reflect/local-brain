@@ -35,7 +35,7 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 | # | Plan | Branch | Base | Status | PR |
 | --- | --- | --- | --- | --- | --- |
 | 00 | Supervisor / build tracking | `codex/local-brain-00-supervisor` | `origin/master` | open | [#1](https://github.com/maccman/local-brain/pull/1) |
-| 01 | Foundation & toolchain | `codex/local-brain-01-foundation` | `…-00-supervisor` | pending | — |
+| 01 | Foundation & toolchain | `codex/local-brain-01-foundation` | `…-00-supervisor` | in progress | — |
 | 02a | SQLite schema crate (Rust migrations) | `codex/local-brain-02a-schema` | `…-01-foundation` | pending | — |
 | 02b | DB package (Kysely + IPC dialect) | `codex/local-brain-02b-db` | `…-02a-schema` | pending | — |
 | 02c | Core DB actions + IPC commands + seed | `codex/local-brain-02c-core-db` | `…-02b-db` | pending | — |
@@ -65,9 +65,14 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
   (`apps/desktop/src-tauri`, `apps/cli`, `crates/brain-schema`), typed IPC `call()`
   wrapper with zod + casing normalization, baseline scripts
   (`typecheck`/`lint`/`test`/`check`/`dev`/`tauri`), `.gitignore`.
-- **Verification:** `pnpm install`; `pnpm check`; `cargo check --workspace`
-  (**deferred** — no cargo here); `git status --short` shows only intentional files.
-- **Caveats:** Rust crates compile-checked only once a cargo toolchain is available.
+- **Verification:** `pnpm install` ✓; `pnpm check` ✓ (typecheck + oxlint + 6 vitest
+  tests pass); migration SQL applies under `sqlite3` ✓; `node --check` on the sidecar
+  script ✓; `git status` shows only intentional files ✓. `cargo check --workspace` /
+  `cargo test --workspace` **deferred** — no cargo here (D1).
+- **Caveats:** Rust crates (`src-tauri`, `brain-cli`, `brain-schema`) authored to spec
+  but not compiled locally; CI must run the Cargo gates. App icons and sidecar
+  bundle wiring are deferred to Plans 07/09 (kept out of the bundle config so a future
+  `cargo check` is not blocked by missing icon files).
 
 ### 02a — SQLite schema crate
 - **Scope (Plan 02, steps 1–7):** `crates/brain-schema` — SQL migrations for all durable

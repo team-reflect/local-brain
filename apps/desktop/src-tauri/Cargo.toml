@@ -1,0 +1,18 @@
+[package]
+name = "local-brain-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "Local Brain desktop app (Tauri 2 shell)"
+
+[lib]
+name = "local_brain_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { workspace = true }
+serde_json = { workspace = true }
