@@ -35,7 +35,7 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 | # | Plan | Branch | Base | Status | PR |
 | --- | --- | --- | --- | --- | --- |
 | 00 | Supervisor / build tracking | `codex/local-brain-00-supervisor` | `origin/master` | open | [#1](https://github.com/maccman/local-brain/pull/1) |
-| 01 | Foundation & toolchain | `codex/local-brain-01-foundation` | `…-00-supervisor` | in progress | — |
+| 01 | Foundation & toolchain | `codex/local-brain-01-foundation` | `…-00-supervisor` | open | [#2](https://github.com/maccman/local-brain/pull/2) |
 | 02a | SQLite schema crate (Rust migrations) | `codex/local-brain-02a-schema` | `…-01-foundation` | pending | — |
 | 02b | DB package (Kysely + IPC dialect) | `codex/local-brain-02b-db` | `…-02a-schema` | pending | — |
 | 02c | Core DB actions + IPC commands + seed | `codex/local-brain-02c-core-db` | `…-02b-db` | pending | — |
@@ -103,3 +103,4 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 ## Open / Updated PR URLs
 
 - PR #1 — Build 00 supervisor docs — https://github.com/maccman/local-brain/pull/1 (base `master`, open)
+- PR #2 — Build 01 foundation scaffold — https://github.com/maccman/local-brain/pull/2 (base `…-00-supervisor`, open)
