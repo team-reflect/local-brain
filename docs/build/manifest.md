@@ -38,7 +38,7 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 | 00 | Supervisor / build tracking | `codex/local-brain-00-supervisor` | `origin/master` | open | [#1](https://github.com/maccman/local-brain/pull/1) |
 | 01 | Foundation & toolchain | `codex/local-brain-01-foundation` | `…-00-supervisor` | open | [#2](https://github.com/maccman/local-brain/pull/2) |
 | 02a | SQLite schema crate (Rust migrations) | `codex/local-brain-02a-schema` | `…-01-foundation` | open | [#3](https://github.com/maccman/local-brain/pull/3) |
-| 02b | DB package (Kysely + IPC dialect) | `codex/local-brain-02b-db` | `…-02a-schema` | pending | — |
+| 02b | DB package (Kysely + IPC dialect) | `codex/local-brain-02b-db` | `…-02a-schema` | open | [#4](https://github.com/maccman/local-brain/pull/4) |
 | 02c | Core DB actions + IPC commands + seed | `codex/local-brain-02c-core-db` | `…-02b-db` | pending | — |
 | 03 | Desktop shell & core UI | `codex/local-brain-03-desktop-shell` | `…-02c-core-db` | pending | — |
 | 04 | Record ingestion | `codex/local-brain-04-ingestion` | `…-03-desktop-shell` | pending | — |
@@ -85,10 +85,19 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
   passes as part of `cargo test --workspace` (9 schema tests).
 
 ### 02b — DB package (Kysely + IPC dialect)
-- **Scope (Plan 02, step 8):** `packages/db` — generated Kysely `Database` interface,
-  custom IPC dialect/driver, `json()` helper, camelCase normalization, schema/codegen
-  drift script.
-- **Verification:** `pnpm --filter @local-brain/db test`; drift check.
+- **Scope (Plan 02, step 8):** `packages/db` — generated Kysely `Database` interface
+  for all 33 durable + join tables, custom IPC dialect/driver (foundation), `json()`
+  helper (foundation), camelCase normalization, schema/codegen drift script.
+- **Codegen approach:** `scripts/generate-schema.mjs` replays the
+  `crates/brain-schema` migrations into an in-memory database using Node's built-in
+  `node:sqlite` (no native build — robust on Node 26) and introspects it to emit
+  `src/schema.gen.ts`. FTS5 virtual/shadow tables are excluded (search uses raw SQL,
+  Plan 06). `scripts/check-drift.mjs` regenerates and diffs against the committed
+  file; it is wired into the db package's `test` script so a stale schema fails
+  `pnpm check`.
+- **Verification:** `pnpm check` ✓ (typecheck + oxlint + db drift check + 4 db
+  vitest tests, incl. a generated-product-column camelCase→snake_case test); drift
+  check fails on a stale `schema.gen.ts` (exit 1) and passes when current (exit 0).
 
 ### 02c — Core DB actions + IPC + seed
 - **Scope (Plan 02, steps 9–13):** `packages/core` domain actions
@@ -108,3 +117,4 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 - PR #1 — Build 00 supervisor docs — https://github.com/maccman/local-brain/pull/1 (base `master`, open)
 - PR #2 — Build 01 foundation scaffold — https://github.com/maccman/local-brain/pull/2 (base `…-00-supervisor`, open)
 - PR #3 — Build 02a launch schema — https://github.com/maccman/local-brain/pull/3 (base `…-01-foundation`, open)
+- PR #4 — Build 02b db package (Kysely codegen + drift check) — https://github.com/maccman/local-brain/pull/4 (base `…-02a-schema`, open)

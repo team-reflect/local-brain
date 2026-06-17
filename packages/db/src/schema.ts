@@ -1,20 +1,13 @@
 /**
  * The Kysely view of the durable SQLite schema.
  *
- * Foundation ships only the `schema_meta` bookkeeping table created by the
- * initial migration in `crates/brain-schema`. The durable product tables
- * (people, organizations, affiliations, projects, tasks, interactions,
- * documents, content_chunks, memories, ...) arrive in Plan 02 (02b) and are
- * generated from the Rust migrations and drift-checked against them.
+ * The `Database` interface and every per-table row type are generated from the
+ * Rust migrations in `crates/brain-schema` by `scripts/generate-schema.mjs`
+ * (run via `pnpm --filter @local-brain/db db:codegen`). Do not edit
+ * `schema.gen.ts` by hand — the drift check in `scripts/check-drift.mjs`, run
+ * by `pnpm test`, fails if it falls out of sync with the migrations.
  *
- * Column names are declared in camelCase here and mapped to the snake_case
- * SQLite columns by Kysely's CamelCasePlugin at the dialect boundary.
+ * Column names are camelCase here and snake_case in SQLite; Kysely's
+ * CamelCasePlugin bridges them at the dialect boundary (see `db.ts`).
  */
-export interface SchemaMetaTable {
-  key: string
-  value: string
-}
-
-export interface Database {
-  schemaMeta: SchemaMetaTable
-}
+export type * from './schema.gen'
