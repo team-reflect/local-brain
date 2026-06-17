@@ -1,16 +1,134 @@
-import type { ReactNode } from 'react'
-import { EmptyState } from '../components/empty-state'
+import { useState, type FormEvent, type ReactNode } from 'react'
+import { Plus } from 'lucide-react'
 import { PageHead } from '../components/page-head'
+import { cn } from '../lib/utils'
+import {
+  useAddMessage,
+  useConversations,
+  useCreateConversation,
+  useMessages,
+} from '../lib/queries'
+import { useRouter } from '../routing/router'
 
-/** Placeholder. The cited-answer chat shell is wired to retrieval in Plan 06. */
-export function AskSurface(): ReactNode {
+/**
+ * The placeholder the assistant returns until Plan 06 wires retrieval. It is
+ * persisted so a conversation reads as a real thread; the cited-answer panel
+ * fills in once retrieval supplies grounded responses.
+ */
+const PLACEHOLDER_ANSWER =
+  'I can’t answer yet — retrieval and cited answers are wired up in Plan 06. Your messages are saved here so the conversation is ready when it lands.'
+
+/** The Ask shell: a conversation list, a chat panel, and a citations footer. */
+export function AskSurface({
+  conversationId,
+}: {
+  conversationId: string | undefined
+}): ReactNode {
+  const { navigate } = useRouter()
+  const conversations = useConversations()
+  const messages = useMessages(conversationId)
+  const createConversation = useCreateConversation()
+  const addMessage = useAddMessage()
+  const [draft, setDraft] = useState('')
+
+  const pending = createConversation.isPending || addMessage.isPending
+
+  async function onSubmit(event: FormEvent): Promise<void> {
+    event.preventDefault()
+    const text = draft.trim()
+    if (!text || pending) return
+    setDraft('')
+
+    let id = conversationId
+    if (!id) {
+      id = await createConversation.mutateAsync(text.length > 60 ? `${text.slice(0, 59)}…` : text)
+      navigate({ kind: 'ask', conversationId: id })
+    }
+    await addMessage.mutateAsync({ conversationId: id, role: 'user', content: text })
+    await addMessage.mutateAsync({ conversationId: id, role: 'assistant', content: PLACEHOLDER_ANSWER })
+  }
+
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4">
+    <div className="mx-auto flex h-full max-w-5xl flex-col gap-4">
       <PageHead eyebrow="Ask" title="Ask" />
-      <EmptyState
-        title="Ask connects to retrieval in Plan 06"
-        hint="A conversation list, chat panel, and citations over your local brain."
-      />
+      <div className="flex min-h-0 flex-1 gap-4">
+        <aside className="flex w-56 shrink-0 flex-col gap-2">
+          <button
+            type="button"
+            onClick={() => navigate({ kind: 'ask' })}
+            className="flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-left text-sm text-foreground hover:bg-secondary/60"
+          >
+            <Plus className="size-3.5" />
+            New conversation
+          </button>
+          <ul className="flex flex-col gap-0.5 overflow-y-auto">
+            {(conversations.data ?? []).map((conversation) => (
+              <li key={conversation.id}>
+                <button
+                  type="button"
+                  onClick={() => navigate({ kind: 'ask', conversationId: conversation.id })}
+                  className={cn(
+                    'w-full truncate rounded-md px-2.5 py-1.5 text-left text-sm transition-colors',
+                    conversation.id === conversationId
+                      ? 'bg-secondary text-foreground'
+                      : 'text-muted-foreground hover:bg-secondary/60',
+                  )}
+                >
+                  {conversation.title ?? 'Untitled'}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </aside>
+
+        <section className="flex min-w-0 flex-1 flex-col">
+          <div className="flex-1 overflow-y-auto">
+            {!conversationId ? (
+              <p className="px-1 py-6 text-sm text-muted-foreground">
+                Ask a question about your brain. Answers stay grounded in your records — citations
+                arrive with retrieval in Plan 06.
+              </p>
+            ) : (messages.data ?? []).length === 0 ? (
+              <p className="px-1 py-6 text-sm text-muted-foreground">No messages yet.</p>
+            ) : (
+              <ul className="flex flex-col gap-3 py-1">
+                {(messages.data ?? []).map((message) => (
+                  <li
+                    key={message.id}
+                    className={cn(
+                      'max-w-[80%] rounded-md px-3 py-2 text-sm',
+                      message.role === 'user'
+                        ? 'self-end bg-primary/10 text-foreground'
+                        : 'self-start border border-border bg-card text-foreground',
+                    )}
+                  >
+                    <p className="mb-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+                      {message.role}
+                    </p>
+                    <p className="whitespace-pre-wrap">{message.content}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <form onSubmit={onSubmit} className="mt-3 flex items-center gap-2">
+            <input
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder="Ask anything…"
+              className="flex-1 rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:border-primary/50"
+            />
+            <button
+              type="submit"
+              disabled={pending || draft.trim().length === 0}
+              className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-40"
+            >
+              Send
+            </button>
+          </form>
+        </section>
+      </div>
     </div>
   )
 }

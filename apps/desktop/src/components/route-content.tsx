@@ -40,8 +40,8 @@ export function RouteContent({ route }: { route: Route }): ReactNode {
     case 'graph':
       return <GraphSurface />
     case 'ask':
-      return <AskSurface />
+      return <AskSurface conversationId={route.conversationId} />
     case 'settings':
-      return <SettingsSurface />
+      return <SettingsSurface section={route.section} />
   }
 }

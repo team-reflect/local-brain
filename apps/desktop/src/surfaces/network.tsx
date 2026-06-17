@@ -1,10 +1,10 @@
 import type { ReactNode } from 'react'
-import type { Person } from '@local-brain/core'
+import type { Organization, Person } from '@local-brain/core'
 import { DataList, type Column } from '../components/data-list'
 import { EmptyState } from '../components/empty-state'
 import { PageHead } from '../components/page-head'
 import { cn } from '../lib/utils'
-import { usePeople } from '../lib/queries'
+import { useOrganizations, usePeople } from '../lib/queries'
 import { useRouter } from '../routing/router'
 
 const TABS = [
@@ -15,6 +15,29 @@ const TABS = [
 export function NetworkSurface({ tab }: { tab: 'people' | 'organizations' }): ReactNode {
   const { navigate } = useRouter()
   const people = usePeople()
+  const organizations = useOrganizations()
+
+  const orgColumns: Column<Organization>[] = [
+    {
+      key: 'name',
+      header: 'Name',
+      render: (org) => <span className="text-foreground">{org.name}</span>,
+    },
+    {
+      key: 'kind',
+      header: 'Kind',
+      className: 'w-28',
+      render: (org) => <span className="text-muted-foreground">{org.kind ?? '—'}</span>,
+    },
+    {
+      key: 'domain',
+      header: 'Domain',
+      className: 'w-48',
+      render: (org) => (
+        <span className="font-mono text-[11px] text-muted-foreground">{org.domain ?? '—'}</span>
+      ),
+    },
+  ]
 
   const columns: Column<Person>[] = [
     {
@@ -83,9 +106,13 @@ export function NetworkSurface({ tab }: { tab: 'people' | 'organizations' }): Re
           empty={<EmptyState title="No people yet" />}
         />
       ) : (
-        <EmptyState
-          title="Organizations"
-          hint="Organization browsing arrives with the org getters in a follow-up."
+        <DataList
+          rows={organizations.data ?? []}
+          columns={orgColumns}
+          rowKey={(org) => org.id}
+          isLoading={organizations.isLoading}
+          onRowClick={(org) => navigate({ kind: 'organization', id: org.id })}
+          empty={<EmptyState title="No organizations yet" />}
         />
       )}
     </div>

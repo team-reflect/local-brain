@@ -57,6 +57,34 @@ None at this checkpoint.
   untyped today, so the codegen + integration test live in `.mjs` files outside the
   typechecked `src` surface.
 
+### DEC-7 — 03b kept as one branch; palette stays hand-rolled (no cmdk)
+- 03b (Graph, Ask, full Settings, org browsing, richer detail, palette record search,
+  render tests) is additive UI + read-only getters + tests with no Rust changes, so it
+  ships as a single reviewable branch rather than being split further.
+- The plan allowed a `cmdk`-based palette "if the dependency is appropriate." We instead
+  extended the existing hand-rolled palette with live record search (people/orgs/projects/
+  tasks/documents/interactions via a simple `quickSearch` LIKE getter) and arrow-key
+  navigation. Rationale: it avoids pulling in `cmdk` + its Radix dependency tree and the
+  React 19 peer surface, already matches the warm-paper design system, and keeps the build
+  hermetic. The command registry remains the single source of truth, so a `cmdk` swap later
+  is a view-only change. Real ranked/full-text search (FTS5/embeddings) is still Plan 06;
+  `quickSearch` is explicitly a navigational quick-open, not retrieval.
+
+### DEC-8 — Ask persists a labeled Plan-06 placeholder answer
+- The Ask shell is real (conversations + messages persist via the `chat_conversations` /
+  `chat_messages` tables), but retrieval/answer generation is Plan 06. Sending a message
+  persists the user turn and a clearly-labeled placeholder assistant turn ("retrieval lands
+  in Plan 06") so a conversation reads as a coherent thread and the list/threading logic is
+  exercised now. Plan 06 replaces the placeholder with grounded, cited answers.
+
+### DEC-9 — Component render tests via jsdom + Testing Library (per-file env)
+- Added `jsdom` + `@testing-library/react`/`dom` as desktop dev deps and a desktop
+  `vitest.config.ts` (`globals: true`, default `environment: 'node'`). DOM render tests opt
+  in per file with a `// @vitest-environment jsdom` docblock, so the fast node-env unit
+  tests (routing, command keymap, graph layout) keep running without a DOM. A shared
+  `src/test/utils.tsx` installs an in-memory IPC bridge (canned/per-SQL `db_query` rows) and
+  a query+router provider wrapper.
+
 ### DEC-4 — Sequential build (no parallel worker sessions)
 - This session drives the stack sequentially and commits from one working tree.
   Read-only research may fan out within a layer, but there is no parallel-session
