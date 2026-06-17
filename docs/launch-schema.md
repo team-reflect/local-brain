@@ -33,7 +33,6 @@ sources
   |
   |--< tasks
   |--< events
-agent_events -> sources / memories / entities / tasks / events
 chat_conversations -> chat_messages
 ```
 
@@ -82,7 +81,7 @@ CREATE TABLE sources (
 );
 ```
 
-Why it matters: sources are the audit trail. If a memory cannot point to evidence, the
+Why it matters: sources are the evidence trail. If a memory cannot point to evidence, the
 UI should treat it as weaker.
 
 ### `source_chunks`
@@ -325,28 +324,6 @@ CREATE TABLE event_entities (
 );
 ```
 
-### `agent_events`
-
-Audit trail for local agents and importers.
-
-```sql
-CREATE TABLE agent_events (
-  id TEXT PRIMARY KEY,
-  agent_name TEXT NOT NULL,
-  action TEXT NOT NULL,
-  summary TEXT,
-  target_type TEXT,
-  target_id TEXT,
-  input_json TEXT NOT NULL DEFAULT '{}',
-  output_json TEXT NOT NULL DEFAULT '{}',
-  status TEXT NOT NULL DEFAULT 'ok',
-  started_at TEXT NOT NULL,
-  finished_at TEXT,
-  created_at TEXT NOT NULL,
-  CHECK (status IN ('ok', 'error', 'canceled'))
-);
-```
-
 ### `chat_conversations` and `chat_messages`
 
 Durable AI chat history.
@@ -439,7 +416,6 @@ CREATE INDEX relationships_source ON relationships(source_entity_id);
 CREATE INDEX relationships_target ON relationships(target_entity_id);
 CREATE INDEX tasks_status_due ON tasks(status, due_at);
 CREATE INDEX events_starts ON events(starts_at);
-CREATE INDEX agent_events_agent_created ON agent_events(agent_name, created_at);
 ```
 
 ## Day-to-Day Query Examples

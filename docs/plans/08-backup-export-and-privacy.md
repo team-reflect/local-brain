@@ -1,7 +1,7 @@
-# Plan 08 - Backup, Export, and Privacy
+# Plan 08 - Settings, Backup, Export, and Privacy
 
-**Goal:** Make local data portable, recoverable, deletable, and understandable, with
-clear privacy boundaries for agents and model providers.
+**Goal:** Make Settings the home for local data portability, recovery, deletion,
+diagnostics, and privacy boundaries for agents and model providers.
 
 **Depends on:** Plan 02, Plan 04, Plan 05, Plan 06.
 
@@ -9,8 +9,8 @@ clear privacy boundaries for agents and model providers.
 
 ## Scope
 
-**In:** SQLite backup, JSON export, source deletion semantics, derived-data cleanup,
-privacy states, keychain rules, context-use audit.
+**In:** Settings UI, SQLite backup, JSON export, source deletion semantics,
+derived-data cleanup, privacy states, keychain rules, context-use metadata.
 
 **Out:** hosted sync, collaboration, mobile sync, Git-based multi-device sync.
 
@@ -34,7 +34,7 @@ privacy states, keychain rules, context-use audit.
    - archive instead of hard delete when safer.
 4. Add derived cleanup for chunks, FTS rows, and embeddings.
 5. Add settings UI for privacy defaults and model provider behavior.
-6. Add answer/context audit metadata showing sources, memories, provider, model, and
+6. Add answer/context metadata showing sources, memories, provider, model, and
    external-context status.
 7. Add recovery documentation for restoring a backup/export.
 
@@ -45,6 +45,7 @@ privacy states, keychain rules, context-use audit.
 - A user can delete or archive a source with clear derived-data choices.
 - Provider keys are stored in the OS keychain only.
 - Cloud AI calls exclude `never_external` context.
+- Settings exposes backup, export, privacy, model keys, diagnostics, and skill setup.
 - The UI can explain whether context left the machine for a given answer.
 
 ## Tests or Verification

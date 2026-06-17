@@ -49,7 +49,7 @@ launch checklist.
 - The user can search/ask with citations.
 - The user can use the `brain` CLI from a terminal.
 - The user can install/use the Codex skill.
-- The user can create a backup/export.
+- The user can create a backup/export from Settings.
 - Diagnostics report common setup failures clearly.
 
 ## Tests or Verification

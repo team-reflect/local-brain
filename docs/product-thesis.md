@@ -73,13 +73,14 @@ write memories without learning the whole schema.
 
 ### Provenance Before Cleverness
 
-The app should prefer a cited, modest answer over a magical answer with no audit trail.
+The app should prefer a cited, modest answer over a magical answer with no provenance.
 Memories should preserve source links, excerpts, timestamps, creator, and confidence.
 
 ### Make Correction Easy
 
 The app should trust AI extraction enough to write useful memory directly. The safety
-mechanism is provenance, confidence, audit history, easy correction, and easy deletion.
+mechanism is provenance, confidence, correction history, easy correction, and easy
+deletion.
 
 ### Simple First Screen
 

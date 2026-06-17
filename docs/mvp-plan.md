@@ -42,7 +42,7 @@ For each source:
 2. Index with FTS5.
 3. Generate local embeddings if available.
 4. Extract memories, entities, tasks, events, and relationships.
-5. Write useful memory directly with provenance, confidence, and agent audit.
+5. Write useful memory directly with provenance and confidence.
 6. Let the user correct, archive, delete, or merge when they notice something wrong.
 
 ## Phase 5: Useful UI
@@ -54,7 +54,7 @@ Use a Picardo-inspired app shell rather than a sparse consumer layout:
 - **Entity sections:** people, projects, places, topics, and related detail pages.
 - **Sources and memories:** dense catalog/list pages with rich details.
 - **Ask and Graph:** cited AI answers plus visual relationship exploration.
-- **Agent Activity:** audit log for imports, writes, and model calls.
+- **Settings:** privacy, model keys, backup, export, diagnostics, and skill setup.
 
 Advanced database inspection can come later behind a developer toggle.
 
@@ -63,7 +63,7 @@ Advanced database inspection can come later behind a developer toggle.
 - Install `brain` CLI.
 - Install one Codex skill.
 - Add commands for search, remember, ingest, today, and entity context.
-- Audit agent writes in `agent_events`.
+- Ensure agent writes include source/provenance metadata.
 
 ## Launch Criteria
 

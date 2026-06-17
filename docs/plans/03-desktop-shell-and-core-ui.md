@@ -34,7 +34,6 @@ core views connected to local DB reads, Picardo-inspired navigation and detail l
   - Memories
   - Ask
   - Graph
-  - Agent Activity
   - Settings
 - Keep the design quiet, dense, keyboard-friendly, and closer to Picardo's editorial
   data-tool feel than a sparse consumer app.
@@ -50,7 +49,7 @@ core views connected to local DB reads, Picardo-inspired navigation and detail l
 4. Implement Today with read-only sections for due tasks, upcoming events, recent
    memories, and follow-ups.
 5. Implement list/detail patterns for People, Projects, Places, Topics, Sources,
-   Memories, Tasks, and Agent Activity.
+   Memories, and Tasks.
 6. Implement Ask as a query/answer workspace with citations rather than a full-screen
    chatbot.
 7. Implement Graph as a real navigation and sensemaking surface.

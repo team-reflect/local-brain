@@ -40,7 +40,7 @@ and uses SQLite as a projection. Local Brain stores durable structured memory in
 5. [Memory Extraction and Correction](05-memory-extraction-and-correction.md)
 6. [Search, Retrieval, and AI](06-search-retrieval-and-ai.md)
 7. [CLI and Agent Skills](07-cli-and-agent-skills.md)
-8. [Backup, Export, and Privacy](08-backup-export-and-privacy.md)
+8. [Settings, Backup, Export, and Privacy](08-backup-export-and-privacy.md)
 9. [Packaging and Launch](09-packaging-and-launch.md)
 
 Support docs:
@@ -57,7 +57,7 @@ Support docs:
 - Raw sources may be preserved for auditability, but product state lives in SQLite.
 - The first audience is agent-native technical users.
 - The first user-visible surfaces follow the Picardo-inspired shell: Today, Tasks,
-  People, Projects, Sources, Memories, Ask, Graph, Agent Activity, and Settings.
+  People, Projects, Sources, Memories, Ask, Graph, and Settings.
 - The first agent interface is the `brain` CLI plus local skills.
 - No hosted Local Brain service is required for the core product.
 

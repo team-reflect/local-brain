@@ -11,7 +11,7 @@ deletion semantics.
 ## Scope
 
 **In:** extraction pipeline, direct memory writes, entity matching, task/event
-extraction, correction flows, agent event audit.
+extraction, correction flows, provenance metadata.
 
 **Out:** full email/calendar integrations, complex ontology, and default triage queues.
 
@@ -37,17 +37,17 @@ extraction, correction flows, agent event audit.
 4. Add BYOK model-backed extraction behind explicit settings once provider keys exist.
 5. Match extracted entities against aliases and canonical keys.
 6. Write active memories, entities, tasks, events, and relationships transactionally.
-7. Store confidence, source excerpt, extraction metadata, and agent event IDs.
+7. Store confidence, source excerpt, extraction metadata, and creator metadata.
 8. Build correction actions: edit memory, mark stale, archive, delete, merge entity, and
    unlink a bad relationship.
-9. Record extraction runs and writes in `agent_events`.
+9. Ensure extracted records can be traced back to the source and extraction metadata.
 
 ## Acceptance Criteria
 
 - Ingested sources can produce active memories and entities.
 - Extracted memories are usable immediately in search and entity pages.
 - Users can correct, archive, delete, or mark memories stale.
-- Corrections keep an audit trail.
+- Corrections preserve provenance and history.
 - Entity matching prevents obvious duplicate people/projects/topics.
 - Tasks and events can be extracted directly.
 

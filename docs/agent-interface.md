@@ -44,15 +44,15 @@ Agent writes should be visible and reversible.
 
 Every write should record:
 
-- agent name,
-- action,
 - source,
 - created records,
 - confidence,
+- created by,
+- created by agent where applicable.
 - confidence.
 
-The default write path should create active memories with provenance, confidence, and an
-agent audit trail. The user should be able to correct or delete those memories later.
+The default write path should create active memories with provenance and confidence. The
+user should be able to correct or delete those memories later.
 
 ## Agent Read Policy
 

@@ -10,7 +10,7 @@ can ingest, query, and write memories safely.
 ## Scope
 
 **In:** CLI binary, JSON output contracts, search/remember/ingest/today/entity commands,
-skill templates, install diagnostics, agent audit trail.
+skill templates, install diagnostics, provenance metadata.
 
 **Out:** local HTTP API, plugin marketplace, multi-user permissions.
 
@@ -19,7 +19,6 @@ skill templates, install diagnostics, agent audit trail.
 - The CLI is the first stable agent contract.
 - Agents should not use raw SQL as the default interface.
 - CLI output must be machine-readable with `--json`.
-- Agent writes are audited in `agent_events`.
 - Default agent writes create active memories with provenance and confidence.
 
 ## Implementation Steps
@@ -46,14 +45,14 @@ skill templates, install diagnostics, agent audit trail.
 - A local agent can add an active memory with `brain remember`.
 - CLI commands return stable JSON suitable for skills.
 - `brain doctor` reports actionable local setup issues.
-- Agent-originated changes are visible in the app and audited.
+- Agent-originated changes are visible in the app with source/provenance metadata.
 - The first Codex skill explains search, remember, ingest, citations, and privacy rules.
 
 ## Tests or Verification
 
 - CLI integration tests against a fixture SQLite DB.
 - JSON schema tests for command outputs.
-- Tests for agent event records on writes.
+- Tests for provenance metadata on agent-originated writes.
 - Skill text review for privacy and provenance instructions.
 - Manual test: run a Codex-like workflow using only the CLI.
 

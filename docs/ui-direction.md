@@ -57,10 +57,8 @@ Use grouped sidebar navigation, closer to Picardo than the earlier simple sketch
 |                           |                                               |
 | AI                        |                                               |
 |  Ask                      |                                               |
-|  Agent activity           |                                               |
 |                           |                                               |
 | SYSTEM                    |                                               |
-|  Backup & export          |                                               |
 |  Settings                 |                                               |
 |                           |                                               |
 |  You / local brain status |                                               |
@@ -87,8 +85,8 @@ Today should feel like Picardo's dashboard/attention center, adapted for a perso
 | +---------------------------+ +----------------------------------------+ |
 |                                                                          |
 | +---------------------------+ +----------------------------------------+ |
-| | Recent memory             | | Agent activity                         | |
-| | facts, decisions, notes   | | imports, writes, model calls           | |
+| | Recent memory             | | Recent sources                         | |
+| | facts, decisions, notes   | | imports, files, transcripts            | |
 | +---------------------------+ +----------------------------------------+ |
 +--------------------------------------------------------------------------+
 ```
@@ -164,21 +162,6 @@ answer workspace with citations.
 +--------------------------------------------------------------------------+
 ```
 
-### Agent Activity
-
-Agent activity replaces the old review/inbox idea. It is not a triage queue; it is an
-audit log.
-
-```text
-+--------------------------------------------------------------------------+
-| AGENT ACTIVITY                                                           |
-| Agent        Action        Target        Confidence  When                 |
-| Codex        remembered    3 memories    0.86        2m ago               |
-| Importer     ingested      transcript    -           14m ago              |
-| Local AI     extracted     9 memories    0.78        14m ago              |
-+--------------------------------------------------------------------------+
-```
-
 ## Visual Defaults
 
 - Warm neutral background with a slightly lighter panel surface.
@@ -201,7 +184,7 @@ translation is:
 - Tasks -> Tasks.
 - Search -> Ask/Search.
 - Graph -> Graph.
-- Sources/Admin -> System / Backup / Settings.
+- Sources/Admin -> Settings.
 - User auth footer -> local brain status / device identity.
 
 The result should feel like a serious personal operating surface, not a consumer toy and

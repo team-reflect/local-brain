@@ -48,7 +48,7 @@ provenance, privacy, and local ownership.
   stable CLI/skill contract for local agents.
 - **Do not lead with a database editor.** Advanced inspection can exist later, but the
   front door is a Picardo-inspired app shell with Today, Tasks, People, Projects,
-  Sources, Memories, Ask, Graph, and Agent Activity.
+  Sources, Memories, Ask, Graph, and Settings.
 - **Privacy is a product surface.** Retrieval and AI calls must know whether context is
   local-only, cloud-allowed, sensitive, or never-external.
 - **Local-first, no hosted core API.** Do not assume a hosted Local Brain service for
@@ -119,7 +119,6 @@ Core durable tables:
 - `tasks`
 - `events`
 - `event_entities`
-- `agent_events`
 - `chat_conversations`
 - `chat_messages`
 - `settings`
@@ -151,8 +150,8 @@ brain today --json
 brain entity "name" --json
 ```
 
-Agent writes should be audited in `agent_events`. The default behavior is direct writes
-with provenance and confidence, plus obvious correction/delete paths for the user.
+Agent writes should use the same source, memory, task, and event records as other writes,
+with provenance and confidence plus obvious correction/delete paths for the user.
 
 ## Development Workflow
 
@@ -187,7 +186,7 @@ When UI code exists:
 - Prefer existing shadcn/Radix/Tailwind primitives before custom interactive widgets.
 - Use Lucide icons where appropriate.
 - Keep the default surface simple and operational: Today, Tasks, People, Projects,
-  Sources, Memories, Ask, Graph, Agent Activity, Settings.
+  Sources, Memories, Ask, Graph, Settings.
 - Follow `docs/ui-direction.md` before inventing UI structure.
 - Do not make a landing page inside the app.
 - Do not put a raw table browser in the main path.
