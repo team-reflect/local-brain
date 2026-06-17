@@ -30,8 +30,9 @@ questions needing Alex.
 - Authored `docs/build/manifest.md`, `status.md`, `decisions.md` and laid out the
   dependency-aware PR stack (Plan 02 split into 02a/02b/02c).
 
+- Committed (`5c02ab5`), pushed, opened **PR #1** (base `master`).
+
 ### Next
-- Commit + push supervisor branch; open PR 00 (base `master`).
 - Start Plan 01 foundation scaffold on `codex/local-brain-01-foundation`
   (base = supervisor branch). Extract exact config patterns from Reflect Open first.
 

@@ -34,7 +34,7 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 
 | # | Plan | Branch | Base | Status | PR |
 | --- | --- | --- | --- | --- | --- |
-| 00 | Supervisor / build tracking | `codex/local-brain-00-supervisor` | `origin/master` | in progress | — |
+| 00 | Supervisor / build tracking | `codex/local-brain-00-supervisor` | `origin/master` | open | [#1](https://github.com/maccman/local-brain/pull/1) |
 | 01 | Foundation & toolchain | `codex/local-brain-01-foundation` | `…-00-supervisor` | pending | — |
 | 02a | SQLite schema crate (Rust migrations) | `codex/local-brain-02a-schema` | `…-01-foundation` | pending | — |
 | 02b | DB package (Kysely + IPC dialect) | `codex/local-brain-02b-db` | `…-02a-schema` | pending | — |
@@ -97,4 +97,4 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 
 ## Open / Updated PR URLs
 
-_None yet._ PR URLs are recorded in the table above and here as they are opened.
+- PR #1 — Build 00 supervisor docs — https://github.com/maccman/local-brain/pull/1 (base `master`, open)
