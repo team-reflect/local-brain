@@ -84,6 +84,12 @@ importers:
 
   packages/core:
     dependencies:
+      '@local-brain/db':
+        specifier: workspace:*
+        version: link:../db
+      kysely:
+        specifier: ^0.28.0
+        version: 0.28.17
       zod:
         specifier: 4.4.3
         version: 4.4.3

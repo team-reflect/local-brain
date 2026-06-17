@@ -13,6 +13,8 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@local-brain/db": "workspace:*",
+    "kysely": "^0.28.0",
     "zod": "4.4.3"
   },
   "devDependencies": {

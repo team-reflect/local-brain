@@ -41,7 +41,7 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 | 02a | SQLite schema crate (Rust migrations) | `codex/local-brain-02a-schema` | `…-01-foundation` | open | [#3](https://github.com/maccman/local-brain/pull/3) |
 | 02b | DB package (Kysely + IPC dialect) | `codex/local-brain-02b-db` | `…-02a-schema` | open | [#4](https://github.com/maccman/local-brain/pull/4) |
 | 02c | Rust IPC DB bridge (db_query/execute/batch) | `codex/local-brain-02c-bridge` | `…-02b-db` | open | [#5](https://github.com/maccman/local-brain/pull/5) |
-| 02d | Core DB actions + seed data | `codex/local-brain-02d-core-db` | `…-02c-bridge` | pending | — |
+| 02d | Core DB actions + seed data | `codex/local-brain-02d-core-db` | `…-02c-bridge` | open | [#6](https://github.com/maccman/local-brain/pull/6) |
 | 03 | Desktop shell & core UI | `codex/local-brain-03-desktop-shell` | `…-02d-core-db` | pending | — |
 | 04 | Record ingestion | `codex/local-brain-04-ingestion` | `…-03-desktop-shell` | pending | — |
 | 05 | Memory extraction & linking | `codex/local-brain-05-extraction` | `…-04-ingestion` | pending | — |
@@ -117,12 +117,18 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
   commit, batch rollback on FK violation) + 9 brain-schema tests; `pnpm check` ✓.
 
 ### 02d — Core DB actions + seed
-- **Scope (Plan 02, steps 9–13):** `packages/core` shared Kysely client over the
-  bridge, typed `dbQuery`/`dbExecute`/`dbBatch` bindings, ULID id generation, domain
-  getters/setters (`people|projects|tasks|documents|interactions`), transaction-scoped
-  multi-table writes via `db_batch`, and seed/demo data.
-- **Verification:** `pnpm check`; getter/setter unit tests against a fake bridge;
-  multi-table write + rollback tests.
+- **Scope (Plan 02, steps 9, 13):** `packages/core` — shared Kysely client over the
+  bridge (`db/client.ts`), `execute`/`batch` write bindings that `.compile()` a Kysely
+  query and send it to `db_execute`/`db_batch` (`db/commands.ts`), ULID id generation
+  (`db/id.ts`), domain getters/setters for `people|projects|tasks|documents|
+  interactions` (`createInteraction` writes the interaction + its participants in one
+  `batch`), and atomic seed/demo data covering every record type incl. a memory + its
+  citation.
+- **Verification:** `pnpm check` ✓ — typecheck + oxlint + 11 core tests: a typechecked
+  capturing-bridge unit test (asserts the compiled SQL/params per action) **and** a
+  real `node:sqlite` round-trip integration test (`.test.mjs`, backed by the actual
+  migrations, mirroring the Rust bridge's JSON conversion) that drives create→read→
+  complete→archive across domains, the seed, and a batch rollback on an invalid FK.
 
 ### 03–09
 - Scope mirrors `docs/plans/03..09`. Detail is filled in as each layer starts; see the
@@ -138,3 +144,4 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 - PR #3 — Build 02a launch schema — https://github.com/maccman/local-brain/pull/3 (base `…-01-foundation`, open)
 - PR #4 — Build 02b db package (Kysely codegen + drift check) — https://github.com/maccman/local-brain/pull/4 (base `…-02a-schema`, open)
 - PR #5 — Build 02c Rust IPC DB bridge — https://github.com/maccman/local-brain/pull/5 (base `…-02b-db`, open)
+- PR #6 — Build 02d core DB actions + seed — https://github.com/maccman/local-brain/pull/6 (base `…-02c-bridge`, open)
