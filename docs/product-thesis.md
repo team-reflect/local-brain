@@ -20,8 +20,7 @@ It is:
 > A local-first personal database that turns sources into trustworthy memory.
 
 The product should hide the database by default and expose it only as an advanced
-inspection surface. The main UI is a memory inbox, search/ask surface, and entity/task
-pages.
+inspection surface. The main UI is Today, Ask/Search, Sources, and entity/task pages.
 
 ## Mental Model
 
@@ -32,7 +31,7 @@ source
   -> chunks
   -> extracted memories
   -> linked entities, tasks, events, and relationships
-  -> reviewed/trusted context
+  -> trusted context with provenance
   -> answers with citations
 ```
 
@@ -73,13 +72,12 @@ write memories without learning the whole schema.
 ### Provenance Before Cleverness
 
 The app should prefer a cited, modest answer over a magical answer with no audit trail.
-Memories should preserve source links, excerpts, timestamps, creator, confidence, and
-review status.
+Memories should preserve source links, excerpts, timestamps, creator, and confidence.
 
-### Review Uncertainty, Do Not Hide It
+### Make Correction Easy
 
-The app should embrace a review inbox. It is acceptable for extraction to produce
-suggestions. It is not acceptable for unreviewed claims to become invisible truth.
+The app should trust AI extraction enough to write useful memory directly. The safety
+mechanism is provenance, confidence, audit history, easy correction, and easy deletion.
 
 ### Simple First Screen
 

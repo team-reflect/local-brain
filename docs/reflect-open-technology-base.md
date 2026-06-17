@@ -144,7 +144,7 @@ React UI
 Because SQLite is durable here, the app should separate tables into classes:
 
 - **Durable:** sources, memories, entities, tasks, events, chats, relationships, audit log.
-- **Derived:** chunks, FTS rows, embedding vectors, denormalized search views, suggestions.
+- **Derived:** chunks, FTS rows, embedding vectors, and denormalized search views.
 - **Device-local:** window state, provider keys, recent paths, temporary queues.
 
 Derived tables can be rebuilt. Durable tables cannot be casually wiped.

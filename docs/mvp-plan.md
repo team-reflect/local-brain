@@ -41,15 +41,15 @@ For each source:
 1. Chunk source.
 2. Index with FTS5.
 3. Generate local embeddings if available.
-4. Extract candidate memories, entities, tasks, events, and relationships.
-5. Put uncertain changes into the inbox.
-6. Let the user accept, reject, edit, or merge.
+4. Extract memories, entities, tasks, events, and relationships.
+5. Write useful memory directly with provenance, confidence, and agent audit.
+6. Let the user correct, archive, delete, or merge when they notice something wrong.
 
 ## Phase 5: Useful UI
 
 Only three primary surfaces:
 
-- **Today:** open tasks, upcoming events, recent memories, follow-ups, review queue.
+- **Today:** open tasks, upcoming events, recent memories, and follow-ups.
 - **Ask/Search:** natural language search and answers with citations.
 - **Entities:** pages for people, projects, organizations, topics, and places.
 
@@ -67,8 +67,8 @@ Advanced database inspection can come later behind a developer toggle.
 The product is launchable when a technical user can:
 
 - import a folder of notes or transcripts,
-- see suggested memories in an inbox,
-- confirm and edit memories,
+- see extracted memories appear automatically,
+- correct and edit memories,
 - ask questions with citations,
 - see a useful Today view,
 - install a local agent skill,

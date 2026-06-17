@@ -64,7 +64,7 @@ These are the questions to answer before implementation starts.
 
 4. What privacy states are clear enough for users?
 
-5. What review states are clear enough for agents?
+5. What correction flow is clear enough when the user spots a wrong memory?
 
 6. How should contradictory memories be represented?
 
@@ -72,9 +72,9 @@ These are the questions to answer before implementation starts.
 
 ## Agent Behavior
 
-1. When is an agent allowed to write confirmed memory?
+1. Which destructive agent writes should require explicit user confirmation?
 
-2. Should the default agent write path always create inbox suggestions?
+2. How should agents expose confidence without making the product feel fussy?
 
 3. Should agent skills be installed automatically or offered as explicit setup steps?
 

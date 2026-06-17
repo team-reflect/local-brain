@@ -35,7 +35,7 @@ fixtures.
 2. Implement the first migration with durable tables:
    `sources`, `source_chunks`, `entities`, `entity_aliases`, `memories`,
    `memory_entities`, `relationships`, `tasks`, `events`, `event_entities`,
-   `inbox_items`, `agent_events`, `chat_conversations`, `chat_messages`, and `settings`.
+   `agent_events`, `chat_conversations`, `chat_messages`, and `settings`.
 3. Add derived search tables for source chunks, memories, entities, and tasks using
    FTS5.
 4. Add Rust DB open/migrate/query/execute/batch commands with transactions for writes.

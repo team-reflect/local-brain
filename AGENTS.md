@@ -28,7 +28,7 @@ Local Brain is a private, local memory substrate for a person and their local ag
 The product loop is:
 
 ```text
-sources -> chunks -> memories -> entities/tasks/events -> reviewed context -> cited answers
+sources -> chunks -> memories -> entities/tasks/events -> cited answers
 ```
 
 The app should help users ask questions across work and personal life while preserving
@@ -42,11 +42,11 @@ provenance, privacy, and local ownership.
 - **Everything starts as a source.** Sources are evidence. Memories are extracted
   beliefs. Keep that distinction crisp.
 - **Provenance before cleverness.** Every important memory should point back to a
-  source, chunk, excerpt, agent, timestamp, and confidence/review state where possible.
+  source, chunk, excerpt, agent, timestamp, and confidence where possible.
 - **Human UI, agent contract.** The app should feel simple for people, while exposing a
   stable CLI/skill contract for local agents.
 - **Do not lead with a database editor.** Advanced inspection can exist later, but the
-  front door is Today, Inbox, Ask/Search, and entity pages.
+  front door is Today, Ask/Search, Sources, and entity pages.
 - **Privacy is a product surface.** Retrieval and AI calls must know whether context is
   local-only, cloud-allowed, sensitive, or never-external.
 - **Local-first, no hosted core API.** Do not assume a hosted Local Brain service for
@@ -114,7 +114,6 @@ Core durable tables:
 - `tasks`
 - `events`
 - `event_entities`
-- `inbox_items`
 - `agent_events`
 - `chat_conversations`
 - `chat_messages`
@@ -147,9 +146,8 @@ brain today --json
 brain entity "name" --json
 ```
 
-Agent writes should be audited in `agent_events`. Prefer suggested memories and inbox
-items over silently confirmed facts unless the user explicitly asked the agent to
-remember something.
+Agent writes should be audited in `agent_events`. The default behavior is direct writes
+with provenance and confidence, plus obvious correction/delete paths for the user.
 
 ## Development Workflow
 
@@ -183,7 +181,7 @@ When UI code exists:
 - Use React + TypeScript with the Reflect-derived design approach.
 - Prefer existing shadcn/Radix/Tailwind primitives before custom interactive widgets.
 - Use Lucide icons where appropriate.
-- Keep the default surface simple and operational: Today, Inbox, Ask/Search, Entities.
+- Keep the default surface simple and operational: Today, Ask/Search, Sources, Entities.
 - Do not make a landing page inside the app.
 - Do not put a raw table browser in the main path.
 
@@ -204,8 +202,7 @@ When native code exists:
 - Any context marked `never_external` must not be sent to cloud model providers.
 - Any context marked `sensitive` needs explicit policy before cloud use.
 - Answers should preserve citations and expose which context was used.
-- Deleting a source must have a clear story for derived memories, chunks, embeddings,
-  and inbox items.
+- Deleting a source must have a clear story for derived memories, chunks, and embeddings.
 
 ## Documentation Style
 

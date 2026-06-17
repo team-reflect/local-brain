@@ -9,8 +9,8 @@ on Reflect Open's local-first desktop technology. The product direction is:
 
 Unlike Reflect Open, this product does not use markdown as the durable source of truth.
 SQLite is the durable local store. The user-facing experience should still feel simple:
-add sources, extract useful memory, review uncertain claims, then ask questions across
-work and life with citations.
+add sources, extract useful memory, then ask questions across work and life with
+citations.
 
 ## Docs
 

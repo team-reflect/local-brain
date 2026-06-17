@@ -36,7 +36,7 @@ and uses SQLite as a projection. Local Brain stores durable structured memory in
 2. [SQLite Schema and DB Layer](02-sqlite-schema-and-db-layer.md)
 3. [Desktop Shell and Core UI](03-desktop-shell-and-core-ui.md)
 4. [Source Ingestion](04-source-ingestion.md)
-5. [Memory Extraction and Review](05-memory-extraction-and-review.md)
+5. [Memory Extraction and Correction](05-memory-extraction-and-correction.md)
 6. [Search, Retrieval, and AI](06-search-retrieval-and-ai.md)
 7. [CLI and Agent Skills](07-cli-and-agent-skills.md)
 8. [Backup, Export, and Privacy](08-backup-export-and-privacy.md)
@@ -55,7 +55,7 @@ Support docs:
 - SQLite is the durable local store.
 - Raw sources may be preserved for auditability, but product state lives in SQLite.
 - The first audience is agent-native technical users.
-- The first user-visible surfaces are Today, Inbox, Ask/Search, and Entities.
+- The first user-visible surfaces are Today, Ask/Search, Sources, and Entities.
 - The first agent interface is the `brain` CLI plus local skills.
 - No hosted Local Brain service is required for the core product.
 

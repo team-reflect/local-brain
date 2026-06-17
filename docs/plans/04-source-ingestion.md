@@ -36,7 +36,7 @@ metadata, audio transcription.
 5. Normalize imported content into `sources` and `source_chunks`.
 6. Store import metadata in `metadata_json`, including original path, size, parser, and
    warnings.
-7. Create inbox items for import errors or files needing review.
+7. Surface import errors in the import result and source detail views.
 8. Add basic source detail UI showing content, metadata, chunks, privacy, and derived
    memories once available.
 
@@ -46,7 +46,7 @@ metadata, audio transcription.
 - A user can import a text/markdown/transcript file and see chunks created.
 - Folder import handles multiple files without blocking the UI.
 - Duplicate imports do not create confusing duplicate sources without warning.
-- Import errors are visible in the Inbox or source import result.
+- Import errors are visible in the source import result.
 
 ## Tests or Verification
 

@@ -33,8 +33,6 @@ sources
   |
   |--< tasks
   |--< events
-  |--< inbox_items
-
 agent_events -> sources / memories / entities / tasks / events
 chat_conversations -> chat_messages
 ```
@@ -177,7 +175,7 @@ CREATE TABLE memories (
   title TEXT,
   body TEXT NOT NULL,
   value_json TEXT,
-  status TEXT NOT NULL DEFAULT 'suggested',
+  status TEXT NOT NULL DEFAULT 'active',
   confidence REAL,
   importance INTEGER NOT NULL DEFAULT 0,
   source_id TEXT REFERENCES sources(id) ON DELETE SET NULL,
@@ -206,13 +204,13 @@ CREATE TABLE memories (
     'instruction',
     'other'
   )),
-  CHECK (status IN ('suggested', 'confirmed', 'rejected', 'stale', 'archived')),
+  CHECK (status IN ('active', 'rejected', 'stale', 'archived')),
   CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1))
 );
 ```
 
 This is the heart of the system. A good memory is small, cited, typed, time-aware, and
-reviewable.
+easy to correct.
 
 ### `memory_entities`
 
@@ -253,7 +251,7 @@ CREATE TABLE relationships (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   CHECK (source_entity_id <> target_entity_id),
-  CHECK (status IN ('suggested', 'active', 'inactive', 'rejected', 'archived'))
+  CHECK (status IN ('active', 'inactive', 'rejected', 'archived'))
 );
 ```
 
@@ -324,38 +322,6 @@ CREATE TABLE event_entities (
   role TEXT NOT NULL DEFAULT 'participant',
   created_at TEXT NOT NULL,
   PRIMARY KEY (event_id, entity_id, role)
-);
-```
-
-### `inbox_items`
-
-Human review queue for uncertain or important changes.
-
-```sql
-CREATE TABLE inbox_items (
-  id TEXT PRIMARY KEY,
-  kind TEXT NOT NULL,
-  title TEXT NOT NULL,
-  body TEXT,
-  status TEXT NOT NULL DEFAULT 'open',
-  target_type TEXT,
-  target_id TEXT,
-  source_id TEXT REFERENCES sources(id) ON DELETE SET NULL,
-  agent_event_id TEXT,
-  metadata_json TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  resolved_at TEXT,
-  CHECK (kind IN (
-    'memory_suggestion',
-    'entity_merge',
-    'task_suggestion',
-    'relationship_suggestion',
-    'privacy_review',
-    'import_issue',
-    'question'
-  )),
-  CHECK (status IN ('open', 'accepted', 'rejected', 'snoozed', 'resolved'))
 );
 ```
 
@@ -473,7 +439,6 @@ CREATE INDEX relationships_source ON relationships(source_entity_id);
 CREATE INDEX relationships_target ON relationships(target_entity_id);
 CREATE INDEX tasks_status_due ON tasks(status, due_at);
 CREATE INDEX events_starts ON events(starts_at);
-CREATE INDEX inbox_items_status_created ON inbox_items(status, created_at);
 CREATE INDEX agent_events_agent_created ON agent_events(agent_name, created_at);
 ```
 
@@ -484,8 +449,7 @@ CREATE INDEX agent_events_agent_created ON agent_events(agent_name, created_at);
 ```text
 open tasks due today
 + upcoming events
-+ recent confirmed memories
-+ open inbox suggestions
++ recent active memories
 + people/projects mentioned in the last few days
 ```
 

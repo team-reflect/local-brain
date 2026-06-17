@@ -19,8 +19,7 @@ privacy states, keychain rules, context-use audit.
 - The SQLite database is durable and must be backed up.
 - JSON export ships as the first portable interchange format.
 - Secrets live in the OS keychain, not SQLite.
-- Deleting a source must address derived chunks, embeddings, memories, inbox items, and
-  citations.
+- Deleting a source must address derived chunks, embeddings, memories, and citations.
 - Privacy states from the launch schema drive retrieval and cloud-model eligibility.
 - No hosted Local Brain sync is required for MVP.
 
@@ -33,7 +32,7 @@ privacy states, keychain rules, context-use audit.
    - delete source only,
    - delete source plus derived memories,
    - archive instead of hard delete when safer.
-4. Add derived cleanup for chunks, FTS rows, embeddings, and inbox items.
+4. Add derived cleanup for chunks, FTS rows, and embeddings.
 5. Add settings UI for privacy defaults and model provider behavior.
 6. Add answer/context audit metadata showing sources, memories, provider, model, and
    external-context status.

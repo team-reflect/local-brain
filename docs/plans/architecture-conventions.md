@@ -26,7 +26,6 @@ Durable:
 - relationships
 - tasks
 - events
-- inbox items
 - agent events
 - chat history
 - settings
@@ -67,8 +66,8 @@ explicit policy or user approval before cloud use.
 The main UI is not a database browser. Build around:
 
 - Today
-- Inbox
 - Ask/Search
+- Sources
 - Entities
 - Settings
 
@@ -79,8 +78,8 @@ Raw table inspection may be added later behind an advanced/developer surface.
 The CLI is the first stable contract. Skills should call `brain` commands rather than
 write SQL directly.
 
-Agent writes must be audited in `agent_events` and should default to suggested memory or
-review inbox items.
+Agent writes must be audited in `agent_events` and should default to active memories
+with provenance and confidence.
 
 ## Testing
 

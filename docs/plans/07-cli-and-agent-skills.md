@@ -20,8 +20,7 @@ skill templates, install diagnostics, agent audit trail.
 - Agents should not use raw SQL as the default interface.
 - CLI output must be machine-readable with `--json`.
 - Agent writes are audited in `agent_events`.
-- Default agent writes create suggested memories or inbox items unless explicitly
-  confirmed by the user.
+- Default agent writes create active memories with provenance and confidence.
 
 ## Implementation Steps
 
@@ -44,7 +43,7 @@ skill templates, install diagnostics, agent audit trail.
 ## Acceptance Criteria
 
 - A local agent can search memory with `brain search`.
-- A local agent can add a memory suggestion with `brain remember`.
+- A local agent can add an active memory with `brain remember`.
 - CLI commands return stable JSON suitable for skills.
 - `brain doctor` reports actionable local setup issues.
 - Agent-originated changes are visible in the app and audited.

@@ -36,7 +36,7 @@ The skill should teach agents:
 - Prefer cited answers.
 - Respect privacy fields.
 - Avoid writing raw SQL unless the user explicitly asks.
-- Leave uncertain extractions in the review inbox instead of silently confirming them.
+- Write memories directly when useful, with provenance and confidence.
 
 ## Agent Write Policy
 
@@ -49,10 +49,10 @@ Every write should record:
 - source,
 - created records,
 - confidence,
-- whether the user reviewed it.
+- confidence.
 
-The default write path should create `suggested` memories or inbox items. Confirmed
-memory should require either explicit user action or a high-confidence local rule.
+The default write path should create active memories with provenance, confidence, and an
+agent audit trail. The user should be able to correct or delete those memories later.
 
 ## Agent Read Policy
 

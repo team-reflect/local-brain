@@ -45,7 +45,7 @@ launch checklist.
 
 - A technical user can install and launch the app.
 - The app creates a local SQLite brain and imports a text source.
-- The user can review extracted memories.
+- The user can see and correct extracted memories.
 - The user can search/ask with citations.
 - The user can use the `brain` CLI from a terminal.
 - The user can install/use the Codex skill.
@@ -58,7 +58,7 @@ launch checklist.
 - Run Cargo tests/checks for the workspace.
 - Run Tauri build for macOS.
 - Run CLI integration tests against a packaged or staged binary.
-- Manual launch script: first run, import, extract, review, ask, CLI search, backup.
+- Manual launch script: first run, import, extract, correct, ask, CLI search, backup.
 
 ## Open Questions
 
