@@ -7,16 +7,33 @@ questions needing Alex.
 
 ## Current State
 
-- **Phase:** 03b — Desktop shell II (Graph, Ask, full Settings, org browsing, richer
-  linked-record detail + citations, command-palette record search; `pnpm check` + Vite
-  build + `cargo check` green, PR open). Plan 03 is now complete.
-- **Active branch:** `codex/local-brain-03b-desktop-shell-ii` (base `…-03-desktop-shell`).
+- **Phase:** 04a — Ingestion core engine (TS): paragraph-aware chunking, SHA-256 content
+  hashing, transactional `ingestDocument`/`ingestInteraction` (record + chunks + links in
+  one batch) with content-hash duplicate detection, and an extraction seam. `pnpm check` +
+  `cargo check` green, PR open. (Plan 04 split into 04a/04b/04c — DEC-10.)
+- **Active branch:** `codex/local-brain-04a-ingestion-core` (base `…-03b-desktop-shell-ii`).
 - **Mode:** Sequential. This session builds the stack layer by layer; no parallel
   worker sessions are spawned. (Within a layer, read-only research may fan out, but
   commits are made sequentially from this session.)
 - **Blockers:** none at this checkpoint.
 
 ## Log
+
+### 2026-06-17 — Phase 04a: Ingestion core engine (Plan 04 split)
+- Split Plan 04 into **04a** (this PR — the TS ingestion engine), **04b** (Rust safe
+  file-read primitives), and **04c** (ingestion UI), recorded as DEC-10; shifted Plan 05's
+  base to `…-04c-ingestion-ui`.
+- Built `packages/core/src/ingest`: `normalizeText` + paragraph-aware `chunkText` (pure,
+  unit-tested); `contentHash` (SHA-256 hex via Web Crypto, matching the future Rust `sha2`
+  path so pasted and imported copies dedupe); `ingestDocument` / `ingestInteraction` that
+  normalize → hash → dedupe-check → write the record + `content_chunks` + optional
+  people/orgs/projects/tasks links in one `db_batch`; and an `extraction-queue` seam
+  (`markForExtraction`/`setExtractionHandler`, no-op until Plan 05 step 10).
+- **Verification:** `pnpm check` ✓ — typecheck + oxlint + **57 tests** (27 core incl. 6
+  chunk/normalize unit tests + a new real-SQLite ingestion block: normalized body + chunks
+  + content hash + links, duplicate detection + `allowDuplicate`, interaction participant
+  links, atomic rollback on an invalid link FK; 4 db; 26 desktop). `cargo check --workspace`
+  ✓ (no Rust this layer). `git diff --check` ✓.
 
 ### 2026-06-17 — Phase 03b: Desktop shell II (Plan 03 complete)
 - Built the 03b read getters in `@local-brain/core` (all over the existing `db_query`
@@ -202,15 +219,18 @@ questions needing Alex.
 - Committed (`5c02ab5`), pushed, opened **PR #1** (base `master`).
 
 ### Next
-- **04** (`codex/local-brain-04-ingestion`, base `…-03b-desktop-shell-ii`): record
-  ingestion per `docs/plans/04-record-ingestion.md`. Then 05 (extraction) onward.
-- Eight PRs open and awaiting review: **#1** (supervisor), **#2** (foundation),
+- **04b** (`codex/local-brain-04b-ingestion-fs`, base `…-04a-ingestion-core`): Rust
+  safe file-read primitives — user-selected files only, canonical-path validation, size
+  caps, content hash (`sha2`, matching 04a), folder enumeration with imported/skipped/
+  duplicate counts; plus TS bindings. Then **04c** (ingestion UI) and **05** (extraction).
+- Nine PRs open and awaiting review: **#1** (supervisor), **#2** (foundation),
   **#3** (schema), **#4** (db package), **#5** (Rust IPC bridge), **#6** (core actions
-  + seed), **#7** (03a desktop shell), **#8** (03b desktop shell II — `pnpm check` + Vite
-  build + cargo check green). Plan 02 (DB layer) and Plan 03 (desktop shell) are complete.
-  A full end-to-end run of the assembled app (`pnpm tauri dev`/`build`) is still pending
-  and is required before the app can be called done. When #1 merges to `master`, rebase the
-  stack and retarget bases upward.
+  + seed), **#7** (03a desktop shell), **#8** (03b desktop shell II), **#9** (04a ingestion
+  core — `pnpm check` + cargo check green). Plan 02 (DB layer) and Plan 03 (desktop shell)
+  are complete; Plan 04 is underway (04a done, 04b/04c next). A full end-to-end run of the
+  assembled app (`pnpm tauri dev`/`build`) is still pending and is required before the app
+  can be called done. When #1 merges to `master`, rebase the stack and retarget bases
+  upward.
 
 ## Verification ledger
 

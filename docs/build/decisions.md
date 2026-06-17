@@ -57,6 +57,17 @@ None at this checkpoint.
   untyped today, so the codegen + integration test live in `.mjs` files outside the
   typechecked `src` surface.
 
+### DEC-10 — Plan 04 split into 04a/04b/04c
+- Ingestion spans three concerns/languages: the TS ingestion engine (chunking, hashing,
+  transactional record+chunk+link writes, dedupe), the Rust safe-file-read primitives
+  (path-traversal guards, size caps, hashing, folder enumeration), and the ingestion UI
+  (paste/import flows, folder import, Add actions). Split per the brief's allowance so each
+  PR is one language/concern and independently verifiable: **04a** by `pnpm check`, **04b**
+  by `cargo`, **04c** by `pnpm check` + Vite build. Downstream bases shift to `…-04c-…`.
+- DEC: content hashing is **SHA-256** on both sides (TS Web Crypto in 04a, Rust `sha2` in
+  04b) so a pasted note and an imported file with identical content produce the same
+  `content_hash` and dedupe against each other.
+
 ### DEC-7 — 03b kept as one branch; palette stays hand-rolled (no cmdk)
 - 03b (Graph, Ask, full Settings, org browsing, richer detail, palette record search,
   render tests) is additive UI + read-only getters + tests with no Rust changes, so it

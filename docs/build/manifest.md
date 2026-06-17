@@ -44,8 +44,10 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 | 02d | Core DB actions + seed data | `codex/local-brain-02d-core-db` | `…-02c-bridge` | open | [#6](https://github.com/maccman/local-brain/pull/6) |
 | 03a | Desktop shell: routing, commands, core surfaces | `codex/local-brain-03-desktop-shell` | `…-02d-core-db` | open | [#7](https://github.com/maccman/local-brain/pull/7) |
 | 03b | Desktop shell: Graph, Ask, full Settings, detail richness, palette | `codex/local-brain-03b-desktop-shell-ii` | `…-03-desktop-shell` | open | [#8](https://github.com/maccman/local-brain/pull/8) |
-| 04 | Record ingestion | `codex/local-brain-04-ingestion` | `…-03b-desktop-shell-ii` | pending | — |
-| 05 | Memory extraction & linking | `codex/local-brain-05-extraction` | `…-04-ingestion` | pending | — |
+| 04a | Ingestion core engine (chunking, hashing, ingest + links + dedupe) | `codex/local-brain-04a-ingestion-core` | `…-03b-desktop-shell-ii` | open | [#9](https://github.com/maccman/local-brain/pull/9) |
+| 04b | Rust file-read primitives (safe reads, size caps, hashing, folder enum) | `codex/local-brain-04b-ingestion-fs` | `…-04a-ingestion-core` | pending | — |
+| 04c | Ingestion UI (paste/import flows, folder import, Add actions) | `codex/local-brain-04c-ingestion-ui` | `…-04b-ingestion-fs` | pending | — |
+| 05 | Memory extraction & linking | `codex/local-brain-05-extraction` | `…-04c-ingestion-ui` | pending | — |
 | 06 | Search, retrieval & AI | `codex/local-brain-06-search-ai` | `…-05-extraction` | pending | — |
 | 07 | CLI & agent skills | `codex/local-brain-07-cli-skills` | `…-06-search-ai` | pending | — |
 | 08 | Settings, backup, export & privacy | `codex/local-brain-08-settings` | `…-07-cli-skills` | pending | — |
@@ -180,10 +182,28 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
   app launch remains pending as noted in status.md. Ask answers and ranked/full-text
   search are placeholders until Plan 06.
 
-### 04–09
-- Scope mirrors `docs/plans/04..09`: 04 = ingestion; 05 = extraction; 06 =
-  search/retrieval/Ask; 07 = `brain` CLI + skills (sidecar via `bundle.externalBin`);
-  08 = settings/backup/export; 09 = macOS packaging, first-run, signing checklist.
+### 04a — Ingestion core engine
+- **Scope (Plan 04, steps 7–10 core, language=TS):** `packages/core/src/ingest` — text
+  `normalizeText` + paragraph-aware `chunkText`; `contentHash` (SHA-256 hex via Web Crypto,
+  chosen to match the future Rust `sha2` import path so a pasted note and an imported file
+  dedupe identically); `ingestDocument` / `ingestInteraction` that normalize → hash →
+  dedupe-check → write the record + its `content_chunks` + optional people/orgs/projects/
+  tasks links in **one** `db_batch` transaction; and an `extraction-queue` seam
+  (`markForExtraction` / `setExtractionHandler`, no-op until Plan 05).
+- **Verification:** `pnpm check` ✓ — typecheck + oxlint + **57 tests** (27 core incl. 6
+  chunk/normalize unit tests and a new real-SQLite ingestion block: normalized body +
+  chunks + content hash + links, duplicate detection + `allowDuplicate`, interaction
+  participant links, and atomic rollback on an invalid link FK; 4 db; 26 desktop).
+  `cargo check --workspace` ✓ (no Rust this layer). `git diff --check` ✓.
+- **Caveats:** UI Add/import flows are 04c; Rust safe file reads + folder import are 04b.
+
+### 04b–04c, 05–09
+- Scope mirrors `docs/plans/04..09`: **04b** = Rust file-read primitives (user-selected
+  files only, canonical-path validation, size caps, content hash, folder enumeration with
+  imported/skipped/duplicate counts); **04c** = ingestion UI (paste/import dialog, folder
+  import, Add actions from surfaces + palette); 05 = extraction; 06 = search/retrieval/Ask;
+  07 = `brain` CLI + skills (sidecar via `bundle.externalBin`); 08 = settings/backup/export;
+  09 = macOS packaging, first-run, signing checklist.
 
 ## Open / Updated PR URLs
 
@@ -195,3 +215,4 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 - PR #6 — Build 02d core DB actions + seed — https://github.com/maccman/local-brain/pull/6 (base `…-02c-bridge`, open)
 - PR #7 — Build 03a desktop shell (routing, commands, core surfaces) — https://github.com/maccman/local-brain/pull/7 (base `…-02d-core-db`, open)
 - PR #8 — Build 03b desktop shell II (Graph, Ask, Settings, org browsing, detail richness, palette search) — https://github.com/maccman/local-brain/pull/8 (base `…-03-desktop-shell`, open)
+- PR #9 — Build 04a ingestion core engine (chunking, hashing, ingest + links + dedupe) — https://github.com/maccman/local-brain/pull/9 (base `…-03b-desktop-shell-ii`, open)

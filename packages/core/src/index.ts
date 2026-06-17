@@ -146,6 +146,23 @@ export {
 // Quick search (command palette)
 export { quickSearch } from './search/getters'
 
+// Ingestion (paste/import → document/interaction + chunks + links)
+export { normalizeText, chunkText, type Chunk, type ChunkOptions } from './ingest/chunk'
+export { contentHash } from './ingest/hash'
+export {
+  ingestDocument,
+  ingestInteraction,
+  type IngestResult,
+  type IngestLinks,
+  type IngestDocumentInput,
+  type IngestInteractionInput,
+} from './ingest/ingest'
+export {
+  markForExtraction,
+  setExtractionHandler,
+  type ExtractionHandler,
+} from './ingest/extraction-queue'
+
 // Knowledge graph
 export {
   getGraph,
