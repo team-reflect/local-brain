@@ -23,11 +23,21 @@ function toSqlParam(value) {
   return value
 }
 
+/**
+ * Strip `CREATE VIRTUAL TABLE … USING vec0(…)` before replay: the sqlite-vec
+ * extension is registered by the Rust runtime but absent from Node's built-in
+ * SQLite. Real vector search is exercised by the Rust tests; these JS round-trip
+ * tests cover the lexical/CRUD path and stub the embedding bridge directly.
+ */
+function stripVec0(sql) {
+  return sql.replace(/CREATE\s+VIRTUAL\s+TABLE[^;]*USING\s+vec0[^;]*;/gi, '')
+}
+
 export function freshDatabase() {
   const database = new DatabaseSync(':memory:')
   database.exec('PRAGMA foreign_keys = ON;')
   for (const file of readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()) {
-    database.exec(readFileSync(join(migrationsDir, file), 'utf8'))
+    database.exec(stripVec0(readFileSync(join(migrationsDir, file), 'utf8')))
   }
   return database
 }

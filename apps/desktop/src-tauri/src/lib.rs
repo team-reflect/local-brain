@@ -1,5 +1,6 @@
 mod commands;
 mod db;
+mod embed;
 mod error;
 mod fs;
 mod keychain;
@@ -23,12 +24,19 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(db::DbState::new(conn))
+        .manage(embed::EmbedState::default())
         .invoke_handler(tauri::generate_handler![
             commands::app_version,
             commands::database_path,
             db::db_query,
             db::db_execute,
             db::db_batch,
+            embed::embed_status,
+            embed::embed_ensure,
+            embed::embed_texts,
+            embed::embed_apply,
+            embed::embed_delete,
+            embed::embed_clear,
             fs::read_text_file,
             fs::read_text_folder,
             keychain::keychain_set,
