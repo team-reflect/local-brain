@@ -197,6 +197,21 @@ Two new Bugbot findings on commit `8e18b20`, both resolved in `brains.rs`:
    guards. New Rust tests `forget_unknown_path_errors_instead_of_silent_no_op` and
    `forget_removes_catalogued_non_active_brain`.
 
+## Bugbot review fixes (2026-06-18, head a1330a2)
+
+One new Bugbot finding on commit `a1330a2`, resolved in `brains.rs`:
+
+1. **High — Registry openable at app startup.** `open_brain` refuses
+   `registry.sqlite` as a brain via `is_registry`, but startup called
+   `open_and_migrate` on whatever `active_candidate` returned with no equivalent
+   check. A `$BRAIN_DB` pin or a stale stored active path pointing at
+   `registry.sqlite` would migrate the catalogue like a brain and keep a second
+   live connection to it. `active_candidate` now filters both the `$BRAIN_DB` pin
+   and the stored active path through `is_registry`, falling through to the default
+   brain (never the registry) when either points at it. `is_registry` also
+   canonicalizes its candidate so a relative/symlinked spelling still resolves.
+   New Rust test `active_candidate_skips_a_stale_registry_active_path`.
+
 ## Progress
 
 - [x] Read AGENTS.md, docs, supervisor skill; mapped Local Brain + both Reflect refs.

@@ -408,12 +408,18 @@ impl BrainState {
             .map_err(|_| AppError::io("the brain registry lock was poisoned by an earlier panic"))
     }
 
-    /// Whether `candidate` (an already-canonicalized path) is this app's own
-    /// registry database. Opening `registry.sqlite` as a brain would run brain
-    /// migrations on the registry and leave a second live connection to the same
-    /// file, so [`open_brain`] refuses it. The stored path is canonical; we also
-    /// re-canonicalize it on each call so a recreated registry still matches.
+    /// Whether `candidate` is this app's own registry database. Opening
+    /// `registry.sqlite` as a brain would run brain migrations on the registry
+    /// and leave a second live connection to the same file, so [`open_brain`]
+    /// refuses it and [`active_candidate`] skips it at startup. The stored path is
+    /// canonical; we re-canonicalize it on each call so a recreated registry still
+    /// matches, and canonicalize `candidate` too so a relative/symlinked/`$BRAIN_DB`
+    /// spelling of the same file still resolves to the registry.
+    ///
+    /// [`active_candidate`]: BrainState::active_candidate
     fn is_registry(&self, candidate: &Path) -> bool {
+        let resolved = candidate.canonicalize();
+        let candidate = resolved.as_deref().unwrap_or(candidate);
         if self.registry_path == candidate {
             return true;
         }
@@ -447,16 +453,32 @@ impl BrainState {
 
     /// The brain to open at startup: `$BRAIN_DB` (CLI parity / explicit pin),
     /// else the last active brain if its file still exists, else the default.
+    ///
+    /// Neither the `$BRAIN_DB` pin nor a stale stored active path may resolve to
+    /// our own `registry.sqlite`: startup runs [`open_and_migrate`] on whatever
+    /// this returns, so returning the registry would migrate the catalogue like a
+    /// brain and keep a second live connection to it — the same hazard
+    /// [`open_brain`] guards against via [`is_registry`]. Both candidates are
+    /// therefore filtered through [`is_registry`], falling through to the default
+    /// brain (which is never the registry; see [`load`]) when they point at it.
+    ///
+    /// [`open_and_migrate`]: brain_schema::open_and_migrate
+    /// [`is_registry`]: BrainState::is_registry
+    /// [`load`]: BrainState::load
     pub fn active_candidate(&self, default_db_path: &Path) -> PathBuf {
         if let Some(env) = std::env::var_os("BRAIN_DB") {
             if !env.is_empty() {
-                return PathBuf::from(env);
+                let pinned = PathBuf::from(env);
+                if !self.is_registry(&pinned) {
+                    return pinned;
+                }
             }
         }
         if let Ok(conn) = self.registry.lock() {
             if let Ok(Some(active)) = active_path(&conn) {
-                if !active.is_empty() && Path::new(&active).is_file() {
-                    return PathBuf::from(active);
+                let stored = PathBuf::from(&active);
+                if !active.is_empty() && stored.is_file() && !self.is_registry(&stored) {
+                    return stored;
                 }
             }
         }
@@ -1124,6 +1146,42 @@ mod tests {
         }
         if std::env::var_os("BRAIN_DB").is_none() {
             assert_eq!(brains.active_candidate(&default), active);
+        }
+    }
+
+    #[test]
+    fn active_candidate_skips_a_stale_registry_active_path() {
+        // Bugbot High regression: startup runs open_and_migrate on whatever
+        // active_candidate returns, with no is_registry guard of its own. A stale
+        // stored active path pointing at registry.sqlite would migrate the
+        // catalogue like a brain and open a second live connection to it. The
+        // candidate must be filtered through is_registry and fall through to the
+        // default brain. (The $BRAIN_DB pin shares the same guard.)
+        let dir = tempdir().unwrap();
+        let registry_path = dir.path().join("registry.sqlite");
+        let brains = file_state(&registry_path);
+        let default = dir.path().join("default.sqlite");
+
+        // The registry file exists, so a non-canonical spelling of it still
+        // resolves: record that stale path as the active brain.
+        let stale = dir
+            .path()
+            .join(".")
+            .join("registry.sqlite")
+            .display()
+            .to_string();
+        {
+            let conn = brains.lock().unwrap();
+            set_active_path(&conn, &stale).unwrap();
+        }
+
+        // Guard against a stray $BRAIN_DB in the test environment masking this.
+        if std::env::var_os("BRAIN_DB").is_none() {
+            assert_eq!(
+                brains.active_candidate(&default),
+                default,
+                "a stored active path pointing at the registry must not open it as a brain"
+            );
         }
     }
 
