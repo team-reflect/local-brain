@@ -7,15 +7,46 @@ questions needing Alex.
 
 ## Current State
 
-- **Phase:** 02a — SQLite schema crate (built, sqlite3-verified, cargo-verified,
-  PR open).
-- **Active branch:** `codex/local-brain-02a-schema` (base `…-01-foundation`).
+- **Phase:** 02b — DB package (generated Kysely schema + drift check, `pnpm check`
+  green, PR open).
+- **Active branch:** `codex/local-brain-02b-db` (base `…-02a-schema`).
 - **Mode:** Sequential. This session builds the stack layer by layer; no parallel
   worker sessions are spawned. (Within a layer, read-only research may fan out, but
   commits are made sequentially from this session.)
 - **Blockers:** none at this checkpoint.
 
 ## Log
+
+### 2026-06-17 — Stack hygiene: propagate foundation fixes down
+- The parent's `6abc16c` ("Verify Rust workspace") mixed three layers. Split it so
+  each PR reviews cleanly and compiles standalone: the foundation-only changes
+  (`Cargo.lock`, the placeholder Tauri icon set, the `gen/schemas/` ignore, and the
+  `cargo fmt` of the app crates) moved down to **#2** as `a11800d`; **#3** was
+  rebuilt on top so it carries only the schema work (`0002` migration + tests). #3's
+  tree is byte-identical to the previously-verified `6abc16c` (asserted with
+  `git diff backup/02a-schema …`). Backup tags kept for every original branch tip.
+- Re-verified both branches: **#2** `pnpm check` ✓, `cargo fmt --all -- --check` ✓,
+  `cargo check --workspace` ✓, `cargo test --workspace` ✓ (5 brain-schema tests);
+  **#3** the same plus 9 brain-schema tests. Pushed (#2 fast-forward, #3
+  force-with-lease) and left explanatory PR comments.
+
+### 2026-06-17 — Phase 02b: DB package (Kysely codegen + drift check)
+- Authored `packages/db/scripts/generate-schema.mjs`: replays the
+  `crates/brain-schema` migrations into an in-memory database via Node's built-in
+  `node:sqlite` (chosen over `better-sqlite3` + `kysely-codegen` to avoid a native
+  build on Node 26) and introspects `PRAGMA table_info` to emit `src/schema.gen.ts`
+  — the `Database` interface plus a row type for each of the 33 durable + join
+  tables, camelCase columns, `Generated<T>` for defaulted/`DEFAULT` columns, and
+  `… | null` for nullable columns. FTS5 virtual/shadow tables are excluded (search
+  uses raw SQL, Plan 06).
+- `src/schema.ts` now re-exports the generated types; `src/index.ts` re-exports the
+  full schema. Added `scripts/check-drift.mjs`, wired into the db package's `test`
+  script, which regenerates and diffs against the committed file (proven: exit 1 on
+  a stale file, exit 0 when current).
+- Added a dialect test that drives the generated `people` types end-to-end
+  (`fullName`→`full_name`, `isSelf`→`is_self`, etc.) through the CamelCasePlugin.
+- **Verification:** `pnpm check` ✓ — typecheck + oxlint + db drift check + 4 db
+  vitest tests (and the existing core tests). No new dependencies.
 
 ### 2026-06-17 — Phase 02a: SQLite schema crate
 - Parent review installed the Homebrew Rust toolchain (`cargo 1.96.0`, `rustc
@@ -82,15 +113,14 @@ questions needing Alex.
 - Committed (`5c02ab5`), pushed, opened **PR #1** (base `master`).
 
 ### Next
-- **02b** (`packages/db`): generate the Kysely `Database` interface from the
-  0002 schema, add the schema/codegen drift check, expand `schema.ts` beyond the
-  `schema_meta` placeholder. Verifiable with `pnpm check`.
-- **02c** (`packages/core` + Rust IPC): `db_query`/`db_execute`/`db_batch`
-  commands, transaction-scoped writes, domain getters/setters, seed data.
-  Rust IPC commands need cargo for full verification (D1).
-- Three PRs open and awaiting review: **#1** (supervisor), **#2** (foundation,
-  TS gates green), **#3** (schema, sqlite3-verified). When #1 merges to `master`,
-  rebase the stack and retarget bases upward.
+- **02c** (`packages/core` + Rust IPC): `db_query`/`db_execute`/`db_batch` Tauri
+  commands over the Rust-owned connection, transaction-scoped multi-table writes,
+  `packages/core` domain getters/setters (people, projects, tasks, documents,
+  interactions), and seed/demo data. Verifiable with `pnpm check` + `cargo test`.
+- Four PRs open and awaiting review: **#1** (supervisor), **#2** (foundation, all
+  gates green), **#3** (schema, sqlite3 + cargo verified), **#4** (db package,
+  `pnpm check` green). When #1 merges to `master`, rebase the stack and retarget
+  bases upward.
 
 ## Verification ledger
 

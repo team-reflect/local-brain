@@ -10,7 +10,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "node scripts/check-drift.mjs && vitest run --passWithNoTests",
+    "db:codegen": "node scripts/generate-schema.mjs"
   },
   "dependencies": {
     "kysely": "^0.28.0"
