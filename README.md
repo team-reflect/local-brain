@@ -2,8 +2,11 @@
 
 An agent-operated local brain with a private desktop UI. SQLite is the durable
 source of truth; AI agents read and write through the `brain` CLI and local
-skills. See [`docs/`](docs/README.md) for product and architecture docs, and
-[`docs/build/`](docs/build/manifest.md) for the implementation PR stack.
+skills. For a grounded overview of what the product is and does today, see
+[`docs/current-state.md`](docs/current-state.md). See [`docs/`](docs/README.md)
+for product and architecture docs, [`docs/launch/`](docs/launch/README.md) for the
+install/usage guide, and [`docs/build/`](docs/build/manifest.md) for the
+implementation PR stack.
 
 ## Workspace layout
 
