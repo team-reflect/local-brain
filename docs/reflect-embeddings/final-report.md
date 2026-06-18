@@ -167,8 +167,9 @@ vec0 cosine-KNN ordering, and a real end-to-end model + KNN test (ranks by meani
   `brain` CLI indexing while the window is open, or another window) were never embedded until a
   focus/settings refetch. Final product cadence now caps automatic incremental backfill to one
   attempt per local calendar day via `embeddings.lastBackfillAttemptDay`; pending chunks no
-  longer keep the status query polling, and the status query fast-polls only while the model is
-  loading. Settings exposes non-destructive "Backfill now" for user-triggered catch-up and keeps
+  longer keep the old 30s status heartbeat alive. The status query fast-polls only while the
+  model is loading, then uses a slow hourly discovery poll until today's automatic backfill slot
+  is used. Settings exposes non-destructive "Backfill now" for user-triggered catch-up and keeps
   "Rebuild index" as repair.
 - **Medium — Semantic available with empty hits:** in `semantic`/`hybrid` mode a `ready` runtime
   whose KNN found no neighbour within the distance cutoff still returned `semanticAvailable: true`

@@ -41,8 +41,9 @@ Branch: `codex/local-brain-reflect-embeddings` · Base: `master` @ 58c801f
 - ✅ **Product cadence — automatic backfill capped daily.** `EmbeddingsSync` now runs
   automatic incremental backfill at most once per local calendar day per brain, recorded in
   `embeddings.lastBackfillAttemptDay`. Pending chunks no longer fast-poll or ride a 30s idle
-  heartbeat; Settings has a non-destructive "Backfill now" button for explicit catch-up while
-  "Rebuild index" remains the destructive repair action.
+  heartbeat; a slow hourly discovery poll runs only until today's automatic slot is used.
+  Settings has a non-destructive "Backfill now" button for explicit catch-up while "Rebuild
+  index" remains the destructive repair action.
 - ✅ **Medium — disabled setting ignored by retrieve.** `retrieve()` now reads the
   `embeddings.enabled` kill-switch before touching the runtime; when disabled it never
   embeds the query or uses vectors, even if the in-memory model stays loaded, and reports

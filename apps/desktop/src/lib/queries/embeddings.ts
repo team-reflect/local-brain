@@ -24,6 +24,8 @@ export const EMBEDDINGS_STATUS_KEY = ['embeddings-status'] as const
 
 /** Fast poll while the model downloads/loads. */
 const ACTIVE_REFETCH_MS = 1500
+/** Slow discovery poll while today's automatic backfill slot is still unused. */
+const DAILY_DISCOVERY_REFETCH_MS = 60 * 60 * 1000
 
 export function todayLocalDayKey(now = new Date()): string {
   const year = now.getFullYear()
@@ -47,6 +49,10 @@ export function embeddingsRefetchInterval(data: EmbeddingsStatus | undefined): n
   // Actively working: model still loading. Pending chunks are handled by
   // EmbeddingsSync's once-per-local-day gate, not by a retry poll loop.
   if (data.runtime.status === 'loading') return ACTIVE_REFETCH_MS
+  // Low-frequency discovery only until today's automatic attempt has happened.
+  // This lets a long-open app notice CLI/other-window writes without returning
+  // to the old 30s idle heartbeat.
+  if (data.lastBackfillAttemptDay !== todayLocalDayKey()) return DAILY_DISCOVERY_REFETCH_MS
   return false
 }
 

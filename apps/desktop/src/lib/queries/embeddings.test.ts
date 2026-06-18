@@ -80,8 +80,9 @@ function installBridge(
 
 /**
  * Polling-cadence contract: the status query should only fast-poll while the
- * model loads. Pending chunks are handled by EmbeddingsSync's once-per-day gate
- * or by explicit user actions, not by a background retry loop.
+ * model loads. Once ready, it uses a slow discovery poll only until today's
+ * automatic attempt is used; pending chunks are still capped by EmbeddingsSync's
+ * once-per-day gate or explicit user actions.
  */
 function status(overrides: Partial<EmbeddingsStatus> = {}): EmbeddingsStatus {
   return {
@@ -108,9 +109,17 @@ describe('embeddingsRefetchInterval', () => {
     expect(embeddingsRefetchInterval(status({ runtime: { status: 'loading' } }))).toBe(1500)
   })
 
-  it('does not poll for idle or pending-ready status', () => {
-    expect(embeddingsRefetchInterval(status())).toBe(false)
-    expect(embeddingsRefetchInterval(status({ pending: 4, ready: false }))).toBe(false)
+  it('slow-polls for discovery only until today has an automatic attempt', () => {
+    expect(embeddingsRefetchInterval(status())).toBe(3_600_000)
+    expect(embeddingsRefetchInterval(status({ pending: 4, ready: false }))).toBe(3_600_000)
+    expect(embeddingsRefetchInterval(status({ lastBackfillAttemptDay: todayLocalDayKey() }))).toBe(
+      false,
+    )
+    expect(
+      embeddingsRefetchInterval(
+        status({ pending: 4, ready: false, lastBackfillAttemptDay: todayLocalDayKey() }),
+      ),
+    ).toBe(false)
   })
 
   it('stops polling a failed runtime or a sticky backfill error', () => {
