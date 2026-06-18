@@ -1,14 +1,27 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { appVersion } from '@local-brain/core'
+import { appVersion, type BrainInfo } from '@local-brain/core'
+import { Check, FolderOpen, Plus, SquareArrowOutUpRight } from 'lucide-react'
+import { BrainDialog, type BrainDialogMode } from '../components/brain-dialog'
+import { BrainSwatch } from '../components/brain-swatch'
+import { Button } from '../components/button'
 import { PageHead } from '../components/page-head'
 import { Section } from '../components/section'
+import { BRAIN_COLOR_OPTIONS } from '../lib/brain-colors'
 import { cn } from '../lib/utils'
+import { controlClass, sectionLabel } from '../lib/ui'
 import {
+  useActiveBrain,
+  useBrains,
   useDatabasePath,
+  useForgetBrain,
   useKeychainHas,
   useModelSettings,
   useModelStatus,
+  useOpenBrain,
+  useRenameBrain,
+  useRevealBrain,
+  useSetBrainColor,
   useSetModelEnabled,
   useSetProviderKey,
 } from '../lib/queries'
@@ -23,6 +36,7 @@ interface SettingsSection {
 
 const SECTIONS: readonly SettingsSection[] = [
   { key: 'general', label: 'General' },
+  { key: 'brain', label: 'Brain' },
   { key: 'model-keys', label: 'Model keys' },
   { key: 'database', label: 'Local database' },
   { key: 'skills', label: 'Skills' },
@@ -86,6 +100,8 @@ export function SettingsSurface({ section }: { section: string | undefined }): R
 
 function SectionBody({ section }: { section: string }): ReactNode {
   switch (section) {
+    case 'brain':
+      return <BrainSettings />
     case 'model-keys':
       return <ModelBoundary />
     case 'database':
@@ -109,6 +125,189 @@ function General(): ReactNode {
         press <kbd className="font-mono text-foreground">⌘K</kbd> to search and run commands.
       </p>
     </Section>
+  )
+}
+
+function formatMs(ms: number): string {
+  return ms > 0 ? new Date(ms).toLocaleString() : '—'
+}
+
+function BrainSettings(): ReactNode {
+  const active = useActiveBrain()
+  const brains = useBrains()
+  const rename = useRenameBrain()
+  const setColor = useSetBrainColor()
+  const forget = useForgetBrain()
+  const openBrain = useOpenBrain()
+  const reveal = useRevealBrain()
+  const [dialog, setDialog] = useState<{ open: boolean; mode: BrainDialogMode }>({
+    open: false,
+    mode: 'create',
+  })
+  const [nameDraft, setNameDraft] = useState<string | null>(null)
+
+  const brain = active.data
+  const others = (brains.data ?? []).filter((entry) => !entry.isActive)
+  const nameValue = nameDraft ?? brain?.name ?? ''
+  const nameChanged = brain != null && nameValue.trim().length > 0 && nameValue.trim() !== brain.name
+
+  function saveName(): void {
+    if (brain && nameChanged) {
+      rename.mutate({ path: brain.path, name: nameValue.trim() })
+      setNameDraft(null)
+    }
+  }
+
+  return (
+    <Section title="Brain">
+      <div className="flex flex-col gap-4 text-sm">
+        <p className="text-muted-foreground">
+          A <strong className="font-medium text-foreground">brain</strong> is one local SQLite
+          database — your top-level workspace. Switch between brains from the picker at the top of
+          the sidebar. (The Network <em>Graph</em> is a different thing: a visualization of the
+          records inside this brain.)
+        </p>
+
+        {brain ? (
+          <div className="flex flex-col gap-4 rounded-lg border border-border bg-card p-4">
+            <div className="flex items-center gap-2.5">
+              <BrainSwatch color={brain.color} className="size-5" />
+              <span className="text-sm font-semibold text-foreground">{brain.name}</span>
+              <span className="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground">
+                <Check className="size-3.5 text-primary" aria-hidden />
+                active
+              </span>
+            </div>
+
+            <BrainField label="Name">
+              <div className="flex items-center gap-2">
+                <input
+                  value={nameValue}
+                  onChange={(event) => setNameDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') saveName()
+                  }}
+                  className={controlClass}
+                />
+                <Button variant="outline" disabled={!nameChanged || rename.isPending} onClick={saveName}>
+                  Save
+                </Button>
+              </div>
+            </BrainField>
+
+            <BrainField label="Color">
+              <div className="flex flex-wrap gap-1.5">
+                {BRAIN_COLOR_OPTIONS.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    aria-label={option.label}
+                    aria-pressed={option.id === brain.color}
+                    title={option.label}
+                    onClick={() => setColor.mutate({ path: brain.path, color: option.id })}
+                    className={cn(
+                      'flex size-6 items-center justify-center rounded-md ring-2 ring-offset-1 ring-offset-card transition-colors',
+                      option.id === brain.color ? 'ring-ring' : 'ring-transparent hover:ring-border',
+                    )}
+                  >
+                    <span
+                      aria-hidden
+                      className="size-4 rounded-[4px]"
+                      style={{ backgroundColor: option.css }}
+                    />
+                  </button>
+                ))}
+              </div>
+            </BrainField>
+
+            <BrainField label="Location">
+              <div className="flex items-center gap-2">
+                <code className="min-w-0 flex-1 truncate rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs text-card-foreground">
+                  {brain.path}
+                </code>
+                <Button variant="ghost" onClick={() => reveal.mutate(brain.path)} aria-label="Reveal in file manager">
+                  <SquareArrowOutUpRight className="size-3.5" aria-hidden />
+                  Reveal
+                </Button>
+              </div>
+            </BrainField>
+
+            <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1.5 text-xs">
+              <dt className="text-muted-foreground">Schema</dt>
+              <dd className="font-mono text-foreground">
+                {brain.schemaVersion != null ? `v${brain.schemaVersion}` : '—'}
+              </dd>
+              <dt className="text-muted-foreground">Created</dt>
+              <dd className="font-mono text-foreground">{formatMs(brain.createdMs)}</dd>
+              <dt className="text-muted-foreground">Last opened</dt>
+              <dd className="font-mono text-foreground">{formatMs(brain.lastOpenedMs)}</dd>
+            </dl>
+          </div>
+        ) : (
+          <p className="text-muted-foreground">No active brain.</p>
+        )}
+
+        <div className="flex flex-col gap-2">
+          <span className={sectionLabel}>All brains</span>
+          {others.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              This is your only brain. Create or open another to switch between them.
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-px">
+              {others.map((entry: BrainInfo) => (
+                <li
+                  key={entry.path}
+                  className="flex items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-secondary/60"
+                >
+                  <BrainSwatch color={entry.color} className="size-4" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm text-foreground">{entry.name}</span>
+                    <span className="block truncate font-mono text-xs text-muted-foreground">{entry.path}</span>
+                  </span>
+                  <Button variant="outline" onClick={() => openBrain.mutate(entry.path)}>
+                    Switch
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => forget.mutate(entry.path)}
+                    aria-label={`Forget ${entry.name}`}
+                  >
+                    Forget
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="flex gap-2">
+          <Button variant="primary" onClick={() => setDialog({ open: true, mode: 'create' })}>
+            <Plus className="size-4" aria-hidden />
+            New brain…
+          </Button>
+          <Button variant="outline" onClick={() => setDialog({ open: true, mode: 'open' })}>
+            <FolderOpen className="size-4" aria-hidden />
+            Open another brain…
+          </Button>
+        </div>
+      </div>
+
+      <BrainDialog
+        open={dialog.open}
+        mode={dialog.mode}
+        onClose={() => setDialog((current) => ({ ...current, open: false }))}
+      />
+    </Section>
+  )
+}
+
+function BrainField({ label, children }: { label: string; children: ReactNode }): ReactNode {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className={sectionLabel}>{label}</span>
+      {children}
+    </label>
   )
 }
 
@@ -229,12 +428,15 @@ function ModelBoundary(): ReactNode {
 
 function LocalDatabase(): ReactNode {
   const path = useDatabasePath()
+  const active = useActiveBrain()
   return (
     <Section title="Local database">
       <div className="flex flex-col gap-2 text-sm text-muted-foreground">
         <p>
-          Local Brain keeps everything in a single SQLite database on this machine. Migrations run
-          automatically at startup; the schema is versioned in the app.
+          Each brain is a single SQLite database on this machine. This is the path of the active
+          brain{active.data ? ` (“${active.data.name}”)` : ''}; manage and switch brains under{' '}
+          <strong className="font-medium text-foreground">Settings → Brain</strong>. Migrations run
+          automatically when a brain is opened; the schema is versioned in the app.
         </p>
         <div className="rounded-md border border-border bg-card px-4 py-3 font-mono text-xs text-card-foreground break-all">
           {path.data ?? 'resolving…'}
@@ -254,9 +456,19 @@ function Diagnostics(): ReactNode {
   const model = useModelStatus()
   const path = useDatabasePath()
   const hasKey = useKeychainHas('anthropic')
+  const active = useActiveBrain()
+  const brains = useBrains()
 
+  const brainCount = brains.data?.length
   const lines: [string, string][] = [
     ['app', info.data ? `${info.data.name} v${info.data.version} · ${info.data.platform}` : '…'],
+    [
+      'brain',
+      active.data
+        ? `${active.data.name}${active.data.schemaVersion != null ? ` · schema v${active.data.schemaVersion}` : ''}` +
+          (brainCount ? ` · ${brainCount} known` : '')
+        : '…',
+    ],
     ['database', path.data ?? '…'],
     ['migrations', 'applied at startup (schema versioned)'],
     ['lexical search', 'FTS5 (available)'],

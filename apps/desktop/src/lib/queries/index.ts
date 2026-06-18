@@ -4,6 +4,7 @@
  * hook so call sites are unaffected by the file split. Mutations invalidate the
  * affected lists so the UI stays consistent.
  */
+export * from './brains'
 export * from './records'
 export * from './corrections'
 export * from './ingest'

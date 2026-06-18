@@ -15,6 +15,7 @@ export const APP_COMMANDS: readonly AppCommand[] = [
   { id: 'go.graph', title: 'Open Graph', keybinding: 'Mod-5', run: (c) => c.navigate({ kind: 'network', tab: 'graph' }) },
   { id: 'go.ask', title: 'Open Ask', keywords: ['chat', 'search'], keybinding: 'Mod-6', run: (c) => c.navigate({ kind: 'ask' }) },
   { id: 'go.settings', title: 'Open Settings', keybinding: 'Mod-,', run: (c) => c.navigate({ kind: 'settings' }) },
+  { id: 'go.brain', title: 'Brain settings', keywords: ['workspace', 'switch', 'brains', 'picker'], keybinding: 'Mod-Shift-B', run: (c) => c.navigate({ kind: 'settings', section: 'brain' }) },
   { id: 'palette.open', title: 'Open command palette', keybinding: 'Mod-k', run: (c) => c.openPalette() },
   { id: 'history.back', title: 'Back', keybinding: 'Mod-[', run: (c) => c.back() },
   { id: 'history.forward', title: 'Forward', keybinding: 'Mod-]', run: (c) => c.forward() },

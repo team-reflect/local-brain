@@ -207,6 +207,25 @@ export {
   type RankInputs,
 } from './retrieval'
 
+// Brains (the top-level workspace picker: registry + runtime switching)
+export {
+  activeBrain,
+  createBrain,
+  forgetBrain,
+  listBrains,
+  openBrain,
+  renameBrain,
+  revealBrain,
+  setBrainColor,
+  BRAIN_COLOR_IDS,
+  DEFAULT_BRAIN_COLOR,
+  brainColorSchema,
+  brainInfoSchema,
+  brainInfoListSchema,
+  type BrainColor,
+  type BrainInfo,
+} from './domains/brains'
+
 // Settings (typed key/value store backing the model boundary and storage path)
 export {
   getSetting,
