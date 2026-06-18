@@ -20,10 +20,15 @@ import {
   createInteraction,
   createPerson,
   createTask,
+  getDocument,
   getGraph,
+  getInteraction,
   getPerson,
   getPersonLinks,
   getSelf,
+  ingestDocument,
+  ingestInteraction,
+  listDocuments,
   listCitationsForSubject,
   listConversations,
   listInteractionParticipants,
@@ -228,5 +233,74 @@ describe('03b read getters (real SQLite round-trip over the seed)', () => {
 
     const conversations = await listConversations()
     expect(conversations.map((c) => c.title)).toEqual(['Planning'])
+  })
+})
+
+describe('04a ingestion (real SQLite round-trip)', () => {
+  beforeEach(() => {
+    installSqliteBridge(freshDatabase())
+  })
+
+  it('ingests a document: normalized body, content chunks, content hash, links', async () => {
+    const personId = await createPerson({ fullName: 'Dana Scully' })
+    const result = await ingestDocument({
+      title: 'Field note',
+      bodyText: 'Para one.\r\n\r\n\r\nPara two.   ',
+      links: { people: [personId] },
+    })
+
+    expect(result.isDuplicate).toBe(false)
+    expect(result.chunkCount).toBeGreaterThanOrEqual(1)
+
+    const doc = await getDocument(result.id)
+    expect(doc?.bodyText).toBe('Para one.\n\nPara two.')
+    expect(doc?.contentHash).toMatch(/^[0-9a-f]{64}$/)
+
+    // The link landed in the same transaction.
+    const links = await getPersonLinks(personId)
+    expect(links.documents.map((d) => d.id)).toContain(result.id)
+  })
+
+  it('detects duplicates by content hash and skips the re-insert', async () => {
+    const first = await ingestDocument({ title: 'Note', bodyText: 'Same content.' })
+    const second = await ingestDocument({ title: 'Note (again)', bodyText: 'Same content.' })
+
+    expect(second.isDuplicate).toBe(true)
+    expect(second.id).toBe(first.id)
+    expect(second.chunkCount).toBe(0)
+    expect(await listDocuments()).toHaveLength(1)
+
+    // allowDuplicate forces a second copy.
+    const forced = await ingestDocument({
+      title: 'Note (forced)',
+      bodyText: 'Same content.',
+      allowDuplicate: true,
+    })
+    expect(forced.id).not.toBe(first.id)
+    expect(await listDocuments()).toHaveLength(2)
+  })
+
+  it('ingests an interaction with a participant link and a default kind', async () => {
+    const personId = await createPerson({ fullName: 'Fox Mulder' })
+    const result = await ingestInteraction({
+      title: 'Sync',
+      kind: 'meeting',
+      bodyText: 'We discussed the case.',
+      links: { people: [personId] },
+    })
+
+    const participants = await listInteractionParticipants(result.id)
+    expect(participants.map((p) => p.id)).toEqual([personId])
+    const interaction = await getInteraction(result.id)
+    expect(interaction?.kind).toBe('meeting')
+    expect(interaction?.contentHash).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it('rolls back the whole import when a link FK is invalid', async () => {
+    await expect(
+      ingestDocument({ title: 'Doomed', bodyText: 'body', links: { people: ['ghost'] } }),
+    ).rejects.toBeDefined()
+    // Neither the document nor its chunks persisted.
+    expect(await listDocuments()).toHaveLength(0)
   })
 })
