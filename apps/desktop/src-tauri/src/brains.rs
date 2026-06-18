@@ -724,16 +724,35 @@ fn forget_brain_impl(db: &DbState, brains: &BrainState, path: &str) -> AppResult
     brains.require_durable()?;
     let schema_version = db.schema_version().ok();
     let conn = brains.lock()?;
+    // The DELETE and the active-path reconciliation run in one transaction so a
+    // forget can never drop the catalogue row while leaving `active_path` naming
+    // it — a half-applied forget would still let the next launch reopen it.
+    let tx = conn.unchecked_transaction()?;
     // A DELETE that matches no row means the requested brain isn't catalogued
     // (a stale path, or a legacy spelling that no longer normalizes to the
     // stored key). Returning the unchanged list would imply the forget
     // succeeded, so surface it as "not found" instead of a silent no-op.
-    let affected = conn.execute("DELETE FROM brains WHERE path = ?1", [&key])?;
+    let affected = tx.execute("DELETE FROM brains WHERE path = ?1", [&key])?;
     if affected == 0 {
         return Err(AppError::not_found(format!(
             "no brain registered at {path}"
         )));
     }
+    // The forget guard only protects the *live* active brain; the registry's
+    // recorded `active_path` can still name the brain we just removed (stale
+    // metadata from a failed startup `register_active`). Forgetting doesn't
+    // delete the database file, so leaving `active_path` pointing at the gone
+    // brain would let `active_candidate` reopen it on the next launch. Reconcile
+    // it to the live active brain — the source of truth — instead.
+    if active_path(&tx)?.as_deref() == Some(key.as_str()) {
+        match live_active_str.as_deref() {
+            Some(live) => set_active_path(&tx, live)?,
+            None => {
+                tx.execute("DELETE FROM registry_meta WHERE key = 'active_path'", [])?;
+            }
+        }
+    }
+    tx.commit()?;
     infos(&conn, live_active.as_deref(), schema_version)
 }
 
@@ -935,6 +954,73 @@ mod tests {
         let records = all_records(&conn).unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].path, "/a/brain.sqlite");
+    }
+
+    #[test]
+    fn forget_clears_stale_active_path_pointing_at_removed_brain() {
+        // Bugbot Medium regression: the forget guard only protects the *live*
+        // active brain, but the registry's recorded `active_path` can be stale and
+        // name a *different* brain (a failed startup `register_active`). Forgetting
+        // that stale-active brain used to DELETE its row while leaving `active_path`
+        // pointing at it — and since forget never deletes the file, the next launch
+        // would reopen the forgotten brain. The forget must reconcile `active_path`
+        // to the live active brain instead.
+        let dir = tempdir().unwrap();
+        let live = dir.path().join("live.sqlite");
+        let (db, live_key) = live_db(&live);
+        let brains = memory_state();
+        {
+            let conn = brains.lock().unwrap();
+            mark_opened(&conn, &live_key, Some("Live")).unwrap();
+            // Catalogue a second brain and force the registry pointer stale to it,
+            // even though the live connection is open on `live`.
+            mark_opened(&conn, "/stale/brain.sqlite", Some("Stale")).unwrap();
+            set_active_path(&conn, "/stale/brain.sqlite").unwrap();
+            assert_eq!(active_path(&conn).unwrap().unwrap(), "/stale/brain.sqlite");
+        }
+
+        // Forgetting the stale-active (but not live-active) brain succeeds...
+        let remaining = forget_brain_impl(&db, &brains, "/stale/brain.sqlite").unwrap();
+        assert!(
+            remaining
+                .iter()
+                .all(|info| info.path != "/stale/brain.sqlite"),
+            "the forgotten brain must not appear in the returned list"
+        );
+
+        // ...and `active_path` no longer dangles at the removed brain — it now
+        // names the live active brain, so the next launch reopens the right one.
+        let conn = brains.lock().unwrap();
+        assert_eq!(
+            active_path(&conn).unwrap().unwrap(),
+            live_key,
+            "active_path must be reconciled to the live brain, not the removed one"
+        );
+    }
+
+    #[test]
+    fn forget_leaves_active_path_when_a_different_brain_is_recorded() {
+        // The reconciliation must be surgical: forgetting a brain that is *not* the
+        // recorded active one leaves `active_path` untouched.
+        let dir = tempdir().unwrap();
+        let live = dir.path().join("live.sqlite");
+        let (db, live_key) = live_db(&live);
+        let brains = memory_state();
+        {
+            let conn = brains.lock().unwrap();
+            mark_opened(&conn, &live_key, Some("Live")).unwrap(); // active_path = live
+            mark_opened(&conn, "/other/brain.sqlite", Some("Other")).unwrap();
+            set_active_path(&conn, &live_key).unwrap();
+        }
+
+        forget_brain_impl(&db, &brains, "/other/brain.sqlite").unwrap();
+
+        let conn = brains.lock().unwrap();
+        assert_eq!(
+            active_path(&conn).unwrap().unwrap(),
+            live_key,
+            "forgetting an unrelated brain must not disturb active_path"
+        );
     }
 
     #[test]

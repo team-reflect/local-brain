@@ -280,6 +280,33 @@ green.
   `forget_unknown_path_errors_instead_of_silent_no_op` and
   `forget_removes_catalogued_non_active_brain` cover the failure and success paths.
 
+### Follow-up Bugbot findings (run on head `e24419d`)
+
+- **Medium — Forget leaves stale active path.** `forget_brain_impl`
+  (`apps/desktop/src-tauri/src/brains.rs`) deleted the catalogue row but never
+  touched `registry_meta.active_path`. The forget guard only protects the *live*
+  active brain, so when the registry's recorded `active_path` was stale (a failed
+  startup `register_active`) and named a *different* brain, forgetting that
+  recorded brain left `active_path` dangling at a removed brain. Since forget
+  never deletes the database file, `active_candidate` would reopen the forgotten
+  brain on the next launch. Fixed by wrapping the `DELETE` and an active-path
+  reconciliation in one SQLite transaction: when the recorded `active_path` is the
+  brain being forgotten, it is repointed at the live active brain (the source of
+  truth), or cleared if none. New Rust tests
+  `forget_clears_stale_active_path_pointing_at_removed_brain` and
+  `forget_leaves_active_path_when_a_different_brain_is_recorded` cover the
+  reconciliation and prove an unrelated forget leaves the pointer untouched.
+- **Medium — Stale brain list after switch.** `useApplyBrainSwitch`
+  (`apps/desktop/src/lib/queries/brains.ts`) seeded `active-brain` but only
+  *invalidated* the `brains` catalogue, so the cached snapshot kept flagging the
+  previous brain active and listed the new active brain under "other brains" until
+  a background refetch landed. Fixed by coherently updating the catalogue cache
+  (`seedActiveBrain`): the switched-to brain becomes the sole `isActive` entry in
+  place (prepended if absent, e.g. a freshly created brain), with the invalidate
+  retained so the authoritative order/schema version still refetch. Updated the
+  existing switch test and added `reconciles the catalogue so only the
+  switched-to brain is active` in `brains.dom.test.tsx`.
+
 ## Caveats / deferred (honest scope)
 
 - **Path field as fallback.** The native OS dialog is the primary affordance; the

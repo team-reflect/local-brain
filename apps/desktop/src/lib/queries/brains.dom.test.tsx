@@ -96,8 +96,31 @@ describe('brain switch cache seeding', () => {
     // Every brain-scoped cache is gone, so the remounted workspace fetches fresh.
     expect(client.getQueryData(['tasks'])).toBeUndefined()
     expect(client.getQueryData(['people', 'p1'])).toBeUndefined()
-    // Brain-picker state is preserved: active-brain seeded, catalogue still there.
+    // Brain-picker state is preserved and reconciled: active-brain seeded, and the
+    // catalogue now flags WORK active (prepended) with the old ACTIVE cleared, so
+    // the switcher never briefly shows the previous brain active.
     expect(client.getQueryData(ACTIVE_BRAIN_KEY)).toEqual(WORK)
-    expect(client.getQueryData(BRAINS_KEY)).toEqual([ACTIVE])
+    expect(client.getQueryData(BRAINS_KEY)).toEqual([WORK, { ...ACTIVE, isActive: false }])
+  })
+
+  it('reconciles the catalogue so only the switched-to brain is active', async () => {
+    // Bugbot Medium regression: after a switch the catalogue was only invalidated,
+    // so a stale snapshot kept marking the old brain active and listed the new
+    // brain under "other brains" until a refetch landed. The cache must be updated
+    // coherently: the switched-to brain becomes the sole active entry in place.
+    installSwitchableBridge()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+    client.setQueryData(ACTIVE_BRAIN_KEY, ACTIVE)
+    // A catalogue already holding both brains, with the previous one flagged active
+    // and WORK present-but-inactive (the common case: switching to a listed brain).
+    client.setQueryData(BRAINS_KEY, [ACTIVE, { ...WORK, isActive: false }])
+
+    const { result } = renderHook(() => useOpenBrain(), { wrapper: withClient(client) })
+    await result.current.mutateAsync(WORK.path)
+
+    const list = client.getQueryData<typeof ACTIVE[]>(BRAINS_KEY)
+    expect(list).toEqual([{ ...ACTIVE, isActive: false }, WORK])
+    // Exactly one active brain, and it is the one we switched to.
+    expect(list?.filter((brain) => brain.isActive)).toEqual([WORK])
   })
 })

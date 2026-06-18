@@ -54,20 +54,50 @@ export function useActiveBrain() {
  * brain's) while reads and writes already hit the new database.
  *
  * So we (1) seed `active-brain` with the freshly returned info, which makes
- * {@link App} re-key its workspace on the new path immediately, then (2)
- * *remove* every brain-scoped query so the remounted tree has no cache to fall
- * back on and must fetch each surface fresh against the now-active brain. We
+ * {@link App} re-key its workspace on the new path immediately, (2) coherently
+ * update the cached `brains` catalogue so the switched-to brain is the only one
+ * flagged active right away — `invalidateQueries` alone only marks the list stale
+ * and keeps serving the old snapshot until a refetch lands, which would briefly
+ * mark the *old* brain active and list the new one under "other brains" — then
+ * (3) *remove* every brain-scoped query so the remounted tree has no cache to
+ * fall back on and must fetch each surface fresh against the now-active brain. We
  * deliberately preserve the brain-picker queries — `active-brain` (just seeded)
- * and the cross-brain `brains` catalogue — and only refresh the catalogue so the
- * switcher reflects the new active flag / last-opened order without flickering.
+ * and the cross-brain `brains` catalogue (just reconciled) — and still invalidate
+ * the catalogue so the authoritative last-opened order / schema version refetch
+ * in the background without flickering the active flag.
  */
 function useApplyBrainSwitch() {
   const queryClient = useQueryClient()
   return (brain: BrainInfo) => {
     queryClient.setQueryData(ACTIVE_BRAIN_KEY, brain)
+    queryClient.setQueryData<BrainInfo[]>(BRAINS_KEY, (list) => seedActiveBrain(list, brain))
     queryClient.removeQueries({ predicate: (query) => !isBrainPickerQuery(query.queryKey) })
     void queryClient.invalidateQueries({ queryKey: BRAINS_KEY })
   }
+}
+
+/**
+ * Reconcile a cached brain catalogue with a just-applied switch: the switched-to
+ * `active` brain becomes the sole `isActive` entry and every other brain is
+ * cleared, so a stale snapshot can't keep flagging the previous active brain. A
+ * freshly created/opened brain absent from the list is prepended (the background
+ * `BRAINS_KEY` refetch settles the authoritative order). Returns `list` untouched
+ * when there's nothing cached yet — there's no snapshot to mislead the UI.
+ */
+function seedActiveBrain(
+  list: BrainInfo[] | undefined,
+  active: BrainInfo,
+): BrainInfo[] | undefined {
+  if (!list) return list
+  let found = false
+  const next = list.map((brain) => {
+    if (brain.path === active.path) {
+      found = true
+      return active
+    }
+    return brain.isActive ? { ...brain, isActive: false } : brain
+  })
+  return found ? next : [active, ...next]
 }
 
 export function useOpenBrain() {
