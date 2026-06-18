@@ -51,7 +51,7 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 | 05b | Extraction corrections + relationship intelligence (UI/setters) | `codex/local-brain-05b-corrections` | `…-05a-extraction-engine` | open | [#14](https://github.com/maccman/local-brain/pull/14) |
 | 06 | Search, retrieval & AI (incl. the model-backed extractor) | `codex/local-brain-06-search-ai` | `…-05b-corrections` | open | [#15](https://github.com/maccman/local-brain/pull/15) |
 | 07 | CLI & agent skills | `codex/local-brain-07-cli-skills` | `…-06-search-ai` | open | [#16](https://github.com/maccman/local-brain/pull/16) |
-| 08 | Settings, backup, export & privacy | `codex/local-brain-08-settings-backup-privacy` | `…-07-cli-skills` | pending | — |
+| 08 | Settings, backup, export & privacy | `codex/local-brain-08-settings-backup-privacy` | `…-07-cli-skills` | open | [#17](https://github.com/maccman/local-brain/pull/17) |
 | 09 | Packaging & launch | `codex/local-brain-09-packaging-launch` | `…-08-settings-backup-privacy` | pending | — |
 
 Status legend: `pending` → not started · `in progress` → branch exists, work underway ·
@@ -379,9 +379,39 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
   Sidecar *detection* in Settings + PATH install is Plan 09. A full `tauri build` was not run this
   layer (no GUI session); the sidecar staging path is verified.
 
-### 08–09
-- Scope mirrors `docs/plans/08..09`: 08 = settings/backup/export/privacy; 09 = macOS packaging,
-  first-run, signing checklist.
+### 08 — Settings, backup, export & privacy
+- **Scope (Plan 08):**
+  - **Rust (`src-tauri`):** `DbState::backup_to` (consistent `VACUUM INTO` snapshot → integrity
+    check → atomic rename, so a crash never leaves a corrupt partial); `storage.rs`
+    (`backup_database`, `write_file_atomic` for the JSON export); `keychain.rs` (provider keys via
+    the macOS `security` tool — never a settings row); `database_path` command.
+  - **Core (`packages/core`):** `domains/settings/model.ts` (typed model-boundary config),
+    `domains/backup/` (`assembleExport` — versioned JSON over the durable tables; `createBackup`/
+    `exportToFile`), `domains/maintenance/` (`hardDeleteRecord` — cascade + derived-chunk cleanup;
+    `rebuildSearchIndexes` — FTS5 rebuild), `ipc/storage.ts` (typed bindings), `executeRaw` for FTS
+    maintenance.
+  - **Desktop:** `installModel` now reads the key from the keychain (env override for dev);
+    Settings → Model is interactive (set/clear keychain key, kill-switch toggle, live status);
+    Backup & export does real backup + JSON export with product states; Local database shows the
+    resolved path; Diagnostics shows db path / migrations / FTS / semantic / keychain / model /
+    CLI-skill + restore instructions.
+- **Decision:** DEC-15 (keychain via macOS `security`; backup via `VACUUM INTO` + atomic rename;
+  export is JSON interchange, backup is the restore path).
+- **Verification:** `cargo fmt --all -- --check` ✓; `cargo check --workspace` ✓; `cargo test
+  --workspace` ✓ — **36 Rust tests** (incl. +2 desktop: a backup that produces a restorable copy
+  with no temp left behind + idempotent re-backup, and an atomic-write test). `pnpm check` ✓ —
+  **155 JS tests** (119 core: +6 real-SQLite Plan-08 round-trips — export assembler/counts, hard
+  delete cascade + FTS rebuild, model-settings round-trip; +4 storage IPC binding unit tests; 36
+  desktop: +2 Settings render tests). `pnpm --filter @local-brain/desktop build` ✓ (2087 modules).
+  `git diff --check` ✓.
+- **Caveats:** keychain uses the macOS `security` CLI (launch target is macOS; non-macOS returns a
+  clear error / no-op); restore is "replace the file + reopen" (a guided in-app restore is a
+  follow-up); the export is JSON interchange (not a re-import path yet). A full `tauri build` was
+  not run this layer.
+
+### 09
+- Scope mirrors `docs/plans/09`: macOS packaging, sidecar bundling, first-run, accessibility/
+  performance/privacy checks, launch docs, smoke checklist.
 
 ## Open / Updated PR URLs
 
@@ -400,3 +430,4 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 - PR #14 — Build 05b extraction corrections + relationship intelligence — https://github.com/maccman/local-brain/pull/14 (base `…-05a-extraction-engine`, open)
 - PR #15 — Build 06 search, retrieval & AI (FTS5 retrieve, cited Ask, model boundary, model-backed extractor, report endpoints) — https://github.com/maccman/local-brain/pull/15 (base `…-05b-corrections`, open)
 - PR #16 — Build 07 CLI & agent skills (`brain` CLI add/search/ask/today/report/graph/show, JSON contracts, sidecar bundling, skill doc) — https://github.com/maccman/local-brain/pull/16 (base `…-06-search-ai`, open)
+- PR #17 — Build 08 settings, backup, export & privacy (SQLite backup, JSON export, keychain, model boundary settings, hard delete + FTS rebuild) — https://github.com/maccman/local-brain/pull/17 (base `…-07-cli-skills`, open)

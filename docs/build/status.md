@@ -7,6 +7,20 @@ questions needing Alex.
 
 ## Current State
 
+- **Phase:** 08 — Settings, backup, export & privacy (**complete, PR #17 open**). SQLite backup
+  (`VACUUM INTO` → integrity check → atomic rename), JSON export (versioned, atomic), provider keys
+  in the macOS keychain (the desktop registers the model provider from it at startup, completing
+  DEC-14), an interactive Settings → Model boundary (set/clear key, kill-switch, live status),
+  hard-delete with cascade + derived-chunk cleanup + FTS rebuild, and richer Diagnostics (db path /
+  migrations / FTS / semantic / keychain / model / CLI-skill + restore instructions). **36 Rust
+  tests**, **155 JS tests**, desktop build — all green. **Plan 08 complete.** Stack continues to
+  Plan 09 (packaging & launch). See DEC-15.
+- **Active branch:** `codex/local-brain-08-settings-backup-privacy` (base `…-07-cli-skills`).
+- **Blockers:** none. Keychain uses the macOS `security` CLI (launch target is macOS); restore is
+  "replace the file + reopen"; JSON export is interchange, not yet a re-import path.
+
+### Prior phase (07)
+
 - **Phase:** 07 — CLI & agent skills (**complete, PR #16 open**). The `brain` CLI grew from the
   Plan 01 scaffold into the full agent contract: a standalone Rust binary that opens SQLite
   directly (no Tauri IPC), with `add document|interaction|task`, `remember`, `search`, `ask`
@@ -60,6 +74,27 @@ questions needing Alex.
 - **Blockers:** none at this checkpoint.
 
 ## Log
+
+### 2026-06-17 — Phase 08: Settings, backup, export & privacy (Plan 08 complete)
+- **Rust (`src-tauri`):** `DbState::backup_to` (consistent `VACUUM INTO` snapshot → integrity check
+  → atomic rename); `storage.rs` (`backup_database`, `write_file_atomic`); `keychain.rs` (provider
+  keys via the macOS `security` tool); `database_path` command. All registered in `lib.rs`.
+- **Core (`packages/core`):** `domains/settings/model.ts` (typed model config), `domains/backup/`
+  (`assembleExport` — versioned JSON over the durable tables; `createBackup`/`exportToFile`),
+  `domains/maintenance/` (`hardDeleteRecord` — cascade + content-chunk cleanup; `rebuildSearchIndexes`
+  — FTS5 rebuild), `ipc/storage.ts` bindings, `executeRaw`.
+- **Desktop:** `installModel` reads the key from the keychain (env override for dev) and registers
+  the provider; Settings → Model is interactive (set/clear key, kill-switch toggle, live status);
+  Backup & export performs real backup + JSON export with product states; Local database shows the
+  resolved path; Diagnostics shows db path / migrations / FTS / semantic / keychain / model /
+  CLI-skill + restore instructions.
+- **Decision DEC-15:** keychain via macOS `security`; backup via `VACUUM INTO` + atomic rename;
+  backup is the restore path, JSON export is interchange; hard delete cleans derived data.
+- **Verification:** `cargo fmt --all -- --check` ✓; `cargo check --workspace` ✓; `cargo test
+  --workspace` ✓ — **36 Rust tests** (+2 desktop: restorable backup w/ no temp leftover + atomic
+  write). `pnpm check` ✓ — **155 JS tests** (119 core incl. +6 Plan-08 real-SQLite + 4 storage IPC
+  unit; 36 desktop incl. +2 Settings render). `pnpm --filter @local-brain/desktop build` ✓ (2087
+  modules). `git diff --check` ✓.
 
 ### 2026-06-17 — Phase 07: CLI & agent skills (Plan 07 complete)
 - **`apps/cli` (`brain`)** grew from the Plan 01 scaffold into the full agent contract — a
