@@ -9,8 +9,8 @@ import {
   installExtractionPipeline,
   keychainGet,
   keychainSet,
-  setAiProvidersState,
   setModelProvider,
+  updateAiProvidersState,
   type AiProviderConfig,
   type AiProviderId,
 } from '@local-brain/core'
@@ -77,7 +77,10 @@ async function legacyAnthropicConfig(): Promise<{ config: AiProviderConfig; key:
 
   try {
     await keychainSet(aiKeySecretName(config.id), key)
-    await setAiProvidersState([config], config.id)
+    const migrated = await updateAiProvidersState((state) =>
+      state.providers.length === 0 ? { providers: [config], defaultProviderId: config.id } : state,
+    )
+    if (!migrated.providers.some((providerConfig) => providerConfig.id === config.id)) return null
   } catch {
     // Even if migration cannot persist, keep the legacy key working this session.
   }

@@ -16,6 +16,8 @@ import {
   setBridge,
   setAiProvidersState,
   setModelEnabled,
+  updateAiProvidersState,
+  withAiProviderAdded,
 } from '@local-brain/core'
 import { freshDatabase, installSqliteBridge } from './sqlite-harness.mjs'
 
@@ -172,5 +174,26 @@ describe('Plan 08 model settings', () => {
     expect(settings.enabled).toBe(false)
     expect(settings.provider).toBe('anthropic')
     expect(settings.model).toBe('claude-sonnet-4-6')
+  })
+
+  it('serializes provider mutations so concurrent updates compose', async () => {
+    const add = (id, makeDefault = false) => (state) =>
+      withAiProviderAdded(
+        state,
+        { id, provider: 'anthropic', model: 'claude-sonnet-4-6', keyHint: id.slice(-5) },
+        makeDefault,
+      )
+
+    await Promise.all([
+      updateAiProvidersState(async (state) => {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        return add('cfg-a', true)(state)
+      }),
+      updateAiProvidersState(add('cfg-b')),
+    ])
+
+    const settings = await getModelSettings()
+    expect(settings.providers.map((provider) => provider.id)).toEqual(['cfg-a', 'cfg-b'])
+    expect(settings.defaultProviderId).toBe('cfg-a')
   })
 })

@@ -276,6 +276,7 @@ export {
 export {
   getModelSettings,
   setAiProvidersState,
+  updateAiProvidersState,
   setModelEnabled,
   setModelProviderSetting,
   setModelModelSetting,

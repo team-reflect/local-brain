@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { createInteraction, createPerson, completeTask, listPeople } from '../index'
+import { createInteraction, createPerson, completeTask, listPeople, setAiProvidersState } from '../index'
 import { captureDbBridge, type CapturedCall } from '../test/bridge'
 
 describe('domain actions', () => {
@@ -45,5 +45,18 @@ describe('domain actions', () => {
     expect(statements).toHaveLength(2)
     expect(statements[0]?.sql).toContain('insert into "interactions"')
     expect(statements[1]?.sql).toContain('insert into "interaction_participants"')
+  })
+
+  it('setAiProvidersState writes provider list and default in one batch', async () => {
+    await setAiProvidersState(
+      [{ id: 'cfg-a', provider: 'anthropic', model: 'claude-sonnet-4-6', keyHint: 'abcde' }],
+      'cfg-a',
+    )
+    expect(calls[0]?.command).toBe('db_batch')
+    const statements = calls[0]?.args['statements'] as Array<{ sql: string; params: unknown[] }>
+    expect(statements).toHaveLength(2)
+    expect(statements[0]?.sql).toContain('insert into "settings"')
+    expect(statements[0]?.params).toContain('model.aiProviders')
+    expect(statements[1]?.params).toContain('model.defaultAiProviderId')
   })
 })

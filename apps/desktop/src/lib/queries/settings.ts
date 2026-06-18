@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   aiKeySecretName,
   apiKeyHint,
-  defaultAiProvider,
   databasePath,
   getModelSettings,
   hardDeleteRecord,
@@ -11,8 +10,8 @@ import {
   keychainHas,
   keychainSet,
   rebuildSearchIndexes,
-  setAiProvidersState,
   setModelEnabled,
+  updateAiProvidersState,
   withAiProviderAdded,
   withAiProviderRemoved,
   type AiProviderConfig,
@@ -67,7 +66,6 @@ export function useAddAiProvider() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (draft: NewAiProvider) => {
-      const settings = await getModelSettings()
       const id = crypto.randomUUID()
       const key = draft.apiKey.trim()
       const entry: AiProviderConfig = {
@@ -78,13 +76,8 @@ export function useAddAiProvider() {
       }
       const secretName = aiKeySecretName(id)
       await keychainSet(secretName, key)
-      const next = withAiProviderAdded(
-        { providers: settings.providers, defaultProviderId: settings.defaultProviderId },
-        entry,
-        draft.isDefault,
-      )
       try {
-        await setAiProvidersState(next.providers, next.defaultProviderId)
+        await updateAiProvidersState((state) => withAiProviderAdded(state, entry, draft.isDefault))
       } catch (error) {
         await keychainDelete(secretName).catch(() => {})
         throw error
@@ -103,13 +96,8 @@ export function useRemoveAiProvider() {
       const secretName = aiKeySecretName(id)
       const priorSecret = await keychainGet(secretName).catch(() => null)
       await keychainDelete(secretName)
-      const settings = await getModelSettings()
-      const next = withAiProviderRemoved(
-        { providers: settings.providers, defaultProviderId: settings.defaultProviderId },
-        id,
-      )
       try {
-        await setAiProvidersState(next.providers, next.defaultProviderId)
+        await updateAiProvidersState((state) => withAiProviderRemoved(state, id))
       } catch (error) {
         if (priorSecret) await keychainSet(secretName, priorSecret).catch(() => {})
         throw error
@@ -125,12 +113,10 @@ export function useMakeDefaultAiProvider() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (id: string) => {
-      const settings = await getModelSettings()
-      const fallback = defaultAiProvider({
-        providers: settings.providers,
+      await updateAiProvidersState((state) => ({
+        providers: state.providers,
         defaultProviderId: id,
-      })
-      await setAiProvidersState(settings.providers, fallback?.id ?? null)
+      }))
     },
     onSuccess: async () => {
       await refreshModelQueries(queryClient)
