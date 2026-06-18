@@ -1,28 +1,8 @@
 import type { ReactNode } from 'react'
 import type { LinkedRecord } from '@local-brain/core'
-import type { Route } from '../routing/route'
+import { routeForRecord } from '../routing/route'
 import { useRouter } from '../routing/router'
 import { Section } from './section'
-
-/** Map a linked record onto its typed detail route (memories have none). */
-export function routeForLinkedRecord(record: LinkedRecord): Route | null {
-  switch (record.kind) {
-    case 'person':
-      return { kind: 'person', id: record.id }
-    case 'organization':
-      return { kind: 'organization', id: record.id }
-    case 'project':
-      return { kind: 'project', id: record.id }
-    case 'task':
-      return { kind: 'task', id: record.id }
-    case 'document':
-      return { kind: 'document', id: record.id }
-    case 'interaction':
-      return { kind: 'interaction', id: record.id }
-    case 'memory':
-      return null
-  }
-}
 
 /** Trim ISO timestamps used as subtitles down to a calm date. */
 function hint(subtitle: string | null): string | null {
@@ -55,7 +35,7 @@ export function LinkedRecords({
     <Section title={title}>
       <ul className="flex flex-col gap-0.5">
         {records.map((record) => {
-          const route = routeForLinkedRecord(record)
+          const route = routeForRecord(record.kind, record.id)
           const subtitle = hint(record.subtitle)
           return (
             <li key={`${record.kind}:${record.id}`} className="group flex items-center gap-1">

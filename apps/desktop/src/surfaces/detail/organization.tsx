@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { DetailFields } from '../../components/detail-fields'
-import { EmptyState } from '../../components/empty-state'
+import { DetailPage } from '../../components/detail-page'
 import { LinkedRecords } from '../../components/linked-records'
 import { PageHead } from '../../components/page-head'
 import { useOrganization, useOrganizationLinks, useUnlinkFrom } from '../../lib/queries'
@@ -10,30 +10,30 @@ export function OrganizationDetail({ id }: { id: string }): ReactNode {
   const links = useOrganizationLinks(id)
   const onUnlink = useUnlinkFrom({ kind: 'organization', id })
 
-  if (organization.isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>
-  if (!organization.data) return <EmptyState title="Organization not found" />
-
-  const o = organization.data
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-5">
-      <PageHead eyebrow="Organization" title={o.name} />
-      <DetailFields
-        fields={[
-          { label: 'Kind', value: o.kind ?? '—' },
-          { label: 'Domain', value: o.domain ?? '—' },
-          { label: 'Location', value: o.location ?? '—' },
-        ]}
-      />
-      {o.summary ? <p className="text-sm text-foreground">{o.summary}</p> : null}
-      {links.data ? (
+    <DetailPage query={organization} notFoundTitle="Organization not found">
+      {(o) => (
         <>
-          <LinkedRecords title="People" records={links.data.people} onUnlink={onUnlink} />
-          <LinkedRecords title="Projects" records={links.data.projects} onUnlink={onUnlink} />
-          <LinkedRecords title="Documents" records={links.data.documents} onUnlink={onUnlink} />
-          <LinkedRecords title="Interactions" records={links.data.interactions} onUnlink={onUnlink} />
-          <LinkedRecords title="Tasks" records={links.data.tasks} onUnlink={onUnlink} />
+          <PageHead eyebrow="Organization" title={o.name} />
+          <DetailFields
+            fields={[
+              { label: 'Kind', value: o.kind ?? '—' },
+              { label: 'Domain', value: o.domain ?? '—' },
+              { label: 'Location', value: o.location ?? '—' },
+            ]}
+          />
+          {o.summary ? <p className="text-sm text-foreground">{o.summary}</p> : null}
+          {links.data ? (
+            <>
+              <LinkedRecords title="People" records={links.data.people} onUnlink={onUnlink} />
+              <LinkedRecords title="Projects" records={links.data.projects} onUnlink={onUnlink} />
+              <LinkedRecords title="Documents" records={links.data.documents} onUnlink={onUnlink} />
+              <LinkedRecords title="Interactions" records={links.data.interactions} onUnlink={onUnlink} />
+              <LinkedRecords title="Tasks" records={links.data.tasks} onUnlink={onUnlink} />
+            </>
+          ) : null}
         </>
-      ) : null}
-    </div>
+      )}
+    </DetailPage>
   )
 }

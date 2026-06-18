@@ -3,7 +3,7 @@ import { Search } from 'lucide-react'
 import { listCommands } from '../lib/commands/registry'
 import type { CommandContext } from '../lib/commands/types'
 import { useGlobalSearch } from '../lib/queries'
-import { routeForLinkedRecord } from './linked-records'
+import { routeForRecord } from '../routing/route'
 
 interface PaletteItem {
   key: string
@@ -73,7 +73,7 @@ export function CommandPalette({
 
   const recordItems = useMemo<PaletteItem[]>(() => {
     return (search.data ?? []).map((hit) => {
-      const route = routeForLinkedRecord({ kind: hit.kind, id: hit.id, title: hit.title, subtitle: hit.subtitle })
+      const route = routeForRecord(hit.kind, hit.id)
       return {
         key: `record:${hit.kind}:${hit.id}`,
         label: hit.title,
