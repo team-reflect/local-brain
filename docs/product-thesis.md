@@ -54,7 +54,7 @@ answer citation.
 - **Memories:** hidden atomic claims extracted from records: facts, preferences,
   decisions, commitments, instructions, risks, and ideas.
 - **Ask:** AI chat over the local brain with cited answers.
-- **Settings:** model keys, local paths, diagnostics, and skill setup.
+- **Settings:** AI providers, local paths, diagnostics, and skill setup.
 
 ## User Experience
 

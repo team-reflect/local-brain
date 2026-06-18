@@ -37,7 +37,7 @@ Top-level sections:
 - **Network:** graph, people, and organizations, with Graph as the default tab.
 - **Projects:** active, waiting, paused, done, and archived projects.
 - **Ask:** AI chat over the local brain with citations.
-- **Settings:** model keys, local database path, diagnostics, and skill setup.
+- **Settings:** AI providers, local database path, diagnostics, and skill setup.
 
 Document and interaction records are browsed inside Network, Project, and Task detail
 pages, and found through global search or Ask.
@@ -102,7 +102,7 @@ Ask
   - linked records
 
 Settings
-  - model keys
+  - AI providers
   - local database path
   - diagnostics
   - agent skill setup

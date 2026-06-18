@@ -33,9 +33,9 @@ export async function getModelStatus(): Promise<ModelStatus> {
   const canRun = enabled && configured
 
   let reason = 'Ready.'
-  if (!provider) reason = 'No model provider is configured. Add a provider key in Settings → Model.'
-  else if (!configured) reason = `The ${provider.label} provider has no usable key. Add one in Settings → Model.`
-  else if (!enabled) reason = 'External model calls are turned off in Settings → Model.'
+  if (!provider) reason = 'No AI provider is configured. Add one in Settings → AI providers.'
+  else if (!configured) reason = `The ${provider.label} provider has no usable key. Add one in Settings → AI providers.`
+  else if (!enabled) reason = 'External model calls are turned off in Settings → AI providers.'
 
   return {
     enabled,

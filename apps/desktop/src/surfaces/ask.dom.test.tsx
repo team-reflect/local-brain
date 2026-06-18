@@ -13,7 +13,7 @@ describe('AskSurface model boundary', () => {
 
   it('surfaces the closed-boundary reason when no provider is configured', async () => {
     renderWithProviders(<AskSurface conversationId={undefined} />)
-    await waitFor(() => expect(screen.getByText(/No model provider is configured/)).toBeDefined())
+    await waitFor(() => expect(screen.getByText(/No AI provider is configured/)).toBeDefined())
   })
 
   it('keeps existing messages visible when the model boundary is closed', async () => {
@@ -38,6 +38,6 @@ describe('AskSurface model boundary', () => {
     renderWithProviders(<AskSurface conversationId="chat-1" />)
 
     await waitFor(() => expect(screen.getByText('What did we decide?')).toBeDefined())
-    expect(screen.queryByText(/No model provider is configured/)).toBeNull()
+    expect(screen.queryByText(/No AI provider is configured/)).toBeNull()
   })
 })

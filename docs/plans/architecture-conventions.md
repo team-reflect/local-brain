@@ -217,7 +217,7 @@ mono metadata, compact controls, a sunken sidebar, and token-derived graph chrom
 
 Settings owns:
 
-- model keys
+- AI providers
 - storage path
 - diagnostics
 - CLI and skill setup

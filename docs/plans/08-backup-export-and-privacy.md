@@ -1,6 +1,6 @@
 # Plan 08 - Settings and Privacy Boundaries
 
-**Goal:** Put diagnostics, model keys, local database visibility, skill setup, and
+**Goal:** Put diagnostics, AI providers, local database visibility, skill setup, and
 privacy boundaries under Settings.
 
 **Depends on:** Plans 01-07.
@@ -17,9 +17,9 @@ and row-level sensitivity labels.
 
 ## Key Decisions
 
-- Settings owns model keys, local database path, diagnostics, and skill setup.
+- Settings owns AI providers, local database path, diagnostics, and skill setup.
 - App-managed backup/export is deferred; SQLite remains the durable source of truth.
-- Keychain stores provider keys and local secrets.
+- Keychain stores AI provider keys and local secrets.
 - Launch privacy is app-level and model-boundary based.
 - Deletion should be explicit and predictable.
 - Future git sync is deferred; do not design launch UI around Git.
@@ -28,7 +28,7 @@ and row-level sensitivity labels.
 
 1. Add Settings sections:
    - general
-   - model keys
+   - AI providers
    - local database
    - diagnostics
    - agent skill setup
@@ -37,7 +37,7 @@ and row-level sensitivity labels.
    - hard delete only behind confirmation
    - cascade or detach links predictably
    - rebuild derived search/chunk data after destructive operations
-3. Add keychain integration for provider keys.
+3. Add keychain integration for AI provider keys.
 4. Add model boundary settings:
    - external model calls enabled/disabled
    - selected provider/model
