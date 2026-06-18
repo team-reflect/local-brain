@@ -91,8 +91,16 @@ pub fn open_in_memory() -> Result<Connection, SchemaError> {
     Ok(conn)
 }
 
+/// Local Brain's per-user application data directory
+/// (`<platform data dir>/local-brain`). The default brain database and the
+/// desktop brain registry both live here. Returns `None` only when no platform
+/// data directory resolves.
+pub fn app_data_dir() -> Option<PathBuf> {
+    Some(dirs::data_dir()?.join("local-brain"))
+}
+
 /// The durable database path the desktop app and the `brain` CLI must agree on:
-/// `$BRAIN_DB` if set, else `<platform data dir>/local-brain/brain.sqlite`.
+/// `$BRAIN_DB` if set, else `<app data dir>/brain.sqlite`.
 /// Returns `None` only when `$BRAIN_DB` is unset and no data directory resolves.
 pub fn resolve_db_path() -> Option<PathBuf> {
     if let Some(env) = std::env::var_os("BRAIN_DB") {
@@ -100,7 +108,7 @@ pub fn resolve_db_path() -> Option<PathBuf> {
             return Some(PathBuf::from(env));
         }
     }
-    Some(dirs::data_dir()?.join("local-brain").join("brain.sqlite"))
+    Some(app_data_dir()?.join("brain.sqlite"))
 }
 
 /// The applied schema version (`PRAGMA user_version`), comparable against
