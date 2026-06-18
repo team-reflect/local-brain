@@ -1,6 +1,9 @@
 import { MODEL_ENABLED_KEY } from '../../ai/boundary'
 import { aiProviderIdSchema, type AiProviderId } from '../../ai/provider-catalog'
-import { defaultAiProvider } from '../../ai/provider-config'
+import { defaultAiProvider, type AiProvidersState } from '../../ai/provider-config'
+import { db } from '../../db/client'
+import { batch } from '../../db/commands'
+import { nowIso } from '../../db/time'
 import { getSetting } from './getters'
 import { setSetting } from './setters'
 import { z } from 'zod'
@@ -80,12 +83,56 @@ export function setModelModelSetting(model: string | null): Promise<void> {
   return setSetting(MODEL_MODEL_KEY, model)
 }
 
+function normalizeAiProvidersState(state: AiProvidersState): AiProvidersState {
+  return {
+    providers: state.providers,
+    defaultProviderId: defaultAiProvider(state)?.id ?? null,
+  }
+}
+
+function setSettingQuery(key: string, value: unknown, updatedAt: string) {
+  const valueJson = JSON.stringify(value ?? null)
+  return db
+    .insertInto('settings')
+    .values({ key, valueJson, updatedAt })
+    .onConflict((oc) => oc.column('key').doUpdateSet({ valueJson, updatedAt }))
+}
+
 export async function setAiProvidersState(
   providers: AiProviderConfig[],
   defaultProviderId: string | null,
 ): Promise<void> {
-  await Promise.all([
-    setSetting(MODEL_AI_PROVIDERS_KEY, providers),
-    setSetting(MODEL_DEFAULT_AI_PROVIDER_KEY, defaultProviderId),
+  const next = normalizeAiProvidersState({ providers, defaultProviderId })
+  const updatedAt = nowIso()
+  await batch([
+    setSettingQuery(MODEL_AI_PROVIDERS_KEY, next.providers, updatedAt),
+    setSettingQuery(MODEL_DEFAULT_AI_PROVIDER_KEY, next.defaultProviderId, updatedAt),
   ])
+}
+
+type AiProvidersUpdater = (
+  state: AiProvidersState,
+) => AiProvidersState | Promise<AiProvidersState>
+
+let aiProvidersUpdateQueue: Promise<void> = Promise.resolve()
+
+export function updateAiProvidersState(updater: AiProvidersUpdater): Promise<AiProvidersState> {
+  const run = aiProvidersUpdateQueue
+    .catch(() => undefined)
+    .then(async () => {
+      const settings = await getModelSettings()
+      const next = normalizeAiProvidersState(
+        await updater({
+          providers: settings.providers,
+          defaultProviderId: settings.defaultProviderId,
+        }),
+      )
+      await setAiProvidersState(next.providers, next.defaultProviderId)
+      return next
+    })
+  aiProvidersUpdateQueue = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  return run
 }
