@@ -207,6 +207,29 @@ vec0 cosine-KNN ordering, and a real end-to-end model + KNN test (ranks by meani
   clean, `pnpm check` (147 core tests + typecheck + lint), desktop build, `cargo fmt --all --
   --check`, `cargo check --workspace`, `cargo test --workspace` (18 + sidecar suites pass).
 
+## Post-review fixes — seventh pass (Cursor Bugbot on PR #27, head 2f9bf09)
+- **High — Rebuild races coordinator backfill:** manual "Rebuild index" could clear vectors and
+  start a full backfill while `EmbeddingsSync` was still draining an earlier incremental pending
+  snapshot. Added a renderer-wide `runExclusiveBackfill` mutex and routed both the incremental
+  coordinator and manual rebuild through it. The backfill plus `setBackfillError` outcome write
+  now happen inside the same exclusive section, so a stale incremental pass cannot clear a rebuild
+  failure marker after the rebuild records it. Tests: `embeddings-coordinator.test.ts`,
+  `embeddings.test.ts`, and `embeddings-sync.dom.test.tsx`.
+- **Medium — Rebuild ignores disable abort:** `rebuildEmbeddings()` now accepts the same
+  cooperative `isStale` hook as the incremental coordinator, and `useRebuildEmbeddings()` reads the
+  live `embeddings-status` query cache so disabling semantic search mid-rebuild aborts between
+  batches. Test: `embeddings.test.ts` verifies an already-stale rebuild clears then aborts without
+  embedding a batch.
+- **Medium — Hard delete splits embedding cleanup:** `hardDeleteRecord` cannot share the source
+  `db_batch` transaction with `embed_delete` (which owns the vec0 rowid coupling), so the prune now
+  runs before the source/chunk delete. If the embedding prune fails, the durable source rows remain
+  intact and the delete is retryable; if the later batch fails, the surviving chunks are simply
+  re-embedded by the idempotent backfill. Test: `settings-maintenance.test.mjs` simulates
+  `embed_delete` failure and verifies the document, chunks, and embeddings all remain.
+- Re-verified: `git diff --check` clean, focused desktop coordinator/rebuild/sync tests (16 pass),
+  focused core maintenance/pipeline tests (11 pass), and `pnpm check` (147 core + 56 desktop tests,
+  existing first-run `act(...)` warning).
+
 ## Repo state
 - Branch: `codex/local-brain-reflect-embeddings`
 - PR: https://github.com/maccman/local-brain/pull/27 (base `master`)

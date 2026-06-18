@@ -6,6 +6,7 @@ import {
   embedEnsure,
   setBackfillError,
 } from '@local-brain/core'
+import { runExclusiveBackfill } from '../lib/embeddings-coordinator'
 import { EMBEDDINGS_STATUS_KEY, useEmbeddingsStatus } from '../lib/queries'
 import { errorMessage } from '../lib/utils'
 
@@ -54,23 +55,33 @@ export function EmbeddingsSync(): null {
       !backfilling.current
     ) {
       backfilling.current = true
-      void backfillEmbeddings({
-        // Observe the LIVE enabled flag from the query cache, not the render
-        // snapshot that kicked off this run: disabling semantic search mid-pass
-        // must abort the backfill between batches. A captured `status.data` would
-        // keep reporting the stale `enabled: true` and let the pass run to the end.
-        isStale: () =>
-          queryClient.getQueryData<EmbeddingsStatus>(EMBEDDINGS_STATUS_KEY)?.enabled === false,
+      // Route through the shared mutex so this incremental pass and a manual
+      // "Rebuild index" can never run concurrently (the rebuild's wipe could
+      // otherwise land mid-pass). Record the backfill outcome INSIDE the
+      // exclusive section so "backfill + setBackfillError" is atomic: a stale
+      // pass can't clear an error a rebuild recorded in a later locked turn.
+      void runExclusiveBackfill(async () => {
+        try {
+          await backfillEmbeddings({
+            // Observe the LIVE enabled flag from the query cache, not the render
+            // snapshot that kicked off this run: disabling semantic search mid-pass
+            // must abort the backfill between batches. A captured `status.data` would
+            // keep reporting the stale `enabled: true` and let the pass run to the end.
+            isStale: () =>
+              queryClient.getQueryData<EmbeddingsStatus>(EMBEDDINGS_STATUS_KEY)?.enabled === false,
+          })
+          // A clean run (completed or cooperatively aborted on disable) clears any
+          // stale marker.
+          await setBackfillError(null)
+        } catch (error: unknown) {
+          // A throw is persisted so the status/UI stops pretending indexing is
+          // progressing and the poll/retry loop above halts.
+          await setBackfillError(errorMessage(error))
+        }
+      }).finally(() => {
+        backfilling.current = false
+        void queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY })
       })
-        // A clean run (completed or cooperatively aborted on disable) clears any
-        // stale marker; a throw is persisted so the status/UI stops pretending
-        // indexing is progressing and the poll/retry loop above halts.
-        .then(() => setBackfillError(null))
-        .catch((error: unknown) => setBackfillError(errorMessage(error)))
-        .finally(() => {
-          backfilling.current = false
-          void queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY })
-        })
     }
   }, [data, queryClient, status.data])
 

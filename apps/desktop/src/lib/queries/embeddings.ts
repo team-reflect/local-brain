@@ -9,6 +9,7 @@ import {
   setBackfillError,
   setEmbeddingsEnabled,
 } from '@local-brain/core'
+import { runExclusiveBackfill } from '../embeddings-coordinator'
 import { errorMessage } from '../utils'
 
 /**
@@ -77,6 +78,16 @@ export function useSetEmbeddingsEnabled() {
   })
 }
 
+/** Optional hooks for a rebuild (kept symmetric with the incremental backfill). */
+export interface RebuildOptions {
+  /**
+   * Abort the rebuild's backfill cooperatively between batches — e.g. semantic
+   * search was disabled mid-rebuild. Mirrors `EmbeddingsSync`'s incremental pass
+   * so a toggle-off stops embedding work in both code paths, not just one.
+   */
+  isStale?: () => boolean
+}
+
 /**
  * Wipe and rebuild every vector (model change / repair).
  *
@@ -86,8 +97,14 @@ export function useSetEmbeddingsEnabled() {
  * usable, so clearing unconditionally could wipe every vector and then fail the
  * backfill — leaving semantic search empty until a later pass. On a not-ready
  * runtime we throw and leave the existing index untouched.
+ *
+ * The clear + backfill + error-record runs through {@link runExclusiveBackfill}
+ * so it can't interleave with `EmbeddingsSync`'s incremental pass: otherwise the
+ * wipe could land while an incremental pass is draining an earlier pending
+ * snapshot (leaving the corpus partly unembedded), or a stale pass finishing
+ * afterwards could clear the failure this rebuild recorded.
  */
-export async function rebuildEmbeddings(): Promise<void> {
+export async function rebuildEmbeddings(options: RebuildOptions = {}): Promise<void> {
   const status = await embedEnsure()
   if (!isEmbedReady(status)) {
     throw new Error(
@@ -96,24 +113,37 @@ export async function rebuildEmbeddings(): Promise<void> {
         : 'Embedding model is still loading; rebuild once it is ready.',
     )
   }
-  // Rebuild is an explicit recovery action: clear the sticky backfill error so a
-  // success leaves a clean status, but re-persist it if this rebuild also throws
-  // so the UI keeps reporting the failure instead of silently pretending again.
-  await setBackfillError(null)
-  await clearEmbeddings()
-  try {
-    await backfillEmbeddings()
-  } catch (error) {
-    await setBackfillError(errorMessage(error))
-    throw error
-  }
+  await runExclusiveBackfill(async () => {
+    // Rebuild is an explicit recovery action: clear the sticky backfill error so a
+    // success leaves a clean status, but re-persist it if this rebuild also throws
+    // so the UI keeps reporting the failure instead of silently pretending again.
+    await setBackfillError(null)
+    await clearEmbeddings()
+    try {
+      // Pass `isStale` so disabling semantic search mid-rebuild aborts between
+      // batches, exactly like the incremental coordinator pass.
+      await backfillEmbeddings(
+        options.isStale === undefined ? {} : { isStale: options.isStale },
+      )
+    } catch (error) {
+      await setBackfillError(errorMessage(error))
+      throw error
+    }
+  })
 }
 
 /** Wipe and rebuild every vector (model change / repair). */
 export function useRebuildEmbeddings() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: rebuildEmbeddings,
+    mutationFn: () =>
+      rebuildEmbeddings({
+        // Observe the LIVE enabled flag from the query cache so toggling semantic
+        // search off mid-rebuild aborts the backfill between batches, matching
+        // `EmbeddingsSync`. A captured snapshot would let the rebuild run on.
+        isStale: () =>
+          queryClient.getQueryData<EmbeddingsStatus>(EMBEDDINGS_STATUS_KEY)?.enabled === false,
+      }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY }),
   })
 }

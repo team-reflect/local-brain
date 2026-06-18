@@ -71,7 +71,7 @@ function installFailingBackfillBridge() {
             )
           }
           if (/count/i.test(sql)) return Promise.resolve([{ count: 1 }]) // one chunk total
-          if (sql.includes('is null')) return Promise.resolve([]) // no orphans to prune
+          if (sql.includes('from "chunk_embeddings"')) return Promise.resolve([]) // no orphans to prune
           return Promise.resolve([{ chunkId: 'c1', text: 'hello', storedHash: null }]) // pending
         }
         case 'db_execute': {
@@ -82,6 +82,8 @@ function installFailingBackfillBridge() {
           }
           return Promise.resolve(1)
         }
+        case 'db_batch':
+          return Promise.resolve([])
         default:
           return Promise.resolve(null)
       }
@@ -183,11 +185,13 @@ describe('EmbeddingsSync', () => {
               return Promise.resolve([]) // no sticky backfill error
             }
             if (/count/i.test(sql)) return Promise.resolve([{ count: pending.length }])
-            if (sql.includes('is null')) return Promise.resolve([]) // no orphans to prune
+            if (sql.includes('from "chunk_embeddings"')) return Promise.resolve([]) // no orphans to prune
             return Promise.resolve(pending) // pending chunks for the backfill
           }
           case 'db_execute':
             return Promise.resolve(1)
+          case 'db_batch':
+            return Promise.resolve([])
           default:
             return Promise.resolve(null)
         }

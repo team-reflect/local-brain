@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { type EmbeddingsStatus, type EmbedStatus, setBridge } from '@local-brain/core'
+import { runExclusiveBackfill } from '../embeddings-coordinator'
 import { embeddingsRefetchInterval, rebuildEmbeddings } from './embeddings'
 
 /**
@@ -43,7 +44,7 @@ function installBridge(
         // backfill's prune + pending scans read the content set here.
         case 'db_query': {
           const sql = String((args as { sql?: unknown }).sql ?? '')
-          if (sql.includes('is null')) return Promise.resolve([]) // no orphans
+          if (sql.includes('from "chunk_embeddings"')) return Promise.resolve([]) // no orphans
           if (options.pendingChunk && !sql.includes('settings')) {
             return Promise.resolve([{ chunkId: 'c1', text: 'hello', storedHash: null }])
           }
@@ -56,6 +57,8 @@ function installBridge(
           }
           return Promise.resolve(1)
         }
+        case 'db_batch':
+          return Promise.resolve([])
         default:
           return Promise.resolve(null)
       }
@@ -145,5 +148,46 @@ describe('rebuildEmbeddings', () => {
     const { commands } = installBridge({ status: 'failed', message: 'onnx blew up' })
     await expect(rebuildEmbeddings()).rejects.toThrow(/failed to load: onnx blew up/)
     expect(commands).not.toContain('embed_clear')
+  })
+
+  it('serializes behind an in-flight backfill so the wipe never lands mid-pass', async () => {
+    // Bugbot pass 7 "Rebuild races coordinator backfill": stand in for an
+    // EmbeddingsSync incremental pass that already holds the shared mutex. The
+    // rebuild must not run `embed_clear` until that pass settles, or the wipe
+    // could land mid-pass and leave part of the corpus unembedded.
+    const { commands } = installBridge({ status: 'ready', model: 'all-MiniLM-L6-v2' })
+    let releaseIncremental: () => void = () => {}
+    const incremental = runExclusiveBackfill(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseIncremental = resolve
+        }),
+    )
+
+    const rebuild = rebuildEmbeddings()
+    // The rebuild may bring the runtime up (embed_ensure runs outside the lock),
+    // but it must block before clearing while the incremental pass holds the lock.
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(commands).toContain('embed_ensure')
+    expect(commands).not.toContain('embed_clear')
+
+    releaseIncremental()
+    await Promise.all([incremental, rebuild])
+    // Only once the incremental pass finished did the rebuild get to wipe.
+    expect(commands).toContain('embed_clear')
+  })
+
+  it('threads isStale into the rebuild backfill so a mid-rebuild disable aborts', async () => {
+    // Bugbot pass 7 "Rebuild ignores disable abort": a manual rebuild must honor
+    // the same cooperative abort as the incremental pass. With `isStale` already
+    // true the backfill aborts before its first batch, so the wipe happened but
+    // no chunk is re-embedded.
+    const { commands } = installBridge(
+      { status: 'ready', model: 'all-MiniLM-L6-v2' },
+      { pendingChunk: true },
+    )
+    await expect(rebuildEmbeddings({ isStale: () => true })).resolves.toBeUndefined()
+    expect(commands).toContain('embed_clear')
+    expect(commands).not.toContain('embed_texts')
   })
 })

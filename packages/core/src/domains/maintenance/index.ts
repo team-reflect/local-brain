@@ -29,13 +29,22 @@ const TABLE: Record<DeletableKind, 'people' | 'organizations' | 'projects' | 'ta
 }
 
 /**
- * Permanently delete a record and its derived data, atomically. Cascades handle
- * typed links; for source records we delete `content_chunks` first so their FTS
- * rows and any `evidence_refs` into them are cleaned up too. The embedding
- * projection has no FK to `content_chunks` (the pipeline owns its lifecycle, so a
- * chunk rewrite can't silently cascade-delete vectors mid-rebuild), so we prune
- * the deleted chunks' `chunk_embeddings`/`chunk_vectors` rows explicitly via
- * `embedDelete` — otherwise orphaned vec0 rows linger and waste KNN slots.
+ * Permanently delete a record and its derived data. Cascades handle typed links;
+ * for source records we delete `content_chunks` (so their FTS rows and any
+ * `evidence_refs` into them are cleaned up too) plus their embedding projection.
+ * The embedding projection has no FK to `content_chunks` (the pipeline owns its
+ * lifecycle, so a chunk rewrite can't silently cascade-delete vectors
+ * mid-rebuild), so it lives in a separate IPC transaction — `db_batch` can't
+ * express the vec0 rowid coupling — and must be pruned explicitly via
+ * `embedDelete`, otherwise orphaned vec0 rows linger and waste KNN slots.
+ *
+ * The two writes can't share a transaction, so we order them for safe failure:
+ * `embedDelete` runs *before* the `content_chunks`/source `db_batch`. If the
+ * embedding prune throws, the durable rows are untouched and the delete is
+ * simply retryable — never a committed source delete with orphaned vectors still
+ * answering KNN. If the prune succeeds but the batch then throws, the chunks
+ * survive without vectors and the idempotent backfill re-embeds them; no orphan
+ * lingers either way.
  */
 export async function hardDeleteRecord(kind: DeletableKind, id: string): Promise<void> {
   const table = TABLE[kind]
@@ -47,13 +56,16 @@ export async function hardDeleteRecord(kind: DeletableKind, id: string): Promise
       .where('recordType', '=', kind)
       .where('recordId', '=', id)
       .execute()
+    // Prune the embedding projection first: a failure here leaves the durable
+    // rows intact and retryable rather than committing the source delete and
+    // stranding orphaned vec0 rows that can still surface in KNN.
+    if (chunks.length > 0) {
+      await embedDelete(chunks.map((chunk) => chunk.id))
+    }
     await batch([
       db.deleteFrom('contentChunks').where('recordType', '=', kind).where('recordId', '=', id),
       db.deleteFrom(table).where('id', '=', id),
     ])
-    if (chunks.length > 0) {
-      await embedDelete(chunks.map((chunk) => chunk.id))
-    }
   } else {
     await batch([db.deleteFrom(table).where('id', '=', id)])
   }
