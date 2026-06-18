@@ -14,6 +14,11 @@ use crate::error::{AppError, AppResult};
 
 const SERVICE: &str = "app.localbrain.desktop";
 
+/// `security` exit code for `errSecItemNotFound` — the only non-zero status that
+/// means "no such item" rather than a real keychain failure (locked, denied, …).
+#[cfg(target_os = "macos")]
+const ERR_SEC_ITEM_NOT_FOUND: i32 = 44;
+
 #[cfg(target_os = "macos")]
 fn run_security(args: &[&str]) -> AppResult<std::process::Output> {
     Command::new("security")
@@ -67,9 +72,15 @@ pub fn keychain_get(account: String) -> AppResult<Option<String>> {
             } else {
                 Some(secret)
             })
-        } else {
-            // A missing item exits non-zero; treat that as "no key", not an error.
+        } else if out.status.code() == Some(ERR_SEC_ITEM_NOT_FOUND) {
+            // No item stored — the only non-zero status that means "no key".
             Ok(None)
+        } else {
+            // A locked keychain or denied access must surface, not look like "no key".
+            Err(AppError::io(format!(
+                "keychain read failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            )))
         }
     }
     #[cfg(not(target_os = "macos"))]
@@ -91,8 +102,17 @@ pub fn keychain_delete(account: String) -> AppResult<()> {
     #[cfg(target_os = "macos")]
     {
         let out = run_security(&["delete-generic-password", "-s", SERVICE, "-a", &account])?;
-        let _ = out; // a missing item is fine
-        Ok(())
+        if out.status.success() || out.status.code() == Some(ERR_SEC_ITEM_NOT_FOUND) {
+            // Deleted, or nothing was stored — both leave the account with no key.
+            Ok(())
+        } else {
+            // A real failure (locked, denied) would leave the secret behind; surface it
+            // so a "Clear key" action can't silently appear to succeed.
+            Err(AppError::io(format!(
+                "keychain delete failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            )))
+        }
     }
     #[cfg(not(target_os = "macos"))]
     {

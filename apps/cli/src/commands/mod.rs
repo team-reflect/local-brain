@@ -127,3 +127,25 @@ pub fn to_match_query(raw: &str, or: bool) -> Option<String> {
         .collect();
     Some(terms.join(if or { " OR " } else { " " }))
 }
+
+/// Build a `%term%` `LIKE` pattern from arbitrary text — the Rust twin of core's
+/// `toLikePattern`. Escapes the LIKE wildcards (`\`, `%`, `_`) so they match
+/// literally (paired with an `ESCAPE '\'` clause) instead of deleting them, which
+/// would turn a wildcard-only query into a `%%` that matches every record.
+/// Returns `None` for blank input.
+pub fn to_like_pattern(raw: &str) -> Option<String> {
+    let needle = raw.trim();
+    if needle.is_empty() {
+        return None;
+    }
+    let mut pattern = String::with_capacity(needle.len() + 2);
+    pattern.push('%');
+    for ch in needle.chars() {
+        if matches!(ch, '\\' | '%' | '_') {
+            pattern.push('\\');
+        }
+        pattern.push(ch);
+    }
+    pattern.push('%');
+    Some(pattern)
+}

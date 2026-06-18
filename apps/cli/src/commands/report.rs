@@ -41,7 +41,9 @@ fn fetch_open_tasks(conn: &Connection) -> Result<Vec<TaskRow>, CliError> {
     rows.collect::<Result<Vec<_>, _>>().map_err(CliError::from)
 }
 
-/// `overdue | today | soon | open` for a task, given today's date and a soon window.
+/// `overdue | today | soon | scheduled | open` for a task, given today's date and
+/// a soon window. Mirrors core `bucketFor`: a task scheduled for a future day is
+/// `scheduled` (ranked with `soon`), not generic `open`.
 fn bucket_for(task: &TaskRow, today: &str, soon_cutoff: &str) -> &'static str {
     if let Some(due) = &task.due_at {
         let due = &due[..due.len().min(10)];
@@ -60,6 +62,7 @@ fn bucket_for(task: &TaskRow, today: &str, soon_cutoff: &str) -> &'static str {
         if sched <= today {
             return "today";
         }
+        return "scheduled";
     }
     "open"
 }
@@ -172,7 +175,7 @@ pub fn plan_day(conn: &Connection, json: bool, limit: usize) -> Result<(), CliEr
     let rank = |t: &TaskRow| match bucket_for(t, &today, &cutoff) {
         "overdue" => 0,
         "today" => 1,
-        "soon" => 2,
+        "soon" | "scheduled" => 2,
         _ => 3,
     };
     tasks.sort_by(|a, b| {

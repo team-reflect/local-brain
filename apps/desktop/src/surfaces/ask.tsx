@@ -35,11 +35,17 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
     const text = draft.trim()
     if (!text || pending) return
     setDraft('')
-    const result = await askMutation.mutateAsync({
-      question: text,
-      ...(conversationId ? { conversationId } : {}),
-    })
-    if (!conversationId) navigate({ kind: 'ask', conversationId: result.conversationId })
+    try {
+      const result = await askMutation.mutateAsync({
+        question: text,
+        ...(conversationId ? { conversationId } : {}),
+      })
+      if (!conversationId) navigate({ kind: 'ask', conversationId: result.conversationId })
+    } catch {
+      // The send failed (e.g. the bridge or DB errored): restore the question so
+      // it is not silently lost and the user can retry without retyping.
+      setDraft(text)
+    }
   }
 
   const status = modelStatus.data
