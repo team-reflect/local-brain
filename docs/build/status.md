@@ -7,18 +7,37 @@ questions needing Alex.
 
 ## Current State
 
-- **Phase:** 04b — Rust safe file-read primitives: `read_text_file` (canonicalize, size
-  cap, UTF-8, SHA-256, kind-by-extension) and `read_text_folder` (recursive scan skipping
-  hidden/unsupported/oversized/binary/duplicate/out-of-root files, with counts) + typed TS
-  bindings. `cargo test` + `pnpm check` green, PR open. (Plan 04 split into 04a/04b/04c —
-  DEC-10; 04a done.)
-- **Active branch:** `codex/local-brain-04b-ingestion-fs` (base `…-04a-ingestion-core`).
+- **Phase:** 04c — Ingestion UI: an `AddRecordDialog` (document/interaction, paste or
+  folder import, link pickers, load-from-path, duplicate notice) wired to the 04a ingest
+  functions + 04b file readers, plus an Add button and `new.document`/`new.interaction`
+  palette commands. `pnpm check` + Vite build + `cargo check` green, PR open. **Plan 04 is
+  now complete** (04a/04b/04c).
+- **Active branch:** `codex/local-brain-04c-ingestion-ui` (base `…-04b-ingestion-fs`).
 - **Mode:** Sequential. This session builds the stack layer by layer; no parallel
   worker sessions are spawned. (Within a layer, read-only research may fan out, but
   commits are made sequentially from this session.)
 - **Blockers:** none at this checkpoint.
 
 ## Log
+
+### 2026-06-17 — Phase 04c: Ingestion UI (Plan 04 complete)
+- Built `AddRecordDialog`: a Document/Interaction toggle and a Paste/Import-folder mode
+  toggle. Paste mode has title/kind/date, a body textarea, an optional "load from file path"
+  (calls `readTextFile`), and collapsible people/projects/organizations/tasks link pickers;
+  Save runs `ingestDocument`/`ingestInteraction`, shows the duplicate notice, and navigates
+  to the record. Folder mode scans a path with `readTextFolder` then ingests each file,
+  reporting imported/duplicate/skipped counts.
+- Wired it in: added `openAdd` to `CommandContext`, pointed the `new.document` /
+  `new.interaction` palette commands at it, added an **Add** button to the command bar, and
+  gave `AppShell` the dialog state. Added `useIngestDocument` / `useIngestInteraction`
+  mutations (broad invalidation).
+- **Decision (DEC-11):** file/folder selection is a typed **path field**, not a native
+  picker — keeps the build hermetic and the dialog render-testable without the Tauri dialog
+  plugin; the native picker is a follow-up.
+- **Verification:** `pnpm check` ✓ — typecheck + oxlint + **61 tests** (27 core, 4 db, 30
+  desktop incl. 4 new `AddRecordDialog` render tests). `pnpm --filter @local-brain/desktop
+  build` ✓ (2041 modules). `cargo check --workspace` ✓ (no Rust this layer). `git diff
+  --check` ✓.
 
 ### 2026-06-17 — Phase 04b: Rust safe file-read primitives
 - Built `apps/desktop/src-tauri/src/fs.rs`: `read_text_file` (canonicalize the
@@ -236,19 +255,17 @@ questions needing Alex.
 - Committed (`5c02ab5`), pushed, opened **PR #1** (base `master`).
 
 ### Next
-- **04c** (`codex/local-brain-04c-ingestion-ui`, base `…-04b-ingestion-fs`): the
-  ingestion UI — a paste/import dialog (document vs interaction, title/kind/date, optional
-  people/org/project/task links), folder import wired to `read_text_folder` + `ingestDocument`
-  with imported/skipped/duplicate reporting, and "Add" actions from the surfaces + command
-  palette. Then **05** (extraction) onward.
-- Ten PRs open and awaiting review: **#1** (supervisor), **#2** (foundation), **#3**
+- **05** (`codex/local-brain-05-extraction`, base `…-04c-ingestion-ui`): memory
+  extraction & linking per `docs/plans/05-memory-extraction.md` — the ingestion extraction
+  seam (`setExtractionHandler`, 04a) is ready to receive a handler.
+- Eleven PRs open and awaiting review: **#1** (supervisor), **#2** (foundation), **#3**
   (schema), **#4** (db package), **#5** (Rust IPC bridge), **#6** (core actions + seed),
   **#7** (03a desktop shell), **#8** (03b desktop shell II), **#9** (04a ingestion core),
-  **#10** (04b Rust file-read primitives — `cargo test` + `pnpm check` green). Plan 02 (DB
-  layer) and Plan 03 (desktop shell) are complete; Plan 04 is underway (04a + 04b done, 04c
-  next). A full end-to-end run of the assembled app (`pnpm tauri dev`/`build`) is still
-  pending and is required before the app can be called done. When #1 merges to `master`,
-  rebase the stack and retarget bases upward.
+  **#10** (04b Rust file-read primitives), **#11** (04c ingestion UI — `pnpm check` + Vite
+  build + cargo check green). Plans 02 (DB layer), 03 (desktop shell), and 04 (ingestion)
+  are complete. A full end-to-end run of the assembled app (`pnpm tauri dev`/`build`) is
+  still pending and is required before the app can be called done. When #1 merges to
+  `master`, rebase the stack and retarget bases upward.
 
 ## Verification ledger
 

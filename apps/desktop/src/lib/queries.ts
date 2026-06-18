@@ -19,6 +19,8 @@ import {
   getSelf,
   getTask,
   getTaskLinks,
+  ingestDocument,
+  ingestInteraction,
   listCitationsForSubject,
   listConversations,
   listEvidenceFromDocument,
@@ -32,6 +34,8 @@ import {
   listTasks,
   quickSearch,
   seedDemoData,
+  type IngestDocumentInput,
+  type IngestInteractionInput,
   type ListTasksOptions,
   type NewChatMessage,
 } from '@local-brain/core'
@@ -193,6 +197,24 @@ export function useEvidenceFromDocument(documentId: string) {
 // Graph
 export function useGraph() {
   return useQuery({ queryKey: ['graph'], queryFn: getGraph })
+}
+
+// Ingestion (paste/import). On success we invalidate broadly because a new
+// document/interaction touches many lists (links, graph, search, Today).
+export function useIngestDocument() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: IngestDocumentInput) => ingestDocument(input),
+    onSuccess: () => queryClient.invalidateQueries(),
+  })
+}
+
+export function useIngestInteraction() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: IngestInteractionInput) => ingestInteraction(input),
+    onSuccess: () => queryClient.invalidateQueries(),
+  })
 }
 
 // Quick search (command palette record results)

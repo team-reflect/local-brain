@@ -8,7 +8,7 @@ import type { CommandContext } from '../lib/commands/types'
 import { installFakeBridge, renderWithProviders } from '../test/utils'
 
 function context(): CommandContext {
-  return { navigate: vi.fn(), back: vi.fn(), forward: vi.fn(), openPalette: vi.fn() }
+  return { navigate: vi.fn(), back: vi.fn(), forward: vi.fn(), openPalette: vi.fn(), openAdd: vi.fn() }
 }
 
 describe('CommandPalette', () => {
