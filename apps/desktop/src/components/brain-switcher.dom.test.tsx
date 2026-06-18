@@ -5,7 +5,9 @@ import { BrainSwitcher } from './brain-switcher'
 import { installFakeBridge, renderWithProviders } from '../test/utils'
 
 const ACTIVE = {
-  path: '/data/brain.sqlite',
+  rootPath: '/data/My brain',
+  databasePath: '/data/My brain/brain.sqlite',
+  assetsPath: '/data/My brain/assets',
   name: 'My brain',
   color: 'indigo',
   createdMs: 1,
@@ -14,7 +16,9 @@ const ACTIVE = {
   schemaVersion: 2,
 }
 const WORK = {
-  path: '/data/work.sqlite',
+  rootPath: '/data/Work',
+  databasePath: '/data/Work/brain.sqlite',
+  assetsPath: '/data/Work/assets',
   name: 'Work',
   color: 'teal',
   createdMs: 1,
@@ -63,7 +67,7 @@ describe('BrainSwitcher', () => {
     await waitFor(() =>
       expect(
         captured.some(
-          (call) => call.command === 'open_brain' && call.args['path'] === '/data/work.sqlite',
+          (call) => call.command === 'open_brain' && call.args['rootPath'] === '/data/Work',
         ),
       ).toBe(true),
     )

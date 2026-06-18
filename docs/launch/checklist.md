@@ -17,10 +17,11 @@ gate decisions. Status reflects the alpha build produced on this host.
 
 ## First-run / launch smoke checklist
 
-Run against a clean user-data directory (e.g. `BRAIN_DB=$(mktemp -d)/brain.sqlite`).
+Run against a clean brain root (e.g. `BRAIN_ROOT=$(mktemp -d)`).
 
-- [ ] First run shows the welcome; "Get started" dismisses it once (never returns).
-- [ ] App creates the SQLite DB and migrates to the current schema version.
+- [ ] First run shows the brain folder chooser before any database is opened.
+- [ ] Selecting a folder creates `brain.sqlite`, `assets/`, and `.local-brain/`.
+- [ ] Welcome appears after a brain opens; "Get started" dismisses it once.
 - [ ] Import a document and an interaction (paste + file path).
 - [ ] Extraction: with a AI provider set, a meeting yields people/org/task/memory;
       without, capture still works (extraction no-ops).

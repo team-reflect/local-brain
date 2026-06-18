@@ -9,8 +9,9 @@ content stored in SQLite and provenance stored on the owning record.
 
 ## Scope
 
-**In:** manual paste, text/markdown/transcript import, folder import, document and
-interaction creation, provenance metadata, safe file reads, content chunking.
+**In:** manual paste, text/markdown/transcript import, folder import, asset import,
+document and interaction creation, provenance metadata, safe file reads and writes,
+content chunking.
 
 **Out:** automatic email/calendar sync, browser extension capture, full OCR, cloud
 storage.
@@ -27,6 +28,8 @@ storage.
 - File reads happen through Rust primitives with path traversal guards.
 - Imported files are copied into SQLite as readable text; the original file remains
   optional provenance, not durable storage.
+- Binary assets are copied into the app-managed `assets/` directory and linked through
+  SQLite. Do not store image or attachment bytes as SQLite blobs.
 - Future app-closed ingestion should use a typed inbox/spooler, not a local web server.
 
 ## Implementation Steps
@@ -43,18 +46,26 @@ storage.
    - size caps
    - content hash
    - clear unsupported-file errors
-4. Build file import for text and markdown.
-5. Add transcript import that defaults to interaction kind `meeting` or `call`.
-6. Add folder import for supported text-like files:
+4. Build Rust asset-write primitives modeled on Reflect Open:
+   - app-relative `assets/...` paths only
+   - path traversal and symlink guards
+   - temp-file plus rename atomic writes
+   - content hash and MIME metadata
+   - Tauri asset-protocol serving for local display
+5. Build file import for text and markdown.
+6. Add image/avatar/attachment import that writes the file, inserts or reuses the
+   `assets` row, and creates the owning `asset_links` row.
+7. Add transcript import that defaults to interaction kind `meeting` or `call`.
+8. Add folder import for supported text-like files:
    - skip hidden/system files
    - skip unsupported binary files
    - report imported/skipped/duplicate counts
-7. Compute content hashes to avoid accidental duplicates.
-8. Store readable text on `documents.body_text` or `interactions.body_text`.
-9. Generate `content_chunks` inside the same transaction.
-10. Trigger extraction jobs from newly created or changed records.
-11. Show imported documents and interactions in relevant detail pages.
-12. Leave a seam for a future typed ingestion inbox:
+9. Compute content hashes to avoid accidental duplicates.
+10. Store readable text on `documents.body_text` or `interactions.body_text`.
+11. Generate `content_chunks` inside the same transaction.
+12. Trigger extraction jobs from newly created or changed records.
+13. Show imported documents, interactions, and linked assets in relevant detail pages.
+14. Leave a seam for a future typed ingestion inbox:
     - app or external helper writes an envelope atomically
     - Local Brain drains it on launch or file event
     - raw record is saved before any enrichment
@@ -66,6 +77,7 @@ storage.
 - A user can paste or import a reference note as a document.
 - A folder import creates documents for supported files.
 - Duplicate detection warns when content hash already exists.
+- A user can add an avatar, logo, image, or attachment and see it on the linked record.
 - Unsafe paths, oversized files, and unsupported files fail clearly without partial
   imports.
 - Chunks are generated for every imported document and interaction.
@@ -76,6 +88,7 @@ storage.
 - Unit test text normalization and chunking.
 - Unit test path validation and unsupported-file handling.
 - Integration test paste/import into SQLite.
+- Integration test asset import writes bytes and metadata, then links the asset.
 - Integration test duplicate detection.
 - Integration test folder import counts and partial-failure behavior.
 - Verify imported records appear in related detail pages and global search.

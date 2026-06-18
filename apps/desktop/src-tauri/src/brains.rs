@@ -1,8 +1,9 @@
 //! The brain registry: Local Brain's top-level workspace picker model.
 //!
 //! In Reflect a "graph" is the top-level container; Local Brain calls it a
-//! **brain** — one self-contained SQLite database file — so the word "graph"
-//! stays reserved for the Network graph *visualization*.
+//! **brain** — one user-selected folder containing `brain.sqlite`, assets, and
+//! support files — so the word "graph" stays reserved for the Network graph
+//! *visualization*.
 //!
 //! A brain's own `settings` table lives *inside* that brain, so it cannot hold
 //! the cross-brain catalogue the switcher needs (it must render brains that
@@ -10,8 +11,9 @@
 //! graph" rule — but keeping Local Brain SQLite-first/local-first for durable
 //! product state — this registry is its own small SQLite database at
 //! `<app data dir>/registry.sqlite`, deliberately separate from every switchable
-//! brain DB. It records every known brain's path, display name, identity color,
-//! and timestamps (table `brains`), plus which brain is active (`registry_meta`).
+//! brain DB. It records every known brain's root path, display name, identity
+//! color, and timestamps (table `brains`), plus which brain is active
+//! (`registry_meta`).
 //!
 //! Rust owns it end to end: writes land in a WAL-backed SQLite transaction,
 //! paths are canonicalized, and the actual connection swap (see [`DbState::swap`])
@@ -69,8 +71,12 @@ const DEFAULT_COLOR: &str = "indigo";
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BrainInfo {
+    /// Absolute, canonical path of the brain root folder.
+    pub root_path: String,
     /// Absolute, canonical path of the brain's SQLite file.
-    pub path: String,
+    pub database_path: String,
+    /// Absolute, canonical path of the brain's assets folder.
+    pub assets_path: String,
     /// User-facing display name.
     pub name: String,
     /// Identity color id (one of [`BRAIN_COLORS`]).
@@ -86,7 +92,7 @@ pub struct BrainInfo {
 /// One catalogued brain (a row of the registry `brains` table).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct BrainRecord {
-    path: String,
+    root_path: String,
     name: String,
     color: String,
     created_ms: u64,
@@ -101,33 +107,50 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// A friendly default name from a brain path: the parent folder name when the
-/// file is the conventional `brain.sqlite`, otherwise the file stem.
-fn derive_name(path: &Path) -> String {
-    let stem = path.file_stem().and_then(|stem| stem.to_str());
-    if matches!(stem, Some("brain")) {
-        if let Some(parent) = path
-            .parent()
-            .and_then(Path::file_name)
-            .and_then(|name| name.to_str())
-        {
-            if !parent.is_empty() {
-                return parent.to_string();
-            }
-        }
-    }
-    stem.filter(|stem| !stem.is_empty())
+/// A friendly default name from a brain root path: the root folder name.
+fn derive_name(root: &Path) -> String {
+    root.file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
         .unwrap_or("Brain")
         .to_string()
 }
 
-/// Canonicalize when the path exists, else fall back to the input string so
+/// Canonicalize when the root exists, else fall back to the input string so
 /// metadata-only operations (rename, color, forget) still match a record.
-fn normalize(path: &str) -> String {
+fn normalize_root(path: &str) -> String {
     Path::new(path)
         .canonicalize()
         .map(|canonical| canonical.display().to_string())
         .unwrap_or_else(|_| path.to_string())
+}
+
+fn paths_for_root(root: &str) -> brain_schema::BrainPaths {
+    brain_schema::BrainPaths::for_root(PathBuf::from(root))
+}
+
+fn info_from_record(
+    record: BrainRecord,
+    live_root: &str,
+    active_schema_version: Option<i64>,
+) -> BrainInfo {
+    let is_active = !live_root.is_empty() && record.root_path == live_root;
+    let paths = paths_for_root(&record.root_path);
+    BrainInfo {
+        root_path: record.root_path,
+        database_path: paths.database_path.display().to_string(),
+        assets_path: paths.assets_path.display().to_string(),
+        name: record.name,
+        color: record.color,
+        created_ms: record.created_ms,
+        last_opened_ms: record.last_opened_ms,
+        is_active,
+        schema_version: if is_active {
+            active_schema_version
+        } else {
+            None
+        },
+    }
 }
 
 fn require_color(color: &str) -> AppResult<()> {
@@ -162,6 +185,28 @@ fn ensure_schema(conn: &Connection) -> AppResult<()> {
     Ok(())
 }
 
+/// Best-effort pre-launch cleanup for old registry rows that pointed directly
+/// at SQLite files. Only paths that actually resolve to files are removed, so a
+/// valid folder whose name happens to end in `.sqlite` stays registered.
+fn remove_legacy_file_rows(conn: &Connection) -> AppResult<()> {
+    let records = all_records(conn)?;
+    let mut stale = Vec::new();
+    for record in records {
+        if Path::new(&record.root_path).is_file() {
+            stale.push(record.root_path);
+        }
+    }
+
+    let active = active_path(conn)?.filter(|path| Path::new(path).is_file());
+    for path in stale {
+        conn.execute("DELETE FROM brains WHERE path = ?1", [path])?;
+    }
+    if active.is_some() {
+        conn.execute("DELETE FROM registry_meta WHERE key = 'active_path'", [])?;
+    }
+    Ok(())
+}
+
 /// Open (creating if needed) the registry database at `path` with the shared
 /// WAL + busy-timeout settings, and ensure its schema.
 fn open_registry(path: &Path) -> AppResult<Connection> {
@@ -171,6 +216,7 @@ fn open_registry(path: &Path) -> AppResult<Connection> {
     let conn = Connection::open(path)?;
     conn.busy_timeout(Duration::from_millis(5000))?;
     ensure_schema(&conn)?;
+    remove_legacy_file_rows(&conn)?;
     Ok(conn)
 }
 
@@ -249,7 +295,7 @@ fn all_records(conn: &Connection) -> AppResult<Vec<BrainRecord>> {
 
 fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<BrainRecord> {
     Ok(BrainRecord {
-        path: row.get(0)?,
+        root_path: row.get(0)?,
         name: row.get(1)?,
         color: row.get(2)?,
         created_ms: row.get::<_, i64>(3)? as u64,
@@ -272,8 +318,8 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<BrainRecord> {
 /// candidate path vs the startup `canonicalize` of it — always hits one row
 /// instead of inserting a duplicate. A path whose file can't be canonicalized
 /// falls back to its raw string, matching the metadata commands' [`normalize`].
-fn mark_opened(conn: &Connection, path: &str, name: Option<&str>) -> AppResult<()> {
-    let key = normalize(path);
+fn mark_opened(conn: &Connection, root_path: &str, name: Option<&str>) -> AppResult<()> {
+    let key = normalize_root(root_path);
     let now = now_ms() as i64;
     let provided = name
         .map(str::trim)
@@ -339,22 +385,7 @@ fn infos(
     let records = all_records(conn)?;
     Ok(records
         .into_iter()
-        .map(|record| {
-            let is_active = !active.is_empty() && record.path == active;
-            BrainInfo {
-                path: record.path,
-                name: record.name,
-                color: record.color,
-                created_ms: record.created_ms,
-                last_opened_ms: record.last_opened_ms,
-                is_active,
-                schema_version: if is_active {
-                    active_schema_version
-                } else {
-                    None
-                },
-            }
-        })
+        .map(|record| info_from_record(record, &active, active_schema_version))
         .collect())
 }
 
@@ -381,13 +412,12 @@ pub struct BrainState {
 }
 
 impl BrainState {
-    /// Load (or create) the registry for the given app data layout. The default
-    /// brain `default_db_path` only fixes where `registry.sqlite` lands when no
-    /// platform data dir resolves; a brain is not registered until it is opened.
-    pub fn load(default_db_path: &Path) -> Self {
+    /// Load (or create) the registry. A brain is not registered until a root
+    /// folder is opened.
+    pub fn load() -> Self {
         let registry_path = brain_schema::app_data_dir()
             .map(|dir| dir.join("registry.sqlite"))
-            .unwrap_or_else(|| default_db_path.with_file_name("registry.sqlite"));
+            .unwrap_or_else(|| PathBuf::from("registry.sqlite"));
         let (registry, durable) = open_resilient(&registry_path);
         // open_resilient has created the file (unless it fell back to memory), so
         // canonicalize now to match the canonical path open_brain compares against;
@@ -417,7 +447,7 @@ impl BrainState {
     /// spelling of the same file still resolves to the registry.
     ///
     /// [`active_candidate`]: BrainState::active_candidate
-    fn is_registry(&self, candidate: &Path) -> bool {
+    pub(crate) fn is_registry(&self, candidate: &Path) -> bool {
         let resolved = candidate.canonicalize();
         let candidate = resolved.as_deref().unwrap_or(candidate);
         if self.registry_path == candidate {
@@ -451,79 +481,76 @@ impl BrainState {
             .map_err(|_| AppError::io("the brain switch lock was poisoned by an earlier panic"))
     }
 
-    /// The brain to open at startup: `$BRAIN_DB` (CLI parity / explicit pin),
-    /// else the last active brain if its file still exists, else the default.
-    ///
-    /// Neither the `$BRAIN_DB` pin nor a stale stored active path may resolve to
-    /// our own `registry.sqlite`: startup runs [`open_and_migrate`] on whatever
-    /// this returns, so returning the registry would migrate the catalogue like a
-    /// brain and keep a second live connection to it — the same hazard
-    /// [`open_brain`] guards against via [`is_registry`]. Both candidates are
-    /// therefore filtered through [`is_registry`], falling through to the default
-    /// brain (which is never the registry; see [`load`]) when they point at it.
-    ///
-    /// [`open_and_migrate`]: brain_schema::open_and_migrate
-    /// [`is_registry`]: BrainState::is_registry
-    /// [`load`]: BrainState::load
-    pub fn active_candidate(&self, default_db_path: &Path) -> PathBuf {
-        if let Some(env) = std::env::var_os("BRAIN_DB") {
-            if !env.is_empty() {
-                let pinned = PathBuf::from(env);
-                if !self.is_registry(&pinned) {
-                    return pinned;
-                }
-            }
+    /// The brain root to open at startup: `$BRAIN_ROOT`, else the last active
+    /// root if its folder still exists, else no active brain.
+    pub fn active_root_candidate(&self) -> Option<PathBuf> {
+        if let Some(root) = brain_schema::resolve_brain_root() {
+            return Some(root);
         }
         if let Ok(conn) = self.registry.lock() {
             if let Ok(Some(active)) = active_path(&conn) {
                 let stored = PathBuf::from(&active);
-                if !active.is_empty() && stored.is_file() && !self.is_registry(&stored) {
-                    return stored;
+                if !active.is_empty() && stored.is_dir() {
+                    return Some(stored);
                 }
             }
         }
-        default_db_path.to_path_buf()
+        None
     }
 
-    /// Record `canonical` as opened and active, persisting it to the registry
+    /// Record `canonical_root` as opened and active, persisting it to the registry
     /// database in one atomic upsert. Used at startup (best-effort) and as the
     /// durable half of a runtime switch — see [`switch_to`], which only swaps the
     /// live connection once this has committed.
-    pub fn register_active(&self, canonical: &Path, name: Option<&str>) -> AppResult<()> {
+    pub fn register_active(&self, canonical_root: &Path, name: Option<&str>) -> AppResult<()> {
         self.require_durable()?;
-        let path = canonical.display().to_string();
+        let path = canonical_root.display().to_string();
         let conn = self.lock()?;
         mark_opened(&conn, &path, name)
     }
 
-    fn active_info(&self, db: &DbState) -> AppResult<BrainInfo> {
-        let active = db.active_path()?.display().to_string();
+    fn active_info(&self, db: &DbState) -> AppResult<Option<BrainInfo>> {
+        let paths = match db.active_paths() {
+            Ok(paths) => paths,
+            Err(AppError::NoDatabase { .. }) => return Ok(None),
+            Err(err) => return Err(err),
+        };
+        let active = paths.root_path.display().to_string();
         let schema_version = db.schema_version().ok();
         let conn = self.lock()?;
         if let Some(record) = find(&conn, &active)? {
-            Ok(BrainInfo {
-                path: record.path,
-                name: record.name,
-                color: record.color,
-                created_ms: record.created_ms,
-                last_opened_ms: record.last_opened_ms,
-                is_active: true,
-                schema_version,
-            })
+            Ok(Some(info_from_record(record, &active, schema_version)))
         } else {
             // Defensive: the open brain isn't catalogued (e.g. a `$BRAIN_DB`
             // pin we never persisted). Synthesize a record from the path.
-            Ok(BrainInfo {
+            Ok(Some(BrainInfo {
+                root_path: active.clone(),
+                database_path: paths.database_path.display().to_string(),
+                assets_path: paths.assets_path.display().to_string(),
                 name: derive_name(Path::new(&active)),
                 color: DEFAULT_COLOR.to_string(),
                 created_ms: 0,
                 last_opened_ms: 0,
                 is_active: true,
                 schema_version,
-                path: active,
-            })
+            }))
         }
     }
+}
+
+pub(crate) fn open_root_for_brain(
+    brains: &BrainState,
+    root: &Path,
+) -> AppResult<(brain_schema::BrainPaths, Connection)> {
+    let paths = brain_schema::bootstrap_brain_root(root)?;
+    if brains.is_registry(&paths.database_path) {
+        return Err(AppError::parse(format!(
+            "{} is Local Brain's internal brain registry, not a brain database",
+            paths.database_path.display()
+        )));
+    }
+    let conn = brain_schema::open_and_migrate(&paths.database_path)?;
+    Ok((paths, conn))
 }
 
 /// Switch the live database to an already-opened, migrated brain.
@@ -546,14 +573,18 @@ fn switch_to(
     db: &DbState,
     brains: &BrainState,
     conn: Connection,
-    canonical: &Path,
+    paths: impl crate::db::IntoActivePaths,
     name: Option<&str>,
 ) -> AppResult<BrainInfo> {
     // One switch at a time: persist + swap is a single critical section so
     // overlapping switches can't interleave the two stores onto different brains.
     let _switch = brains.switch_guard()?;
-    db.swap_after(conn, canonical, || brains.register_active(canonical, name))?;
-    brains.active_info(db)
+    let paths = paths.into_active_paths();
+    let root = paths.root_path.clone();
+    db.swap_after(conn, paths, || brains.register_active(&root, name))?;
+    brains
+        .active_info(db)?
+        .ok_or_else(|| AppError::no_database("the brain switch completed without an active brain"))
 }
 
 // ---- Tauri commands -------------------------------------------------------
@@ -566,7 +597,7 @@ pub fn list_brains(
 ) -> AppResult<Vec<BrainInfo>> {
     // Derive the active flag from the live connection, not the registry pointer,
     // so a stale `active_path` can't mark the wrong brain active (see [`infos`]).
-    let live_active = db.active_path().ok();
+    let live_active = db.active_root_path().ok();
     let schema_version = db.schema_version().ok();
     let conn = brains.lock()?;
     infos(&conn, live_active.as_deref(), schema_version)
@@ -574,99 +605,63 @@ pub fn list_brains(
 
 /// The currently open brain.
 #[tauri::command]
-pub fn active_brain(db: State<'_, DbState>, brains: State<'_, BrainState>) -> AppResult<BrainInfo> {
+pub fn active_brain(
+    db: State<'_, DbState>,
+    brains: State<'_, BrainState>,
+) -> AppResult<Option<BrainInfo>> {
     brains.active_info(&db)
 }
 
-/// Open an existing brain and make it active. Errors (bad path, open failure)
-/// leave the current brain untouched.
+/// Open or bootstrap a brain root directory and make it active. Errors leave
+/// the current brain untouched.
 #[tauri::command]
 pub fn open_brain(
     db: State<'_, DbState>,
     brains: State<'_, BrainState>,
-    path: String,
+    root_path: String,
 ) -> AppResult<BrainInfo> {
-    open_brain_impl(&db, &brains, &path)
+    open_brain_impl(&db, &brains, &root_path)
 }
 
-fn open_brain_impl(db: &DbState, brains: &BrainState, path: &str) -> AppResult<BrainInfo> {
-    let canonical = Path::new(path)
-        .canonicalize()
-        .map_err(|err| AppError::not_found(format!("no brain at {path}: {err}")))?;
-    if !canonical.is_file() {
-        return Err(AppError::parse(format!(
-            "not a brain database file: {path}"
-        )));
+fn open_brain_impl(db: &DbState, brains: &BrainState, root_path: &str) -> AppResult<BrainInfo> {
+    let root = Path::new(root_path);
+    if root.exists() && !root.is_dir() {
+        return Err(AppError::parse(format!("not a brain folder: {root_path}")));
     }
-    // Never open the app's own registry as a brain: that would migrate the
-    // registry like a brain and leave a second live connection to the same file.
-    if brains.is_registry(&canonical) {
-        return Err(AppError::parse(format!(
-            "{path} is Local Brain's internal brain registry, not a brain database"
-        )));
-    }
-    let conn = brain_schema::open_and_migrate(&canonical)?;
-    switch_to(db, brains, conn, &canonical, None)
+    let (paths, conn) = open_root_for_brain(brains, root)?;
+    switch_to(db, brains, conn, paths, None)
 }
 
-/// Create a brand-new brain at `path`, then open it. `path` must be absolute and
-/// must not already exist (open the existing one instead).
+/// Create or bootstrap a brain root directory, then open it.
 #[tauri::command]
 pub fn create_brain(
     db: State<'_, DbState>,
     brains: State<'_, BrainState>,
-    path: String,
+    root_path: String,
     name: Option<String>,
 ) -> AppResult<BrainInfo> {
-    create_brain_impl(&db, &brains, &path, name.as_deref())
+    create_brain_impl(&db, &brains, &root_path, name.as_deref())
 }
 
 fn create_brain_impl(
     db: &DbState,
     brains: &BrainState,
-    path: &str,
+    root_path: &str,
     name: Option<&str>,
 ) -> AppResult<BrainInfo> {
-    let target = Path::new(path);
+    let target = Path::new(root_path);
     if !target.is_absolute() {
         return Err(AppError::parse(format!(
-            "a new brain needs an absolute path: {path}"
+            "a new brain needs an absolute folder path: {root_path}"
         )));
     }
-    if target.exists() {
+    if target.exists() && !target.is_dir() {
         return Err(AppError::parse(format!(
-            "a file already exists at {path} — open it instead"
+            "a file already exists at {root_path} — choose a folder instead"
         )));
     }
-    let conn = brain_schema::open_and_migrate(target)?;
-    let canonical = target
-        .canonicalize()
-        .unwrap_or_else(|_| target.to_path_buf());
-    // `open_and_migrate` just created the database file (we verified it didn't
-    // exist above). If the switch fails — a poisoned DB lock or a registry
-    // persist error — the previous brain stays active, so the file we created
-    // is orphaned and uncatalogued. `switch_to` has already dropped `conn` on
-    // that path, so the file is closed and safe to remove; clean it up to keep
-    // the create all-or-nothing.
-    match switch_to(db, brains, conn, &canonical, name) {
-        Ok(info) => Ok(info),
-        Err(err) => {
-            remove_brain_file(target);
-            Err(err)
-        }
-    }
-}
-
-/// Best-effort delete of a freshly-created brain database and its WAL/SHM
-/// sidecars after a failed [`create_brain`]. Errors are ignored: leaving a
-/// stray file is preferable to masking the original switch failure.
-fn remove_brain_file(target: &Path) {
-    let _ = std::fs::remove_file(target);
-    for suffix in ["-wal", "-shm"] {
-        let mut sidecar = target.as_os_str().to_os_string();
-        sidecar.push(suffix);
-        let _ = std::fs::remove_file(PathBuf::from(sidecar));
-    }
+    let (paths, conn) = open_root_for_brain(brains, target)?;
+    switch_to(db, brains, conn, paths, name)
 }
 
 /// Apply a single-column metadata edit (rename / color) to a catalogued brain.
@@ -681,16 +676,16 @@ fn remove_brain_file(target: &Path) {
 fn edit_metadata(
     db: &DbState,
     brains: &BrainState,
-    raw_path: &str,
+    raw_root_path: &str,
     update: &str,
     value: &str,
 ) -> AppResult<BrainInfo> {
     brains.require_durable()?;
-    let key = normalize(raw_path);
+    let key = normalize_root(raw_root_path);
     let live_active = db
-        .active_path()
+        .active_root_path()
         .ok()
-        .map(|path| normalize(&path.display().to_string()));
+        .map(|path| normalize_root(&path.display().to_string()));
     {
         let conn = brains.lock()?;
         if live_active.as_deref() == Some(key.as_str()) {
@@ -699,11 +694,13 @@ fn edit_metadata(
         let affected = conn.execute(update, params![key, value])?;
         if affected == 0 {
             return Err(AppError::not_found(format!(
-                "no brain registered at {raw_path}"
+                "no brain registered at {raw_root_path}"
             )));
         }
     }
-    brains.active_info(db)
+    brains
+        .active_info(db)?
+        .ok_or_else(|| AppError::no_database("no active brain"))
 }
 
 /// Rename a brain in the catalogue.
@@ -711,7 +708,7 @@ fn edit_metadata(
 pub fn rename_brain(
     db: State<'_, DbState>,
     brains: State<'_, BrainState>,
-    path: String,
+    root_path: String,
     name: String,
 ) -> AppResult<BrainInfo> {
     let trimmed = name.trim();
@@ -721,7 +718,7 @@ pub fn rename_brain(
     edit_metadata(
         &db,
         &brains,
-        &path,
+        &root_path,
         "UPDATE brains SET name = ?2 WHERE path = ?1",
         trimmed,
     )
@@ -732,14 +729,14 @@ pub fn rename_brain(
 pub fn set_brain_color(
     db: State<'_, DbState>,
     brains: State<'_, BrainState>,
-    path: String,
+    root_path: String,
     color: String,
 ) -> AppResult<BrainInfo> {
     require_color(&color)?;
     edit_metadata(
         &db,
         &brains,
-        &path,
+        &root_path,
         "UPDATE brains SET color = ?2 WHERE path = ?1",
         &color,
     )
@@ -751,17 +748,21 @@ pub fn set_brain_color(
 pub fn forget_brain(
     db: State<'_, DbState>,
     brains: State<'_, BrainState>,
-    path: String,
+    root_path: String,
 ) -> AppResult<Vec<BrainInfo>> {
-    forget_brain_impl(&db, &brains, &path)
+    forget_brain_impl(&db, &brains, &root_path)
 }
 
-fn forget_brain_impl(db: &DbState, brains: &BrainState, path: &str) -> AppResult<Vec<BrainInfo>> {
-    let key = normalize(path);
+fn forget_brain_impl(
+    db: &DbState,
+    brains: &BrainState,
+    root_path: &str,
+) -> AppResult<Vec<BrainInfo>> {
+    let key = normalize_root(root_path);
     // Guard against forgetting the *live* active brain (the one reads/writes hit),
     // and derive the returned list's active flag from it too, so a stale registry
     // pointer can neither block a valid forget nor mislabel the survivors.
-    let live_active = db.active_path().ok();
+    let live_active = db.active_root_path().ok();
     let live_active_str = live_active.as_ref().map(|path| path.display().to_string());
     if live_active_str.as_deref() == Some(key.as_str()) {
         return Err(AppError::parse(
@@ -784,7 +785,7 @@ fn forget_brain_impl(db: &DbState, brains: &BrainState, path: &str) -> AppResult
     let affected = tx.execute("DELETE FROM brains WHERE path = ?1", [&key])?;
     if affected == 0 {
         return Err(AppError::not_found(format!(
-            "no brain registered at {path}"
+            "no brain registered at {root_path}"
         )));
     }
     // The forget guard only protects the *live* active brain; the registry's
@@ -805,11 +806,11 @@ fn forget_brain_impl(db: &DbState, brains: &BrainState, path: &str) -> AppResult
     infos(&conn, live_active.as_deref(), schema_version)
 }
 
-/// Reveal a brain's database file in the OS file manager (best effort).
+/// Reveal a brain's root folder in the OS file manager (best effort).
 #[tauri::command]
-pub fn reveal_brain(path: String) -> AppResult<()> {
-    tauri_plugin_opener::reveal_item_in_dir(&path)
-        .map_err(|err| AppError::io(format!("could not reveal {path}: {err}")))
+pub fn reveal_brain(root_path: String) -> AppResult<()> {
+    tauri_plugin_opener::reveal_item_in_dir(&root_path)
+        .map_err(|err| AppError::io(format!("could not reveal {root_path}: {err}")))
 }
 
 #[cfg(test)]
@@ -867,18 +868,17 @@ mod tests {
 
     #[test]
     fn derive_name_prefers_parent_for_default_filename() {
-        assert_eq!(derive_name(Path::new("/x/Work/brain.sqlite")), "Work");
-        assert_eq!(derive_name(Path::new("/x/personal.sqlite")), "personal");
+        assert_eq!(derive_name(Path::new("/x/Work")), "Work");
+        assert_eq!(derive_name(Path::new("/x/Personal")), "Personal");
     }
 
     #[test]
     fn register_active_persists_and_round_trips() {
         let dir = tempdir().unwrap();
         let registry_path = dir.path().join("registry.sqlite");
-        let path = dir.path().join("Work").join("brain.sqlite");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, b"db").unwrap();
-        let canonical = path.canonicalize().unwrap();
+        let root = dir.path().join("Work");
+        std::fs::create_dir_all(&root).unwrap();
+        let canonical = root.canonicalize().unwrap();
 
         {
             let brains = file_state(&registry_path);
@@ -896,6 +896,54 @@ mod tests {
         assert_eq!(records[0].name, "Work");
         assert_eq!(records[0].color, DEFAULT_COLOR);
         assert!(records[0].created_ms > 0);
+    }
+
+    #[test]
+    fn registry_cleanup_preserves_folder_roots_ending_in_sqlite() {
+        let dir = tempdir().unwrap();
+        let registry_path = dir.path().join("registry.sqlite");
+        let root = dir.path().join("Work.sqlite");
+        std::fs::create_dir_all(&root).unwrap();
+        let canonical = root.canonicalize().unwrap().display().to_string();
+
+        {
+            let conn = open_registry(&registry_path).unwrap();
+            mark_opened(&conn, &canonical, Some("Work")).unwrap();
+        }
+
+        let reopened = open_registry(&registry_path).unwrap();
+        assert!(
+            find(&reopened, &canonical).unwrap().is_some(),
+            "a brain root folder ending in .sqlite is valid and must remain catalogued"
+        );
+        assert_eq!(
+            active_path(&reopened).unwrap().as_deref(),
+            Some(canonical.as_str())
+        );
+    }
+
+    #[test]
+    fn registry_cleanup_removes_existing_legacy_file_rows_only() {
+        let dir = tempdir().unwrap();
+        let registry_path = dir.path().join("registry.sqlite");
+        let legacy_file = dir.path().join("legacy.sqlite");
+        std::fs::write(&legacy_file, b"not a registry brain root").unwrap();
+        let legacy_key = legacy_file.display().to_string();
+
+        {
+            let conn = open_registry(&registry_path).unwrap();
+            mark_opened(&conn, &legacy_key, Some("Legacy")).unwrap();
+        }
+
+        let reopened = open_registry(&registry_path).unwrap();
+        assert!(
+            find(&reopened, &legacy_key).unwrap().is_none(),
+            "actual file-style legacy brain rows should be reset"
+        );
+        assert!(
+            active_path(&reopened).unwrap().is_none(),
+            "an active pointer to a legacy file row should be cleared"
+        );
     }
 
     #[test]
@@ -969,7 +1017,7 @@ mod tests {
             .unwrap();
         let records = all_records(&conn).unwrap();
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].path, "/b/brain.sqlite");
+        assert_eq!(records[0].root_path, "/b/brain.sqlite");
 
         // infos() marks the live active brain and orders newest-opened first.
         let infos = infos(&conn, Some(Path::new("/b/brain.sqlite")), Some(2)).unwrap();
@@ -1002,7 +1050,7 @@ mod tests {
         let conn = brains.lock().unwrap();
         let records = all_records(&conn).unwrap();
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].path, "/a/brain.sqlite");
+        assert_eq!(records[0].root_path, "/a/brain.sqlite");
     }
 
     #[test]
@@ -1033,7 +1081,7 @@ mod tests {
         assert!(
             remaining
                 .iter()
-                .all(|info| info.path != "/stale/brain.sqlite"),
+                .all(|info| info.root_path != "/stale/brain.sqlite"),
             "the forgotten brain must not appear in the returned list"
         );
 
@@ -1087,7 +1135,9 @@ mod tests {
 
         let remaining = forget_brain_impl(&db, &brains, "/a/brain.sqlite").unwrap();
         assert!(
-            remaining.iter().all(|info| info.path != "/a/brain.sqlite"),
+            remaining
+                .iter()
+                .all(|info| info.root_path != "/a/brain.sqlite"),
             "the forgotten brain must not appear in the returned list"
         );
         let conn = brains.lock().unwrap();
@@ -1114,7 +1164,7 @@ mod tests {
 
         // The live connection is actually open on B.
         let live = infos(&conn, Some(Path::new("/b/brain.sqlite")), Some(7)).unwrap();
-        let by_path = |path: &str| live.iter().find(|info| info.path == path).unwrap();
+        let by_path = |path: &str| live.iter().find(|info| info.root_path == path).unwrap();
 
         let b = by_path("/b/brain.sqlite");
         assert!(b.is_active, "the live brain (B) must be active");
@@ -1154,43 +1204,35 @@ mod tests {
     }
 
     #[test]
-    fn active_candidate_prefers_existing_active_then_default() {
+    fn active_root_candidate_prefers_existing_active_then_none() {
         let dir = tempdir().unwrap();
         let brains = memory_state();
-        let default = dir.path().join("default.sqlite");
 
-        // No active set and BRAIN_DB unset → default. (Guard against a stray env.)
-        if std::env::var_os("BRAIN_DB").is_none() {
-            assert_eq!(brains.active_candidate(&default), default);
+        // No active set and BRAIN_ROOT unset → chooser.
+        if std::env::var_os("BRAIN_ROOT").is_none() {
+            assert_eq!(brains.active_root_candidate(), None);
         }
 
-        // A real active file is preferred.
-        let active = dir.path().join("active.sqlite");
-        std::fs::write(&active, b"db").unwrap();
+        // A real active folder is preferred.
+        let active = dir.path().join("Active");
+        std::fs::create_dir_all(&active).unwrap();
         {
             let conn = brains.lock().unwrap();
             set_active_path(&conn, &active.display().to_string()).unwrap();
         }
-        if std::env::var_os("BRAIN_DB").is_none() {
-            assert_eq!(brains.active_candidate(&default), active);
+        if std::env::var_os("BRAIN_ROOT").is_none() {
+            assert_eq!(brains.active_root_candidate(), Some(active));
         }
     }
 
     #[test]
-    fn active_candidate_skips_a_stale_registry_active_path() {
-        // Bugbot High regression: startup runs open_and_migrate on whatever
-        // active_candidate returns, with no is_registry guard of its own. A stale
-        // stored active path pointing at registry.sqlite would migrate the
-        // catalogue like a brain and open a second live connection to it. The
-        // candidate must be filtered through is_registry and fall through to the
-        // default brain. (The $BRAIN_DB pin shares the same guard.)
+    fn active_root_candidate_skips_a_stale_file_active_path() {
+        // Folder-based startup must ignore legacy/stale file paths so it shows
+        // the chooser instead of migrating an arbitrary SQLite file as a root.
         let dir = tempdir().unwrap();
         let registry_path = dir.path().join("registry.sqlite");
         let brains = file_state(&registry_path);
-        let default = dir.path().join("default.sqlite");
 
-        // The registry file exists, so a non-canonical spelling of it still
-        // resolves: record that stale path as the active brain.
         let stale = dir
             .path()
             .join(".")
@@ -1202,12 +1244,11 @@ mod tests {
             set_active_path(&conn, &stale).unwrap();
         }
 
-        // Guard against a stray $BRAIN_DB in the test environment masking this.
-        if std::env::var_os("BRAIN_DB").is_none() {
+        if std::env::var_os("BRAIN_ROOT").is_none() {
             assert_eq!(
-                brains.active_candidate(&default),
-                default,
-                "a stored active path pointing at the registry must not open it as a brain"
+                brains.active_root_candidate(),
+                None,
+                "a stored active file path must not open as a brain root"
             );
         }
     }
@@ -1277,19 +1318,18 @@ mod tests {
         let old = dir.path().join("old.sqlite");
         let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old.clone());
 
-        let new = dir.path().join("Work").join("brain.sqlite");
-        std::fs::create_dir_all(new.parent().unwrap()).unwrap();
-        let new_conn = brain_schema::open_and_migrate(&new).unwrap();
-        let canonical = new.canonicalize().unwrap();
+        let new = dir.path().join("Work");
+        let (paths, new_conn) = brain_schema::open_brain_root(&new).unwrap();
+        let canonical = paths.root_path.clone();
 
         let brains = memory_state();
-        let info = switch_to(&db, &brains, new_conn, &canonical, None).unwrap();
+        let info = switch_to(&db, &brains, new_conn, paths, None).unwrap();
 
         // The live DB moved to the new brain...
-        assert_eq!(db.active_path().unwrap(), canonical);
+        assert_eq!(db.active_root_path().unwrap(), canonical);
         // ...and the registry durably records it as the active brain.
         assert!(info.is_active);
-        assert_eq!(info.path, canonical.display().to_string());
+        assert_eq!(info.root_path, canonical.display().to_string());
         let conn = brains.lock().unwrap();
         assert_eq!(
             active_path(&conn).unwrap().unwrap(),
@@ -1313,11 +1353,11 @@ mod tests {
             start.clone(),
         );
 
-        let a = dir.path().join("a.sqlite");
-        let b = dir.path().join("b.sqlite");
+        let a = dir.path().join("A");
+        let b = dir.path().join("B");
         // Migrate both up front so the threads only race the register + swap.
-        brain_schema::open_and_migrate(&a).unwrap();
-        brain_schema::open_and_migrate(&b).unwrap();
+        brain_schema::open_brain_root(&a).unwrap();
+        brain_schema::open_brain_root(&b).unwrap();
         let a = a.canonicalize().unwrap();
         let b = b.canonicalize().unwrap();
 
@@ -1328,17 +1368,17 @@ mod tests {
         for _ in 0..200 {
             std::thread::scope(|scope| {
                 scope.spawn(|| {
-                    let conn = brain_schema::open_and_migrate(&a).unwrap();
-                    let _ = switch_to(&db, &brains, conn, &a, None);
+                    let (paths, conn) = brain_schema::open_brain_root(&a).unwrap();
+                    let _ = switch_to(&db, &brains, conn, paths, None);
                 });
                 scope.spawn(|| {
-                    let conn = brain_schema::open_and_migrate(&b).unwrap();
-                    let _ = switch_to(&db, &brains, conn, &b, None);
+                    let (paths, conn) = brain_schema::open_brain_root(&b).unwrap();
+                    let _ = switch_to(&db, &brains, conn, paths, None);
                 });
             });
 
             // Whichever switch resolved last, both stores must name the same brain.
-            let live = db.active_path().unwrap().display().to_string();
+            let live = db.active_root_path().unwrap().display().to_string();
             let recorded = {
                 let conn = brains.lock().unwrap();
                 active_path(&conn).unwrap().unwrap()
@@ -1395,13 +1435,17 @@ mod tests {
     const RENAME_SQL: &str = "UPDATE brains SET name = ?2 WHERE path = ?1";
     const COLOR_SQL: &str = "UPDATE brains SET color = ?2 WHERE path = ?1";
 
-    /// A live DB open on a freshly migrated brain at `path`, with its canonical
-    /// path (so `active_path()` matches the registry's normalized key).
+    /// A live DB open on a freshly migrated brain root, with its canonical root
+    /// path (so registry metadata matches the folder-based key).
     fn live_db(path: &Path) -> (DbState, String) {
-        let conn = brain_schema::open_and_migrate(path).unwrap();
-        let canonical = path.canonicalize().unwrap();
-        let key = canonical.display().to_string();
-        (DbState::new(conn, canonical), key)
+        let root = if path.file_name().and_then(|name| name.to_str()) == Some("brain.sqlite") {
+            path.parent().unwrap_or(path)
+        } else {
+            path
+        };
+        let (paths, conn) = brain_schema::open_brain_root(root).unwrap();
+        let key = paths.root_path.display().to_string();
+        (DbState::new(conn, paths), key)
     }
 
     #[test]
@@ -1413,15 +1457,12 @@ mod tests {
         let dir = tempdir().unwrap();
         let nested = dir.path().join("Work");
         std::fs::create_dir_all(&nested).unwrap();
-        let path = nested.join("brain.sqlite");
-        std::fs::write(&path, b"db").unwrap();
-
         let brains = memory_state();
         let conn = brains.lock().unwrap();
 
-        let canonical = path.canonicalize().unwrap().display().to_string();
-        // A non-canonical spelling of the same file ("…/Work/./brain.sqlite").
-        let dotted = nested.join(".").join("brain.sqlite").display().to_string();
+        let canonical = nested.canonicalize().unwrap().display().to_string();
+        // A non-canonical spelling of the same root folder ("…/Work/.").
+        let dotted = nested.join(".").display().to_string();
         assert_ne!(canonical, dotted, "the spellings must actually differ");
 
         mark_opened(&conn, &canonical, Some("First")).unwrap();
@@ -1429,7 +1470,7 @@ mod tests {
 
         let records = all_records(&conn).unwrap();
         assert_eq!(records.len(), 1, "the same brain must not list twice");
-        assert_eq!(records[0].path, canonical);
+        assert_eq!(records[0].root_path, canonical);
         // The active pointer normalizes too, so it names the single row.
         assert_eq!(active_path(&conn).unwrap().unwrap(), canonical);
     }
@@ -1543,6 +1584,39 @@ mod tests {
         assert!(all_records(&conn).unwrap().is_empty());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn open_root_rejects_registry_symlink_before_migration() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempdir().unwrap();
+        let registry_path = dir.path().join("registry.sqlite");
+        let brains = file_state(&registry_path);
+
+        let root = dir.path().join("Tricky");
+        std::fs::create_dir_all(&root).unwrap();
+        symlink(&registry_path, root.join("brain.sqlite")).unwrap();
+
+        let result = open_root_for_brain(&brains, &root);
+        assert!(
+            result.is_err(),
+            "a brain.sqlite symlink to registry.sqlite must be rejected"
+        );
+
+        let conn = open_registry(&registry_path).unwrap();
+        let migrated_as_brain: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_meta'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            migrated_as_brain, 0,
+            "the registry must not be migrated before the guard fires"
+        );
+    }
+
     #[test]
     fn open_brain_opens_a_real_brain() {
         // The guard rejects only the registry itself — an ordinary brain still opens.
@@ -1553,14 +1627,13 @@ mod tests {
         let old = dir.path().join("old.sqlite");
         let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old.clone());
 
-        let target = dir.path().join("Work").join("brain.sqlite");
-        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
-        brain_schema::open_and_migrate(&target).unwrap();
+        let target = dir.path().join("Work");
+        brain_schema::open_brain_root(&target).unwrap();
         let canonical = target.canonicalize().unwrap();
 
         let info = open_brain_impl(&db, &brains, &target.display().to_string()).unwrap();
         assert!(info.is_active);
-        assert_eq!(db.active_path().unwrap(), canonical);
+        assert_eq!(db.active_root_path().unwrap(), canonical);
     }
 
     #[test]
@@ -1573,12 +1646,11 @@ mod tests {
         let old = dir.path().join("old.sqlite");
         let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old.clone());
 
-        let new = dir.path().join("new.sqlite");
-        let new_conn = brain_schema::open_and_migrate(&new).unwrap();
-        let canonical = new.canonicalize().unwrap();
+        let new = dir.path().join("New");
+        let (paths, new_conn) = brain_schema::open_brain_root(&new).unwrap();
 
         let brains = non_durable_state();
-        let result = switch_to(&db, &brains, new_conn, &canonical, None);
+        let result = switch_to(&db, &brains, new_conn, paths, None);
         assert!(
             result.is_err(),
             "a switch on a non-durable registry must fail"
@@ -1614,38 +1686,26 @@ mod tests {
     }
 
     #[test]
-    fn create_brain_removes_the_file_when_the_switch_fails() {
-        // Bugbot Medium regression: create_brain runs open_and_migrate (which
-        // creates the database file on disk) before switch_to. If the switch
-        // fails afterward, the previous brain stays active but the new file is
-        // left orphaned and uncatalogued. create_brain must delete it so the
-        // create is all-or-nothing.
+    fn create_brain_does_not_switch_when_the_registry_persist_fails() {
+        // A create/open may bootstrap the selected folder before the registry
+        // persist. If that persist fails, the previous brain stays active. The
+        // selected folder is user-owned, so it is not deleted as cleanup.
         let dir = tempdir().unwrap();
         let old = dir.path().join("old.sqlite");
         let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old.clone());
 
-        let new = dir.path().join("Work").join("brain.sqlite");
-        std::fs::create_dir_all(new.parent().unwrap()).unwrap();
+        let new = dir.path().join("Work");
         // A non-durable registry makes the registry persist inside switch_to fail.
         let brains = non_durable_state();
 
         let result = create_brain_impl(&db, &brains, &new.display().to_string(), Some("Work"));
         assert!(result.is_err(), "create must fail when the switch fails");
-        // open_and_migrate created the file before the switch failed; the
-        // cleanup must have removed it again.
+        assert!(new.is_dir(), "the user-selected folder must remain");
         assert!(
-            !new.exists(),
-            "the orphaned brain file must be removed on switch failure"
+            new.join("brain.sqlite").is_file(),
+            "bootstrap creates the database"
         );
-        // WAL/SHM sidecars must not survive either.
-        for suffix in ["-wal", "-shm"] {
-            let mut sidecar = new.as_os_str().to_os_string();
-            sidecar.push(suffix);
-            assert!(
-                !Path::new(&sidecar).exists(),
-                "the {suffix} sidecar must be removed on switch failure"
-            );
-        }
+        assert!(new.join("assets").is_dir(), "bootstrap creates assets");
         // The live DB stays on the previous brain.
         assert_eq!(db.active_path().unwrap(), old);
     }
@@ -1658,15 +1718,18 @@ mod tests {
         let old = dir.path().join("old.sqlite");
         let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old);
 
-        let new = dir.path().join("Work").join("brain.sqlite");
-        std::fs::create_dir_all(new.parent().unwrap()).unwrap();
+        let new = dir.path().join("Work");
         let brains = memory_state(); // durable
 
-        let info = create_brain_impl(&db, &brains, &new.display().to_string(), Some("Work")).unwrap();
+        let info =
+            create_brain_impl(&db, &brains, &new.display().to_string(), Some("Work")).unwrap();
         assert!(info.is_active);
-        assert!(new.exists(), "the new brain file must survive a successful create");
+        assert!(
+            new.join("brain.sqlite").exists(),
+            "the new brain file must survive a successful create"
+        );
         let canonical = new.canonicalize().unwrap();
-        assert_eq!(db.active_path().unwrap(), canonical);
+        assert_eq!(db.active_root_path().unwrap(), canonical);
     }
 
     #[test]
@@ -1677,14 +1740,13 @@ mod tests {
         let old = dir.path().join("old.sqlite");
         let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old.clone());
 
-        let new = dir.path().join("Work").join("brain.sqlite");
-        std::fs::create_dir_all(new.parent().unwrap()).unwrap();
-        let new_conn = brain_schema::open_and_migrate(&new).unwrap();
-        let canonical = new.canonicalize().unwrap();
+        let new = dir.path().join("Work");
+        let (paths, new_conn) = brain_schema::open_brain_root(&new).unwrap();
+        let canonical = paths.root_path.clone();
 
         let brains = memory_state(); // durable
-        let info = switch_to(&db, &brains, new_conn, &canonical, None).unwrap();
+        let info = switch_to(&db, &brains, new_conn, paths, None).unwrap();
         assert!(info.is_active);
-        assert_eq!(db.active_path().unwrap(), canonical);
+        assert_eq!(db.active_root_path().unwrap(), canonical);
     }
 }

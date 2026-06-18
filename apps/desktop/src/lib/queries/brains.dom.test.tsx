@@ -7,7 +7,9 @@ import { installFakeBridge } from '../../test/utils'
 import { ACTIVE_BRAIN_KEY, BRAINS_KEY, useCreateBrain, useOpenBrain } from './brains'
 
 const ACTIVE = {
-  path: '/data/brain.sqlite',
+  rootPath: '/data/My brain',
+  databasePath: '/data/My brain/brain.sqlite',
+  assetsPath: '/data/My brain/assets',
   name: 'My brain',
   color: 'indigo',
   createdMs: 1,
@@ -16,7 +18,9 @@ const ACTIVE = {
   schemaVersion: 2,
 }
 const WORK = {
-  path: '/data/work.sqlite',
+  rootPath: '/data/Work',
+  databasePath: '/data/Work/brain.sqlite',
+  assetsPath: '/data/Work/assets',
   name: 'Work',
   color: 'teal',
   createdMs: 1,
@@ -61,7 +65,7 @@ describe('brain switch cache seeding', () => {
     client.setQueryData(ACTIVE_BRAIN_KEY, ACTIVE)
 
     const { result } = renderHook(() => useOpenBrain(), { wrapper: withClient(client) })
-    await result.current.mutateAsync(WORK.path)
+    await result.current.mutateAsync(WORK.rootPath)
 
     // Synchronously after the mutation resolves (before invalidation refetches),
     // the cache already points at the new brain so App re-keys immediately.
@@ -74,7 +78,7 @@ describe('brain switch cache seeding', () => {
     client.setQueryData(ACTIVE_BRAIN_KEY, ACTIVE)
 
     const { result } = renderHook(() => useCreateBrain(), { wrapper: withClient(client) })
-    await result.current.mutateAsync({ path: WORK.path, name: WORK.name })
+    await result.current.mutateAsync({ rootPath: WORK.rootPath, name: WORK.name })
 
     expect(client.getQueryData(ACTIVE_BRAIN_KEY)).toEqual(WORK)
   })
@@ -91,7 +95,7 @@ describe('brain switch cache seeding', () => {
     client.setQueryData(['people', 'p1'], { id: 'p1', name: 'Old brain person' })
 
     const { result } = renderHook(() => useOpenBrain(), { wrapper: withClient(client) })
-    await result.current.mutateAsync(WORK.path)
+    await result.current.mutateAsync(WORK.rootPath)
 
     // Every brain-scoped cache is gone, so the remounted workspace fetches fresh.
     expect(client.getQueryData(['tasks'])).toBeUndefined()
@@ -116,7 +120,7 @@ describe('brain switch cache seeding', () => {
     client.setQueryData(BRAINS_KEY, [ACTIVE, { ...WORK, isActive: false }])
 
     const { result } = renderHook(() => useOpenBrain(), { wrapper: withClient(client) })
-    await result.current.mutateAsync(WORK.path)
+    await result.current.mutateAsync(WORK.rootPath)
 
     const list = client.getQueryData<typeof ACTIVE[]>(BRAINS_KEY)
     expect(list).toEqual([{ ...ACTIVE, isActive: false }, WORK])

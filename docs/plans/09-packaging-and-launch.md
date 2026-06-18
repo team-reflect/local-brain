@@ -35,8 +35,9 @@ update-path decision.
    - build-sidecar script before Tauri dev/build
    - verify the CLI runs from inside the packaged app
 3. Add first-run flow:
-   - choose or create local brain location
-   - create/open SQLite DB
+   - choose or create a local brain folder with the OS directory picker
+   - bootstrap `brain.sqlite`, `assets/`, and `.local-brain/`
+   - record/open recent brain folders
    - configure optional AI provider key
    - optionally install agent skill
 4. Add keyboard and accessibility pass:
@@ -87,7 +88,10 @@ update-path decision.
 ## Acceptance Criteria
 
 - A technical user can install and launch the app.
-- The app creates a local SQLite brain and imports a document or interaction.
+- The app asks for a brain folder on first run, creates the local brain layout there,
+  and imports a document or interaction.
+- A relaunch auto-opens the newest recent brain folder or returns to the chooser if it
+  cannot be opened.
 - The user can browse Today, Tasks, Network Graph/People/Organizations, and Projects.
 - The user can search/ask with citations.
 - The user can use the `brain` CLI from a terminal.
@@ -106,8 +110,9 @@ update-path decision.
 - Run CLI integration tests against a packaged or staged binary.
 - Run accessibility smoke pass.
 - Run performance smoke pass against seed-large data.
-- Manual launch script: first run, install skill, import document, import interaction,
-  extract, graph, ask, CLI search, daily report, todo list.
+- Manual launch script: first run, choose a brain folder, relaunch recent auto-open,
+  install skill, import document, import interaction, extract, graph, ask, CLI search,
+  daily report, todo list.
 
 ## Open Questions
 

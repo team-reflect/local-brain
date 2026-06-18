@@ -2,7 +2,7 @@
 
 SQLite is the durable source of truth for Local Brain. The launch schema is a personal
 CRM with first-class people, organizations, projects, tasks, interactions, documents,
-hidden atomic memories, tags, AI chat, and settings.
+asset metadata, hidden atomic memories, tags, AI chat, and settings.
 
 The schema should make everyday questions easy:
 
@@ -16,6 +16,8 @@ The schema should make everyday questions easy:
 
 - Use typed tables for product nouns instead of a generic graph-node layer.
 - Store imported readable text directly in SQLite.
+- Store binary asset bytes as app-managed files under the chosen brain root; SQLite owns
+  the asset manifest, typed links, provenance, and deletion state.
 - Preserve provenance on the record that owns the text.
 - Derive chunks for search and embeddings from documents and interactions.
 - Keep memories hidden by default and link them to visible records.
@@ -45,6 +47,7 @@ Key columns:
 - `important_dates_json`
 - `summary`
 - `notes`
+- `avatar_asset_id`
 - `current_organization_id`
 - `created_at`
 - `updated_at`
@@ -63,6 +66,7 @@ Key columns:
 - `location`
 - `summary`
 - `notes`
+- `logo_asset_id`
 - `created_at`
 - `updated_at`
 - `archived_at`
@@ -179,6 +183,55 @@ Key columns:
 
 Suggested `kind` values: `note`, `file`, `pdf`, `webpage`, `plan`, `receipt`, `text`,
 `other`.
+
+### `assets`
+
+App-managed binary files such as avatars, organization logos, screenshots, inline
+images, and original attachments. The bytes live under the chosen brain root's
+`assets/` directory, following Reflect Open's ordinary-file attachment model. SQLite
+stores the durable manifest and links.
+
+Key columns:
+
+- `id`
+- `kind`
+- `mime_type`
+- `byte_size`
+- `content_hash`
+- `storage_path`
+- `original_filename`
+- `original_path`
+- `original_url`
+- `width`
+- `height`
+- `created_at`
+- `updated_at`
+- `archived_at`
+
+Suggested `kind` values: `avatar`, `logo`, `image`, `screenshot`, `attachment`,
+`source_file`, `thumbnail`, `other`.
+
+`storage_path` is app-relative, for example `assets/pasted-20260618-ab12cd34.png` or
+`assets/objects/ab/abcdef...jpg`. Absolute paths stay in provenance fields only.
+
+### `asset_links`
+
+Typed links from assets to visible records.
+
+Key columns:
+
+- `id`
+- `asset_id`
+- `record_type`
+- `record_id`
+- `role`
+- `caption`
+- `sort_order`
+- `created_at`
+
+Allowed `record_type` values: `person`, `organization`, `project`, `task`, `document`,
+`interaction`. Suggested `role` values: `avatar`, `logo`, `attachment`, `inline_image`,
+`screenshot`, `source_file`.
 
 ### `content_chunks`
 
@@ -330,6 +383,7 @@ Use explicit typed join tables where they make the UI faster and clearer:
 - `task_organizations`: organizations linked to a task.
 - `task_documents`: documents that explain a task.
 - `task_interactions`: interactions that created or changed a task.
+- `asset_links`: assets attached to typed records, with role and ordering.
 
 Each join table should include:
 
@@ -374,19 +428,19 @@ Each join table should include:
           +----------------+
                    ^
                    |
-          +----------------+
-          | evidence_refs  |
-          +----------------+
-            ^      ^     ^
-            |      |     |
-       +---------+ | +--------------------+
-       | memories| | |  chat_messages     |
-       +---------+ | +--------------------+
-            ^      |          ^
-            |      |          |
-       +--------------+ +--------------------+
-       | memory_links | | chat_conversations |
-       +--------------+ +--------------------+
+         +----------------+       +-------------+       +------------+
+         | evidence_refs  |       | asset_links |------>|   assets   |
+         +----------------+       +-------------+       +------------+
+           ^      ^     ^
+           |      |     |
+      +---------+ | +--------------------+
+      | memories| | |  chat_messages     |
+      +---------+ | +--------------------+
+           ^      |          ^
+           |      |          |
+      +--------------+ +--------------------+
+      | memory_links | | chat_conversations |
+      +--------------+ +--------------------+
 ```
 
 ## Derived Indexes
@@ -400,7 +454,7 @@ Each join table should include:
 - Optional denormalized search view that unions visible records for global search.
 - Derived graph view centered on the `people.is_self` row, with nodes for typed records
   and edges from affiliations, join tables, task origins, memory links, evidence refs,
-  and tags.
+  asset links, and tags.
 
 Derived indexes can be rebuilt from durable tables.
 

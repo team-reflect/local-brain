@@ -17,6 +17,19 @@ fn run(db: &Path, args: &[&str]) -> Output {
         .arg(db)
         .args(args)
         .env_remove("BRAIN_DB")
+        .env_remove("BRAIN_ROOT")
+        .env_remove("ANTHROPIC_API_KEY")
+        .output()
+        .expect("failed to run brain")
+}
+
+fn run_with_brain(root: &Path, args: &[&str]) -> Output {
+    Command::new(BIN)
+        .arg("--brain")
+        .arg(root)
+        .args(args)
+        .env_remove("BRAIN_DB")
+        .env_remove("BRAIN_ROOT")
         .env_remove("ANTHROPIC_API_KEY")
         .output()
         .expect("failed to run brain")
@@ -24,6 +37,21 @@ fn run(db: &Path, args: &[&str]) -> Output {
 
 fn run_json(db: &Path, args: &[&str]) -> Value {
     let out = run(db, args);
+    assert!(
+        out.status.success(),
+        "command {args:?} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
+        panic!(
+            "stdout for {args:?} was not JSON ({e}): {}",
+            String::from_utf8_lossy(&out.stdout)
+        )
+    })
+}
+
+fn run_brain_json(root: &Path, args: &[&str]) -> Value {
+    let out = run_with_brain(root, args);
     assert!(
         out.status.success(),
         "command {args:?} failed: {}",
@@ -47,6 +75,54 @@ fn status_reports_schema_version() {
     let db = db_path(&dir);
     let status = run_json(&db, &["--json", "status"]);
     assert_eq!(status["schemaVersion"], 3);
+}
+
+#[test]
+fn brain_flag_derives_standard_folder_layout() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().join("Work");
+    let status = run_brain_json(&root, &["--json", "status"]);
+    let canonical = root.canonicalize().unwrap();
+    assert_eq!(status["brainRoot"], canonical.display().to_string());
+    assert_eq!(
+        status["dbPath"],
+        canonical.join("brain.sqlite").display().to_string()
+    );
+    assert_eq!(
+        status["assetsPath"],
+        canonical.join("assets").display().to_string()
+    );
+    assert!(root.join("brain.sqlite").is_file());
+    assert!(root.join("assets").is_dir());
+    assert!(root.join(".local-brain").join("meta.json").is_file());
+}
+
+#[test]
+fn brain_root_env_derives_standard_folder_layout() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().join("EnvBrain");
+    let out = Command::new(BIN)
+        .args(["--json", "path"])
+        .env_remove("BRAIN_DB")
+        .env("BRAIN_ROOT", &root)
+        .env_remove("ANTHROPIC_API_KEY")
+        .output()
+        .expect("failed to run brain");
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let canonical = root.canonicalize().unwrap();
+    assert_eq!(
+        value["dbPath"],
+        canonical.join("brain.sqlite").display().to_string()
+    );
+    assert_eq!(
+        value["assetsPath"],
+        canonical.join("assets").display().to_string()
+    );
 }
 
 #[test]

@@ -1,10 +1,11 @@
 import { z } from 'zod'
 
 /**
- * A **brain** is Local Brain's top-level container — one self-contained SQLite
- * database file. Reflect calls this a "graph"; Local Brain keeps "graph" for the
- * Network visualization and uses "brain" for the workspace the picker switches
- * between. These types mirror the Rust `BrainInfo` and the registry's color set.
+ * A **brain** is Local Brain's top-level container — one user-selected folder
+ * containing `brain.sqlite`, assets, and support files. Reflect calls this a
+ * "graph"; Local Brain keeps "graph" for the Network visualization and uses
+ * "brain" for the workspace the picker switches between. These types mirror the
+ * Rust `BrainInfo` and the registry's color set.
  */
 
 /**
@@ -37,8 +38,12 @@ export const DEFAULT_BRAIN_COLOR: BrainColor = 'indigo'
  * to the default rather than failing the whole list.
  */
 export const brainInfoSchema = z.object({
+  /** Absolute, canonical path of the brain root folder. */
+  rootPath: z.string(),
   /** Absolute, canonical path of the brain's SQLite file. */
-  path: z.string(),
+  databasePath: z.string(),
+  /** Absolute, canonical path of the brain's assets folder. */
+  assetsPath: z.string(),
   /** User-facing display name. */
   name: z.string(),
   /** Identity color id; unknown values fall back to the default. */
@@ -54,3 +59,4 @@ export const brainInfoSchema = z.object({
 export type BrainInfo = z.infer<typeof brainInfoSchema>
 
 export const brainInfoListSchema = z.array(brainInfoSchema)
+export const activeBrainSchema = brainInfoSchema.nullable()

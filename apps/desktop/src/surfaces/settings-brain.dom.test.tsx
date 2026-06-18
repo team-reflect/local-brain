@@ -5,7 +5,9 @@ import { SettingsSurface } from './settings'
 import { installFakeBridge, renderWithProviders } from '../test/utils'
 
 const ACTIVE = {
-  path: '/data/local-brain/brain.sqlite',
+  rootPath: '/data/local-brain',
+  databasePath: '/data/local-brain/brain.sqlite',
+  assetsPath: '/data/local-brain/assets',
   name: 'My brain',
   color: 'indigo',
   createdMs: 1,
@@ -14,7 +16,9 @@ const ACTIVE = {
   schemaVersion: 2,
 }
 const WORK = {
-  path: '/data/local-brain/work.sqlite',
+  rootPath: '/data/work-brain',
+  databasePath: '/data/work-brain/brain.sqlite',
+  assetsPath: '/data/work-brain/assets',
   name: 'Work',
   color: 'teal',
   createdMs: 1,
@@ -33,7 +37,7 @@ describe('Settings → Brain', () => {
           case 'list_brains':
             return [WORK, ACTIVE]
           case 'database_path':
-            return ACTIVE.path
+            return ACTIVE.databasePath
           default:
             return undefined
         }
@@ -46,6 +50,7 @@ describe('Settings → Brain', () => {
     // Local database section, so allow more than one match).
     await waitFor(() => expect(screen.getByText('My brain')).toBeDefined())
     expect(screen.getAllByText('/data/local-brain/brain.sqlite').length).toBeGreaterThan(0)
+    expect(screen.getByText('/data/local-brain/assets')).toBeDefined()
 
     // The color picker exposes every brain color as a labelled control.
     expect(screen.getByRole('button', { name: 'Teal' })).toBeDefined()

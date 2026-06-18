@@ -15,6 +15,7 @@ Reference repo:
 - React/TypeScript frontend.
 - Rust native layer for file-system, keychain, local processes, and database access.
 - Local-first defaults.
+- Directory-first workspace selection and recents.
 - Sidecar CLI pattern.
 - BYOK model/provider setup.
 - Local embeddings direction where practical.
@@ -51,6 +52,35 @@ Rust native layer
 
 The frontend should feel like a real local app: fast navigation, optimistic edits where
 reasonable, clear diagnostics, and no dependence on a hosted account.
+
+## Startup And Storage Root
+
+Copy Reflect Open's startup behavior, adapted from these files:
+
+- `/Users/alex/repos/reflect-open/apps/desktop/src/providers/graph-provider.tsx`
+- `/Users/alex/repos/reflect-open/apps/desktop/src/components/graph-chooser.tsx`
+- `/Users/alex/repos/reflect-open/apps/desktop/src-tauri/src/fs/mod.rs`
+- `/Users/alex/repos/reflect-open/apps/desktop/src-tauri/src/fs/io.rs`
+- `/Users/alex/repos/reflect-open/apps/desktop/src-tauri/src/recents.rs`
+
+Reflect's behavior to preserve:
+
+- The user picks a directory with the OS folder picker, not an individual storage file.
+- The picked directory becomes the workspace root.
+- Opening a root bootstraps the expected layout idempotently.
+- The Rust layer records the active root plus a monotonic generation; stale writes are
+  rejected after a root switch.
+- The frontend serializes overlapping opens so UI state and Rust state cannot disagree.
+- A recents list lives in the OS config directory, outside any workspace root.
+- Launch auto-opens the newest recent root; if none exists or opening fails, show the
+  chooser.
+- Local files are served through a scoped asset protocol, not broad arbitrary file access.
+
+Local Brain should use the same root-first model. The first-run screen asks the user to
+choose or create a **brain folder**. Inside that folder Local Brain creates
+`brain.sqlite`, `assets/`, and `.local-brain/` support directories. Settings and CLI
+diagnostics should show the brain root first, with the derived SQLite and asset paths
+under it.
 
 ## Database Direction
 

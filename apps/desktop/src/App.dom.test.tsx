@@ -36,7 +36,9 @@ vi.mock('./lib/queries', async (importOriginal) => {
 })
 
 const ACTIVE = {
-  path: '/data/brain.sqlite',
+  rootPath: '/data/My brain',
+  databasePath: '/data/My brain/brain.sqlite',
+  assetsPath: '/data/My brain/assets',
   name: 'My brain',
   color: 'indigo',
   createdMs: 1,
@@ -69,8 +71,8 @@ describe('App active-brain gate', () => {
   })
 
   it('shows the chooser when there is genuinely no active brain', () => {
-    // Initial resolution produced no brain (error with no data retained).
-    renderApp({ isPending: false, isError: true, data: undefined })
+    // Initial resolution produced no brain.
+    renderApp({ isPending: false, isError: false, data: null })
 
     expect(screen.getByTestId('chooser')).toBeTruthy()
     expect(screen.queryByTestId('workspace')).toBeNull()

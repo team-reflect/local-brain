@@ -25,10 +25,10 @@ pub fn app_version() -> AppResult<AppInfo> {
     })
 }
 
-/// The path of the currently open brain, for Settings → Local database /
+/// The SQLite path of the currently open brain, for Settings → Local database /
 /// Diagnostics. Reads the live active path so it stays correct after a brain
 /// switch (rather than recomputing the startup default).
 #[tauri::command]
 pub fn database_path(db: State<'_, DbState>) -> AppResult<String> {
-    Ok(db.active_path()?.display().to_string())
+    Ok(db.active_database_path()?.display().to_string())
 }

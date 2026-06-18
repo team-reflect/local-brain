@@ -15,9 +15,34 @@ use rusqlite::ffi::{sqlite3, sqlite3_api_routines};
 use rusqlite::Connection;
 use rusqlite_migration::{Migrations, M};
 
+pub const BRAIN_DB_FILENAME: &str = "brain.sqlite";
+pub const ASSETS_DIRNAME: &str = "assets";
+pub const SUPPORT_DIRNAME: &str = ".local-brain";
+
 /// Bumped whenever a migration is appended below. Asserted against the applied
 /// `user_version` in tests so the constant can never drift from the list.
 pub const LATEST_SCHEMA_VERSION: usize = 3;
+
+/// The canonical filesystem layout for one Local Brain root directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrainPaths {
+    pub root_path: PathBuf,
+    pub database_path: PathBuf,
+    pub assets_path: PathBuf,
+    pub support_path: PathBuf,
+}
+
+impl BrainPaths {
+    pub fn for_root(root: impl Into<PathBuf>) -> Self {
+        let root_path = root.into();
+        Self {
+            database_path: root_path.join(BRAIN_DB_FILENAME),
+            assets_path: root_path.join(ASSETS_DIRNAME),
+            support_path: root_path.join(SUPPORT_DIRNAME),
+            root_path,
+        }
+    }
+}
 
 /// Ordered schema migrations, embedded from `migrations/*.sql`.
 static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
@@ -124,6 +149,46 @@ pub fn open_and_migrate(path: &Path) -> Result<Connection, SchemaError> {
     Ok(conn)
 }
 
+/// Create the directory layout for a folder-based brain and return canonical
+/// paths. The database itself is opened/migrated separately so callers can
+/// coordinate connection swaps.
+pub fn bootstrap_brain_root(root: &Path) -> Result<BrainPaths, SchemaError> {
+    if root.exists() && !root.is_dir() {
+        return Err(SchemaError::Open(format!(
+            "{} is a file; choose a folder for a Local Brain",
+            root.display()
+        )));
+    }
+    std::fs::create_dir_all(root).map_err(|err| SchemaError::Open(err.to_string()))?;
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|err| SchemaError::Open(err.to_string()))?;
+    let paths = BrainPaths::for_root(canonical_root);
+    std::fs::create_dir_all(&paths.assets_path)
+        .map_err(|err| SchemaError::Open(err.to_string()))?;
+    std::fs::create_dir_all(paths.support_path.join("inbox"))
+        .map_err(|err| SchemaError::Open(err.to_string()))?;
+    std::fs::create_dir_all(paths.support_path.join("rejected"))
+        .map_err(|err| SchemaError::Open(err.to_string()))?;
+
+    let meta_path = paths.support_path.join("meta.json");
+    if !meta_path.exists() {
+        std::fs::write(
+            &meta_path,
+            "{\n  \"app\": \"local-brain\",\n  \"storageVersion\": 1\n}\n",
+        )
+        .map_err(|err| SchemaError::Open(err.to_string()))?;
+    }
+    Ok(paths)
+}
+
+/// Bootstrap a brain root and open/migrate its SQLite database.
+pub fn open_brain_root(root: &Path) -> Result<(BrainPaths, Connection), SchemaError> {
+    let paths = bootstrap_brain_root(root)?;
+    let conn = open_and_migrate(&paths.database_path)?;
+    Ok((paths, conn))
+}
+
 /// Open an in-memory database migrated to the latest schema. Test helper.
 pub fn open_in_memory() -> Result<Connection, SchemaError> {
     register_sqlite_vec()?;
@@ -143,16 +208,30 @@ pub fn app_data_dir() -> Option<PathBuf> {
     Some(dirs::data_dir()?.join("local-brain"))
 }
 
-/// The durable database path the desktop app and the `brain` CLI must agree on:
-/// `$BRAIN_DB` if set, else `<app data dir>/brain.sqlite`.
-/// Returns `None` only when `$BRAIN_DB` is unset and no data directory resolves.
+/// Explicit folder-based brain root from the environment.
+pub fn resolve_brain_root() -> Option<PathBuf> {
+    if let Some(env) = std::env::var_os("BRAIN_ROOT") {
+        if !env.is_empty() {
+            return Some(PathBuf::from(env));
+        }
+    }
+    None
+}
+
+/// The durable database path used by diagnostics and the CLI compatibility
+/// override: `$BRAIN_DB`, then `$BRAIN_ROOT/brain.sqlite`, then the old app-data
+/// fallback. Desktop startup does not silently create this fallback; it is kept
+/// for advanced CLI/dev workflows.
 pub fn resolve_db_path() -> Option<PathBuf> {
     if let Some(env) = std::env::var_os("BRAIN_DB") {
         if !env.is_empty() {
             return Some(PathBuf::from(env));
         }
     }
-    Some(app_data_dir()?.join("brain.sqlite"))
+    if let Some(root) = resolve_brain_root() {
+        return Some(BrainPaths::for_root(root).database_path);
+    }
+    Some(app_data_dir()?.join(BRAIN_DB_FILENAME))
 }
 
 /// The applied schema version (`PRAGMA user_version`), comparable against
@@ -271,6 +350,23 @@ mod tests {
         let path = dir.path().join("brain.sqlite");
         let _conn = open_and_migrate(&path).unwrap();
         assert!(path.exists());
+    }
+
+    #[test]
+    fn bootstrap_brain_root_creates_standard_layout() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("Personal Brain");
+        let paths = bootstrap_brain_root(&root).unwrap();
+
+        assert_eq!(paths.root_path, root.canonicalize().unwrap());
+        assert_eq!(paths.database_path, paths.root_path.join("brain.sqlite"));
+        assert!(paths.assets_path.is_dir());
+        assert!(paths.support_path.join("inbox").is_dir());
+        assert!(paths.support_path.join("rejected").is_dir());
+        assert!(paths.support_path.join("meta.json").is_file());
+
+        let _conn = open_and_migrate(&paths.database_path).unwrap();
+        assert!(paths.database_path.is_file());
     }
 
     /// Every durable product table named in docs/launch-schema.md exists.

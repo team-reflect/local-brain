@@ -54,7 +54,7 @@ export function useActiveBrain() {
  * brain's) while reads and writes already hit the new database.
  *
  * So we (1) seed `active-brain` with the freshly returned info, which makes
- * {@link App} re-key its workspace on the new path immediately, (2) coherently
+ * {@link App} re-key its workspace on the new root immediately, (2) coherently
  * update the cached `brains` catalogue so the switched-to brain is the only one
  * flagged active right away — `invalidateQueries` alone only marks the list stale
  * and keeps serving the old snapshot until a refetch lands, which would briefly
@@ -91,7 +91,7 @@ function seedActiveBrain(
   if (!list) return list
   let found = false
   const next = list.map((brain) => {
-    if (brain.path === active.path) {
+    if (brain.rootPath === active.rootPath) {
       found = true
       return active
     }
@@ -103,7 +103,7 @@ function seedActiveBrain(
 export function useOpenBrain() {
   const applySwitch = useApplyBrainSwitch()
   return useMutation({
-    mutationFn: (path: string) => openBrain(path),
+    mutationFn: (rootPath: string) => openBrain(rootPath),
     onSuccess: applySwitch,
   })
 }
@@ -111,7 +111,7 @@ export function useOpenBrain() {
 export function useCreateBrain() {
   const applySwitch = useApplyBrainSwitch()
   return useMutation({
-    mutationFn: (vars: { path: string; name?: string }) => createBrain(vars.path, vars.name),
+    mutationFn: (vars: { rootPath: string; name?: string }) => createBrain(vars.rootPath, vars.name),
     onSuccess: applySwitch,
   })
 }
@@ -119,7 +119,7 @@ export function useCreateBrain() {
 export function useRenameBrain() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (vars: { path: string; name: string }) => renameBrain(vars.path, vars.name),
+    mutationFn: (vars: { rootPath: string; name: string }) => renameBrain(vars.rootPath, vars.name),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: BRAINS_KEY })
       void queryClient.invalidateQueries({ queryKey: ACTIVE_BRAIN_KEY })
@@ -130,7 +130,8 @@ export function useRenameBrain() {
 export function useSetBrainColor() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (vars: { path: string; color: BrainColor }) => setBrainColor(vars.path, vars.color),
+    mutationFn: (vars: { rootPath: string; color: BrainColor }) =>
+      setBrainColor(vars.rootPath, vars.color),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: BRAINS_KEY })
       void queryClient.invalidateQueries({ queryKey: ACTIVE_BRAIN_KEY })
@@ -141,11 +142,11 @@ export function useSetBrainColor() {
 export function useForgetBrain() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (path: string) => forgetBrain(path),
+    mutationFn: (rootPath: string) => forgetBrain(rootPath),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: BRAINS_KEY }),
   })
 }
 
 export function useRevealBrain() {
-  return useMutation({ mutationFn: (path: string) => revealBrain(path) })
+  return useMutation({ mutationFn: (rootPath: string) => revealBrain(rootPath) })
 }

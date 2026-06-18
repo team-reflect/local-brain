@@ -6,10 +6,9 @@ import { BrainDialog, type BrainDialogMode } from './brain-dialog'
 import { BrainSwatch } from './brain-swatch'
 
 /**
- * The no-active-brain fallback. Local Brain always opens a brain at startup, so
- * this is reached only when the active brain can't be resolved (a moved or
- * deleted file). It lists known brains to reopen and offers create/open — the
- * same path-based flow as the switcher.
+ * The no-active-brain fallback. Shown on first launch or when the active brain
+ * root can't be resolved. It lists known brains to reopen and offers create/open
+ * through the same folder-based flow as the switcher.
  */
 export function BrainChooser(): ReactNode {
   const brains = useBrains()
@@ -25,7 +24,8 @@ export function BrainChooser(): ReactNode {
         <div className="space-y-1 text-center">
           <h1 className="text-lg font-semibold text-foreground">Open a brain</h1>
           <p className="text-sm text-muted-foreground">
-            A brain is one local SQLite database. Pick a recent brain or open another.
+            A brain is a local folder with its SQLite database and assets. Pick a recent brain or
+            open another.
           </p>
         </div>
 
@@ -45,16 +45,16 @@ export function BrainChooser(): ReactNode {
             <p className="px-1 text-[11px] font-medium text-muted-foreground">Recent</p>
             <ul className="space-y-px">
               {brains.data?.map((brain) => (
-                <li key={brain.path}>
+                <li key={brain.rootPath}>
                   <button
                     type="button"
-                    onClick={() => openBrain.mutate(brain.path)}
+                    onClick={() => openBrain.mutate(brain.rootPath)}
                     className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-secondary"
                   >
                     <BrainSwatch color={brain.color} className="size-4" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-foreground">{brain.name}</span>
-                      <span className="block truncate font-mono text-xs text-muted-foreground">{brain.path}</span>
+                      <span className="block truncate font-mono text-xs text-muted-foreground">{brain.rootPath}</span>
                     </span>
                   </button>
                 </li>

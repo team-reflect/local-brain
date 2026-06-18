@@ -10,7 +10,7 @@
 mod convert;
 mod query;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
 use rusqlite::Connection;
@@ -25,7 +25,7 @@ use query::{bind, run_query};
 /// from. Kept together so a brain switch swaps both atomically under one lock.
 struct Active {
     conn: Connection,
-    path: PathBuf,
+    paths: brain_schema::BrainPaths,
 }
 
 /// The process-wide active brain, serialized behind a mutex so the desktop's
@@ -33,45 +33,113 @@ struct Active {
 /// [`crate::brains`]) replaces the connection in place, so every later read or
 /// write lands on the newly active brain.
 pub struct DbState {
-    active: Mutex<Active>,
+    active: Mutex<Option<Active>>,
+}
+
+pub(crate) trait IntoActivePaths {
+    fn into_active_paths(self) -> brain_schema::BrainPaths;
+}
+
+impl IntoActivePaths for brain_schema::BrainPaths {
+    fn into_active_paths(self) -> brain_schema::BrainPaths {
+        self
+    }
+}
+
+impl IntoActivePaths for PathBuf {
+    fn into_active_paths(self) -> brain_schema::BrainPaths {
+        let root = self
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.clone());
+        let mut paths = brain_schema::BrainPaths::for_root(root);
+        paths.database_path = self;
+        paths
+    }
+}
+
+impl IntoActivePaths for &std::path::Path {
+    fn into_active_paths(self) -> brain_schema::BrainPaths {
+        self.to_path_buf().into_active_paths()
+    }
+}
+
+impl IntoActivePaths for &PathBuf {
+    fn into_active_paths(self) -> brain_schema::BrainPaths {
+        self.to_path_buf().into_active_paths()
+    }
 }
 
 impl DbState {
-    pub fn new(conn: Connection, path: PathBuf) -> Self {
+    pub fn new(conn: Connection, paths: impl IntoActivePaths) -> Self {
         Self {
-            active: Mutex::new(Active { conn, path }),
+            active: Mutex::new(Some(Active {
+                conn,
+                paths: paths.into_active_paths(),
+            })),
         }
     }
 
-    fn lock(&self) -> AppResult<MutexGuard<'_, Active>> {
+    pub fn empty() -> Self {
+        Self {
+            active: Mutex::new(None),
+        }
+    }
+
+    fn lock(&self) -> AppResult<MutexGuard<'_, Option<Active>>> {
         self.active
             .lock()
             .map_err(|_| AppError::io("the database lock was poisoned by an earlier panic"))
     }
 
-    /// The path of the currently open brain (for `database_path` / diagnostics).
-    pub fn active_path(&self) -> AppResult<PathBuf> {
-        Ok(self.lock()?.path.clone())
+    fn no_active() -> AppError {
+        AppError::no_database("choose a Local Brain folder to open a database")
+    }
+
+    /// The paths of the currently open brain.
+    pub fn active_paths(&self) -> AppResult<brain_schema::BrainPaths> {
+        self.lock()?
+            .as_ref()
+            .map(|active| active.paths.clone())
+            .ok_or_else(Self::no_active)
+    }
+
+    /// The database path of the currently open brain.
+    pub fn active_database_path(&self) -> AppResult<PathBuf> {
+        Ok(self.active_paths()?.database_path)
+    }
+
+    /// The root path of the currently open brain.
+    pub fn active_root_path(&self) -> AppResult<PathBuf> {
+        Ok(self.active_paths()?.root_path)
     }
 
     /// The applied schema version of the open brain.
     pub fn schema_version(&self) -> AppResult<i64> {
         let guard = self.lock()?;
-        brain_schema::schema_version(&guard.conn).map_err(AppError::from)
+        let active = guard.as_ref().ok_or_else(Self::no_active)?;
+        brain_schema::schema_version(&active.conn).map_err(AppError::from)
     }
 
     /// Run `before_swap` while holding the active database lock, then replace
     /// the open connection. This lets callers that must coordinate another
     /// durable store fail before mutating that store when the DB lock itself is
     /// unavailable.
-    pub fn swap_after<F>(&self, conn: Connection, path: &Path, before_swap: F) -> AppResult<()>
+    pub fn swap_after<F>(
+        &self,
+        conn: Connection,
+        paths: impl IntoActivePaths,
+        before_swap: F,
+    ) -> AppResult<()>
     where
         F: FnOnce() -> AppResult<()>,
     {
         let mut guard = self.lock()?;
         before_swap()?;
-        guard.conn = conn;
-        guard.path = path.to_path_buf();
+        *guard = Some(Active {
+            conn,
+            paths: paths.into_active_paths(),
+        });
         Ok(())
     }
 
@@ -84,10 +152,16 @@ impl DbState {
         f: impl FnOnce(&Connection) -> AppResult<T>,
     ) -> AppResult<T> {
         let mut guard = self.lock()?;
-        let tx = guard.conn.transaction()?;
+        let active = guard.as_mut().ok_or_else(Self::no_active)?;
+        let tx = active.conn.transaction()?;
         let result = f(&tx)?;
         tx.commit()?;
         Ok(result)
+    }
+
+    #[cfg(test)]
+    pub fn active_path(&self) -> AppResult<PathBuf> {
+        self.active_database_path()
     }
 
     #[cfg(test)]
@@ -137,7 +211,8 @@ pub fn db_query(
     params: Vec<JsonValue>,
 ) -> AppResult<Vec<Map<String, JsonValue>>> {
     let guard = state.lock()?;
-    run_query(&guard.conn, &sql, &params)
+    let active = guard.as_ref().ok_or_else(DbState::no_active)?;
+    run_query(&active.conn, &sql, &params)
 }
 
 /// Run a single write statement against the durable database.
@@ -148,14 +223,16 @@ pub fn db_execute(
     params: Vec<JsonValue>,
 ) -> AppResult<usize> {
     let guard = state.lock()?;
-    run_execute(&guard.conn, &sql, &params)
+    let active = guard.as_ref().ok_or_else(DbState::no_active)?;
+    run_execute(&active.conn, &sql, &params)
 }
 
 /// Run a transaction-scoped batch of write statements.
 #[tauri::command]
 pub fn db_batch(state: State<'_, DbState>, statements: Vec<DbStatement>) -> AppResult<Vec<usize>> {
     let mut guard = state.lock()?;
-    run_batch(&mut guard.conn, &statements)
+    let active = guard.as_mut().ok_or_else(DbState::no_active)?;
+    run_batch(&mut active.conn, &statements)
 }
 
 #[cfg(test)]
@@ -167,6 +244,10 @@ mod tests {
         brain_schema::open_in_memory().expect("in-memory database")
     }
 
+    fn paths(root: PathBuf) -> brain_schema::BrainPaths {
+        brain_schema::BrainPaths::for_root(root)
+    }
+
     #[test]
     fn swap_switches_the_active_brain() {
         let dir = tempfile::tempdir().unwrap();
@@ -174,27 +255,38 @@ mod tests {
         let second = dir.path().join("second.sqlite");
         let state = DbState::new(
             brain_schema::open_and_migrate(&first).unwrap(),
-            first.clone(),
+            paths(first.parent().unwrap().join("first")),
         );
 
         // A row written to the first brain.
         {
             let guard = state.lock().unwrap();
-            insert_person(&guard.conn, "p1", "Ada").unwrap();
+            insert_person(&guard.as_ref().unwrap().conn, "p1", "Ada").unwrap();
         }
-        assert_eq!(state.active_path().unwrap(), first);
+        assert_eq!(
+            state.active_root_path().unwrap(),
+            first.parent().unwrap().join("first")
+        );
 
         // After switching, the second brain is empty and the path updates.
         state
             .swap_after(
                 brain_schema::open_and_migrate(&second).unwrap(),
-                &second,
+                paths(second.parent().unwrap().join("second")),
                 || Ok(()),
             )
             .unwrap();
-        assert_eq!(state.active_path().unwrap(), second);
+        assert_eq!(
+            state.active_root_path().unwrap(),
+            second.parent().unwrap().join("second")
+        );
         let guard = state.lock().unwrap();
-        let rows = run_query(&guard.conn, "SELECT count(*) AS n FROM people", &[]).unwrap();
+        let rows = run_query(
+            &guard.as_ref().unwrap().conn,
+            "SELECT count(*) AS n FROM people",
+            &[],
+        )
+        .unwrap();
         assert_eq!(rows[0]["n"], json!(0), "the new brain has no rows");
     }
 

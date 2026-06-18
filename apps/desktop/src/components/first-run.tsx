@@ -84,15 +84,15 @@ export function FirstRun(): ReactNode {
           </h2>
         </div>
         <p className="mb-4 text-sm text-muted-foreground">
-          A private, local-first personal CRM and knowledge base. Everything stays in one SQLite
-          database on this machine — nothing is uploaded.
+          A private, local-first personal CRM and knowledge base. Everything stays in the brain
+          folder you selected on this machine — nothing is uploaded.
         </p>
 
         <ul className="mb-5 flex flex-col gap-3 text-sm">
           <li className="flex items-start gap-2.5">
             <Database className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
             <span>
-              <span className="font-medium text-foreground">Your data lives here</span>
+              <span className="font-medium text-foreground">SQLite database</span>
               <span className="mt-0.5 block break-all font-mono text-[11px] text-muted-foreground">
                 {dbPath.data ?? 'resolving…'}
               </span>

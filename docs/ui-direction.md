@@ -12,6 +12,17 @@ not the primary bulk-entry or reporting interface.
 Use [Design System](design-system.md) for concrete tokens, typography, components, and
 the Reflect reference paths.
 
+## Startup
+
+Before the main shell appears, Local Brain follows Reflect Open's graph chooser pattern:
+
+- first run asks the user to choose or create a brain folder with the OS directory picker
+- returning launches auto-open the newest recent brain folder
+- failed opens return to the chooser with a clear error and recent folders still visible
+- the chooser opens folders, never individual SQLite files
+
+The chosen folder is the user's portable local brain root.
+
 ## Navigation
 
 Sidebar:
@@ -38,9 +49,10 @@ Top-level sections:
 - **Projects:** active, waiting, paused, done, and archived projects.
 - **Ask:** AI chat over the local brain with citations.
 - **Settings:** the active brain's identity (name, color, location), AI providers,
-  local database path, diagnostics, and skill setup.
+  local storage paths, diagnostics, and skill setup.
 
-A **brain** is the top-level workspace — one local SQLite database. The sidebar
+A **brain** is the top-level workspace: a user-selected folder containing the local
+SQLite database plus its app-managed assets directory. The sidebar
 top holds a **brain switcher** (swatch + active brain name) to switch, create, or
 open another brain. Do not confuse a *brain* (the container) with the Network
 **Graph** (a visualization of the records inside the current brain).
@@ -110,7 +122,7 @@ Ask
 Settings
   - brain (identity: name, color, location, schema version; switch/create/open/forget)
   - AI providers
-  - local database path
+  - brain root, local database path, and asset directory path
   - diagnostics
   - agent skill setup
 ```

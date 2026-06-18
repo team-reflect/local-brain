@@ -12,7 +12,9 @@ import { brainInfoSchema } from './schema'
 import { captureBridge } from '../../test/bridge'
 
 const SAMPLE = {
-  path: '/data/local-brain/brain.sqlite',
+  rootPath: '/data/local-brain',
+  databasePath: '/data/local-brain/brain.sqlite',
+  assetsPath: '/data/local-brain/assets',
   name: 'My brain',
   color: 'indigo',
   createdMs: 1,
@@ -29,40 +31,40 @@ describe('brain IPC bindings', () => {
     expect(brains[0]?.name).toBe('My brain')
 
     captureBridge(SAMPLE)
-    expect((await activeBrain()).isActive).toBe(true)
+    expect((await activeBrain())?.isActive).toBe(true)
   })
 
   it('create passes a null name when none is given', async () => {
     const calls = captureBridge(SAMPLE)
-    await createBrain('/tmp/work.sqlite')
+    await createBrain('/tmp/Work')
     expect(calls[0]).toEqual({
       command: 'create_brain',
-      args: { path: '/tmp/work.sqlite', name: null },
+      args: { rootPath: '/tmp/Work', name: null },
     })
   })
 
   it('open / rename / color / forget forward their args', async () => {
     let calls = captureBridge(SAMPLE)
-    await openBrain('/tmp/work.sqlite')
-    expect(calls[0]).toEqual({ command: 'open_brain', args: { path: '/tmp/work.sqlite' } })
+    await openBrain('/tmp/Work')
+    expect(calls[0]).toEqual({ command: 'open_brain', args: { rootPath: '/tmp/Work' } })
 
     calls = captureBridge(SAMPLE)
-    await renameBrain('/tmp/work.sqlite', 'Work')
+    await renameBrain('/tmp/Work', 'Work')
     expect(calls[0]).toEqual({
       command: 'rename_brain',
-      args: { path: '/tmp/work.sqlite', name: 'Work' },
+      args: { rootPath: '/tmp/Work', name: 'Work' },
     })
 
     calls = captureBridge(SAMPLE)
-    await setBrainColor('/tmp/work.sqlite', 'teal')
+    await setBrainColor('/tmp/Work', 'teal')
     expect(calls[0]).toEqual({
       command: 'set_brain_color',
-      args: { path: '/tmp/work.sqlite', color: 'teal' },
+      args: { rootPath: '/tmp/Work', color: 'teal' },
     })
 
     calls = captureBridge([])
-    await forgetBrain('/tmp/work.sqlite')
-    expect(calls[0]).toEqual({ command: 'forget_brain', args: { path: '/tmp/work.sqlite' } })
+    await forgetBrain('/tmp/Work')
+    expect(calls[0]).toEqual({ command: 'forget_brain', args: { rootPath: '/tmp/Work' } })
   })
 
   it('an unknown color degrades to the default rather than throwing', () => {

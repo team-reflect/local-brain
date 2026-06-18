@@ -100,8 +100,9 @@ Notes:
 
 ## Database resolution
 
-The CLI finds the database via `--db <path>` → `$BRAIN_DB` → the platform default
-(`<data>/local-brain/brain.sqlite`). It opens SQLite directly and works with the
-desktop app closed. Run `brain doctor --json` to check health (schema version,
-model configured, curl available). Exit codes: `0` ok, `1` runtime error,
-`3` not found, `4` no database.
+The CLI normally targets a brain folder via `--brain <dir>` or `$BRAIN_ROOT`, and
+uses `<dir>/brain.sqlite` with assets under `<dir>/assets`. `--db <path>` and
+`$BRAIN_DB` remain advanced exact-file overrides for tests and diagnostics. It
+opens SQLite directly and works with the desktop app closed. Run
+`brain doctor --json` to check health (schema version, model configured, curl
+available). Exit codes: `0` ok, `1` runtime error, `3` not found, `4` no database.

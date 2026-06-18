@@ -6,35 +6,30 @@ mod error;
 mod fs;
 mod keychain;
 
-use std::path::PathBuf;
-
 pub use error::{AppError, AppResult};
-
-/// Resolve the durable database path via the shared `brain-schema` helper, so the
-/// desktop writer and the CLI reader always agree: `$BRAIN_DB`, then the platform
-/// data directory.
-pub(crate) fn resolve_db_path() -> PathBuf {
-    brain_schema::resolve_db_path().expect("could not resolve a platform data directory")
-}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Resolve which brain to open: the registry's last active brain (or
-    // `$BRAIN_DB` / the default) — see `brains::BrainState`. The default path
-    // only fixes where `registry.sqlite` lands when no platform data dir resolves.
-    let default_db_path = resolve_db_path();
-    let brains = brains::BrainState::load(&default_db_path);
-    let active = brains.active_candidate(&default_db_path);
-    let conn =
-        brain_schema::open_and_migrate(&active).expect("could not open the Local Brain database");
-    let canonical = active.canonicalize().unwrap_or(active);
-    // Record the opened brain in the catalogue (non-fatal if it can't persist).
-    let _ = brains.register_active(&canonical, None);
+    // Resolve which brain root to open: `$BRAIN_ROOT`, then the registry's last
+    // active root. If neither exists we start without a database and let the
+    // chooser drive the first open, matching Reflect Open's startup lifecycle.
+    let brains = brains::BrainState::load();
+    let db_state = if let Some(active_root) = brains.active_root_candidate() {
+        match brains::open_root_for_brain(&brains, &active_root) {
+            Ok((paths, conn)) => {
+                let _ = brains.register_active(&paths.root_path, None);
+                db::DbState::new(conn, paths)
+            }
+            Err(_) => db::DbState::empty(),
+        }
+    } else {
+        db::DbState::empty()
+    };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .manage(db::DbState::new(conn, canonical))
+        .manage(db_state)
         .manage(brains)
         .manage(embed::EmbedState::default())
         .invoke_handler(tauri::generate_handler![
