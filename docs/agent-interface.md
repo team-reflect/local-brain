@@ -10,7 +10,7 @@ or approved local database access.
 ## Principles
 
 - Query before writing.
-- Write typed records: documents, interactions, assets, tasks, and hidden memories.
+- Write typed records: people, documents, interactions, assets, tasks, and hidden memories.
 - Use people, organizations, projects, and tasks as the main links.
 - Store readable imported text in SQLite through the CLI.
 - Store binary assets through CLI file import so SQLite can record metadata and typed
@@ -33,6 +33,7 @@ brain path
 Add records:
 
 ```bash
+brain add person --full-name "Maya Chen" --email maya@example.com
 brain add document --title "Kitchen remodel notes" --text-file notes.md
 brain add interaction --kind meeting --title "Call with Maya" --text-file transcript.txt
 brain add asset --file maya.jpg --link person:maya --role avatar
@@ -91,6 +92,15 @@ Before adding a record:
 4. Link the new record to relevant people, organizations, projects, or tasks.
 5. Let extraction create hidden memories unless the agent has an explicit atomic claim
    to store.
+
+When adding a person:
+
+- Use the generic CLI person command for explicit contact imports, regardless of source
+  (Google Contacts, vCard, CSV, or manual user instruction).
+- Include stable contact fields when known: full name, preferred name, primary email,
+  primary phone, headline, location, summary, notes, reconnect cadence, and strength.
+- Do not teach the `brain` CLI about any upstream provider. Agents translate source
+  records into Local Brain's typed person fields before writing.
 
 When adding an asset:
 

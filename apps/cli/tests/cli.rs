@@ -7,6 +7,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 use brain_schema::LATEST_SCHEMA_VERSION;
+use rusqlite::Connection;
 use serde_json::Value;
 use tempfile::TempDir;
 
@@ -159,6 +160,156 @@ fn add_dedupes_identical_content() {
     );
     assert_eq!(second["isDuplicate"], true);
     assert_eq!(second["id"], first["id"]); // points back at the original
+}
+
+#[test]
+fn add_person_dedupes_and_returns_contact_fields() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Maya Chen",
+            "--preferred-name",
+            "Maya",
+            "--email",
+            "MAYA@EXAMPLE.COM",
+            "--phone",
+            "+1 555 0100",
+            "--headline",
+            "Designer",
+            "--location",
+            "Austin",
+            "--notes",
+            "Imported from a contact export.",
+            "--reconnect-interval-days",
+            "30",
+        ],
+    );
+    assert_eq!(first["kind"], "person");
+    assert_eq!(first["isDuplicate"], false);
+
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Maya Chen",
+            "--email",
+            "maya@example.com",
+        ],
+    );
+    assert_eq!(second["isDuplicate"], true);
+    assert_eq!(second["id"], first["id"]);
+
+    let by_name = run_json(
+        &db,
+        &["--json", "add", "person", "--full-name", "Maya   Chen"],
+    );
+    assert_eq!(by_name["isDuplicate"], true);
+    assert_eq!(by_name["id"], first["id"]);
+
+    let search = run_json(&db, &["--json", "search", "Maya"]);
+    assert!(search["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|h| h["kind"] == "person" && h["title"] == "Maya Chen"));
+
+    let id = first["id"].as_str().unwrap();
+    let shown = run_json(&db, &["--json", "show", "person", id]);
+    assert_eq!(shown["title"], "Maya Chen");
+    assert_eq!(shown["preferredName"], "Maya");
+    assert_eq!(shown["primaryEmail"], "maya@example.com");
+    assert_eq!(shown["primaryPhone"], "+1 555 0100");
+    assert_eq!(shown["subtitle"], "Designer");
+    assert_eq!(shown["location"], "Austin");
+    assert_eq!(shown["reconnectIntervalDays"], 30);
+    assert_eq!(shown["relationshipStrength"], Value::Null);
+}
+
+#[test]
+fn add_asset_copies_file_and_links_to_interaction() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().join("AssetsBrain");
+    let source = dir.path().join("invoice.txt");
+    std::fs::write(&source, "attachment bytes").unwrap();
+
+    let interaction = run_brain_json(
+        &root,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Email with attachment",
+            "--text",
+            "Plain text email body.",
+        ],
+    );
+    let interaction_id = interaction["id"].as_str().unwrap();
+    let link = format!("interaction:{interaction_id}");
+    let asset = run_brain_json(
+        &root,
+        &[
+            "--json",
+            "add",
+            "asset",
+            "--file",
+            source.to_str().unwrap(),
+            "--kind",
+            "attachment",
+            "--mime-type",
+            "text/plain",
+            "--link",
+            &link,
+        ],
+    );
+    assert_eq!(asset["kind"], "asset");
+    assert_eq!(asset["isDuplicate"], false);
+    assert_eq!(asset["linkCount"], 1);
+
+    let conn = Connection::open(root.join("brain.sqlite")).unwrap();
+    let storage_path: String = conn
+        .query_row(
+            "SELECT storage_path FROM assets WHERE id = ?1",
+            [asset["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(root.join(&storage_path).is_file());
+    let linked: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM asset_links WHERE asset_id = ?1 AND record_type = 'interaction' AND record_id = ?2",
+            (asset["id"].as_str().unwrap(), interaction_id),
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(linked, 1);
+
+    let duplicate = run_brain_json(
+        &root,
+        &[
+            "--json",
+            "add",
+            "asset",
+            "--file",
+            source.to_str().unwrap(),
+            "--link",
+            &link,
+        ],
+    );
+    assert_eq!(duplicate["isDuplicate"], true);
+    assert_eq!(duplicate["id"], asset["id"]);
+    assert_eq!(duplicate["linkCount"], 0);
 }
 
 #[test]

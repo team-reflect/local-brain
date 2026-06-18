@@ -21,7 +21,7 @@ pub const SUPPORT_DIRNAME: &str = ".local-brain";
 
 /// Bumped whenever a migration is appended below. Asserted against the applied
 /// `user_version` in tests so the constant can never drift from the list.
-pub const LATEST_SCHEMA_VERSION: usize = 4;
+pub const LATEST_SCHEMA_VERSION: usize = 5;
 
 /// The canonical filesystem layout for one Local Brain root directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,6 +53,7 @@ static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
         M::up(include_str!(
             "../migrations/0004_select_only_relationship_strength.sql"
         )),
+        M::up(include_str!("../migrations/0005_assets.sql")),
     ])
 });
 

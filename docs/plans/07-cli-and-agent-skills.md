@@ -23,7 +23,7 @@ checks.
 - CLI writes use the same SQLite schema/migration crate as the desktop app.
 - The CLI opens the SQLite database directly; it does not require the desktop app to be
   running and does not use Tauri IPC.
-- Agents can add documents, interactions, assets, tasks, and memories with direct
+- Agents can add people, documents, interactions, assets, tasks, and memories with direct
   provenance.
 - Agents can search and ask, but cited answers still come from document or interaction
   chunks.
@@ -64,6 +64,7 @@ checks.
    - `brain doctor`
    - `brain path`
 5. Add write commands:
+   - `brain add person --full-name ... --email ...`
    - `brain add document --title ... --text-file ...`
    - `brain add interaction --kind meeting --title ... --text-file ...`
    - `brain add asset --file ... --link person:... --role avatar`
@@ -111,6 +112,8 @@ checks.
 ## Acceptance Criteria
 
 - An agent can add a meeting transcript as an interaction.
+- An agent can add an explicit contact as a person without coupling the CLI to a source
+  provider.
 - An agent can add a reference note as a document.
 - An agent can add an avatar, image, or attachment as a linked asset.
 - An agent can add a task linked to a person/project.
