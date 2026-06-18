@@ -67,6 +67,15 @@ export function installSqliteBridge(database) {
           return Promise.reject(error)
         }
       }
+      if (command === 'embed_delete') {
+        // Mirror the Rust `embed_delete`: drop chunk_embeddings rows (and their
+        // chunk_vectors, which this harness strips) for the given chunk ids.
+        let deleted = 0
+        for (const chunkId of args.chunkIds) {
+          deleted += Number(database.prepare('DELETE FROM chunk_embeddings WHERE chunk_id = ?').run(chunkId).changes)
+        }
+        return Promise.resolve(deleted)
+      }
       return Promise.reject(new Error(`unexpected command: ${command}`))
     },
   })

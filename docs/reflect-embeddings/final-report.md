@@ -182,6 +182,31 @@ vec0 cosine-KNN ordering, and a real end-to-end model + KNN test (ranks by meani
   `cargo fmt --all -- --check`, `cargo check --workspace`, `cargo test --workspace` (18 + sidecar
   suites pass).
 
+## Post-review fixes — sixth pass (Cursor Bugbot on PR #27, head ce7cfa5)
+- **Medium — Hard delete leaves orphan vectors:** `hardDeleteRecord` dropped a document's/
+  interaction's `content_chunks` (and their FTS rows) but never the matching
+  `chunk_embeddings`/`chunk_vectors`, which have no FK cascade (the pipeline owns that
+  lifecycle so a chunk rewrite can't silently cascade-delete vectors mid-rebuild). Orphaned
+  vec0 rows then consumed KNN slots until a separate prune ran. `hardDeleteRecord` now
+  captures the chunk ids before the delete and calls `embedDelete` on them, so the embedding
+  projection is cleaned in the same operation. The shared SQLite test harness learned
+  `embed_delete`; regression test in `settings-maintenance.test.mjs` (embedded chunks are gone
+  after a hard delete). Rust `delete_chunks` already drops the vec0 rows (covered by
+  `embed/write.rs` tests).
+- **Medium — Status poll rehashes all chunks:** `getEmbeddingsStatus` → `countPending` loaded
+  every chunk and SHA-256-hashed the full text in JS on every poll (1.5s while draining, 30s
+  idle), so large libraries repeatedly paid full-corpus hashing on the status path. The chunk
+  text hash is now stored in `content_chunks.content_hash` at ingest/seed, and both the count
+  and the backfill share a pure-SQL pending predicate (null-safe `ce.content_hash IS NOT
+  cc.content_hash`, keyed on `model_id`) — `countPending` is now a `COUNT(*)` that loads no
+  text and hashes nothing. `backfillEmbeddings` runs a one-time `ensureChunkHashes` to fill the
+  column for legacy/seed chunks written before it existed, so the count settles instead of
+  re-embedding forever. Tests: legacy-hash backfill + settle, and the existing change-detection
+  test updated to mutate text + stored hash the way a re-ingest does (`pipeline.test.mjs`).
+- Re-verified (TypeScript only this pass; Rust gates re-run unchanged): `git diff --check`
+  clean, `pnpm check` (147 core tests + typecheck + lint), desktop build, `cargo fmt --all --
+  --check`, `cargo check --workspace`, `cargo test --workspace` (18 + sidecar suites pass).
+
 ## Repo state
 - Branch: `codex/local-brain-reflect-embeddings`
 - PR: https://github.com/maccman/local-brain/pull/27 (base `master`)

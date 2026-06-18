@@ -1,5 +1,6 @@
 import { db } from '../../db/client'
 import { batch, executeRaw } from '../../db/commands'
+import { embedDelete } from '../../embeddings/commands'
 
 /**
  * Destructive-operation maintenance (Plan 08 step 4–5).
@@ -8,7 +9,9 @@ import { batch, executeRaw } from '../../db/commands'
  * setting `archived_at`). Hard delete is explicit and predictable here: join
  * tables, `memory_links`, and `evidence_refs` cascade via the schema; for
  * documents/interactions we also drop the derived `content_chunks` (which the
- * FTS triggers keep in sync), so no orphaned derived data survives.
+ * FTS triggers keep in sync) plus their embedding projection
+ * (`chunk_embeddings` + `chunk_vectors`, which have no FK cascade), so no
+ * orphaned derived data survives.
  *
  * Derived search data can always be rebuilt from durable rows via
  * {@link rebuildSearchIndexes} — call it after a bulk destructive operation.
@@ -28,15 +31,29 @@ const TABLE: Record<DeletableKind, 'people' | 'organizations' | 'projects' | 'ta
 /**
  * Permanently delete a record and its derived data, atomically. Cascades handle
  * typed links; for source records we delete `content_chunks` first so their FTS
- * rows and any `evidence_refs` into them are cleaned up too.
+ * rows and any `evidence_refs` into them are cleaned up too. The embedding
+ * projection has no FK to `content_chunks` (the pipeline owns its lifecycle, so a
+ * chunk rewrite can't silently cascade-delete vectors mid-rebuild), so we prune
+ * the deleted chunks' `chunk_embeddings`/`chunk_vectors` rows explicitly via
+ * `embedDelete` — otherwise orphaned vec0 rows linger and waste KNN slots.
  */
 export async function hardDeleteRecord(kind: DeletableKind, id: string): Promise<void> {
   const table = TABLE[kind]
   if (kind === 'document' || kind === 'interaction') {
+    // Capture the chunk ids before the delete so we can drop their embeddings.
+    const chunks = await db
+      .selectFrom('contentChunks')
+      .select('id')
+      .where('recordType', '=', kind)
+      .where('recordId', '=', id)
+      .execute()
     await batch([
       db.deleteFrom('contentChunks').where('recordType', '=', kind).where('recordId', '=', id),
       db.deleteFrom(table).where('id', '=', id),
     ])
+    if (chunks.length > 0) {
+      await embedDelete(chunks.map((chunk) => chunk.id))
+    }
   } else {
     await batch([db.deleteFrom(table).where('id', '=', id)])
   }

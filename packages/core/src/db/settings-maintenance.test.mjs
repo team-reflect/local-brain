@@ -43,6 +43,29 @@ describe('Plan 08 destructive maintenance', () => {
     expect((await globalSearch('zebra')).length).toBe(0)
   })
 
+  it('drops the embedding projection when a source record is hard-deleted', async () => {
+    const database = freshDatabase()
+    installSqliteBridge(database)
+
+    const doc = await ingestDocument({ title: 'Embedded', bodyText: 'vectorize me please' })
+    const chunks = database.prepare('SELECT id FROM content_chunks WHERE record_id = ?').all(doc.id)
+    expect(chunks.length).toBeGreaterThan(0)
+    // Stand in for the backfill: give every chunk a stored embedding row.
+    for (const chunk of chunks) {
+      database
+        .prepare("INSERT INTO chunk_embeddings (chunk_id, content_hash, model_id) VALUES (?, 'h', 'all-MiniLM-L6-v2')")
+        .run(chunk.id)
+    }
+    const embeddingCount = () => Number(database.prepare('SELECT count(*) AS n FROM chunk_embeddings').get().n)
+    expect(embeddingCount()).toBe(chunks.length)
+
+    await hardDeleteRecord('document', doc.id)
+
+    expect(await tableCount('contentChunks')).toBe(0)
+    // No orphaned chunk_embeddings (and, on real SQLite, no orphaned chunk_vectors).
+    expect(embeddingCount()).toBe(0)
+  })
+
   it('cascades evidence when its cited chunk is deleted', async () => {
     const interaction = await ingestInteraction({ kind: 'meeting', title: 'M', bodyText: 'grounding text' })
     // No evidence yet; just prove the delete path cleans interactions + chunks.

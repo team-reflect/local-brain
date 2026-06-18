@@ -1,6 +1,7 @@
 import { db } from '../db/client'
 import { batch } from '../db/commands'
 import { newId } from '../db/id'
+import { contentHash } from '../ingest/hash'
 
 export interface SeedResult {
   seeded: boolean
@@ -41,6 +42,9 @@ export async function seedDemoData(): Promise<SeedResult> {
   const evidenceId = newId()
   const tagId = newId()
   const taggingId = newId()
+
+  const chunkText = 'We agreed to draft a partnership proposal.'
+  const chunkHash = await contentHash(chunkText)
 
   await batch([
     db.insertInto('organizations').values({
@@ -115,7 +119,8 @@ export async function seedDemoData(): Promise<SeedResult> {
       recordType: 'document',
       recordId: documentId,
       chunkIndex: 0,
-      text: 'We agreed to draft a partnership proposal.',
+      text: chunkText,
+      contentHash: chunkHash,
     }),
     db.insertInto('interactions').values({
       id: interactionId,

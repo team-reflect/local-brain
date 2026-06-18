@@ -7,6 +7,7 @@
 // This exercises the hash-skip incremental logic against real SQL while the
 // actual vector math/storage is covered by the Rust tests.
 
+import { createHash } from 'node:crypto'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   backfillEmbeddings,
@@ -119,13 +120,38 @@ describe('embedding backfill pipeline', () => {
     await backfillEmbeddings()
     expect(await countPending()).toBe(0)
 
-    // Mutate one chunk's text directly: its content hash no longer matches.
-    database.prepare("UPDATE content_chunks SET text = 'totally different text' WHERE chunk_index = 0").run()
+    // Mutate one chunk's text the way a re-ingest does: new text, new stored
+    // hash. The stored hash now differs from the embedded one → pending.
+    const changed = 'totally different text'
+    const changedHash = createHash('sha256').update(changed).digest('hex')
+    database
+      .prepare('UPDATE content_chunks SET text = ?, content_hash = ? WHERE chunk_index = 0')
+      .run(changed, changedHash)
     expect(await countPending()).toBe(1)
 
     const result = await backfillEmbeddings()
     expect(result.embedded).toBe(1)
     expect(await countPending()).toBe(0)
+  })
+
+  it('backfills a chunk hash written before the column was populated, then stays settled', async () => {
+    const database = freshDatabase()
+    installComboBridge(database)
+    // A legacy chunk: row exists but content_hash was never written (NULL).
+    database
+      .prepare(
+        "INSERT INTO content_chunks (id, record_type, record_id, chunk_index, text) VALUES ('legacy', 'document', 'doc', 0, 'legacy chunk text')",
+      )
+      .run()
+    expect(await countPending()).toBe(1)
+
+    const first = await backfillEmbeddings()
+    expect(first.embedded).toBe(1)
+    // The stored hash is now persisted, so the chunk is settled — not re-embedded
+    // on the next poll/run (no perpetual-pending loop).
+    expect(await countPending()).toBe(0)
+    const second = await backfillEmbeddings()
+    expect(second.embedded).toBe(0)
   })
 
   it('prunes embeddings whose source chunk no longer exists', async () => {
