@@ -3,7 +3,6 @@ import type { Task } from '@local-brain/core'
 import { StatusBadge } from '../components/badge'
 import { DataList, type Column } from '../components/data-list'
 import { EmptyState } from '../components/empty-state'
-import { PageHead } from '../components/page-head'
 import { cn } from '../lib/utils'
 import { useArchiveTask, useCompleteTask, useTasks } from '../lib/queries'
 import { useRouter } from '../routing/router'
@@ -80,29 +79,25 @@ export function TasksSurface(): ReactNode {
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-4">
-      <PageHead
-        eyebrow="Tasks"
-        title="Tasks"
-        actions={
-          <div className="flex items-center gap-1">
-            {FILTERS.map((option) => (
-              <button
-                key={option}
-                type="button"
-                onClick={() => setFilter(option)}
-                className={cn(
-                  'rounded-md px-2 py-1 text-xs font-medium capitalize transition-colors',
-                  filter === option
-                    ? 'bg-secondary text-foreground'
-                    : 'text-muted-foreground hover:bg-secondary/60',
-                )}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
-        }
-      />
+      <div className="flex justify-end">
+        <div className="flex items-center gap-1">
+          {FILTERS.map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => setFilter(option)}
+              className={cn(
+                'rounded-md px-2 py-1 text-xs font-medium capitalize transition-colors',
+                filter === option
+                  ? 'bg-secondary text-foreground'
+                  : 'text-muted-foreground hover:bg-secondary/60',
+              )}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      </div>
       <DataList
         rows={tasks.data ?? []}
         columns={columns}
