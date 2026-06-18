@@ -149,6 +149,35 @@ New Rust tests: `edit_materializes_uncatalogued_active_brain`,
 and `mark_opened_dedupes_path_spellings`. `cargo test -p local-brain-desktop`
 (25 tests) and `cargo clippy` are green.
 
+## Bugbot review fixes (2026-06-18, head afdc8d6)
+
+Two new Bugbot findings on commit `afdc8d6`, both resolved in `brains.rs`:
+
+1. **High — Registry file openable as brain.** `open_brain` accepted any existing
+   `.sqlite` file after `canonicalize`, including the app's own `registry.sqlite`.
+   Choosing it would run brain migrations on the registry DB, point `DbState` at it,
+   and leave a second live connection to the same file for the catalogue. `BrainState`
+   now records the registry's canonical `registry_path` at `load`, and `open_brain`
+   (via the testable `open_brain_impl`) rejects any path that `is_registry` — a
+   canonical comparison that re-canonicalizes the stored path so a recreated registry
+   still matches. Ordinary brains still open unchanged.
+2. **Medium — In-memory registry hides lost saves.** If `registry.sqlite` could not be
+   recreated after corrupt recovery, `open_resilient` fell back to an in-memory
+   registry and brain switches / catalogue edits then succeeded for the session but
+   silently disappeared on the next launch. `open_resilient` now returns a `durable`
+   flag (`false` only for that in-memory fallback), stored on `BrainState`. Every
+   registry *write* — `register_active` (so any `switch_to`), `edit_metadata`
+   (rename/color), and `forget_brain` — first calls `require_durable`, which fails
+   loudly with a restart-the-app message instead of pretending the write stuck. Reads
+   and startup still work, so resilience is kept without silent lost saves. The
+   persist-before-swap ordering means a blocked switch leaves the live `DbState` on
+   the previous brain.
+
+New Rust tests: `open_brain_rejects_the_registry_file`, `open_brain_opens_a_real_brain`,
+`non_durable_registry_blocks_switch_loudly`, `non_durable_registry_blocks_metadata_and_forget`,
+and `durable_registry_still_allows_writes`; `corrupt_registry_falls_back_to_empty` now
+also asserts the recreated registry stays durable.
+
 ## Progress
 
 - [x] Read AGENTS.md, docs, supervisor skill; mapped Local Brain + both Reflect refs.

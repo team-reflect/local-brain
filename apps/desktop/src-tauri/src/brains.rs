@@ -17,6 +17,13 @@
 //! paths are canonicalized, and the actual connection swap (see [`DbState::swap`])
 //! happens here. A failed open leaves the previously active brain intact, and a
 //! corrupt registry file is moved aside and recreated so the app still starts.
+//! If even that recreate fails the registry falls back to a non-persistent
+//! in-memory catalogue so the app still launches, but every registry *write*
+//! (switch, rename, recolor, forget) then fails loudly via [`BrainState::durable`]
+//! rather than silently succeeding for the session and vanishing on next launch.
+//! The registry's own database file can never be opened as a brain
+//! (see [`BrainState::is_registry`]): doing so would run brain migrations on the
+//! registry and leave a second live connection to the same file.
 //!
 //! Switching is ordered so the two stores can never disagree: a switch persists
 //! the new active brain to this registry *before* it swaps the live [`DbState`]
@@ -178,12 +185,21 @@ fn open_memory_registry() -> Connection {
 /// Open the registry resiliently: a corrupt or non-SQLite file is moved aside
 /// (`registry.sqlite.corrupt`) and recreated empty rather than failing startup —
 /// matching the old JSON registry's "corrupt → empty default" behavior.
-fn open_resilient(path: &Path) -> Connection {
+///
+/// Returns the connection and a `durable` flag: `true` when it is backed by the
+/// on-disk file, `false` for the last-resort in-memory fallback used only when no
+/// on-disk registry can be opened *or* recreated. A non-durable registry keeps
+/// the app usable for reads but must reject writes (see [`BrainState::durable`])
+/// so a switch or metadata edit can't silently disappear on the next launch.
+fn open_resilient(path: &Path) -> (Connection, bool) {
     match open_registry(path) {
-        Ok(conn) => conn,
+        Ok(conn) => (conn, true),
         Err(_) => {
             let _ = fs::rename(path, path.with_extension("sqlite.corrupt"));
-            open_registry(path).unwrap_or_else(|_| open_memory_registry())
+            match open_registry(path) {
+                Ok(conn) => (conn, true),
+                Err(_) => (open_memory_registry(), false),
+            }
         }
     }
 }
@@ -342,6 +358,14 @@ pub struct BrainState {
     /// and leave `registry_meta` and the live connection on different brains.
     /// It guards only switches — ordinary reads/writes never take it.
     switch: Mutex<()>,
+    /// Whether `registry` is backed by the on-disk file. `false` only for the
+    /// in-memory fallback ([`open_resilient`]) used when no on-disk registry can
+    /// be opened or recreated; in that state registry writes are refused (see
+    /// [`BrainState::require_durable`]) so they can't silently vanish on restart.
+    durable: bool,
+    /// Canonical path of the registry's own database file, so [`open_brain`] can
+    /// refuse to open it as a brain (see [`BrainState::is_registry`]).
+    registry_path: PathBuf,
 }
 
 impl BrainState {
@@ -352,9 +376,17 @@ impl BrainState {
         let registry_path = brain_schema::app_data_dir()
             .map(|dir| dir.join("registry.sqlite"))
             .unwrap_or_else(|| default_db_path.with_file_name("registry.sqlite"));
+        let (registry, durable) = open_resilient(&registry_path);
+        // open_resilient has created the file (unless it fell back to memory), so
+        // canonicalize now to match the canonical path open_brain compares against;
+        // on the in-memory fallback the raw path is fine since no brain can ever
+        // resolve to an in-memory database.
+        let registry_path = registry_path.canonicalize().unwrap_or(registry_path);
         Self {
-            registry: Mutex::new(open_resilient(&registry_path)),
+            registry: Mutex::new(registry),
             switch: Mutex::new(()),
+            durable,
+            registry_path,
         }
     }
 
@@ -362,6 +394,35 @@ impl BrainState {
         self.registry
             .lock()
             .map_err(|_| AppError::io("the brain registry lock was poisoned by an earlier panic"))
+    }
+
+    /// Whether `candidate` (an already-canonicalized path) is this app's own
+    /// registry database. Opening `registry.sqlite` as a brain would run brain
+    /// migrations on the registry and leave a second live connection to the same
+    /// file, so [`open_brain`] refuses it. The stored path is canonical; we also
+    /// re-canonicalize it on each call so a recreated registry still matches.
+    fn is_registry(&self, candidate: &Path) -> bool {
+        if self.registry_path == candidate {
+            return true;
+        }
+        matches!(self.registry_path.canonicalize(), Ok(canonical) if canonical == candidate)
+    }
+
+    /// Refuse a registry write when running on the non-persistent in-memory
+    /// fallback ([`open_resilient`]). The catalogue still renders for the session,
+    /// but a switch, rename, recolor, or forget would be lost on the next launch;
+    /// failing loudly surfaces that instead of pretending the write succeeded.
+    fn require_durable(&self) -> AppResult<()> {
+        if self.durable {
+            Ok(())
+        } else {
+            Err(AppError::io(
+                "the brain registry could not be opened or recreated on disk, so it is \
+                 running in a temporary in-memory fallback; changes to your brain list \
+                 cannot be saved. Restart Local Brain after restoring access to its app \
+                 data directory.",
+            ))
+        }
     }
 
     /// Acquire the switch lock, held for the whole of a [`switch_to`] so the
@@ -395,6 +456,7 @@ impl BrainState {
     /// durable half of a runtime switch — see [`switch_to`], which only swaps the
     /// live connection once this has committed.
     pub fn register_active(&self, canonical: &Path, name: Option<&str>) -> AppResult<()> {
+        self.require_durable()?;
         let path = canonical.display().to_string();
         let conn = self.lock()?;
         mark_opened(&conn, &path, name)
@@ -496,7 +558,11 @@ pub fn open_brain(
     brains: State<'_, BrainState>,
     path: String,
 ) -> AppResult<BrainInfo> {
-    let canonical = Path::new(&path)
+    open_brain_impl(&db, &brains, &path)
+}
+
+fn open_brain_impl(db: &DbState, brains: &BrainState, path: &str) -> AppResult<BrainInfo> {
+    let canonical = Path::new(path)
         .canonicalize()
         .map_err(|err| AppError::not_found(format!("no brain at {path}: {err}")))?;
     if !canonical.is_file() {
@@ -504,8 +570,15 @@ pub fn open_brain(
             "not a brain database file: {path}"
         )));
     }
+    // Never open the app's own registry as a brain: that would migrate the
+    // registry like a brain and leave a second live connection to the same file.
+    if brains.is_registry(&canonical) {
+        return Err(AppError::parse(format!(
+            "{path} is Local Brain's internal brain registry, not a brain database"
+        )));
+    }
     let conn = brain_schema::open_and_migrate(&canonical)?;
-    switch_to(&db, &brains, conn, &canonical, None)
+    switch_to(db, brains, conn, &canonical, None)
 }
 
 /// Create a brand-new brain at `path`, then open it. `path` must be absolute and
@@ -551,6 +624,7 @@ fn edit_metadata(
     update: &str,
     value: &str,
 ) -> AppResult<BrainInfo> {
+    brains.require_durable()?;
     let key = normalize(raw_path);
     let live_active = db
         .active_path()
@@ -618,7 +692,11 @@ pub fn forget_brain(
     brains: State<'_, BrainState>,
     path: String,
 ) -> AppResult<Vec<BrainInfo>> {
-    let key = normalize(&path);
+    forget_brain_impl(&db, &brains, &path)
+}
+
+fn forget_brain_impl(db: &DbState, brains: &BrainState, path: &str) -> AppResult<Vec<BrainInfo>> {
+    let key = normalize(path);
     // Guard against forgetting the *live* active brain (the one reads/writes hit),
     // and derive the returned list's active flag from it too, so a stale registry
     // pointer can neither block a valid forget nor mislabel the survivors.
@@ -629,6 +707,9 @@ pub fn forget_brain(
             "cannot forget the active brain — switch to another brain first",
         ));
     }
+    // A non-durable (in-memory fallback) registry would lose the removal on
+    // restart, so reject it rather than report a forget that silently comes back.
+    brains.require_durable()?;
     let schema_version = db.schema_version().ok();
     let conn = brains.lock()?;
     conn.execute("DELETE FROM brains WHERE path = ?1", [&key])?;
@@ -647,19 +728,26 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
-    /// A registry backed by an in-memory SQLite database (no file on disk).
+    /// A registry backed by an in-memory SQLite database (no file on disk),
+    /// treated as durable: it stands in for a normal on-disk registry in tests
+    /// that don't exercise the non-durable fallback.
     fn memory_state() -> BrainState {
         BrainState {
             registry: Mutex::new(open_memory_registry()),
             switch: Mutex::new(()),
+            durable: true,
+            registry_path: PathBuf::new(),
         }
     }
 
-    /// A registry backed by an on-disk SQLite file, for persistence tests.
+    /// A registry backed by an on-disk SQLite file, for persistence tests. Its
+    /// canonical `registry_path` is recorded so the open-brain guard can be tested.
     fn file_state(path: &Path) -> BrainState {
         BrainState {
             registry: Mutex::new(open_registry(path).unwrap()),
             switch: Mutex::new(()),
+            durable: true,
+            registry_path: path.canonicalize().unwrap_or_else(|_| path.to_path_buf()),
         }
     }
 
@@ -671,6 +759,20 @@ mod tests {
         BrainState {
             registry: Mutex::new(conn),
             switch: Mutex::new(()),
+            durable: true,
+            registry_path: PathBuf::new(),
+        }
+    }
+
+    /// A non-durable registry: the in-memory fallback used when no on-disk
+    /// registry can be opened or recreated. Writes through it must fail loudly so
+    /// they can't silently vanish on the next launch.
+    fn non_durable_state() -> BrainState {
+        BrainState {
+            registry: Mutex::new(open_memory_registry()),
+            switch: Mutex::new(()),
+            durable: false,
+            registry_path: PathBuf::new(),
         }
     }
 
@@ -801,8 +903,10 @@ mod tests {
         let path = dir.path().join("registry.sqlite");
         std::fs::write(&path, b"this is not a sqlite database at all").unwrap();
 
-        let conn = open_resilient(&path);
+        let (conn, durable) = open_resilient(&path);
         assert!(all_records(&conn).unwrap().is_empty());
+        // The corrupt file is recreated on disk, so the registry stays durable.
+        assert!(durable);
         // The corrupt file is moved aside, not silently overwritten.
         assert!(path.with_extension("sqlite.corrupt").exists());
     }
@@ -1097,5 +1201,125 @@ mod tests {
             all_records(&conn).unwrap().is_empty(),
             "a failed edit must not catalogue the brain"
         );
+    }
+
+    #[test]
+    fn open_brain_rejects_the_registry_file() {
+        // Bugbot High regression: open_brain must refuse to open the app's own
+        // registry.sqlite as a brain. Doing so would run brain migrations on the
+        // registry DB, point DbState at it, and leave a second live connection to
+        // the same file for the catalogue. is_registry guards on the canonical path.
+        let dir = tempdir().unwrap();
+        let registry_path = dir.path().join("registry.sqlite");
+        let brains = file_state(&registry_path);
+
+        // A live DB already open on a real brain.
+        let old = dir.path().join("old.sqlite");
+        let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old.clone());
+
+        // Opening the registry path — even via a non-canonical spelling — is refused.
+        let dotted = dir
+            .path()
+            .join(".")
+            .join("registry.sqlite")
+            .display()
+            .to_string();
+        let result = open_brain_impl(&db, &brains, &dotted);
+        assert!(result.is_err(), "the registry must not open as a brain");
+
+        // The live connection still points at the original brain, untouched.
+        assert_eq!(db.active_path().unwrap(), old);
+        // The registry was not catalogued or migrated as a brain.
+        let conn = brains.lock().unwrap();
+        assert!(all_records(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn open_brain_opens_a_real_brain() {
+        // The guard rejects only the registry itself — an ordinary brain still opens.
+        let dir = tempdir().unwrap();
+        let registry_path = dir.path().join("registry.sqlite");
+        let brains = file_state(&registry_path);
+
+        let old = dir.path().join("old.sqlite");
+        let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old.clone());
+
+        let target = dir.path().join("Work").join("brain.sqlite");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        brain_schema::open_and_migrate(&target).unwrap();
+        let canonical = target.canonicalize().unwrap();
+
+        let info = open_brain_impl(&db, &brains, &target.display().to_string()).unwrap();
+        assert!(info.is_active);
+        assert_eq!(db.active_path().unwrap(), canonical);
+    }
+
+    #[test]
+    fn non_durable_registry_blocks_switch_loudly() {
+        // Bugbot Medium regression: when the registry fell back to a
+        // non-persistent in-memory store, a switch would appear to succeed for the
+        // session and silently disappear on the next launch. switch_to must now
+        // fail loudly and leave the live DB on the previous brain.
+        let dir = tempdir().unwrap();
+        let old = dir.path().join("old.sqlite");
+        let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old.clone());
+
+        let new = dir.path().join("new.sqlite");
+        let new_conn = brain_schema::open_and_migrate(&new).unwrap();
+        let canonical = new.canonicalize().unwrap();
+
+        let brains = non_durable_state();
+        let result = switch_to(&db, &brains, new_conn, &canonical, None);
+        assert!(
+            result.is_err(),
+            "a switch on a non-durable registry must fail"
+        );
+        assert_eq!(
+            db.active_path().unwrap(),
+            old,
+            "the live DB must stay on the previous brain"
+        );
+    }
+
+    #[test]
+    fn non_durable_registry_blocks_metadata_and_forget() {
+        // The same lost-save guard must cover metadata edits and forget, which
+        // would otherwise report success and vanish on restart.
+        let dir = tempdir().unwrap();
+        let active = dir.path().join("active.sqlite");
+        let (db, key) = live_db(&active);
+        let brains = non_durable_state();
+
+        assert!(
+            edit_metadata(&db, &brains, &key, RENAME_SQL, "X").is_err(),
+            "rename on a non-durable registry must fail"
+        );
+        assert!(
+            edit_metadata(&db, &brains, &key, COLOR_SQL, "teal").is_err(),
+            "recolor on a non-durable registry must fail"
+        );
+        assert!(
+            forget_brain_impl(&db, &brains, "/some/other.sqlite").is_err(),
+            "forget on a non-durable registry must fail"
+        );
+    }
+
+    #[test]
+    fn durable_registry_still_allows_writes() {
+        // The guard must not regress normal operation: a durable registry accepts
+        // a switch and the metadata edits exactly as before.
+        let dir = tempdir().unwrap();
+        let old = dir.path().join("old.sqlite");
+        let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old.clone());
+
+        let new = dir.path().join("Work").join("brain.sqlite");
+        std::fs::create_dir_all(new.parent().unwrap()).unwrap();
+        let new_conn = brain_schema::open_and_migrate(&new).unwrap();
+        let canonical = new.canonicalize().unwrap();
+
+        let brains = memory_state(); // durable
+        let info = switch_to(&db, &brains, new_conn, &canonical, None).unwrap();
+        assert!(info.is_active);
+        assert_eq!(db.active_path().unwrap(), canonical);
     }
 }

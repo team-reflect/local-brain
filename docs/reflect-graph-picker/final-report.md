@@ -227,6 +227,39 @@ green.
   test `mark_opened_dedupes_path_spellings`. `cargo test -p local-brain-desktop`
   (25 tests) and `cargo clippy` are green.
 
+### Follow-up Bugbot findings (comments on head `afdc8d6`)
+
+- **High — Registry file openable as brain.** `open_brain`
+  (`apps/desktop/src-tauri/src/brains.rs`) accepted any existing `.sqlite` file once
+  `canonicalize` succeeded, including the app's own `registry.sqlite`. Picking the
+  registry would run *brain* migrations on the registry DB, point `DbState` at it, and
+  leave a second live connection to the same file for the catalogue — two writers, one
+  file, schema confusion. Fixed by tracking the registry's canonical path on
+  `BrainState` (recorded at `load`, after `open_resilient` has created the file) and
+  rejecting any open whose canonical path `is_registry`. `is_registry` compares against
+  the stored canonical path and re-canonicalizes it per call, so a recreated registry
+  still matches and non-canonical spellings of the registry path are caught too.
+  `open_brain` now delegates to a testable `open_brain_impl`. New Rust tests
+  `open_brain_rejects_the_registry_file` (incl. a dotted spelling, asserting the live
+  DB is untouched and nothing is catalogued) and `open_brain_opens_a_real_brain`.
+- **Medium — In-memory registry hides lost saves.** When `registry.sqlite` could not
+  be recreated after corrupt recovery, `open_resilient` fell back to an in-memory
+  registry. Brain switches and catalogue edits then *appeared* to succeed for the
+  session but silently vanished on the next launch — a non-durable store presented as
+  durable. Fixed by making `open_resilient` return a `durable` flag (`false` only for
+  that in-memory fallback) stored on `BrainState`, and gating every registry write
+  behind `require_durable`: `register_active` (so any `switch_to`), `edit_metadata`
+  (rename/color), and `forget_brain` now fail loudly with a "restart after restoring
+  app-data access" message rather than reporting a write that won't survive a restart.
+  Reads, listing, and startup still work on the fallback, so launch resilience is
+  preserved without silent lost saves; because the switch persists before it swaps, a
+  blocked switch leaves the live `DbState` on the previous brain. New Rust tests
+  `non_durable_registry_blocks_switch_loudly`,
+  `non_durable_registry_blocks_metadata_and_forget`, and
+  `durable_registry_still_allows_writes`; `corrupt_registry_falls_back_to_empty` now
+  also asserts the recreated registry stays durable. `cargo test -p local-brain-desktop`
+  (30 tests) and `cargo clippy` are green.
+
 ## Caveats / deferred (honest scope)
 
 - **Path field as fallback.** The native OS dialog is the primary affordance; the
