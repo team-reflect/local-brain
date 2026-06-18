@@ -11,11 +11,13 @@ export function ModelCombobox({
   value,
   models,
   onChange,
+  disabled = false,
 }: {
   id: string
   value: string
   models: readonly AiModelOption[]
   onChange: (value: string) => void
+  disabled?: boolean
 }): ReactNode {
   const listId = `${id}-options`
   return (
@@ -24,6 +26,7 @@ export function ModelCombobox({
         id={id}
         list={listId}
         value={value}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
         className={`${controlClass} font-mono text-xs`}
       />

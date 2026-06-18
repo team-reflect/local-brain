@@ -24,6 +24,7 @@ export function AddAiProviderDialog({
   const [apiKey, setApiKey] = useState('')
   const [isDefault, setIsDefault] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
   const [unverified, setUnverified] = useState(false)
   const providerRef = useRef<HTMLSelectElement>(null)
 
@@ -44,6 +45,7 @@ export function AddAiProviderDialog({
   }
 
   async function submit(): Promise<void> {
+    if (submitting) return
     setSubmitError(null)
     const key = apiKey.trim()
     const modelId = model.trim()
@@ -56,6 +58,7 @@ export function AddAiProviderDialog({
       return
     }
 
+    setSubmitting(true)
     try {
       if (!unverified) {
         const validation = await validateApiKey(provider, key)
@@ -72,13 +75,19 @@ export function AddAiProviderDialog({
       onClose()
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Could not save the provider.')
+    } finally {
+      setSubmitting(false)
     }
+  }
+
+  function requestClose(): void {
+    if (!submitting) onClose()
   }
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-foreground/25 pt-[12vh] backdrop-blur-[1px]"
-      onClick={onClose}
+      onClick={requestClose}
     >
       <div
         role="dialog"
@@ -87,7 +96,7 @@ export function AddAiProviderDialog({
         className="flex w-[24rem] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-[0_8px_28px_rgba(2,6,23,0.16)]"
         onClick={(event) => event.stopPropagation()}
         onKeyDown={(event) => {
-          if (event.key === 'Escape') onClose()
+          if (event.key === 'Escape') requestClose()
         }}
       >
         <div className="border-b border-border px-4 py-3">
@@ -110,6 +119,7 @@ export function AddAiProviderDialog({
             <select
               ref={providerRef}
               value={provider}
+              disabled={submitting}
               onChange={(event) => changeProvider(event.target.value as AiProviderId)}
               className={controlClass}
             >
@@ -126,6 +136,7 @@ export function AddAiProviderDialog({
             <ModelCombobox
               id="ai-provider-model"
               value={model}
+              disabled={submitting}
               models={selectedProvider.models}
               onChange={(modelId) => {
                 setModel(modelId)
@@ -141,6 +152,7 @@ export function AddAiProviderDialog({
               autoComplete="off"
               spellCheck={false}
               value={apiKey}
+              disabled={submitting}
               onChange={(event) => {
                 setApiKey(event.target.value)
                 setSubmitError(null)
@@ -156,6 +168,7 @@ export function AddAiProviderDialog({
               type="checkbox"
               className="accent-primary"
               checked={isDefault}
+              disabled={submitting}
               onChange={(event) => setIsDefault(event.target.checked)}
             />
             Use as the default provider
@@ -170,11 +183,11 @@ export function AddAiProviderDialog({
           ) : null}
 
           <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="ghost" onClick={onClose}>
+            <Button type="button" variant="ghost" disabled={submitting} onClick={requestClose}>
               Cancel
             </Button>
-            <Button type="submit" variant="primary">
-              {unverified ? 'Save anyway' : 'Add provider'}
+            <Button type="submit" variant="primary" disabled={submitting}>
+              {submitting ? 'Saving…' : unverified ? 'Save anyway' : 'Add provider'}
             </Button>
           </div>
         </form>
