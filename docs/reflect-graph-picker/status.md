@@ -212,6 +212,28 @@ One new Bugbot finding on commit `a1330a2`, resolved in `brains.rs`:
    canonicalizes its candidate so a relative/symlinked spelling still resolves.
    New Rust test `active_candidate_skips_a_stale_registry_active_path`.
 
+## Bugbot review fix (2026-06-18, head 40242c4 · comment `3437388117`)
+
+One new Bugbot finding on PR #26's current head, resolved in `apps/desktop/src/App.tsx`:
+
+1. **Medium — Query error shows chooser.** The App root gate rendered `BrainChooser`
+   whenever `useActiveBrain()` was `isError`, even though TanStack Query keeps the last
+   successful `active-brain` data on a background refetch failure. A transient
+   IPC/validation error could therefore tear down the whole workspace and drop the user
+   into the chooser while Rust still had a brain open. The gate now keys solely on the
+   data — `if (!active.data) return <BrainChooser />` — so a refetch error with data
+   still present keeps the workspace mounted; the chooser only shows when the initial
+   resolution produced no active brain. (`active_brain` always returns a `BrainInfo` or
+   errors, so "has data" is the right signal for "a brain is open".)
+
+New regression test (`apps/desktop/src/App.dom.test.tsx`): drives `useActiveBrain`'s
+result directly — the gate-distinguishing case is `isError: true` *with* data retained,
+which the QueryObserver surfaces on refetch failure — and asserts the workspace stays
+mounted on error-with-data, the chooser shows only on error-with-no-data, and the
+pending/healthy cases behave. Verified the test fails against the old gate and passes
+against the fix. `pnpm check` + desktop build green. No Rust changed (cargo gates
+skipped).
+
 ## Progress
 
 - [x] Read AGENTS.md, docs, supervisor skill; mapped Local Brain + both Reflect refs.
