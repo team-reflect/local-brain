@@ -8,6 +8,7 @@ import {
   isEmbedReady,
   setBackfillError,
   setEmbeddingsEnabled,
+  setLastBackfillAttemptDay,
 } from '@local-brain/core'
 import { runExclusiveBackfill } from '../embeddings-coordinator'
 import { errorMessage } from '../utils'
@@ -21,19 +22,15 @@ import { errorMessage } from '../utils'
 
 export const EMBEDDINGS_STATUS_KEY = ['embeddings-status'] as const
 
-/** Fast poll while the model downloads/loads or chunks are actively draining. */
+/** Fast poll while the model downloads/loads. */
 const ACTIVE_REFETCH_MS = 1500
 
-/**
- * Slow idle heartbeat once indexing is healthy and caught up. New chunks can be
- * written by a non-UI path — the `brain` CLI indexing while the window is open,
- * or another window — without ever invalidating this query, so a one-shot "stop
- * polling when pending hits 0" would leave them unembedded until the next focus
- * or settings refetch. The heartbeat lets `EmbeddingsSync` notice them on its
- * own. 30s is slow enough not to reintroduce the 1.5s hammering that the
- * failed/backfill-error guards below exist to avoid.
- */
-const IDLE_REFETCH_MS = 30_000
+export function todayLocalDayKey(now = new Date()): string {
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
 
 /**
  * Decide the status poll cadence from the latest status. Extracted (and exported)
@@ -47,10 +44,10 @@ export function embeddingsRefetchInterval(data: EmbeddingsStatus | undefined): n
   // explicit user action (re-enable / rebuild), whose mutation invalidates
   // this query (and clears the sticky backfill error first).
   if (data.runtime.status === 'failed' || data.backfillError) return false
-  // Actively working: model still loading, or chunks waiting to embed.
-  if (data.runtime.status === 'loading' || data.pending > 0) return ACTIVE_REFETCH_MS
-  // Idle but healthy: heartbeat so externally written chunks get embedded.
-  return IDLE_REFETCH_MS
+  // Actively working: model still loading. Pending chunks are handled by
+  // EmbeddingsSync's once-per-local-day gate, not by a retry poll loop.
+  if (data.runtime.status === 'loading') return ACTIVE_REFETCH_MS
+  return false
 }
 
 export function useEmbeddingsStatus() {
@@ -91,6 +88,42 @@ export interface RebuildOptions {
    * so a toggle-off stops embedding work in both code paths, not just one.
    */
   isStale?: () => boolean
+}
+
+export interface BackfillNowOptions {
+  /**
+   * Abort the backfill cooperatively between batches — e.g. semantic search was
+   * disabled mid-run. Mirrors rebuild/automatic backfill behavior.
+   */
+  isStale?: () => boolean
+}
+
+/**
+ * Non-destructive manual backfill: embed pending chunks without wiping vectors.
+ * This bypasses the daily automatic cap, but records today's day key so the
+ * automatic coordinator does not immediately repeat the same work.
+ */
+export async function backfillEmbeddingsNow(options: BackfillNowOptions = {}): Promise<void> {
+  const status = await embedEnsure()
+  if (!isEmbedReady(status)) {
+    throw new Error(
+      status.status === 'failed'
+        ? `Embedding model failed to load: ${status.message}`
+        : 'Embedding model is still loading; backfill once it is ready.',
+    )
+  }
+  await runExclusiveBackfill(async () => {
+    await setBackfillError(null)
+    await setLastBackfillAttemptDay(todayLocalDayKey())
+    try {
+      await backfillEmbeddings(
+        options.isStale === undefined ? {} : { isStale: options.isStale },
+      )
+    } catch (error) {
+      await setBackfillError(errorMessage(error))
+      throw error
+    }
+  })
 }
 
 /**
@@ -154,6 +187,19 @@ export function useRebuildEmbeddings() {
     // the index wiped on disk. An onSuccess-only refresh would let Settings keep
     // showing a full/healthy index while the vectors are actually empty until the
     // next poll; on settle the UI reflects the wipe + sticky error immediately.
+    onSettled: () => queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY }),
+  })
+}
+
+/** Non-destructive manual backfill of pending vectors. */
+export function useBackfillEmbeddingsNow() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      backfillEmbeddingsNow({
+        isStale: () =>
+          queryClient.getQueryData<EmbeddingsStatus>(EMBEDDINGS_STATUS_KEY)?.enabled === false,
+      }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY }),
   })
 }

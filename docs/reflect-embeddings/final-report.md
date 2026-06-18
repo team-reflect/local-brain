@@ -40,10 +40,11 @@ app and contrary to `docs/plans/libraries.md` (which commits to `fastembed` + `s
   `semanticAvailable: false`. Ask's citations and model boundary are untouched.
 
 ### Desktop UX (`apps/desktop`)
-- `EmbeddingsSync` headless coordinator (loads the model + runs incremental backfill,
-  including for records the CLI wrote while the app was closed).
+- `EmbeddingsSync` headless coordinator (loads the model + runs automatic incremental
+  backfill at most once per local calendar day; manual backfill/rebuild remain available
+  from Settings).
 - Settings → **Semantic search**: enable/disable, model download progress bar, runtime +
-  index status (indexed/total, pending), "Rebuild index".
+  index status (indexed/total, pending), "Backfill now", and "Rebuild index".
 - Diagnostics now reports the real semantic state instead of a hardcoded "off".
 
 ### Tooling
@@ -164,12 +165,11 @@ vec0 cosine-KNN ordering, and a real end-to-end model + KNN test (ranks by meani
 - **Medium — Stale pending stops CLI indexing:** once semantic search was enabled and `pending`
   hit 0, `useEmbeddingsStatus` stopped polling entirely, so chunks written by a non-UI path (the
   `brain` CLI indexing while the window is open, or another window) were never embedded until a
-  focus/settings refetch. The refetch cadence is now an extracted, exported pure function,
-  `embeddingsRefetchInterval`: it still fast-polls (1.5s) while loading or draining and still
-  stops dead on a `failed` runtime or sticky `backfillError`, but when idle-and-healthy it keeps
-  a slow 30s heartbeat so `EmbeddingsSync` notices externally written chunks on its own — without
-  reintroducing the 1.5s hammering the failure guards exist to prevent. New cadence-contract
-  cases in `embeddings.test.ts`.
+  focus/settings refetch. Final product cadence now caps automatic incremental backfill to one
+  attempt per local calendar day via `embeddings.lastBackfillAttemptDay`; pending chunks no
+  longer keep the status query polling, and the status query fast-polls only while the model is
+  loading. Settings exposes non-destructive "Backfill now" for user-triggered catch-up and keeps
+  "Rebuild index" as repair.
 - **Medium — Semantic available with empty hits:** in `semantic`/`hybrid` mode a `ready` runtime
   whose KNN found no neighbour within the distance cutoff still returned `semanticAvailable: true`
   with empty/unhelpful chunks and skipped the lexical fallback the unavailable-runtime path

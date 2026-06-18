@@ -23,8 +23,8 @@ Branch: `codex/local-brain-reflect-embeddings` · Base: `master` @ 58c801f
   `retrieve()` now does real semantic + hybrid (RRF K=60, KNN 24, cosine ≤ 0.7) and
   degrades to lexical with `semanticAvailable: false`. Exported from core.
 - ✅ Phase D — Desktop UX: `EmbeddingsSync` headless coordinator; Settings "Semantic
-  search" section (enable/disable, download progress, index status, rebuild); Diagnostics
-  now reports the real state.
+  search" section (enable/disable, download progress, index status, manual backfill,
+  rebuild); Diagnostics now reports the real state.
 - ✅ Phase E — Tests: RRF fusion, semanticHits mapping/cutoff, retrieve mode orchestration
   + fallback (TS); backfill hash-skip, re-embed-on-change, prune, status counts (real
   SQLite harness + stubbed runtime); Rust storage + vec0 KNN + e2e.
@@ -38,6 +38,11 @@ Branch: `codex/local-brain-reflect-embeddings` · Base: `master` @ 58c801f
   result throws *before* the clear, so a model that can't load can't wipe the index.
   Tests: `apps/desktop/src/lib/queries/embeddings.test.ts` (ready clears; loading/failed
   abort without `embed_clear`).
+- ✅ **Product cadence — automatic backfill capped daily.** `EmbeddingsSync` now runs
+  automatic incremental backfill at most once per local calendar day per brain, recorded in
+  `embeddings.lastBackfillAttemptDay`. Pending chunks no longer fast-poll or ride a 30s idle
+  heartbeat; Settings has a non-destructive "Backfill now" button for explicit catch-up while
+  "Rebuild index" remains the destructive repair action.
 - ✅ **Medium — disabled setting ignored by retrieve.** `retrieve()` now reads the
   `embeddings.enabled` kill-switch before touching the runtime; when disabled it never
   embeds the query or uses vectors, even if the in-memory model stays loaded, and reports

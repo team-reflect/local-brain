@@ -19,11 +19,14 @@ export const EMBEDDINGS_ENABLED_KEY = 'embeddings.enabled'
  * Last incremental-backfill failure, persisted so the UI/coordinator stop
  * pretending indexing is progressing after a backfill threw. The runtime can
  * report `ready` while a backfill (embed/persist) fails mid-pass; without this
- * marker `pending` stays > 0, the status keeps polling, and the coordinator
- * re-attempts the same failing backfill forever. Cleared on a clean backfill or
- * an explicit user action (re-enable / rebuild). Null means no pending failure.
+ * marker `pending` stays > 0 and the next allowed/manual coordinator pass would
+ * repeat the same failing backfill. Cleared on a clean backfill or an explicit
+ * user action (re-enable / backfill / rebuild). Null means no pending failure.
  */
 export const EMBEDDINGS_BACKFILL_ERROR_KEY = 'embeddings.backfillError'
+
+/** Local calendar day (`YYYY-MM-DD`) of the last automatic/manual backfill attempt. */
+export const EMBEDDINGS_LAST_BACKFILL_ATTEMPT_DAY_KEY = 'embeddings.lastBackfillAttemptDay'
 
 export interface EmbeddingsStatus {
   /** Whether the user has turned semantic search on. */
@@ -41,6 +44,8 @@ export interface EmbeddingsStatus {
   ready: boolean
   /** Last incremental-backfill error message, or null when indexing is healthy. */
   backfillError: string | null
+  /** Local day key for the last backfill attempt, or null if none has run. */
+  lastBackfillAttemptDay: string | null
 }
 
 export async function isEmbeddingsEnabled(): Promise<boolean> {
@@ -61,6 +66,16 @@ export async function setBackfillError(message: string | null): Promise<void> {
   await setSetting(EMBEDDINGS_BACKFILL_ERROR_KEY, message)
 }
 
+/** Last local calendar day on which a backfill was attempted. */
+export async function getLastBackfillAttemptDay(): Promise<string | null> {
+  return getSetting<string | null>(EMBEDDINGS_LAST_BACKFILL_ATTEMPT_DAY_KEY, null)
+}
+
+/** Record (or clear, with `null`) the last local calendar day backfill marker. */
+export async function setLastBackfillAttemptDay(day: string | null): Promise<void> {
+  await setSetting(EMBEDDINGS_LAST_BACKFILL_ATTEMPT_DAY_KEY, day)
+}
+
 /** A best-effort runtime poll that degrades to `uninitialized` off-desktop. */
 async function safeRuntimeStatus(): Promise<EmbedStatus> {
   try {
@@ -71,7 +86,7 @@ async function safeRuntimeStatus(): Promise<EmbedStatus> {
 }
 
 export async function getEmbeddingsStatus(): Promise<EmbeddingsStatus> {
-  const [enabled, runtime, totalRow, pending, backfillError] = await Promise.all([
+  const [enabled, runtime, totalRow, pending, backfillError, lastBackfillAttemptDay] = await Promise.all([
     isEmbeddingsEnabled(),
     safeRuntimeStatus(),
     db
@@ -80,6 +95,7 @@ export async function getEmbeddingsStatus(): Promise<EmbeddingsStatus> {
       .executeTakeFirst(),
     countPending(EMBEDDING_MODEL_ID),
     getBackfillError(),
+    getLastBackfillAttemptDay(),
   ])
 
   const totalChunks = Number(totalRow?.count ?? 0)
@@ -93,5 +109,6 @@ export async function getEmbeddingsStatus(): Promise<EmbeddingsStatus> {
     pending,
     ready: runtime.status === 'ready' && pending === 0,
     backfillError,
+    lastBackfillAttemptDay,
   }
 }

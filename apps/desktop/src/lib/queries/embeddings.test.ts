@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { type EmbeddingsStatus, type EmbedStatus, setBridge } from '@local-brain/core'
 import { runExclusiveBackfill } from '../embeddings-coordinator'
-import { embeddingsRefetchInterval, rebuildEmbeddings } from './embeddings'
+import {
+  backfillEmbeddingsNow,
+  embeddingsRefetchInterval,
+  rebuildEmbeddings,
+  todayLocalDayKey,
+} from './embeddings'
 
 /**
  * Rebuild safety contract (Bugbot #27 high-severity fix): the rebuild must never
@@ -18,6 +23,8 @@ interface BridgeHandle {
   commands: string[]
   /** The value last written to the `embeddings.backfillError` setting. */
   persistedError: () => string | null
+  /** The value last written to the `embeddings.lastBackfillAttemptDay` setting. */
+  persistedDay: () => string | null
 }
 
 function installBridge(
@@ -26,6 +33,7 @@ function installBridge(
 ): BridgeHandle {
   const commands: string[] = []
   let persistedError: string | null = null
+  let persistedDay: string | null = null
   setBridge({
     invoke: (command, args) => {
       commands.push(command)
@@ -55,6 +63,9 @@ function installBridge(
           if (sql.includes('settings') && params[0] === 'embeddings.backfillError') {
             persistedError = JSON.parse(String(params[1])) as string | null
           }
+          if (sql.includes('settings') && params[0] === 'embeddings.lastBackfillAttemptDay') {
+            persistedDay = JSON.parse(String(params[1])) as string | null
+          }
           return Promise.resolve(1)
         }
         case 'db_batch':
@@ -64,15 +75,13 @@ function installBridge(
       }
     },
   })
-  return { commands, persistedError: () => persistedError }
+  return { commands, persistedError: () => persistedError, persistedDay: () => persistedDay }
 }
 
 /**
- * Polling-cadence contract (Bugbot "Stale pending stops CLI indexing"): once the
- * runtime is ready and `pending` hits 0 the status query must NOT go silent — a
- * non-UI writer (the `brain` CLI, another window) can add chunks without
- * invalidating this query, so the poll has to keep a slow heartbeat to notice
- * them. Failed runtimes and sticky backfill errors still stop polling entirely.
+ * Polling-cadence contract: the status query should only fast-poll while the
+ * model loads. Pending chunks are handled by EmbeddingsSync's once-per-day gate
+ * or by explicit user actions, not by a background retry loop.
  */
 function status(overrides: Partial<EmbeddingsStatus> = {}): EmbeddingsStatus {
   return {
@@ -84,6 +93,7 @@ function status(overrides: Partial<EmbeddingsStatus> = {}): EmbeddingsStatus {
     pending: 0,
     ready: true,
     backfillError: null,
+    lastBackfillAttemptDay: null,
     ...overrides,
   }
 }
@@ -94,15 +104,13 @@ describe('embeddingsRefetchInterval', () => {
     expect(embeddingsRefetchInterval(status({ enabled: false }))).toBe(false)
   })
 
-  it('fast-polls while the model loads or chunks are pending', () => {
+  it('fast-polls while the model loads', () => {
     expect(embeddingsRefetchInterval(status({ runtime: { status: 'loading' } }))).toBe(1500)
-    expect(embeddingsRefetchInterval(status({ pending: 4, ready: false }))).toBe(1500)
   })
 
-  it('keeps a slow heartbeat when idle so externally written chunks get noticed', () => {
-    // Ready, nothing pending, healthy: an earlier "stop at pending 0" left CLI
-    // writes unembedded until a focus refetch. The heartbeat keeps it live.
-    expect(embeddingsRefetchInterval(status())).toBe(30_000)
+  it('does not poll for idle or pending-ready status', () => {
+    expect(embeddingsRefetchInterval(status())).toBe(false)
+    expect(embeddingsRefetchInterval(status({ pending: 4, ready: false }))).toBe(false)
   })
 
   it('stops polling a failed runtime or a sticky backfill error', () => {
@@ -114,6 +122,33 @@ describe('embeddingsRefetchInterval', () => {
     expect(embeddingsRefetchInterval(status({ pending: 3, backfillError: 'onnx blew up' }))).toBe(
       false,
     )
+  })
+})
+
+describe('backfillEmbeddingsNow', () => {
+  afterEach(() => setBridge({ invoke: () => Promise.reject(new Error('no bridge')) }))
+
+  it('runs a non-destructive backfill and records today', async () => {
+    const bridge = installBridge(
+      { status: 'ready', model: 'all-MiniLM-L6-v2' },
+      { pendingChunk: true },
+    )
+    await expect(backfillEmbeddingsNow()).resolves.toBeUndefined()
+    expect(bridge.commands).toContain('embed_ensure')
+    expect(bridge.commands).toContain('embed_texts')
+    expect(bridge.commands).not.toContain('embed_clear')
+    expect(bridge.persistedDay()).toBe(todayLocalDayKey())
+  })
+
+  it('persists the backfill error when manual backfill fails', async () => {
+    const bridge = installBridge(
+      { status: 'ready', model: 'all-MiniLM-L6-v2' },
+      { pendingChunk: true, failEmbed: true },
+    )
+    await expect(backfillEmbeddingsNow()).rejects.toThrow(/onnx blew up/)
+    expect(bridge.commands).not.toContain('embed_clear')
+    expect(bridge.persistedDay()).toBe(todayLocalDayKey())
+    expect(bridge.persistedError()).toBe('onnx blew up')
   })
 })
 
