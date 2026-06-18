@@ -13,17 +13,28 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
+  addMessage,
   archiveTask,
   completeTask,
+  createConversation,
   createInteraction,
   createPerson,
   createTask,
+  getGraph,
   getPerson,
+  getPersonLinks,
   getSelf,
+  listCitationsForSubject,
+  listConversations,
   listInteractionParticipants,
   listInteractions,
+  listMemories,
+  listMemoriesForRecord,
+  listMessages,
+  listOrganizations,
   listPeople,
   listTasks,
+  quickSearch,
   seedDemoData,
   setBridge,
 } from '@local-brain/core'
@@ -135,5 +146,87 @@ describe('core domain actions (real SQLite round-trip)', () => {
     // The interaction insert must not have persisted (atomic rollback).
     const interactions = await listInteractions()
     expect(interactions).toHaveLength(0)
+  })
+})
+
+describe('03b read getters (real SQLite round-trip over the seed)', () => {
+  let alex
+
+  beforeEach(async () => {
+    installSqliteBridge(freshDatabase())
+    await seedDemoData()
+    const people = await listPeople()
+    alex = people.find((person) => person.fullName === 'Alex Rivera')
+  })
+
+  it('lists organizations from the seed', async () => {
+    const orgs = await listOrganizations()
+    expect(orgs.map((org) => org.name)).toEqual(['Northwind Labs'])
+  })
+
+  it("assembles a person's linked-record neighborhood across join tables", async () => {
+    const links = await getPersonLinks(alex.id)
+    expect(links.organizations.map((o) => o.title)).toEqual(['Northwind Labs'])
+    expect(links.projects.map((p) => p.title)).toEqual(['Northwind partnership'])
+    expect(links.interactions.map((i) => i.title)).toEqual(['Northwind kickoff'])
+    // The org link carries the affiliation title as its subtitle.
+    expect(links.organizations[0]?.subtitle).toBe('Founder')
+  })
+
+  it('reads memories about a record and their supporting citations', async () => {
+    const memories = await listMemoriesForRecord('person', alex.id)
+    expect(memories.map((m) => m.claim)).toEqual(['Alex Rivera founded Northwind Labs.'])
+    expect((await listMemories()).length).toBe(1)
+
+    const citations = await listCitationsForSubject('memory', memories[0].id)
+    expect(citations).toHaveLength(1)
+    expect(citations[0].sourceType).toBe('document')
+    expect(citations[0].sourceTitle).toBe('Northwind kickoff notes')
+    expect(citations[0].quote).toContain('partnership proposal')
+  })
+
+  it('builds a user-centered graph from the seed', async () => {
+    const graph = await getGraph()
+    expect(graph.selfId).toBeTruthy()
+    expect(graph.truncatedKinds).toEqual([])
+    // 3 people + 1 org + 1 project + 2 tasks + 1 doc + 1 interaction + 1 memory.
+    expect(graph.nodes).toHaveLength(10)
+    expect(graph.nodes.filter((n) => n.kind === 'self')).toHaveLength(1)
+
+    // The self row is the hub: edges to the two other people and the project.
+    const fromSelf = graph.edges.filter((e) => e.source === graph.selfId)
+    expect(fromSelf.filter((e) => e.kind === 'knows')).toHaveLength(2)
+    expect(fromSelf.filter((e) => e.kind === 'owns')).toHaveLength(1)
+    // Join-table edges are present and reference real nodes.
+    expect(graph.edges.some((e) => e.kind === 'affiliation')).toBe(true)
+    expect(graph.edges.some((e) => e.kind === 'memory')).toBe(true)
+    const ids = new Set(graph.nodes.map((n) => n.id))
+    expect(graph.edges.every((e) => ids.has(e.source) && ids.has(e.target))).toBe(true)
+  })
+
+  it('quick-searches record names/titles across types', async () => {
+    const results = await quickSearch('Northwind')
+    const kinds = results.map((r) => r.kind)
+    // The seed has a Northwind org, project, task, document, and interaction.
+    expect(kinds).toContain('organization')
+    expect(kinds).toContain('project')
+    expect(kinds).toContain('task')
+    expect(kinds).toContain('document')
+    expect(kinds).toContain('interaction')
+    expect(await quickSearch('   ')).toEqual([])
+    expect(await quickSearch('no-such-record-xyz')).toEqual([])
+  })
+
+  it('creates a conversation, appends messages, and reads them back in order', async () => {
+    const conversationId = await createConversation('Planning')
+    await addMessage({ conversationId, role: 'user', content: 'What is due this week?' })
+    await addMessage({ conversationId, role: 'assistant', content: 'Retrieval lands in Plan 06.' })
+
+    const messages = await listMessages(conversationId)
+    expect(messages.map((m) => m.role)).toEqual(['user', 'assistant'])
+    expect(messages[0].content).toBe('What is due this week?')
+
+    const conversations = await listConversations()
+    expect(conversations.map((c) => c.title)).toEqual(['Planning'])
   })
 })

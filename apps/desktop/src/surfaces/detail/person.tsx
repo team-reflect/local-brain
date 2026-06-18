@@ -1,11 +1,15 @@
 import type { ReactNode } from 'react'
 import { DetailFields } from '../../components/detail-fields'
 import { EmptyState } from '../../components/empty-state'
+import { LinkedRecords } from '../../components/linked-records'
+import { MemoryList } from '../../components/memory-list'
 import { PageHead } from '../../components/page-head'
-import { usePerson } from '../../lib/queries'
+import { useMemoriesForRecord, usePerson, usePersonLinks } from '../../lib/queries'
 
 export function PersonDetail({ id }: { id: string }): ReactNode {
   const person = usePerson(id)
+  const links = usePersonLinks(id)
+  const memories = useMemoriesForRecord('person', id)
 
   if (person.isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>
   if (!person.data) return <EmptyState title="Person not found" />
@@ -25,6 +29,16 @@ export function PersonDetail({ id }: { id: string }): ReactNode {
         ]}
       />
       {p.summary ? <p className="text-sm text-foreground">{p.summary}</p> : null}
+      {links.data ? (
+        <>
+          <LinkedRecords title="Organizations" records={links.data.organizations} />
+          <LinkedRecords title="Projects" records={links.data.projects} />
+          <LinkedRecords title="Tasks" records={links.data.tasks} />
+          <LinkedRecords title="Interactions" records={links.data.interactions} />
+          <LinkedRecords title="Documents" records={links.data.documents} />
+        </>
+      ) : null}
+      {memories.data ? <MemoryList records={memories.data} /> : null}
     </div>
   )
 }

@@ -79,5 +79,81 @@ export {
   type InteractionParticipantInput,
 } from './domains/interactions/setters'
 
+// Organizations
+export {
+  listOrganizations,
+  getOrganization,
+  type Organization,
+  type ListOrganizationsOptions,
+} from './domains/organizations/getters'
+export {
+  createOrganization,
+  updateOrganization,
+  archiveOrganization,
+  type NewOrganization,
+  type OrganizationPatch,
+} from './domains/organizations/setters'
+
+// Memories
+export {
+  listMemories,
+  getMemory,
+  listMemoriesForRecord,
+  type Memory,
+  type ListMemoriesOptions,
+} from './domains/memories/getters'
+
+// Linked records (the typed join-table neighborhood of a record)
+export { type LinkedRecord, type RecordKind } from './domains/relations/types'
+export {
+  getPersonLinks,
+  getOrganizationLinks,
+  getProjectLinks,
+  getTaskLinks,
+  getDocumentLinks,
+  getInteractionLinks,
+  type PersonLinks,
+  type OrganizationLinks,
+  type ProjectLinks,
+  type TaskLinks,
+  type DocumentLinks,
+  type InteractionLinks,
+} from './domains/relations/getters'
+
+// Citations / evidence
+export {
+  listCitationsForSubject,
+  listEvidenceFromDocument,
+  type Citation,
+  type CitingRecord,
+} from './domains/citations/getters'
+
+// Chat (Ask)
+export {
+  listConversations,
+  getConversation,
+  listMessages,
+  type ChatConversation,
+  type ChatMessage,
+} from './domains/chat/getters'
+export {
+  createConversation,
+  addMessage,
+  archiveConversation,
+  type NewChatMessage,
+} from './domains/chat/setters'
+
+// Quick search (command palette)
+export { quickSearch } from './search/getters'
+
+// Knowledge graph
+export {
+  getGraph,
+  type Graph,
+  type GraphNode,
+  type GraphEdge,
+  type GraphNodeKind,
+} from './graph/getters'
+
 // Seed / demo data
 export { seedDemoData, type SeedResult } from './seed/seed'

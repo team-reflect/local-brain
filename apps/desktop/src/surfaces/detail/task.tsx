@@ -1,11 +1,13 @@
 import type { ReactNode } from 'react'
 import { DetailFields } from '../../components/detail-fields'
 import { EmptyState } from '../../components/empty-state'
+import { LinkedRecords } from '../../components/linked-records'
 import { PageHead } from '../../components/page-head'
-import { useTask } from '../../lib/queries'
+import { useTask, useTaskLinks } from '../../lib/queries'
 
 export function TaskDetail({ id }: { id: string }): ReactNode {
   const task = useTask(id)
+  const links = useTaskLinks(id)
 
   if (task.isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>
   if (!task.data) return <EmptyState title="Task not found" />
@@ -24,6 +26,14 @@ export function TaskDetail({ id }: { id: string }): ReactNode {
         ]}
       />
       {t.description ? <p className="text-sm text-foreground">{t.description}</p> : null}
+      {links.data ? (
+        <>
+          <LinkedRecords title="Project" records={links.data.projects} />
+          <LinkedRecords title="People" records={links.data.people} />
+          <LinkedRecords title="Documents" records={links.data.documents} />
+          <LinkedRecords title="Interactions" records={links.data.interactions} />
+        </>
+      ) : null}
     </div>
   )
 }

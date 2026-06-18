@@ -43,7 +43,7 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 | 02c | Rust IPC DB bridge (db_query/execute/batch) | `codex/local-brain-02c-bridge` | `…-02b-db` | open | [#5](https://github.com/maccman/local-brain/pull/5) |
 | 02d | Core DB actions + seed data | `codex/local-brain-02d-core-db` | `…-02c-bridge` | open | [#6](https://github.com/maccman/local-brain/pull/6) |
 | 03a | Desktop shell: routing, commands, core surfaces | `codex/local-brain-03-desktop-shell` | `…-02d-core-db` | open | [#7](https://github.com/maccman/local-brain/pull/7) |
-| 03b | Desktop shell: Graph, Ask, full Settings, detail richness, palette | `codex/local-brain-03b-desktop-shell-ii` | `…-03-desktop-shell` | pending | — |
+| 03b | Desktop shell: Graph, Ask, full Settings, detail richness, palette | `codex/local-brain-03b-desktop-shell-ii` | `…-03-desktop-shell` | open | [#8](https://github.com/maccman/local-brain/pull/8) |
 | 04 | Record ingestion | `codex/local-brain-04-ingestion` | `…-03b-desktop-shell-ii` | pending | — |
 | 05 | Memory extraction & linking | `codex/local-brain-05-extraction` | `…-04-ingestion` | pending | — |
 | 06 | Search, retrieval & AI | `codex/local-brain-06-search-ai` | `…-05-extraction` | pending | — |
@@ -147,12 +147,38 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
   **duplicate-keybinding** guard); `pnpm --filter @local-brain/desktop build` ✓ (Vite
   bundles 2025 modules); `cargo check --workspace` ✓.
 
-### 03b — Desktop shell II (pending)
-- **Scope:** the user-centered Graph surface, the Ask chat shell (cited answers wired in
-  Plan 06), full Settings sections, organization getters + Network Organizations
-  tab/detail, richer detail pages (linked tasks/documents/interactions/memories +
-  citation lists), and a cmdk-based palette with record search. Component render tests
-  once `jsdom`/testing-library are added.
+### 03b — Desktop shell II
+- **Scope (delivered):**
+  - **Core read getters (`packages/core`):** organizations getters/setters; a
+    `relations` module returning the typed join-table neighborhood per entity
+    (`get<Person|Organization|Project|Task|Document|Interaction>Links`) as navigable
+    `LinkedRecord`s; memories getters incl. `listMemoriesForRecord`; citations/evidence
+    (`listCitationsForSubject`, `listEvidenceFromDocument`); chat conversations/messages
+    getters + setters (`createConversation`, `addMessage` — message + conversation touch
+    in one batch); a user-centered `getGraph` assembler (self-hub + join-table edges, node
+    caps with `truncatedKinds`); and a `quickSearch` LIKE getter for the palette.
+  - **Surfaces (`apps/desktop`):** SVG user-centered **Graph** (pure `graph-layout`
+    radial layout, click-to-navigate, legend, truncation note); **Ask** chat shell
+    (conversation list + thread + composer, persists a labeled Plan-06 placeholder answer);
+    full **Settings** (General / Model keys / Local database / Backup & export / Skills /
+    Diagnostics via the `settings.section` route param); **Network → Organizations** tab +
+    organization detail; richer **person/organization/project/task/document/interaction**
+    detail pages with `LinkedRecords` + `CitationList` + `MemoryList` sections; and a
+    command palette with live record search + arrow-key navigation.
+- **Decisions:** DEC-7 (single branch; hand-rolled palette instead of `cmdk`), DEC-8 (Ask
+  persists a labeled placeholder answer), DEC-9 (jsdom + Testing Library render tests).
+- **Verification:** `pnpm check` ✓ — typecheck + oxlint + 47 tests (17 core incl. a new
+  real-SQLite round-trip block covering organizations, person links, memories+citations,
+  graph assembly, chat, and quick-search; 4 db; 26 desktop incl. graph-layout unit tests
+  and jsdom render tests for `RouteContent`, the command palette record search/keyboard
+  nav, and `LinkedRecords`). `pnpm --filter @local-brain/desktop build` ✓ (Vite bundles
+  2039 modules). `cargo check --workspace` ✓ (no Rust changes this layer). `git diff
+  --check` ✓.
+- **Caveats:** no Rust changes (the existing `db_query` bridge covers every new getter). A
+  full assembled `pnpm tauri dev`/`build` run was **not** performed this layer (no GUI
+  session); the frontend production build and `cargo check` both pass, but an end-to-end
+  app launch remains pending as noted in status.md. Ask answers and ranked/full-text
+  search are placeholders until Plan 06.
 
 ### 04–09
 - Scope mirrors `docs/plans/04..09`: 04 = ingestion; 05 = extraction; 06 =
@@ -168,3 +194,4 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 - PR #5 — Build 02c Rust IPC DB bridge — https://github.com/maccman/local-brain/pull/5 (base `…-02b-db`, open)
 - PR #6 — Build 02d core DB actions + seed — https://github.com/maccman/local-brain/pull/6 (base `…-02c-bridge`, open)
 - PR #7 — Build 03a desktop shell (routing, commands, core surfaces) — https://github.com/maccman/local-brain/pull/7 (base `…-02d-core-db`, open)
+- PR #8 — Build 03b desktop shell II (Graph, Ask, Settings, org browsing, detail richness, palette search) — https://github.com/maccman/local-brain/pull/8 (base `…-03-desktop-shell`, open)

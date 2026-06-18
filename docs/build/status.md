@@ -7,15 +7,43 @@ questions needing Alex.
 
 ## Current State
 
-- **Phase:** 03a — Desktop shell (typed routing + command registry + core surfaces,
-  `pnpm check` + Vite build + `cargo check` green, PR open).
-- **Active branch:** `codex/local-brain-03-desktop-shell` (base `…-02d-core-db`).
+- **Phase:** 03b — Desktop shell II (Graph, Ask, full Settings, org browsing, richer
+  linked-record detail + citations, command-palette record search; `pnpm check` + Vite
+  build + `cargo check` green, PR open). Plan 03 is now complete.
+- **Active branch:** `codex/local-brain-03b-desktop-shell-ii` (base `…-03-desktop-shell`).
 - **Mode:** Sequential. This session builds the stack layer by layer; no parallel
   worker sessions are spawned. (Within a layer, read-only research may fan out, but
   commits are made sequentially from this session.)
 - **Blockers:** none at this checkpoint.
 
 ## Log
+
+### 2026-06-17 — Phase 03b: Desktop shell II (Plan 03 complete)
+- Built the 03b read getters in `@local-brain/core` (all over the existing `db_query`
+  bridge — no Rust changes): organizations getters/setters; a `relations` module that
+  returns each record's typed join-table neighborhood as navigable `LinkedRecord`s;
+  memories (`listMemoriesForRecord`); citations/evidence (`listCitationsForSubject`,
+  `listEvidenceFromDocument`); chat conversations/messages (getters + `createConversation`
+  / `addMessage` that writes the message and touches the conversation in one batch); a
+  user-centered `getGraph` assembler (self-hub + join-table edges, per-kind node caps with
+  `truncatedKinds`); and a `quickSearch` LIKE getter for the palette.
+- Built the surfaces: an SVG **Graph** (a pure, unit-tested `graph-layout` radial layout,
+  click-to-navigate nodes, a kind legend, and a truncation note); the **Ask** chat shell
+  (conversation list + thread + composer; persists a clearly-labeled Plan-06 placeholder
+  answer — DEC-8); full **Settings** sections wired to the `settings.section` route param;
+  the **Network → Organizations** tab + organization detail; richer
+  **person/org/project/task/document/interaction** detail pages with shared `LinkedRecords`,
+  `CitationList`, and `MemoryList` components; and a command palette with live record search
+  + arrow-key navigation (kept hand-rolled instead of pulling in `cmdk` — DEC-7). Coalesced
+  the single-record query hooks to `null` so TanStack Query never sees `undefined` data.
+- **Verification:** `pnpm check` ✓ — typecheck + oxlint + **47 tests** (17 core incl. a new
+  real-SQLite round-trip block over the seed: organizations, person links, memories +
+  citations, graph assembly, chat threads, quick-search; 4 db; 26 desktop incl. the
+  `graph-layout` unit tests and jsdom/Testing-Library render tests for `RouteContent`, the
+  palette record search + keyboard nav, and `LinkedRecords` — DEC-9). `pnpm --filter
+  @local-brain/desktop build` ✓ (Vite bundles 2039 modules). `cargo check --workspace` ✓
+  (unchanged — no Rust this layer). `git diff --check` ✓. A full assembled `pnpm tauri
+  dev`/`build` launch was not run (no GUI session); still pending.
 
 ### 2026-06-17 — Stack hygiene: propagate foundation fixes down
 - The parent's `6abc16c` ("Verify Rust workspace") mixed three layers. Split it so
@@ -174,17 +202,14 @@ questions needing Alex.
 - Committed (`5c02ab5`), pushed, opened **PR #1** (base `master`).
 
 ### Next
-- **03b** (`codex/local-brain-03b-desktop-shell-ii`, base `…-03-desktop-shell`): the
-  user-centered Graph, the Ask chat shell, full Settings sections, organization getters
-  + Network Organizations tab/detail, richer linked-record detail sections + citation
-  lists, and a cmdk palette with record search; add `jsdom`/testing-library for
-  component render tests. Then **04** (ingestion) onward.
-- Seven PRs open and awaiting review: **#1** (supervisor), **#2** (foundation),
+- **04** (`codex/local-brain-04-ingestion`, base `…-03b-desktop-shell-ii`): record
+  ingestion per `docs/plans/04-record-ingestion.md`. Then 05 (extraction) onward.
+- Eight PRs open and awaiting review: **#1** (supervisor), **#2** (foundation),
   **#3** (schema), **#4** (db package), **#5** (Rust IPC bridge), **#6** (core actions
-  + seed), **#7** (03a desktop shell — `pnpm check` + Vite build + cargo check green).
-  Plan 02 (DB layer) is complete; Plan 03 is underway (03a done, 03b next). A full
-  end-to-end run of the assembled app (`pnpm tauri dev`/`build`) is still pending and is
-  required before the app can be called done. When #1 merges to `master`, rebase the
+  + seed), **#7** (03a desktop shell), **#8** (03b desktop shell II — `pnpm check` + Vite
+  build + cargo check green). Plan 02 (DB layer) and Plan 03 (desktop shell) are complete.
+  A full end-to-end run of the assembled app (`pnpm tauri dev`/`build`) is still pending
+  and is required before the app can be called done. When #1 merges to `master`, rebase the
   stack and retarget bases upward.
 
 ## Verification ledger
