@@ -64,8 +64,8 @@ Network visualization.
 - Rust: SQLite-registry round-trip/persistence (reopens `registry.sqlite` from
   disk), rename/color, forget-keeps-active, corrupt-fallback (non-SQLite file →
   moved aside + empty registry), active-candidate precedence, and a
-  `DbState::swap` test that proves queries hit the new brain. (`cargo test` — 16
-  lib tests.)
+  `DbState::swap` test that proves queries hit the new brain. Plus the Bugbot
+  regression tests below (`cargo test` — 19 desktop-lib tests).
 - Core: brain IPC binding arg/shape tests + lenient color parse.
 - Desktop DOM: `BrainSwitcher` (shows active brain, switches, opens new-brain
   dialog), `Settings → Brain` (identity, color picker, other-brains list), and
@@ -95,6 +95,33 @@ Two changes Alex required after the first pass; both shipped:
 - **Native dialog plugin installed and wired.** `tauri-plugin-dialog` (Rust) +
   `@tauri-apps/plugin-dialog` (JS) + `dialog:default` capability; the brain
   create/open dialog now uses the native OS picker (`lib/native-dialog.ts`).
+
+## Cursor Bugbot review fixes (2026-06-18)
+
+Two Bugbot findings on PR #26, both fixed in `apps/desktop/src-tauri/src/brains.rs`:
+
+- **High — switch succeeds when registry save fails.** `open_brain`/`create_brain`
+  called `DbState::swap` (the live connection) *before* `register_active` (the
+  durable registry), so if the registry write failed the command returned an error
+  while the SQLite connection already pointed at the new brain — the UI kept
+  showing the previous brain while reads and writes hit the newly opened database.
+  Fixed by extracting a `switch_to` helper that **persists the active brain first
+  and only swaps the live connection on success**; a failed persist returns the
+  error without swapping, so the open connection and the recorded active brain both
+  stay on the previous brain. (`swap` itself only fails on a poisoned lock, i.e. an
+  already-crashed thread.)
+- **Medium — registry memory updated before persist.** Structurally resolved by the
+  SQLite rewrite: the registry *is* a SQLite database read on demand, with no
+  separate in-memory catalogue, so a metadata write that fails leaves the observable
+  state exactly as it was (memory cannot diverge from disk). Documented the invariant
+  in the module/​function docs and added a regression test.
+
+Regression tests added: `switch_does_not_swap_live_db_when_registry_persist_fails`
+(persist failure leaves the live DB on the old brain — would fail under the old
+swap-then-persist ordering), `switch_persists_then_swaps_on_success`, and
+`failed_metadata_write_leaves_registry_state_unchanged` (a write rejected via
+`PRAGMA query_only` does not change read-back state). `cargo test`/`clippy`/`fmt`
+green.
 
 ## Caveats / deferred (honest scope)
 

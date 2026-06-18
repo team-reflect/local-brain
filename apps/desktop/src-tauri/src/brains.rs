@@ -17,6 +17,15 @@
 //! paths are canonicalized, and the actual connection swap (see [`DbState::swap`])
 //! happens here. A failed open leaves the previously active brain intact, and a
 //! corrupt registry file is moved aside and recreated so the app still starts.
+//!
+//! Switching is ordered so the two stores can never disagree: a switch persists
+//! the new active brain to this registry *before* it swaps the live [`DbState`]
+//! connection (see [`switch_to`]). If the registry write fails the swap never
+//! runs, so both the open connection and the recorded active brain stay on the
+//! previous brain — there is no window where the UI shows one brain while reads
+//! and writes hit another. Because the registry *is* a SQLite database read on
+//! demand (no separate in-memory catalogue), a failed metadata write likewise
+//! leaves the observable state exactly as it was; memory cannot drift from disk.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -312,9 +321,10 @@ impl BrainState {
         default_db_path.to_path_buf()
     }
 
-    /// Record `canonical` as opened and active, persisting the registry. Used at
-    /// startup and after a runtime switch. Persist failure is non-fatal (the
-    /// brain is still open) but is surfaced for logging.
+    /// Record `canonical` as opened and active, persisting it to the registry
+    /// database in one atomic upsert. Used at startup (best-effort) and as the
+    /// durable half of a runtime switch — see [`switch_to`], which only swaps the
+    /// live connection once this has committed.
     pub fn register_active(&self, canonical: &Path, name: Option<&str>) -> AppResult<()> {
         let path = canonical.display().to_string();
         let conn = self.lock()?;
@@ -349,6 +359,31 @@ impl BrainState {
             })
         }
     }
+}
+
+/// Switch the live database to an already-opened, migrated brain.
+///
+/// Ordering is the invariant here: the durable registry update
+/// ([`BrainState::register_active`]) must commit *before* the live [`DbState`]
+/// connection is swapped. If persistence fails we return that error without
+/// swapping, so the open connection — and the registry's recorded active brain —
+/// both stay on the previous brain, leaving nothing for the frontend to fall out
+/// of sync with. Swapping first (the old ordering) could leave the SQLite
+/// connection pointing at the newly opened brain while the command reports
+/// failure and the UI keeps showing — and reading/writing through — the old one.
+fn switch_to(
+    db: &DbState,
+    brains: &BrainState,
+    conn: Connection,
+    canonical: &Path,
+    name: Option<&str>,
+) -> AppResult<BrainInfo> {
+    // Durable first: persist the new active brain to the registry database.
+    brains.register_active(canonical, name)?;
+    // Only now point the live connection at it — this cannot fail except on a
+    // poisoned lock, which already implies a crashed thread.
+    db.swap(conn, canonical)?;
+    brains.active_info(db)
 }
 
 // ---- Tauri commands -------------------------------------------------------
@@ -387,9 +422,7 @@ pub fn open_brain(
         )));
     }
     let conn = brain_schema::open_and_migrate(&canonical)?;
-    db.swap(conn, &canonical)?;
-    brains.register_active(&canonical, None)?;
-    brains.active_info(&db)
+    switch_to(&db, &brains, conn, &canonical, None)
 }
 
 /// Create a brand-new brain at `path`, then open it. `path` must be absolute and
@@ -416,9 +449,7 @@ pub fn create_brain(
     let canonical = target
         .canonicalize()
         .unwrap_or_else(|_| target.to_path_buf());
-    db.swap(conn, &canonical)?;
-    brains.register_active(&canonical, name.as_deref())?;
-    brains.active_info(&db)
+    switch_to(&db, &brains, conn, &canonical, name.as_deref())
 }
 
 /// Rename a brain in the catalogue.
@@ -512,6 +543,16 @@ mod tests {
     fn file_state(path: &Path) -> BrainState {
         BrainState {
             registry: Mutex::new(open_registry(path).unwrap()),
+        }
+    }
+
+    /// A registry whose connection rejects every write (`PRAGMA query_only`),
+    /// standing in for a persistence failure (disk full, I/O error, ...).
+    fn read_only_state() -> BrainState {
+        let conn = open_memory_registry();
+        conn.execute_batch("PRAGMA query_only = ON;").unwrap();
+        BrainState {
+            registry: Mutex::new(conn),
         }
     }
 
@@ -627,5 +668,97 @@ mod tests {
         if std::env::var_os("BRAIN_DB").is_none() {
             assert_eq!(brains.active_candidate(&default), active);
         }
+    }
+
+    #[test]
+    fn switch_does_not_swap_live_db_when_registry_persist_fails() {
+        // Bug 1 regression: a switch must persist the new active brain to the
+        // registry *before* swapping the live connection. If persistence fails,
+        // the live DB must stay on the previous brain so the UI (which skips
+        // cache invalidation on error) and the database keep pointing at the
+        // same brain. The old swap-then-persist ordering left the connection on
+        // the new brain while the command reported failure.
+        let dir = tempdir().unwrap();
+
+        // A live DB already open on the "old" brain.
+        let old = dir.path().join("old.sqlite");
+        let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old.clone());
+
+        // A valid, migrated "new" brain we attempt to switch to.
+        let new = dir.path().join("new.sqlite");
+        let new_conn = brain_schema::open_and_migrate(&new).unwrap();
+        let canonical = new.canonicalize().unwrap();
+
+        // The registry rejects writes → the switch fails...
+        let brains = read_only_state();
+        let result = switch_to(&db, &brains, new_conn, &canonical, None);
+        assert!(result.is_err());
+
+        // ...and the live connection still points at the old brain.
+        assert_eq!(db.active_path().unwrap(), old);
+    }
+
+    #[test]
+    fn switch_persists_then_swaps_on_success() {
+        let dir = tempdir().unwrap();
+        let old = dir.path().join("old.sqlite");
+        let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old.clone());
+
+        let new = dir.path().join("Work").join("brain.sqlite");
+        std::fs::create_dir_all(new.parent().unwrap()).unwrap();
+        let new_conn = brain_schema::open_and_migrate(&new).unwrap();
+        let canonical = new.canonicalize().unwrap();
+
+        let brains = memory_state();
+        let info = switch_to(&db, &brains, new_conn, &canonical, None).unwrap();
+
+        // The live DB moved to the new brain...
+        assert_eq!(db.active_path().unwrap(), canonical);
+        // ...and the registry durably records it as the active brain.
+        assert!(info.is_active);
+        assert_eq!(info.path, canonical.display().to_string());
+        let conn = brains.lock().unwrap();
+        assert_eq!(
+            active_path(&conn).unwrap().unwrap(),
+            canonical.display().to_string()
+        );
+    }
+
+    #[test]
+    fn failed_metadata_write_leaves_registry_state_unchanged() {
+        // Bug 2 regression: the SQLite registry is read on demand with no
+        // separate in-memory catalogue, so a metadata write that fails leaves
+        // the observable state exactly as it was. The old path mutated an
+        // in-memory Vec before writing JSON, so a failed write diverged from
+        // disk until restart.
+        let brains = memory_state();
+        let conn = brains.lock().unwrap();
+        mark_opened(&conn, "/x/brain.sqlite", Some("Original")).unwrap();
+        conn.execute(
+            "UPDATE brains SET color = ?2 WHERE path = ?1",
+            params!["/x/brain.sqlite", "teal"],
+        )
+        .unwrap();
+
+        // Reject writes, then attempt the same mutations the commands issue.
+        conn.execute_batch("PRAGMA query_only = ON;").unwrap();
+        assert!(conn
+            .execute(
+                "UPDATE brains SET name = ?2 WHERE path = ?1",
+                params!["/x/brain.sqlite", "Renamed"],
+            )
+            .is_err());
+        assert!(conn
+            .execute(
+                "UPDATE brains SET color = ?2 WHERE path = ?1",
+                params!["/x/brain.sqlite", "red"],
+            )
+            .is_err());
+
+        // Re-enable reads/writes and confirm nothing changed on the failed path.
+        conn.execute_batch("PRAGMA query_only = OFF;").unwrap();
+        let record = find(&conn, "/x/brain.sqlite").unwrap().unwrap();
+        assert_eq!(record.name, "Original");
+        assert_eq!(record.color, "teal");
     }
 }
