@@ -4,6 +4,7 @@ import {
   clearEmbeddings,
   embedEnsure,
   getEmbeddingsStatus,
+  isEmbedReady,
   setEmbeddingsEnabled,
 } from '@local-brain/core'
 
@@ -42,15 +43,34 @@ export function useSetEmbeddingsEnabled() {
   })
 }
 
+/**
+ * Wipe and rebuild every vector (model change / repair).
+ *
+ * Bring the runtime up first and ONLY clear the existing projection once the
+ * model is confirmed `ready`. `embed_ensure` resolves with `loading` (a
+ * concurrent load is already in flight) or `failed` without the model becoming
+ * usable, so clearing unconditionally could wipe every vector and then fail the
+ * backfill — leaving semantic search empty until a later pass. On a not-ready
+ * runtime we throw and leave the existing index untouched.
+ */
+export async function rebuildEmbeddings(): Promise<void> {
+  const status = await embedEnsure()
+  if (!isEmbedReady(status)) {
+    throw new Error(
+      status.status === 'failed'
+        ? `Embedding model failed to load: ${status.message}`
+        : 'Embedding model is still loading; rebuild once it is ready.',
+    )
+  }
+  await clearEmbeddings()
+  await backfillEmbeddings()
+}
+
 /** Wipe and rebuild every vector (model change / repair). */
 export function useRebuildEmbeddings() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async () => {
-      await embedEnsure()
-      await clearEmbeddings()
-      await backfillEmbeddings()
-    },
+    mutationFn: rebuildEmbeddings,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY }),
   })
 }

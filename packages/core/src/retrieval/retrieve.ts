@@ -4,6 +4,7 @@ import type { RecordKind } from '../domains/relations/types'
 import { embedStatus, embedTexts } from '../embeddings/commands'
 import { isEmbedReady } from '../embeddings/model'
 import { fuseRanked, semanticHits } from '../embeddings/semantic'
+import { isEmbeddingsEnabled } from '../embeddings/status'
 import { toMatchQuery } from './match-query'
 import { combineScore, lexicalScore, recencyScore } from './ranking'
 
@@ -15,9 +16,10 @@ import { combineScore, lexicalScore, recencyScore } from './ranking'
  * optional explicit-link boost.
  *
  * `mode` accepts `lexical | semantic | hybrid`. Semantic/hybrid use the local
- * embedding runtime (sqlite-vec + fastembed, desktop): when it is `ready` the
- * query is embedded and vector neighbours are blended with lexical hits via
- * Reciprocal Rank Fusion. When the runtime is unavailable — no model loaded, a
+ * embedding runtime (sqlite-vec + fastembed, desktop): when the user has enabled
+ * semantic search AND the runtime is `ready`, the query is embedded and vector
+ * neighbours are blended with lexical hits via Reciprocal Rank Fusion. When
+ * semantic search is disabled, the runtime is unavailable — no model loaded, a
  * non-desktop host, or any embed error — the call degrades cleanly to lexical
  * and reports `semanticAvailable: false`. It never fails for lack of vectors.
  */
@@ -181,9 +183,11 @@ export async function retrieve(query: string, options: RetrieveOptions = {}): Pr
   // Semantic / hybrid: try the embedding runtime, degrade to lexical on anything
   // that isn't a clean `ready` + successful embed. Lexical never gets skipped on
   // failure, so retrieval can't return empty just because vectors are missing.
+  // Respect the user's kill-switch first: if semantic search is disabled we must
+  // not embed the query or use vectors, even while the model stays loaded.
   try {
-    const status = await embedStatus()
-    if (isEmbedReady(status)) {
+    const status = (await isEmbeddingsEnabled()) ? await embedStatus() : null
+    if (status && isEmbedReady(status)) {
       const [vector] = await embedTexts([query])
       if (vector && vector.length > 0) {
         const semantic = await semanticHits(vector, {

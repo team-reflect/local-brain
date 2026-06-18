@@ -4,7 +4,8 @@ Branch: `codex/local-brain-reflect-embeddings` · Base: `master` @ 58c801f
 
 ## Current phase
 
-**Done — verification green.** Awaiting push + PR. See `final-report.md`.
+**Done — verification green.** Cursor Bugbot review fixes applied on top of PR #27
+(see "Bugbot fixes" below). See `final-report.md`.
 
 ## Progress log
 
@@ -30,13 +31,30 @@ Branch: `codex/local-brain-reflect-embeddings` · Base: `master` @ 58c801f
 - ✅ Phase F — Docs aligned (`launch-schema.md`, plan 06); codegen + JS test harness strip
   vec0 statements (Node SQLite lacks the extension); `schema.gen.ts` regenerated.
 
+## Bugbot fixes (post-review pass on PR #27)
+- ✅ **High — rebuild clears without ready model.** `useRebuildEmbeddings` now calls a
+  shared `rebuildEmbeddings()` that only `clearEmbeddings()` + `backfillEmbeddings()`
+  once `embedEnsure()` confirms `ready`; a `loading` (concurrent load) or `failed`
+  result throws *before* the clear, so a model that can't load can't wipe the index.
+  Tests: `apps/desktop/src/lib/queries/embeddings.test.ts` (ready clears; loading/failed
+  abort without `embed_clear`).
+- ✅ **Medium — disabled setting ignored by retrieve.** `retrieve()` now reads the
+  `embeddings.enabled` kill-switch before touching the runtime; when disabled it never
+  embeds the query or uses vectors, even if the in-memory model stays loaded, and reports
+  `semanticAvailable: false`. Tests added in `retrieve.modes.test.ts` (hybrid + semantic
+  short-circuit to lexical when disabled, no `embed_status`/`embed_texts`).
+- ✅ **Low — HF_HOME download/load path split.** `embed_ensure` resolves one
+  `effective_cache_dir` (HF_HOME override or app-data `models`) and passes it to BOTH
+  `download_model_files` and `TextEmbedding::try_new`, so progress and the loader agree on
+  one cache path. Pure `resolve_cache_dir` unit tests in `embed/mod.rs` (`cache_dir` mod).
+
 ## Verification results
 - `git diff --check` — clean
-- `pnpm check` — pass (lint + typecheck + 136 core + 40 desktop tests + schema-drift)
+- `pnpm check` — pass (lint + typecheck + 138 core + 43 desktop tests + schema-drift)
 - `pnpm --filter @local-brain/desktop build` — pass
 - `cargo fmt --all -- --check` — pass
 - `cargo check --workspace` — pass
-- `cargo test --workspace` — pass (47 tests)
+- `cargo test --workspace` — pass (50 tests incl. 3 new `cache_dir` tests)
 - `cargo test -p local-brain-desktop -- --ignored embeds_and_ranks_by_meaning` — pass
   (real fastembed model + real sqlite-vec KNN ranked by meaning)
 

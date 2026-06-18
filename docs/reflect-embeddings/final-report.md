@@ -90,6 +90,20 @@ vec0 cosine-KNN ordering, and a real end-to-end model + KNN test (ranks by meani
 - **No live ingest hook:** backfill runs on enable / app start / manual rebuild; it is
   hash-skip cheap. A push-on-write trigger could be added later.
 
+## Post-review fixes (Cursor Bugbot on PR #27)
+- **High — rebuild clears without ready model:** rebuild now goes through a shared
+  `rebuildEmbeddings()` that only clears + backfills once `embedEnsure()` reports `ready`;
+  `loading`/`failed` throws before any `embed_clear`, so a model that can't load can't wipe
+  the vectors. New `apps/desktop/src/lib/queries/embeddings.test.ts`.
+- **Medium — disabled setting ignored by retrieve:** `retrieve()` checks the
+  `embeddings.enabled` kill-switch before embedding the query or using vectors, even when
+  the runtime stays loaded. New disabled-mode cases in `retrieve.modes.test.ts`.
+- **Low — HF_HOME download/load path split:** `embed_ensure` resolves one effective cache
+  dir (HF_HOME override or app-data `models`) shared by `download_model_files` and
+  `TextEmbedding::try_new`. New pure `resolve_cache_dir` unit tests in `embed/mod.rs`.
+- Re-verified: `git diff --check` clean, `pnpm check` (138 core + 43 desktop), desktop
+  build, `cargo fmt`/`check`, `cargo test --workspace` (50 tests).
+
 ## Repo state
 - Branch: `codex/local-brain-reflect-embeddings`
 - PR: https://github.com/maccman/local-brain/pull/27 (base `master`)

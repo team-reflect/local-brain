@@ -187,15 +187,30 @@ impl Progress for DownloadProgress {
     fn finish(&mut self) {}
 }
 
+/// The hf-hub cache dir override, if any: `HF_HOME` wins when set (matching
+/// fastembed's own env resolution). Kept pure (takes the env value) so the
+/// download and the loader can both run it on the *same* base path and agree on
+/// where the files live — a split would re-download under `try_new`.
+fn resolve_cache_dir(hf_home: Option<String>, default: &Path) -> PathBuf {
+    hf_home
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default.to_path_buf())
+}
+
+/// The effective model cache dir for this process: the `HF_HOME` override or the
+/// supplied app-data default. Used for BOTH the pre-download and `try_new`.
+fn effective_cache_dir(default: &Path) -> PathBuf {
+    resolve_cache_dir(std::env::var("HF_HOME").ok(), default)
+}
+
 /// Fetch whatever model files are missing from the cache, with byte progress.
 /// fastembed downloads these itself inside `try_new`, but silently; fetching
 /// them first through the same hf-hub cache gives the UI a progress bar and
-/// leaves `try_new` a pure cache hit. Mirrors fastembed's resolution (env
-/// overrides included) so both sides agree on location and endpoint.
+/// leaves `try_new` a pure cache hit. `cache_dir` is the already-resolved
+/// effective path (see `effective_cache_dir`), so both sides agree on location.
 fn download_model_files(app: &AppHandle, cache_dir: &Path) -> Result<(), String> {
-    let cache_dir = std::env::var("HF_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| cache_dir.to_path_buf());
+    let cache_dir = cache_dir.to_path_buf();
     let endpoint =
         std::env::var("HF_ENDPOINT").unwrap_or_else(|_| "https://huggingface.co".to_string());
 
@@ -246,12 +261,16 @@ pub fn embed_status(state: State<EmbedState>) -> AppResult<EmbedStatus> {
 #[tauri::command]
 pub async fn embed_ensure(app: AppHandle, state: State<'_, EmbedState>) -> AppResult<EmbedStatus> {
     // Resolve the cache dir BEFORE flipping to Loading: it's the only step here
-    // that may fail without a guaranteed state transition afterwards.
-    let cache_dir = app
+    // that may fail without a guaranteed state transition afterwards. Apply the
+    // HF_HOME override here once so the pre-download and `try_new` below load
+    // from the SAME path — otherwise progress finishes against one dir while the
+    // loader re-fetches the files from another.
+    let app_data_models = app
         .path()
         .app_data_dir()
         .map_err(|err| AppError::io(format!("no app data dir: {err}")))?
         .join("models");
+    let cache_dir = effective_cache_dir(&app_data_models);
 
     {
         let mut runtime = lock_state(&state)?;
@@ -337,6 +356,41 @@ pub fn embed_delete(db: State<DbState>, chunk_ids: Vec<String>) -> AppResult<usi
 #[tauri::command]
 pub fn embed_clear(db: State<DbState>) -> AppResult<usize> {
     db.with_connection_mut(write::clear)
+}
+
+#[cfg(test)]
+mod cache_dir {
+    //! The effective cache path must be ONE value shared by the pre-download and
+    //! the loader (Bugbot #27): `HF_HOME` overrides the app-data default when set
+    //! and non-empty, otherwise the default wins. A split here re-downloads the
+    //! model under `try_new` after progress already showed it finished.
+
+    use super::resolve_cache_dir;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn defaults_when_hf_home_unset() {
+        let default = Path::new("/app/data/models");
+        assert_eq!(resolve_cache_dir(None, default), default.to_path_buf());
+    }
+
+    #[test]
+    fn defaults_when_hf_home_empty() {
+        let default = Path::new("/app/data/models");
+        assert_eq!(
+            resolve_cache_dir(Some(String::new()), default),
+            default.to_path_buf()
+        );
+    }
+
+    #[test]
+    fn overrides_with_hf_home_when_set() {
+        let default = Path::new("/app/data/models");
+        assert_eq!(
+            resolve_cache_dir(Some("/custom/hf".to_string()), default),
+            PathBuf::from("/custom/hf")
+        );
+    }
 }
 
 #[cfg(test)]

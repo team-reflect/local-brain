@@ -14,6 +14,8 @@ import { retrieve } from './retrieve'
 interface BridgeOptions {
   /** Runtime status the mocked `embed_status` reports. */
   status?: 'ready' | 'uninitialized' | 'throw'
+  /** Value of the `embeddings.enabled` setting (default: enabled). */
+  enabled?: boolean
 }
 
 function lexicalRow(chunkId: string, bm25: number) {
@@ -58,6 +60,11 @@ function installBridge(options: BridgeOptions = {}) {
       if (command === 'embed_texts') return Promise.resolve([[0.1, 0.2, 0.3]])
       if (command === 'db_query') {
         const sql = String((args as { sql: string }).sql)
+        // The `embeddings.enabled` kill-switch read (defaults to enabled here).
+        if (sql.includes('settings')) {
+          const enabled = options.enabled ?? true
+          return Promise.resolve([{ valueJson: JSON.stringify(enabled) }])
+        }
         if (sql.includes('chunk_vectors')) {
           return Promise.resolve([semanticRow('s1', 0.2), semanticRow('shared', 0.3)])
         }
@@ -110,5 +117,22 @@ describe('retrieve modes', () => {
     const result = await retrieve('quarterly planning', { mode: 'semantic' })
     expect(result.semanticAvailable).toBe(true)
     expect(result.chunks.map((c) => c.chunkId).sort()).toEqual(['s1', 'shared'])
+  })
+
+  it('hybrid degrades to lexical when semantic search is disabled, even if the runtime is ready', async () => {
+    const commands = installBridge({ status: 'ready', enabled: false })
+    const result = await retrieve('quarterly planning', { mode: 'hybrid' })
+    expect(result.semanticAvailable).toBe(false)
+    // The kill-switch must short-circuit before any embed work touches vectors.
+    expect(commands).not.toContain('embed_status')
+    expect(commands).not.toContain('embed_texts')
+    expect(result.chunks.every((c) => c.chunkId.startsWith('l') || c.chunkId === 'shared')).toBe(true)
+  })
+
+  it('semantic mode returns no vector hits when semantic search is disabled', async () => {
+    const commands = installBridge({ status: 'ready', enabled: false })
+    const result = await retrieve('quarterly planning', { mode: 'semantic' })
+    expect(result.semanticAvailable).toBe(false)
+    expect(commands).not.toContain('embed_texts')
   })
 })
