@@ -52,6 +52,7 @@ function tsTypeForColumn(declaredType, columnName) {
   if (type.includes('CHAR') || type.includes('CLOB') || type.includes('TEXT')) return 'string'
   if (type === '') {
     if (columnName === 'id' || columnName.endsWith('_id')) return 'string'
+    if (columnName.endsWith('_at') || columnName.endsWith('_on')) return 'string'
     return 'number'
   }
   if (type.includes('BLOB')) return 'Uint8Array'

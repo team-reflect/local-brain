@@ -3,6 +3,7 @@ import { nowIso } from '../../db/time'
 import {
   addDays,
   daysBetween,
+  nextReconnectAt as deriveNextReconnectAt,
   relationshipStrength,
   STRENGTH_WINDOW_DAYS,
 } from './strength'
@@ -45,20 +46,11 @@ export async function listReconnectSuggestions(
     .selectFrom('people')
     .where('people.isSelf', '=', 0)
     .where('people.archivedAt', 'is', null)
-    .where('people.nextReconnectAt', 'is not', null)
-    .where('people.nextReconnectAt', '<=', asOf)
-    .orderBy('people.nextReconnectAt', 'asc')
-    .select([
-      'people.id',
-      'people.fullName',
-      'people.lastInteractionAt',
-      'people.nextReconnectAt',
-    ])
-  if (options.limit !== undefined) {
-    query = query.limit(options.limit)
-  }
+    .where('people.reconnectIntervalDays', 'is not', null)
+    .orderBy('people.fullName', 'asc')
+    .select(['people.id', 'people.fullName', 'people.reconnectIntervalDays'])
   const rows = await query.execute()
-  return Promise.all(
+  const suggestions = await Promise.all(
     rows.map(async (row) => {
       const [lastRow, recentRow, openRow] = await Promise.all([
         db
@@ -89,19 +81,24 @@ export async function listReconnectSuggestions(
           .executeTakeFirst(),
       ])
       const lastInteractionAt = lastRow?.lastAt ?? null
+      const nextReconnectAt = deriveNextReconnectAt(lastInteractionAt, row.reconnectIntervalDays)
       const recentInteractions = Number(recentRow?.n ?? 0)
       const openTasks = Number(openRow?.n ?? 0)
       const daysSinceLast = lastInteractionAt ? daysBetween(lastInteractionAt, asOf) : null
 
+      if (nextReconnectAt === null || nextReconnectAt > asOf) return null
       return {
         id: row.id,
         fullName: row.fullName,
         relationshipStrength: relationshipStrength({ recentInteractions, daysSinceLast, openTasks }),
         lastInteractionAt,
-        // The `is not null` filter guarantees a value; assert it for the type.
-        nextReconnectAt: row.nextReconnectAt as string,
-        overdueDays: daysBetween(row.nextReconnectAt as string, asOf),
+        nextReconnectAt,
+        overdueDays: daysBetween(nextReconnectAt, asOf),
       }
     }),
   )
+  return suggestions
+    .filter((suggestion): suggestion is ReconnectSuggestion => suggestion !== null)
+    .sort((a, b) => a.nextReconnectAt.localeCompare(b.nextReconnectAt))
+    .slice(0, options.limit)
 }

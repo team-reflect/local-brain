@@ -287,8 +287,8 @@ pub fn show(conn: &Connection, json: bool, kind: &str, id: &str) -> Result<(), C
                     people.summary,
                     people.notes,
                     relationship_strengths.relationship_strength,
-                    people.last_interaction_at,
-                    people.next_reconnect_at
+                    relationship_strengths.last_interaction_at,
+                    relationship_strengths.next_reconnect_at
              FROM people
              LEFT JOIN relationship_strengths ON relationship_strengths.person_id = people.id
              WHERE people.id = ?1",

@@ -8,6 +8,11 @@ CREATE VIEW relationship_strengths AS
 WITH signals AS (
   SELECT
     people.id AS person_id,
+    people.reconnect_interval_days,
+    MAX(CASE
+      WHEN interactions.archived_at IS NULL AND interactions.occurred_at IS NOT NULL
+      THEN interactions.occurred_at
+    END) AS last_interaction_at,
     COUNT(DISTINCT CASE
       WHEN interactions.archived_at IS NULL
        AND interactions.occurred_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-365 days')
@@ -27,11 +32,16 @@ WITH signals AS (
   LEFT JOIN task_people ON task_people.person_id = people.id
   LEFT JOIN tasks ON tasks.id = task_people.task_id
   WHERE people.is_self = 0 AND people.archived_at IS NULL
-  GROUP BY people.id
+  GROUP BY people.id, people.reconnect_interval_days
 ),
 scores AS (
   SELECT
     person_id,
+    last_interaction_at,
+    CASE
+      WHEN last_interaction_at IS NULL OR reconnect_interval_days IS NULL THEN NULL
+      ELSE strftime('%Y-%m-%dT%H:%M:%fZ', last_interaction_at, printf('+%d days', reconnect_interval_days))
+    END AS next_reconnect_at,
     recent_interactions,
     days_since_last,
     open_tasks,
@@ -48,6 +58,8 @@ scores AS (
 )
 SELECT
   person_id,
+  last_interaction_at,
+  next_reconnect_at,
   CASE
     WHEN recent_interactions = 0 AND open_tasks = 0 THEN NULL
     WHEN score >= 8 THEN 5

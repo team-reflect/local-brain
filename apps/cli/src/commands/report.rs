@@ -94,14 +94,14 @@ fn reconnect_suggestions(conn: &Connection) -> Result<Vec<Value>, CliError> {
         "SELECT people.id,
                 people.full_name,
                 relationship_strengths.relationship_strength,
-                people.last_interaction_at,
-                people.next_reconnect_at
-         FROM people
-         LEFT JOIN relationship_strengths ON relationship_strengths.person_id = people.id
+                relationship_strengths.last_interaction_at,
+                relationship_strengths.next_reconnect_at
+         FROM relationship_strengths
+         INNER JOIN people ON people.id = relationship_strengths.person_id
          WHERE people.is_self = 0 AND people.archived_at IS NULL
-           AND people.next_reconnect_at IS NOT NULL
-           AND people.next_reconnect_at <= strftime('%Y-%m-%dT%H:%M:%fZ','now')
-         ORDER BY people.next_reconnect_at ASC",
+           AND relationship_strengths.next_reconnect_at IS NOT NULL
+           AND relationship_strengths.next_reconnect_at <= strftime('%Y-%m-%dT%H:%M:%fZ','now')
+         ORDER BY relationship_strengths.next_reconnect_at ASC",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(json!({

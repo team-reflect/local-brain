@@ -282,6 +282,8 @@ export interface Projects {
 
 export interface RelationshipStrengths {
   personId: SelectOnly<string | null>
+  lastInteractionAt: SelectOnly<string | null>
+  nextReconnectAt: SelectOnly<string | null>
   relationshipStrength: SelectOnly<number | null>
   recentInteractions: SelectOnly<number | null>
   daysSinceLast: SelectOnly<number | null>
