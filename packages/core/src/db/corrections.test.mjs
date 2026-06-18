@@ -9,6 +9,8 @@ import {
   archiveMemory,
   createInteraction,
   createPerson,
+  db,
+  execute,
   getMemory,
   getPerson,
   getPersonLinks,
@@ -264,6 +266,29 @@ describe('05b relationship intelligence recompute (real SQLite)', () => {
     // As of 2026-06-01 the interaction was 22 days old: 1 interaction + 3 recency
     // points = score 4 -> bucket 3. This should not drift with SQLite's current now.
     expect(suggestions[0].relationshipStrength).toBe(3)
+  })
+
+  it('computes reconnect strength from the live last interaction, not the cached person hint', async () => {
+    const personId = await createPerson({ fullName: 'Archived Latest', reconnectIntervalDays: 7 })
+    await createInteraction({ kind: 'call', title: 'old', occurredAt: '2026-01-01T00:00:00.000Z' }, [
+      { personId },
+    ])
+    const latest = await createInteraction({ kind: 'call', title: 'archived', occurredAt: '2026-05-10T00:00:00.000Z' }, [
+      { personId },
+    ])
+    await recomputeAllRelationships({ asOf: '2026-06-01T00:00:00.000Z' })
+
+    await execute(
+      db
+        .updateTable('interactions')
+        .set({ archivedAt: '2026-05-20T00:00:00.000Z' })
+        .where('id', '=', latest),
+    )
+
+    const suggestions = await listReconnectSuggestions({ asOf: '2026-06-01T00:00:00.000Z' })
+    expect(suggestions).toHaveLength(1)
+    expect(suggestions[0].lastInteractionAt).toBe('2026-01-01T00:00:00.000Z')
+    expect(suggestions[0].relationshipStrength).toBe(2)
   })
 
   it('does not suggest people who are not yet due or have no cadence', async () => {

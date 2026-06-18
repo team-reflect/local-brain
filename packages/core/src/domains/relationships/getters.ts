@@ -60,7 +60,16 @@ export async function listReconnectSuggestions(
   const rows = await query.execute()
   return Promise.all(
     rows.map(async (row) => {
-      const [recentRow, openRow] = await Promise.all([
+      const [lastRow, recentRow, openRow] = await Promise.all([
+        db
+          .selectFrom('interactions')
+          .innerJoin('interactionParticipants', 'interactionParticipants.interactionId', 'interactions.id')
+          .where('interactionParticipants.personId', '=', row.id)
+          .where('interactions.archivedAt', 'is', null)
+          .where('interactions.occurredAt', 'is not', null)
+          .where('interactions.occurredAt', '<=', asOf)
+          .select((eb) => eb.fn.max('interactions.occurredAt').as('lastAt'))
+          .executeTakeFirst(),
         db
           .selectFrom('interactions')
           .innerJoin('interactionParticipants', 'interactionParticipants.interactionId', 'interactions.id')
@@ -79,7 +88,7 @@ export async function listReconnectSuggestions(
           .select((eb) => eb.fn.countAll<number>().as('n'))
           .executeTakeFirst(),
       ])
-      const lastInteractionAt = row.lastInteractionAt
+      const lastInteractionAt = lastRow?.lastAt ?? null
       const recentInteractions = Number(recentRow?.n ?? 0)
       const openTasks = Number(openRow?.n ?? 0)
       const daysSinceLast = lastInteractionAt ? daysBetween(lastInteractionAt, asOf) : null
