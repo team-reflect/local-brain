@@ -13,7 +13,7 @@ import { HOME_ROUTE, type Route, routeFromPath, routesEqual, routeToPath } from 
 
 interface RouterValue {
   route: Route
-  navigate: (route: Route, options?: { replace?: boolean }) => void
+  navigate: (route: Route) => void
   back: () => void
   forward: () => void
   canBack: boolean
@@ -40,21 +40,13 @@ function initialRoute(): Route {
 export function RouterProvider({ children }: { children: ReactNode }): ReactElement {
   const [history, setHistory] = useState<History>(() => ({ stack: [initialRoute()], index: 0 }))
   const suppressPopstate = useRef(false)
-  const historyWriteMode = useRef<'push' | 'replace'>('push')
 
   const route = history.stack[history.index] ?? HOME_ROUTE
 
-  const navigate = useCallback((next: Route, options: { replace?: boolean } = {}) => {
+  const navigate = useCallback((next: Route) => {
     setHistory((current) => {
       const active = current.stack[current.index]
       if (active && routesEqual(active, next)) return current
-      if (options.replace) {
-        historyWriteMode.current = 'replace'
-        const stack = [...current.stack]
-        stack[current.index] = next
-        return { stack, index: current.index }
-      }
-      historyWriteMode.current = 'push'
       const stack = [...current.stack.slice(0, current.index + 1), next]
       return { stack, index: stack.length - 1 }
     })
@@ -80,13 +72,8 @@ export function RouterProvider({ children }: { children: ReactNode }): ReactElem
     const path = routeToPath(route)
     if (window.location.pathname + window.location.search !== path) {
       suppressPopstate.current = true
-      if (historyWriteMode.current === 'replace') {
-        window.history.replaceState({}, '', path)
-      } else {
-        window.history.pushState({}, '', path)
-      }
+      window.history.pushState({}, '', path)
     }
-    historyWriteMode.current = 'push'
   }, [route])
 
   useEffect(() => {

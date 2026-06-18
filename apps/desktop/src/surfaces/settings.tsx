@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { appVersion } from '@local-brain/core'
 import { PageHead } from '../components/page-head'
@@ -41,52 +41,14 @@ function settingsSectionId(section: string): string {
 
 export function SettingsSurface({ section }: { section: string | undefined }): ReactNode {
   const { navigate } = useRouter()
-  const [active, setActive] = useState<string>(isSettingsSection(section) ? section : DEFAULT_SECTION)
-  const suppressScrollRouteSync = useRef(false)
+  const active = isSettingsSection(section) ? section : DEFAULT_SECTION
 
   useEffect(() => {
     if (!isSettingsSection(section)) return
-    let timeout: number | undefined
-    setActive(section)
-    suppressScrollRouteSync.current = true
     requestAnimationFrame(() => {
       document.getElementById(settingsSectionId(section))?.scrollIntoView?.({ block: 'start' })
-      timeout = window.setTimeout(() => {
-        suppressScrollRouteSync.current = false
-      }, 150)
     })
-    return () => {
-      if (timeout !== undefined) window.clearTimeout(timeout)
-      suppressScrollRouteSync.current = false
-    }
   }, [section])
-
-  useEffect(() => {
-    if (typeof IntersectionObserver === 'undefined') return
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0]
-        if (!visible?.target.id) return
-        const next = visible.target.id.replace(/^settings-/, '')
-        if (!isSettingsSection(next) || suppressScrollRouteSync.current) return
-        setActive(next)
-        if (next !== (isSettingsSection(section) ? section : DEFAULT_SECTION)) {
-          navigate({ kind: 'settings', section: next }, { replace: true })
-        }
-      },
-      { root: null, rootMargin: '-16% 0px -68% 0px', threshold: [0, 0.1, 1] },
-    )
-
-    for (const item of SECTIONS) {
-      const element = document.getElementById(settingsSectionId(item.key))
-      if (element) observer.observe(element)
-    }
-
-    return () => observer.disconnect()
-  }, [navigate, section])
 
   return (
     <div className="mx-auto grid max-w-5xl grid-cols-[11rem_minmax(0,1fr)] gap-x-8 gap-y-5 pb-10">
@@ -99,13 +61,7 @@ export function SettingsSurface({ section }: { section: string | undefined }): R
             key={s.key}
             type="button"
             aria-current={s.key === active ? 'location' : undefined}
-            onClick={() => {
-              setActive(s.key)
-              navigate({ kind: 'settings', section: s.key })
-              document
-                .getElementById(settingsSectionId(s.key))
-                ?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
-            }}
+            onClick={() => navigate({ kind: 'settings', section: s.key })}
             className={cn(
               'rounded-r-md border-l-2 px-3 py-1.5 text-left text-sm font-medium transition-colors',
               s.key === active
