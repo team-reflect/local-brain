@@ -7,6 +7,7 @@ description = "Durable SQLite schema, migrations, and open/migrate helpers for L
 [dependencies]
 rusqlite = { workspace = true }
 rusqlite_migration = { workspace = true }
+sqlite-vec = { workspace = true }
 dirs = "6.0.0"
 
 [dev-dependencies]

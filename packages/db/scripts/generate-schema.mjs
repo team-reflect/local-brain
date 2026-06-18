@@ -14,7 +14,9 @@
 // CamelCasePlugin bridges the two at the dialect boundary (see db.ts), so this
 // file maps both column identifiers and table keys to camelCase. FTS5 virtual
 // tables and their shadow tables are excluded — search uses raw SQL (Plan 06),
-// not the typed query builder.
+// not the typed query builder. The sqlite-vec (vec0) virtual tables are likewise
+// excluded; their CREATE statements are stripped before replay because Node's
+// built-in SQLite lacks the extension (see stripVec0).
 
 import { DatabaseSync } from 'node:sqlite'
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -52,6 +54,18 @@ function tsTypeForColumn(declaredType) {
   return 'number'
 }
 
+/**
+ * Strip `CREATE VIRTUAL TABLE … USING vec0(…)` statements before replaying a
+ * migration. The vec0 virtual tables (sqlite-vec) need the extension, which the
+ * Rust runtime registers but Node's built-in SQLite does not have. Like the
+ * FTS5 tables, they are never part of the typed query builder (semantic search
+ * uses raw SQL), so dropping them from codegen costs nothing and keeps the
+ * generator a pure-JS, native-dependency-free replay.
+ */
+function stripVec0(sql) {
+  return sql.replace(/CREATE\s+VIRTUAL\s+TABLE[^;]*USING\s+vec0[^;]*;/gi, '')
+}
+
 /** Apply every migration, in lexical order, to a fresh in-memory database. */
 function migratedDatabase() {
   const db = new DatabaseSync(':memory:')
@@ -60,7 +74,7 @@ function migratedDatabase() {
     .filter((file) => file.endsWith('.sql'))
     .sort()
   for (const file of files) {
-    db.exec(readFileSync(join(migrationsDir, file), 'utf8'))
+    db.exec(stripVec0(readFileSync(join(migrationsDir, file), 'utf8')))
   }
   return db
 }

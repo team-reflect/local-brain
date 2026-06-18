@@ -23,11 +23,21 @@ function toSqlParam(value) {
   return value
 }
 
+/**
+ * Strip `CREATE VIRTUAL TABLE … USING vec0(…)` before replay: the sqlite-vec
+ * extension is registered by the Rust runtime but absent from Node's built-in
+ * SQLite. Real vector search is exercised by the Rust tests; these JS round-trip
+ * tests cover the lexical/CRUD path and stub the embedding bridge directly.
+ */
+function stripVec0(sql) {
+  return sql.replace(/CREATE\s+VIRTUAL\s+TABLE[^;]*USING\s+vec0[^;]*;/gi, '')
+}
+
 export function freshDatabase() {
   const database = new DatabaseSync(':memory:')
   database.exec('PRAGMA foreign_keys = ON;')
   for (const file of readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()) {
-    database.exec(readFileSync(join(migrationsDir, file), 'utf8'))
+    database.exec(stripVec0(readFileSync(join(migrationsDir, file), 'utf8')))
   }
   return database
 }
@@ -56,6 +66,15 @@ export function installSqliteBridge(database) {
           database.exec('ROLLBACK')
           return Promise.reject(error)
         }
+      }
+      if (command === 'embed_delete') {
+        // Mirror the Rust `embed_delete`: drop chunk_embeddings rows (and their
+        // chunk_vectors, which this harness strips) for the given chunk ids.
+        let deleted = 0
+        for (const chunkId of args.chunkIds) {
+          deleted += Number(database.prepare('DELETE FROM chunk_embeddings WHERE chunk_id = ?').run(chunkId).changes)
+        }
+        return Promise.resolve(deleted)
       }
       return Promise.reject(new Error(`unexpected command: ${command}`))
     },

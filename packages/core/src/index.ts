@@ -207,6 +207,44 @@ export {
   type RankInputs,
 } from './retrieval'
 
+// Embeddings (local semantic search: sqlite-vec + fastembed, desktop runtime)
+export {
+  EMBEDDING_MODEL_ID,
+  EMBEDDING_DIMENSIONS,
+  embedStatusSchema,
+  byteProgressSchema,
+  isEmbedReady,
+  embedStatus,
+  embedEnsure,
+  embedTexts,
+  embedApply,
+  embedDelete,
+  embedClear,
+  semanticHits,
+  fuseRanked,
+  KNN_CANDIDATES,
+  MAX_COSINE_DISTANCE,
+  RRF_K,
+  backfillEmbeddings,
+  clearEmbeddings,
+  countPending,
+  pruneOrphanEmbeddings,
+  getEmbeddingsStatus,
+  isEmbeddingsEnabled,
+  setEmbeddingsEnabled,
+  getBackfillError,
+  setBackfillError,
+  EMBEDDINGS_ENABLED_KEY,
+  EMBEDDINGS_BACKFILL_ERROR_KEY,
+  type EmbedStatus,
+  type ByteProgress,
+  type EmbeddedChunkInput,
+  type BackfillOptions,
+  type BackfillProgress,
+  type BackfillResult,
+  type EmbeddingsStatus,
+} from './embeddings'
+
 // Settings (typed key/value store backing the model boundary and storage path)
 export {
   getSetting,

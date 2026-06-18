@@ -6,22 +6,25 @@
 //! database is durable user data. Only derived tables (content chunks, FTS,
 //! vectors) are rebuildable; the product tables are the source of truth.
 
+use std::ffi::{c_char, c_int};
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+use std::sync::{LazyLock, OnceLock};
 use std::time::Duration;
 
+use rusqlite::ffi::{sqlite3, sqlite3_api_routines};
 use rusqlite::Connection;
 use rusqlite_migration::{Migrations, M};
 
 /// Bumped whenever a migration is appended below. Asserted against the applied
 /// `user_version` in tests so the constant can never drift from the list.
-pub const LATEST_SCHEMA_VERSION: usize = 2;
+pub const LATEST_SCHEMA_VERSION: usize = 3;
 
 /// Ordered schema migrations, embedded from `migrations/*.sql`.
 static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
     Migrations::new(vec![
         M::up(include_str!("../migrations/0001_init.sql")),
         M::up(include_str!("../migrations/0002_launch_schema.sql")),
+        M::up(include_str!("../migrations/0003_embeddings.sql")),
     ])
 });
 
@@ -31,6 +34,7 @@ pub enum SchemaError {
     Open(String),
     Pragma(String),
     Migration(String),
+    VecRegistration(String),
 }
 
 impl std::fmt::Display for SchemaError {
@@ -43,11 +47,49 @@ impl std::fmt::Display for SchemaError {
             SchemaError::Migration(message) => {
                 write!(f, "could not migrate the database: {message}")
             }
+            SchemaError::VecRegistration(message) => {
+                write!(f, "could not register the sqlite-vec extension: {message}")
+            }
         }
     }
 }
 
 impl std::error::Error for SchemaError {}
+
+/// Result of the one-time sqlite-vec registration; the error message is cached so
+/// every caller surfaces it instead of racing on the auto-extension slot.
+static VEC_INIT: OnceLock<Result<(), String>> = OnceLock::new();
+
+/// The SQLite auto-extension entry-point signature. sqlite-vec and rusqlite each
+/// link their own copy of the C types, so we transmute `sqlite3_vec_init` into
+/// rusqlite's matching function-pointer type.
+type AutoExtensionFn =
+    unsafe extern "C" fn(*mut sqlite3, *mut *mut c_char, *const sqlite3_api_routines) -> c_int;
+
+/// Register the sqlite-vec extension once per process so every connection opened
+/// afterwards exposes the `vec0` virtual table and `vec_*` functions. Must run
+/// before opening/migrating any connection that touches the `chunk_vectors`
+/// table (migration 0003). Idempotent and process-global.
+pub fn register_sqlite_vec() -> Result<(), SchemaError> {
+    let result = VEC_INIT.get_or_init(|| {
+        // SAFETY: registering a statically-linked SQLite extension entry point
+        // before opening connections — the documented sqlite-vec pattern.
+        let rc = unsafe {
+            rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute::<
+                *const (),
+                AutoExtensionFn,
+            >(
+                sqlite_vec::sqlite3_vec_init as *const ()
+            )))
+        };
+        if rc == rusqlite::ffi::SQLITE_OK {
+            Ok(())
+        } else {
+            Err(format!("sqlite3_auto_extension returned code {rc}"))
+        }
+    });
+    result.clone().map_err(SchemaError::VecRegistration)
+}
 
 /// Apply the connection settings the desktop app and CLI must share so they can
 /// safely coexist on the same database file (WAL + a busy timeout).
@@ -72,6 +114,7 @@ pub fn migrate(conn: &mut Connection) -> Result<(), SchemaError> {
 
 /// Open (creating if needed) and migrate the durable brain database at `path`.
 pub fn open_and_migrate(path: &Path) -> Result<Connection, SchemaError> {
+    register_sqlite_vec()?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|err| SchemaError::Open(err.to_string()))?;
     }
@@ -83,6 +126,7 @@ pub fn open_and_migrate(path: &Path) -> Result<Connection, SchemaError> {
 
 /// Open an in-memory database migrated to the latest schema. Test helper.
 pub fn open_in_memory() -> Result<Connection, SchemaError> {
+    register_sqlite_vec()?;
     let mut conn =
         Connection::open_in_memory().map_err(|err| SchemaError::Open(err.to_string()))?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")
@@ -115,7 +159,68 @@ mod tests {
 
     #[test]
     fn migrations_are_well_formed() {
+        // 0003 creates a vec0 virtual table, so the extension must be registered
+        // before the migration set can replay during validation.
+        register_sqlite_vec().unwrap();
         assert!(MIGRATIONS.validate().is_ok());
+    }
+
+    #[test]
+    fn chunk_embeddings_tables_exist() {
+        let conn = open_in_memory().unwrap();
+        for table in ["chunk_embeddings", "chunk_vectors"] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1, "missing embeddings table: {table}");
+        }
+    }
+
+    #[test]
+    fn vec0_knn_orders_by_cosine_distance() {
+        let conn = open_in_memory().unwrap();
+        // A tiny 384-dim space: one basis vector and its near/far neighbours.
+        let mut unit = vec![0.0f32; 384];
+        unit[0] = 1.0;
+        let mut near = vec![0.0f32; 384];
+        near[0] = 0.9;
+        near[1] = 0.1;
+        let mut far = vec![0.0f32; 384];
+        far[1] = 1.0; // orthogonal to the query
+
+        let to_json = |v: &[f32]| {
+            let parts: Vec<String> = v.iter().map(|x| x.to_string()).collect();
+            format!("[{}]", parts.join(","))
+        };
+
+        for (rowid, vec) in [(1i64, &unit), (2, &near), (3, &far)] {
+            conn.execute(
+                "INSERT INTO chunk_vectors(rowid, embedding) VALUES (?1, ?2)",
+                rusqlite::params![rowid, to_json(vec)],
+            )
+            .unwrap();
+        }
+
+        // Query closest to `unit`: expect unit (0 distance) then near then far.
+        let ordered: Vec<i64> = conn
+            .prepare(
+                "SELECT rowid FROM chunk_vectors \
+                 WHERE embedding MATCH ?1 AND k = 3 ORDER BY distance",
+            )
+            .unwrap()
+            .query_map(rusqlite::params![to_json(&unit)], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            ordered,
+            vec![1, 2, 3],
+            "cosine KNN should rank by closeness"
+        );
     }
 
     #[test]

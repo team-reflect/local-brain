@@ -54,19 +54,28 @@ export interface IngestInteractionInput extends BaseIngestInput {
   externalId?: string | null
 }
 
-function chunkStatements(recordType: 'document' | 'interaction', recordId: string, body: string): {
+async function chunkStatements(
+  recordType: 'document' | 'interaction',
+  recordId: string,
+  body: string,
+): Promise<{
   statements: Compilable[]
   count: number
-} {
+}> {
   const chunks = chunkText(body)
-  const statements = chunks.map((chunk) =>
-    db.insertInto('contentChunks').values({
-      id: newId(),
-      recordType,
-      recordId,
-      chunkIndex: chunk.index,
-      text: chunk.text,
-    }),
+  // Store each chunk's text hash so the embedding-status count can compare it
+  // against the embedded hash in SQL instead of re-hashing every chunk per poll.
+  const statements = await Promise.all(
+    chunks.map(async (chunk) =>
+      db.insertInto('contentChunks').values({
+        id: newId(),
+        recordType,
+        recordId,
+        chunkIndex: chunk.index,
+        text: chunk.text,
+        contentHash: await contentHash(chunk.text),
+      }),
+    ),
   )
   return { statements, count: chunks.length }
 }
@@ -91,7 +100,7 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
   if (dup && !input.allowDuplicate) return { id: dup, isDuplicate: true, chunkCount: 0 }
 
   const id = newId()
-  const chunks = chunkStatements('document', id, body)
+  const chunks = await chunkStatements('document', id, body)
   const statements: Compilable[] = [
     db.insertInto('documents').values({
       id,
@@ -118,7 +127,7 @@ export async function ingestInteraction(input: IngestInteractionInput): Promise<
   if (dup && !input.allowDuplicate) return { id: dup, isDuplicate: true, chunkCount: 0 }
 
   const id = newId()
-  const chunks = chunkStatements('interaction', id, body)
+  const chunks = await chunkStatements('interaction', id, body)
   const statements: Compilable[] = [
     db.insertInto('interactions').values({
       id,

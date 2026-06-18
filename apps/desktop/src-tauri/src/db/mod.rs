@@ -38,6 +38,21 @@ impl DbState {
             .lock()
             .map_err(|_| AppError::io("the database lock was poisoned by an earlier panic"))
     }
+
+    /// Run `f` against the durable connection inside one transaction, committing
+    /// on `Ok` and rolling back on `Err`. Used by the embedding write commands,
+    /// which need `last_insert_rowid` coupling that the generic `db_batch` path
+    /// can't express.
+    pub fn with_connection_mut<T>(
+        &self,
+        f: impl FnOnce(&Connection) -> AppResult<T>,
+    ) -> AppResult<T> {
+        let mut conn = self.lock()?;
+        let tx = conn.transaction()?;
+        let result = f(&tx)?;
+        tx.commit()?;
+        Ok(result)
+    }
 }
 
 /// One statement in a [`db_batch`] request: compiled SQL plus its JSON params.
