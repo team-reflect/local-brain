@@ -49,7 +49,7 @@ demonstration.
 - The Network Graph tab shows a user-centered node map derived from typed records and
   links. Filters by node type, time, strength, and project are optional follow-up.
 - Ask supports cited answers over the local brain.
-- Settings owns model keys, local database path, diagnostics, and skill setup.
+- Settings owns AI providers, local database path, diagnostics, and skill setup.
 - The UI is optimized for quick browsing and inspection, not bulk data entry.
 
 ## Phase 6 - Agent Interface

@@ -9,6 +9,11 @@ export interface FakeBridgeOptions {
   queryRows?: unknown[]
   /** Per-query rows, chosen from the compiled SQL — overrides `queryRows`. */
   query?: (sql: string, params: unknown[]) => unknown[]
+  /**
+   * Answer specific non-db commands (e.g. `active_brain`, `list_brains`). Return
+   * `undefined` to fall through to the built-in defaults.
+   */
+  respond?: (command: string, args: Record<string, unknown>) => unknown
 }
 
 /**
@@ -20,6 +25,10 @@ export interface FakeBridgeOptions {
 export function installFakeBridge(options: FakeBridgeOptions = {}): void {
   setBridge({
     invoke: (command, args) => {
+      if (options.respond) {
+        const answer = options.respond(command, args)
+        if (answer !== undefined) return Promise.resolve(answer)
+      }
       switch (command) {
         case 'db_query': {
           if (options.query) {

@@ -6,7 +6,6 @@ import {
   FolderKanban,
   ListTodo,
   MessageSquare,
-  Plus,
   Search,
   Settings,
   Users,
@@ -17,7 +16,7 @@ import { useAppShortcuts } from '../lib/commands/use-shortcuts'
 import type { CommandContext } from '../lib/commands/types'
 import { sectionForRoute, type Route } from '../routing/route'
 import { useRouter } from '../routing/router'
-import { AddRecordDialog, type AddRecordType } from './add-record-dialog'
+import { BrainSwitcher } from './brain-switcher'
 import { CommandPalette } from './command-palette'
 import { FirstRun } from './first-run'
 import { RouteContent } from './route-content'
@@ -40,24 +39,20 @@ const NAV: readonly NavItem[] = [
 export function AppShell(): ReactNode {
   const { route, navigate, back, forward, canBack, canForward } = useRouter()
   const [paletteOpen, setPaletteOpen] = useState(false)
-  const [addState, setAddState] = useState<{ open: boolean; type: AddRecordType }>({
-    open: false,
-    type: 'document',
-  })
   const activeSection = sectionForRoute(route)
 
   const openPalette = useCallback(() => setPaletteOpen(true), [])
-  const openAdd = useCallback((type: AddRecordType) => setAddState({ open: true, type }), [])
   const context = useMemo<CommandContext>(
-    () => ({ navigate, back, forward, openPalette, openAdd }),
-    [navigate, back, forward, openPalette, openAdd],
+    () => ({ navigate, back, forward, openPalette }),
+    [navigate, back, forward, openPalette],
   )
   useAppShortcuts(context)
   const settingsActive = activeSection === 'settings'
 
   return (
     <div className="flex h-full min-h-0">
-      <aside className="flex min-h-0 w-[260px] shrink-0 flex-col border-r border-border bg-[hsl(var(--lb-sidebar))] py-5">
+      <aside className="flex min-h-0 w-[260px] shrink-0 flex-col overflow-y-auto overscroll-contain border-r border-border bg-[hsl(var(--lb-sidebar))] py-5">
+        <BrainSwitcher />
         <div className="flex items-center justify-end gap-1 px-4 pb-3">
           <button
             type="button"
@@ -100,15 +95,7 @@ export function AppShell(): ReactNode {
             )
           })}
         </nav>
-        <div className="mt-auto flex items-center gap-1 px-4 pt-4">
-          <button
-            type="button"
-            onClick={() => openAdd('document')}
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-medium text-[hsl(var(--lb-ink-2))] transition-colors hover:bg-secondary/60 hover:text-foreground"
-          >
-            <Plus className="size-4 shrink-0 text-muted-foreground" />
-            Add record
-          </button>
+        <div className="mt-auto flex items-center justify-end px-4 pt-4">
           <button
             type="button"
             onClick={() => navigate({ kind: 'settings' })}
@@ -144,11 +131,6 @@ export function AppShell(): ReactNode {
       </div>
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} context={context} />
-      <AddRecordDialog
-        open={addState.open}
-        initialType={addState.type}
-        onClose={() => setAddState((current) => ({ ...current, open: false }))}
-      />
       <FirstRun />
     </div>
   )

@@ -87,8 +87,8 @@ function ClosedBoundary({ reason }: { reason: string }): ReactNode {
           {reason} Local Brain calls the provider directly with your own key and cites the records
           it used.
         </p>
-        <Button className="mt-5" onClick={() => navigate({ kind: 'settings', section: 'model-keys' })}>
-          Add a model key
+        <Button className="mt-5" onClick={() => navigate({ kind: 'settings', section: 'ai-providers' })}>
+          Add an AI provider
         </Button>
       </div>
     </div>

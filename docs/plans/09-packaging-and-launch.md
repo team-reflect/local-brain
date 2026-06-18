@@ -37,7 +37,7 @@ update-path decision.
 3. Add first-run flow:
    - choose or create local brain location
    - create/open SQLite DB
-   - configure optional provider key
+   - configure optional AI provider key
    - optionally install agent skill
 4. Add keyboard and accessibility pass:
    - sidebar

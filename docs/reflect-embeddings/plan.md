@@ -28,7 +28,7 @@ product, not a Tauri desktop app, and contradicts the stated library direction.
   `db_query` (read-only), `db_execute`, `db_batch` (txn), plus `app_version`,
   `database_path`, `fs::*`, `keychain::*`. TS calls them through the generic
   `IpcBridge.invoke` + zod-validated `call()`.
-- `apps/desktop/src/surfaces/settings.tsx` — sections general / model-keys / database /
+- `apps/desktop/src/surfaces/settings.tsx` — sections general / AI providers / database /
   skills / diagnostics. Diagnostics hardcodes `['semantic search', 'off (lexical fallback)']`.
   Settings read/write via react-query hooks in `apps/desktop/src/lib/queries/settings.ts`.
 - `apps/cli` — **separate Rust** lexical search/ask (`commands/read.rs`); model via `curl`.

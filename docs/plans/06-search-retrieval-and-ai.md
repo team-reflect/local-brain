@@ -25,7 +25,7 @@ settings.
 - AI answers cite `content_chunks` through `evidence_refs`.
 - Chat history lives in `chat_conversations` and `chat_messages`.
 - Daily reports and todo lists should use the same retrieval/citation machinery as Ask.
-- Settings controls model keys and whether external model calls are enabled.
+- Settings controls AI providers and whether external model calls are enabled.
 - There is no row-level sensitivity label schema for launch.
 
 ## Reflect Open Patterns To Reuse
@@ -126,7 +126,7 @@ settings.
 - Graph data can be generated from durable typed records without a separate graph table.
 - Search and Ask both use the same retrieval contract.
 - Semantic search can be unavailable while lexical search still works.
-- The app behaves clearly when no model key or local model is configured.
+- The app behaves clearly when no AI provider or local model is configured.
 
 ## Tests or Verification
 

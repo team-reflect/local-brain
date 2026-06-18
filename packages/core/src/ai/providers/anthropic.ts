@@ -65,6 +65,7 @@ export function createAnthropicProvider(options: AnthropicOptions): ModelProvide
           'content-type': 'application/json',
           'x-api-key': options.apiKey,
           'anthropic-version': apiVersion,
+          'anthropic-dangerous-direct-browser-access': 'true',
         },
         body: JSON.stringify(buildAnthropicBody(request, model)),
       })

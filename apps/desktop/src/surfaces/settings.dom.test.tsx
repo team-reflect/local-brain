@@ -16,13 +16,14 @@ describe('SettingsSurface (Plan 08)', () => {
     expect(screen.queryByText('Backup & export')).toBeNull()
     expect(screen.queryByText('Create backup')).toBeNull()
     expect(screen.queryByText('Export JSON')).toBeNull()
-    expect(screen.getByRole('heading', { name: 'Settings' })).toBeDefined()
+    expect(screen.queryByRole('heading', { name: 'Settings' })).toBeNull()
+    expect(screen.getByRole('heading', { name: 'General' })).toBeDefined()
   })
 
-  it('renders the model-keys boundary with a key input and live status', async () => {
-    renderWithProviders(<SettingsSurface section="model-keys" />)
-    await waitFor(() => expect(screen.getByText('Save key')).toBeDefined())
+  it('renders the AI providers boundary with an add form and live status', async () => {
+    renderWithProviders(<SettingsSurface section="ai-providers" />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add provider' })).toBeDefined())
     // The closed-boundary reason surfaces (no provider configured).
-    await waitFor(() => expect(screen.getByText(/No model provider is configured/)).toBeDefined())
+    await waitFor(() => expect(screen.getByText(/No AI provider is configured/)).toBeDefined())
   })
 })

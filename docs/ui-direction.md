@@ -37,7 +37,13 @@ Top-level sections:
 - **Network:** graph, people, and organizations, with Graph as the default tab.
 - **Projects:** active, waiting, paused, done, and archived projects.
 - **Ask:** AI chat over the local brain with citations.
-- **Settings:** model keys, local database path, diagnostics, and skill setup.
+- **Settings:** the active brain's identity (name, color, location), AI providers,
+  local database path, diagnostics, and skill setup.
+
+A **brain** is the top-level workspace — one local SQLite database. The sidebar
+top holds a **brain switcher** (swatch + active brain name) to switch, create, or
+open another brain. Do not confuse a *brain* (the container) with the Network
+**Graph** (a visualization of the records inside the current brain).
 
 Document and interaction records are browsed inside Network, Project, and Task detail
 pages, and found through global search or Ask.
@@ -102,7 +108,8 @@ Ask
   - linked records
 
 Settings
-  - model keys
+  - brain (identity: name, color, location, schema version; switch/create/open/forget)
+  - AI providers
   - local database path
   - diagnostics
   - agent skill setup
@@ -111,7 +118,8 @@ Settings
 ## Visual Style
 
 - Fixed 260px sunken left sidebar with compact navigation; active rows use a grey wash
-  and an indigo icon. A quiet ⌘K search field sits at the sidebar top.
+  and an indigo icon. The brain switcher (swatch + active brain name) sits at the
+  sidebar top in the brand slot; a quiet ⌘K search trigger sits in the topbar.
 - Main surfaces favor dense tables, split panes, detail blocks, filters, and search on a
   white content area over a faint cool field.
 - Use cards only for repeated summary items or modals, never as the default page layout;

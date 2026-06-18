@@ -26,7 +26,7 @@ pages.
 - Network has Graph, People, and Organizations tabs, with Graph as the default.
 - Documents and interactions are browsed inside related detail pages and through search
   or Ask.
-- Settings owns diagnostics, model keys, local database path, and skill setup.
+- Settings owns diagnostics, AI providers, local database path, and skill setup.
 - Graph is a Picardo-inspired node graph with the user at the center.
 - Use a typed route model and central command/keymap registry, following Reflect Open's
   routing and shortcut pattern.
@@ -109,7 +109,7 @@ pages.
     - show people, organizations, projects, tasks, documents, interactions, and memories
     - open related detail pages from nodes
 15. Build Ask shell with conversation list, chat panel, and citations.
-16. Build Settings sections for model keys, local database, diagnostics, and skill
+16. Build Settings sections for AI providers, local database, diagnostics, and skill
     setup.
 
 ## Acceptance Criteria

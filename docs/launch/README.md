@@ -34,16 +34,22 @@ at `Contents/MacOS/brain`. (DMG packaging needs a GUI session; see
 
 ## Local storage
 
-Local Brain keeps everything in one SQLite file. The path is resolved as:
+Each **brain** is one SQLite file — your top-level workspace. A fresh install
+uses a single default brain; you can create or open more and switch between them
+from the brain switcher at the top of the sidebar or under **Settings → Brain**.
+The active brain's path is resolved as:
 
 1. `--db <path>` (CLI only)
-2. `$BRAIN_DB`
-3. the platform data directory: `~/Library/Application Support/local-brain/brain.sqlite`
+2. `$BRAIN_DB` (also pins the desktop app to that brain on startup)
+3. the last brain you opened (from the desktop brain registry)
+4. the platform data directory: `~/Library/Application Support/local-brain/brain.sqlite`
 
-The desktop app and the `brain` CLI resolve the **same** path, so the CLI works
-whether or not the app is running. The path is shown in **Settings → Local
-database** and **Settings → Diagnostics**. Migrations run automatically at
-startup and the schema is versioned.
+The desktop app and the `brain` CLI resolve the **same** default path, so the CLI
+works whether or not the app is running. The active brain's path is shown in
+**Settings → Brain**, **Settings → Local database**, and **Settings →
+Diagnostics**. Migrations run automatically when a brain is opened and the schema
+is versioned. (Note: the CLI operates on the default/`$BRAIN_DB` brain; choosing a
+non-default brain for the CLI is a documented follow-up.)
 
 ## Importing your first record
 
@@ -84,12 +90,12 @@ the answer is grounded in your documents and interactions.
 ## Model boundaries (BYOK)
 
 Local Brain bundles no model. Ask and model-backed extraction call **your own**
-provider key:
+AI provider key:
 
-- The desktop stores the key in the **macOS keychain** (Settings → Model keys) —
+- The desktop stores the key in the **macOS keychain** (Settings → AI providers) —
   never in app settings or the export.
 - The CLI reads `ANTHROPIC_API_KEY` from the environment.
-- A master **kill switch** (Settings → Model keys) disables all external calls.
+- A master **kill switch** (Settings → AI providers) disables all external calls.
 - With no key, the AI surface degrades cleanly: Ask shows "not configured" and
   extraction is a no-op. Lexical (FTS5) search always works.
 
@@ -100,7 +106,7 @@ needed to answer are sent, assembled through one checked helper.
 
 - **"no brain database" (CLI exit 4):** no database at the resolved path. Run an
   `brain add …`, open the app once, or pass `--db`.
-- **Ask says "not configured":** add a provider key (Settings → Model keys) or set
+- **Ask says "not configured":** add an AI provider key (Settings → AI providers) or set
   `ANTHROPIC_API_KEY` for the CLI. Check the kill switch isn't off.
 - **`brain ask` returns evidence but no prose:** no model configured — the cited
   chunks are returned for your agent to reason over.

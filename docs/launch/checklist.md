@@ -22,7 +22,7 @@ Run against a clean user-data directory (e.g. `BRAIN_DB=$(mktemp -d)/brain.sqlit
 - [ ] First run shows the welcome; "Get started" dismisses it once (never returns).
 - [ ] App creates the SQLite DB and migrates to the current schema version.
 - [ ] Import a document and an interaction (paste + file path).
-- [ ] Extraction: with a model key set, a meeting yields people/org/task/memory;
+- [ ] Extraction: with a AI provider set, a meeting yields people/org/task/memory;
       without, capture still works (extraction no-ops).
 - [ ] Browse Today, Tasks, Network (Graph/People/Orgs), Projects, and Ask.
 - [ ] Search (⌘K) finds records by name and full text.
@@ -66,7 +66,7 @@ stay off the UI thread when added.
       settings rows.
 - [x] No hosted Local Brain service in the core path; SQLite is the only store.
 - [x] External model calls gated by a present key **and** an enable kill switch;
-      both surfaced in Settings → Model and Diagnostics.
+      both surfaced in Settings → AI providers and Diagnostics.
 - [x] External payloads are minimal: only retrieved cited chunks, assembled
       through one checked helper.
 - [x] Every factual Ask answer persists `evidence_refs` that open the source.

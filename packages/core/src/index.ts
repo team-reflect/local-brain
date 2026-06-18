@@ -207,6 +207,25 @@ export {
   type RankInputs,
 } from './retrieval'
 
+// Brains (the top-level workspace picker: registry + runtime switching)
+export {
+  activeBrain,
+  createBrain,
+  forgetBrain,
+  listBrains,
+  openBrain,
+  renameBrain,
+  revealBrain,
+  setBrainColor,
+  BRAIN_COLOR_IDS,
+  DEFAULT_BRAIN_COLOR,
+  brainColorSchema,
+  brainInfoSchema,
+  brainInfoListSchema,
+  type BrainColor,
+  type BrainInfo,
+} from './domains/brains'
+
 // Embeddings (local semantic search: sqlite-vec + fastembed, desktop runtime)
 export {
   EMBEDDING_MODEL_ID,
@@ -256,12 +275,19 @@ export {
 } from './domains/settings'
 export {
   getModelSettings,
+  setAiProvidersState,
   setModelEnabled,
   setModelProviderSetting,
   setModelModelSetting,
   MODEL_PROVIDER_KEY,
   MODEL_MODEL_KEY,
+  MODEL_AI_PROVIDERS_KEY,
+  MODEL_DEFAULT_AI_PROVIDER_KEY,
+  aiProviderConfigSchema,
+  aiProvidersSchema,
+  defaultAiProviderIdSchema,
   type ModelSettings,
+  type AiProviderConfig,
 } from './domains/settings/model'
 
 // Native storage path + keychain bindings (Plan 08)
@@ -293,8 +319,27 @@ export {
   createModelExtractor,
   extractJsonObject,
   createAnthropicProvider,
+  createOpenAiProvider,
+  createGoogleProvider,
+  createConfiguredProvider,
   buildAnthropicBody,
   readAnthropicText,
+  buildOpenAiBody,
+  buildGoogleBody,
+  readGoogleText,
+  AI_PROVIDERS,
+  aiProvider,
+  aiProviderIdSchema,
+  aiModelLabel,
+  modelContextWindow,
+  DEFAULT_CONTEXT_WINDOW,
+  apiKeyHint,
+  aiKeySecretName,
+  defaultAiProvider,
+  withAiProviderAdded,
+  withAiProviderRemoved,
+  validateApiKey,
+  KEY_HINT_LENGTH,
   type ModelProvider,
   type ModelRequest,
   type ModelMessage,
@@ -307,6 +352,13 @@ export {
   type AskCitation,
   type AskOptions,
   type AnthropicOptions,
+  type OpenAiOptions,
+  type GoogleOptions,
+  type AiProviderId,
+  type AiProviderInfo,
+  type AiModelOption,
+  type AiProvidersState,
+  type ApiKeyValidation,
 } from './ai'
 
 // Agent report endpoints (daily brief, plan-day, changes, waiting items)

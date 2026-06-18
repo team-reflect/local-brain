@@ -1,0 +1,128 @@
+# Reflect Graph Picker → Local Brain "Brain" Picker
+
+Port Reflect Next / Reflect Open's top-level **graph** picker/switcher capability into
+Local Brain, choosing deliberate, non-ambiguous terminology.
+
+## Terminology decision (the central product call)
+
+In Reflect, a **graph** is the top-level user workspace/brain/container. In Local Brain,
+**Graph** already means the Network graph *visualization*. Reusing "graph" for the
+container would be ambiguous.
+
+Decision: the top-level container is a **Brain**.
+
+- The product is literally *Local Brain*, so "your brains", "switch brain", "new brain"
+  read naturally and need no glossary.
+- **Graph** stays reserved exclusively for the Network graph visualization (the
+  `network` surface's `graph` tab). Nothing about that surface changes.
+- A **Brain** is one self-contained local SQLite database file on disk. Multiple brains
+  = multiple `.sqlite` files. This matches Local Brain's "SQLite is the durable source of
+  truth" model and Reflect Open's "graph = a user-chosen folder" boundary, adapted to
+  Local Brain's single-file store.
+
+Mapping from the references:
+
+| Reflect concept            | Local Brain port                              |
+| -------------------------- | --------------------------------------------- |
+| graph (top-level)          | **brain** (top-level)                         |
+| graph root (folder)        | brain path (a `.sqlite` file)                 |
+| `RecentGraph`              | brain registry entry                          |
+| `GraphColor` (9 ids)       | `BrainColor` (same 9 ids)                     |
+| `GraphSwatch`              | `BrainSwatch`                                  |
+| graph switcher footer      | **brain switcher** (sidebar, top brand slot)  |
+| graph chooser screen       | **brain chooser** (no-active-brain fallback)  |
+| Preferences → Graphs       | **Settings → Brain**                          |
+| `graph map` (viz)          | unchanged — Local Brain's Network → Graph tab |
+
+## Architecture
+
+### Durable data model — brain registry (Rust-owned, outside any brain)
+
+A brain's own `settings` table lives *inside* that brain, so it cannot hold the
+cross-brain catalogue (the switcher must render brains that aren't open). Following
+Reflect Open (recents in OS app-config, not in a graph) — but keeping Local Brain
+SQLite-first/local-first for durable product state — the **brain registry** is its
+own dedicated SQLite database owned by Rust at `<data_dir>/local-brain/registry.sqlite`,
+separate from every switchable brain DB:
+
+```sql
+CREATE TABLE brains (
+  path TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  color TEXT NOT NULL DEFAULT 'indigo',
+  created_ms INTEGER NOT NULL DEFAULT 0,
+  last_opened_ms INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE registry_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+-- registry_meta holds key='active_path' → the open brain.
+```
+
+- Rust owns it: WAL-backed SQLite writes (atomic upsert/transaction), path
+  canonicalisation, OS-native semantics — consistent with the file-safety conventions.
+- A corrupt/non-SQLite registry file is moved aside (`registry.sqlite.corrupt`) and
+  recreated empty so the app still starts (mirrors the old "corrupt → empty" rule).
+- Name + color are catalogue metadata so the switcher can render any known brain.
+- On startup: open the registry; the resolved active brain is recorded as opened,
+  so today's single default brain just works (backward compatible).
+
+### Runtime switching (real, not relaunch)
+
+`DbState` already holds `Mutex<Connection>`. Add the active path and a `swap()` that
+locks, `open_and_migrate`s the new path, and replaces the connection. A failed open
+leaves the current brain intact. The frontend remounts the shell keyed by the active
+brain path and invalidates the TanStack Query cache, so all reads hit the new brain.
+
+### Layers
+
+- **crates/brain-schema**: unchanged open/migrate helpers (reused for every brain).
+- **apps/desktop/src-tauri/src/brains.rs**: registry + `BrainInfo` + commands
+  `list_brains`, `active_brain`, `open_brain`, `create_brain`, `rename_brain`,
+  `set_brain_color`, `forget_brain`, `reveal_brain` (best-effort, via opener). Update
+  `database_path` to report the active path. `DbState` gains `swap()`.
+- **packages/core/src/domains/brains/**: zod `brainColorSchema`, `brainInfoSchema`,
+  typed IPC bindings, index exports.
+- **apps/desktop/src/lib/brain-colors.ts**: 9-color CSS map + options (indigo = accent).
+- **apps/desktop/src/components/brain-swatch.tsx**: presentational color square.
+- **apps/desktop/src/lib/queries/brains.ts**: TanStack hooks; switch invalidates cache.
+- **apps/desktop/src/components/brain-switcher.tsx**: sidebar brand-slot button + custom
+  accessible dropdown (switch brain, new brain, open another, reveal, brain settings).
+- **apps/desktop/src/components/brain-dialog.tsx**: create/open dialog whose primary
+  affordance is the native OS file dialog (`@tauri-apps/plugin-dialog`), with the
+  validated path field kept as an editable fallback.
+- **apps/desktop/src/lib/native-dialog.ts**: thin wrappers over the dialog plugin's
+  `open`/`save` (file picker for open, save dialog for create).
+- **apps/desktop/src/components/brain-chooser.tsx**: no-active-brain fallback screen.
+- **app-shell.tsx**: brain switcher in the top brand slot; `brain.*` commands.
+- **App.tsx**: gate on active brain; remount keyed by brain path.
+- **surfaces/settings.tsx**: new **Brain** section (identity, color, rename, list,
+  switch, forget, create/open); Diagnostics + Local database reference the active brain.
+
+## Acceptance criteria
+
+1. Brain picker: list/select current brain, create/open/switch, visible sidebar
+   affordance, keyboard-accessible dropdown + palette commands.
+2. Settings/diagnostics for top-level brain identity/location/state.
+3. Durable multi-brain storage model (a dedicated SQLite registry, **not** JSON) with
+   real runtime switching; native OS file dialog wired for create/open (validated
+   path field kept as an editable fallback).
+4. Terminology aligned: **Brain** (container) vs **Graph** (network viz) across UI/docs.
+5. Tests: Rust registry/switch, core schemas/bindings, switcher + settings DOM, colors,
+   commands.
+6. Docs: this plan, status, final-report, plus design-system / ui-direction /
+   architecture-conventions / README terminology updates.
+
+## Risks & caveats
+
+- Connection swap mid-query: the mutex serialises; remount + cache invalidation refetch
+  against the new brain. Low risk.
+- Native file dialog (`@tauri-apps/plugin-dialog`) drives create/open; the validated
+  path field stays as an editable fallback so manual entry still works.
+- `reveal_brain` uses the opener plugin from Rust; best-effort and isolated so it can be
+  dropped if the API differs.
+- Cannot launch the full Tauri app in this environment; verification is `pnpm check`,
+  desktop build, vitest (incl. jsdom DOM tests), `cargo fmt/check/test`.
+
+## Verification
+
+`git diff --check` · `pnpm check` · `pnpm --filter @local-brain/desktop build` ·
+`cargo fmt --all -- --check` · `cargo check --workspace` · `cargo test --workspace`.
