@@ -294,10 +294,11 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
   - **Relationship intelligence (`relationships/`):** `strength.ts` (pure, unit-tested date
     math + the transparent 1–5 strength formula), `recompute.ts`
     (`recomputeRelationshipIntelligence` / `recomputeAllRelationships` — derive
-    `last_interaction_at`, `next_reconnect_at`, and `relationship_strength` from
-    interactions/tasks), and `getters.ts` (`listReconnectSuggestions`). Recompute runs
-    incrementally after a relevant interaction (create/ingest/apply) and in bulk on first-run
-    seed. See **DEC-13** for what it owns and why important dates are deferred.
+    `last_interaction_at` and `next_reconnect_at` from interactions/cadence), and
+    `getters.ts` (`listReconnectSuggestions`, joining the SELECT-only
+    `relationship_strengths` view). Recompute runs incrementally after a relevant
+    interaction (create/ingest/apply) and in bulk on first-run seed. See **DEC-13** for what
+    it owns and why important dates are deferred.
   - **UI (`apps/desktop`):** the shared `LinkedRecords`, `MemoryList`, and `CitationList`
     gained in-place correction affordances (Unlink / Archive / Remove), wired through all six
     detail pages; person detail shows the derived "Reconnect by" field; Today gained a
@@ -338,7 +339,7 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 - **Verification:** `pnpm check` ✓ — typecheck + oxlint + **144 tests** (111 core: +8
   match-query, +6 ranking, +4 context, +5 extractor-json, +4 anthropic, +10 real-SQLite Plan-06
   round-trips — FTS retrieve/degrade, global search, cited Ask + persisted evidence_refs,
-  kill-switch, model-backed extractor, daily brief/plan-day/changes; 4 db; 33 desktop incl. a
+  provider boundary, model-backed extractor, daily brief/plan-day/changes; 4 db; 33 desktop incl. a
   new Ask closed-boundary render test). `pnpm --filter @local-brain/desktop build` ✓ (2075
   modules). `cargo fmt --all -- --check` ✓; `cargo check --workspace` ✓; `cargo test
   --workspace` ✓ (18 Rust tests, unchanged). `git diff --check` ✓.
@@ -391,7 +392,7 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
     `rebuildSearchIndexes` — FTS5 rebuild), `ipc/storage.ts` (typed bindings), `executeRaw` for FTS
     maintenance.
   - **Desktop:** `installModel` now reads the key from the keychain (env override for dev);
-    Settings → Model is interactive (set/clear keychain key, kill-switch toggle, live status);
+    Settings → Model is interactive (set/clear keychain key, live status);
     Backup & export does real backup + JSON export with product states; Local database shows the
     resolved path; Diagnostics shows db path / migrations / FTS / semantic / keychain / model /
     CLI-skill + restore instructions.

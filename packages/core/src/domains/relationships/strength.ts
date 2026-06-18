@@ -40,7 +40,7 @@ export interface RelationshipSignals {
  * - collaboration: +1 per shared open task, capped at 2
  *
  * The total buckets into 1–5. Returns `null` when there is no signal at all (no
- * interactions and no open tasks) so a recompute never overwrites a manually set
+ * interactions and no open tasks) so the read-only projection does not invent a
  * strength for a person we simply have no data about yet.
  */
 export function relationshipStrength(signals: RelationshipSignals): number | null {

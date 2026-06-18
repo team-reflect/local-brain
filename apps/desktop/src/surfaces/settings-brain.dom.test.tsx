@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { SettingsSurface } from './settings'
 import { installFakeBridge, renderWithProviders } from '../test/utils'
 
@@ -15,27 +15,15 @@ const ACTIVE = {
   isActive: true,
   schemaVersion: 2,
 }
-const WORK = {
-  rootPath: '/data/work-brain',
-  databasePath: '/data/work-brain/brain.sqlite',
-  assetsPath: '/data/work-brain/assets',
-  name: 'Work',
-  color: 'teal',
-  createdMs: 1,
-  lastOpenedMs: 3,
-  isActive: false,
-  schemaVersion: null,
-}
-
 describe('Settings → Brain', () => {
-  it('renders the active brain identity, color picker, and the other brains', async () => {
+  it('renders the active brain identity, color popover, and folder only', async () => {
     installFakeBridge({
       respond: (command) => {
         switch (command) {
           case 'active_brain':
             return ACTIVE
           case 'list_brains':
-            return [WORK, ACTIVE]
+            return [ACTIVE]
           case 'database_path':
             return ACTIVE.databasePath
           default:
@@ -46,17 +34,27 @@ describe('Settings → Brain', () => {
 
     renderWithProviders(<SettingsSurface section="brain" />)
 
-    // Identity: name + path of the active brain (the path also appears in the
-    // Local database section, so allow more than one match).
     await waitFor(() => expect(screen.getByText('My brain')).toBeDefined())
-    expect(screen.getAllByText('/data/local-brain/brain.sqlite').length).toBeGreaterThan(0)
-    expect(screen.getByText('/data/local-brain/assets')).toBeDefined()
+    const brainSection = screen.getByRole('heading', { name: 'Brain' }).closest('section')
+    expect(brainSection).not.toBeNull()
+    const brain = within(brainSection!)
 
-    // The color picker exposes every brain color as a labelled control.
-    expect(screen.getByRole('button', { name: 'Teal' })).toBeDefined()
+    expect(brain.getByText('Name')).toBeDefined()
+    expect(brain.getByText('Color')).toBeDefined()
+    expect(brain.getByText('Folder')).toBeDefined()
+    expect(brain.getByText('/data/local-brain')).toBeDefined()
+    expect(brain.queryByText('Database')).toBeNull()
+    expect(brain.queryByText('/data/local-brain/brain.sqlite')).toBeNull()
+    expect(brain.queryByText('Assets')).toBeNull()
+    expect(brain.queryByText('/data/local-brain/assets')).toBeNull()
+    expect(brain.queryByText('Schema')).toBeNull()
+    expect(brain.queryByText('Created')).toBeNull()
+    expect(brain.queryByText('Last opened')).toBeNull()
+    expect(brain.queryByText('All brains')).toBeNull()
+    expect(brain.queryByRole('button', { name: 'Switch' })).toBeNull()
 
-    // The other brain is listed with a Switch action.
-    expect(screen.getByText('Work')).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Switch' })).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Teal' })).toBeNull()
+    fireEvent.click(brain.getByRole('button', { name: 'Brain color' }))
+    expect(await screen.findByRole('button', { name: 'Teal' })).toBeDefined()
   })
 })

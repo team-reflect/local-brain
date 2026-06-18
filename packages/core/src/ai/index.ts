@@ -10,7 +10,6 @@ export {
 export {
   getModelStatus,
   ModelUnavailableError,
-  MODEL_ENABLED_KEY,
   type ModelStatus,
 } from './boundary'
 export {

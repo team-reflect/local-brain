@@ -11,7 +11,7 @@ import {
   Users,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
-import { keycapClass } from '../lib/ui'
+import { controlClass, keycapClass } from '../lib/ui'
 import { useAppShortcuts } from '../lib/commands/use-shortcuts'
 import type { CommandContext } from '../lib/commands/types'
 import { sectionForRoute, type Route } from '../routing/route'
@@ -37,6 +37,14 @@ const NAV: readonly NavItem[] = [
   { section: 'ask', label: 'Ask', icon: MessageSquare, route: { kind: 'ask' } },
 ]
 
+const HISTORY_BUTTON_CLASS =
+  'rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent'
+
+const SEARCH_TRIGGER_CLASS = cn(
+  controlClass,
+  'window-drag-control flex h-8 w-full cursor-text items-center gap-2 px-2.5 py-0 text-xs text-muted-foreground hover:text-foreground',
+)
+
 export function AppShell(): ReactNode {
   const { route, navigate, back, forward, canBack, canForward } = useRouter()
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -54,26 +62,7 @@ export function AppShell(): ReactNode {
     <div className="flex h-full min-h-0">
       <WindowDragRegion />
       <aside className="flex min-h-0 w-[260px] shrink-0 flex-col overflow-y-auto overscroll-contain border-r border-border bg-[hsl(var(--lb-sidebar))] py-5">
-        <div className="window-drag-control flex items-center justify-end gap-1 px-4 pb-3">
-          <button
-            type="button"
-            onClick={back}
-            disabled={!canBack}
-            aria-label="Back"
-            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
-          >
-            <ChevronLeft className="size-4" />
-          </button>
-          <button
-            type="button"
-            onClick={forward}
-            disabled={!canForward}
-            aria-label="Forward"
-            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
-          >
-            <ChevronRight className="size-4" />
-          </button>
-        </div>
+        <div aria-hidden className="h-9 shrink-0" />
         <nav className="flex flex-col gap-1 px-4 py-2">
           {NAV.map((item) => {
             const Icon = item.icon
@@ -116,16 +105,38 @@ export function AppShell(): ReactNode {
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
         <header className="flex h-12 items-center justify-center border-b border-border px-4">
-          <button
-            type="button"
-            onClick={openPalette}
-            aria-label="Search or run a command"
-            className="window-drag-control flex h-8 w-[min(760px,100%)] items-center gap-2 rounded-md border border-input bg-card px-3 text-xs text-muted-foreground shadow-sm transition-colors hover:text-foreground"
-          >
-            <Search className="size-3.5" />
-            <span className="flex-1 truncate text-left">Search anything…</span>
-            <kbd className={keycapClass}>⌘K</kbd>
-          </button>
+          <div className="relative w-[min(760px,100%)]">
+            <div className="absolute left-0 top-1/2 z-40 flex -translate-x-[calc(100%+0.5rem)] -translate-y-1/2 items-center gap-1">
+              <button
+                type="button"
+                onClick={back}
+                disabled={!canBack}
+                aria-label="Back"
+                className={HISTORY_BUTTON_CLASS}
+              >
+                <ChevronLeft className="size-4" />
+              </button>
+              <button
+                type="button"
+                onClick={forward}
+                disabled={!canForward}
+                aria-label="Forward"
+                className={HISTORY_BUTTON_CLASS}
+              >
+                <ChevronRight className="size-4" />
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={openPalette}
+              aria-label="Search or run a command"
+              className={SEARCH_TRIGGER_CLASS}
+            >
+              <Search className="size-3.5" />
+              <span className="flex-1 truncate text-left">Search anything…</span>
+              <kbd className={keycapClass}>⌘K</kbd>
+            </button>
+          </div>
         </header>
         <main className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
           <RouteContent route={route} />

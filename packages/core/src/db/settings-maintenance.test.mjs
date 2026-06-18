@@ -15,7 +15,6 @@ import {
   rebuildSearchIndexes,
   setBridge,
   setAiProvidersState,
-  setModelEnabled,
   updateAiProvidersState,
   withAiProviderAdded,
 } from '@local-brain/core'
@@ -159,19 +158,16 @@ describe('Plan 08 model settings', () => {
 
   it('round-trips the model boundary config', async () => {
     expect(await getModelSettings()).toEqual({
-      enabled: true,
       providers: [],
       defaultProviderId: null,
       provider: null,
       model: null,
     })
-    await setModelEnabled(false)
     await setAiProvidersState(
       [{ id: 'cfg-a', provider: 'anthropic', model: 'claude-sonnet-4-6', keyHint: 'abcde' }],
       'cfg-a',
     )
     const settings = await getModelSettings()
-    expect(settings.enabled).toBe(false)
     expect(settings.provider).toBe('anthropic')
     expect(settings.model).toBe('claude-sonnet-4-6')
   })

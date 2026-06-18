@@ -65,7 +65,6 @@ export async function seedDemoData(): Promise<SeedResult> {
       preferredName: 'Alex',
       headline: 'Founder, Northwind Labs',
       primaryEmail: 'alex@northwind.example',
-      relationshipStrength: 4,
       reconnectIntervalDays: 30,
       currentOrganizationId: orgId,
     }),
@@ -73,7 +72,6 @@ export async function seedDemoData(): Promise<SeedResult> {
       id: jordanId,
       fullName: 'Jordan Lee',
       headline: 'Product designer',
-      relationshipStrength: 3,
     }),
     db.insertInto('affiliations').values({
       id: affiliationId,

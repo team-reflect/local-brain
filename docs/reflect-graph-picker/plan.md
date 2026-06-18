@@ -94,8 +94,8 @@ brain path and invalidates the TanStack Query cache, so all reads hit the new br
 - **apps/desktop/src/components/brain-chooser.tsx**: no-active-brain fallback screen.
 - **app-shell.tsx**: brain switcher in the top brand slot; `brain.*` commands.
 - **App.tsx**: gate on active brain; remount keyed by brain path.
-- **surfaces/settings.tsx**: new **Brain** section (identity, color, rename, list,
-  switch, forget, create/open); Diagnostics + Local database reference the active brain.
+- **surfaces/settings.tsx**: **Brain** section for active identity, color, rename,
+  and folder reveal; Diagnostics + Local database reference the active brain.
 
 ## Acceptance criteria
 

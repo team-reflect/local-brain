@@ -156,7 +156,7 @@ For launch:
 
 - no hosted Local Brain service
 - provider keys stored in the OS keychain
-- Settings controls whether external model calls are enabled
+- Settings controls AI provider configuration
 - Ask and extraction should send only the context needed for the operation
 - app-managed backup/export is deferred
 

@@ -25,8 +25,9 @@ describe('domain actions', () => {
     expect(people[0]?.fullName).toBe('Ada')
     const sql = String(calls[0]?.args['sql'])
     expect(sql).toContain('from "people"')
+    expect(sql).toContain('left join "relationship_strengths"')
     expect(sql).toContain('"archived_at" is null')
-    expect(sql).toContain('order by "full_name"')
+    expect(sql).toContain('order by "people"."full_name"')
   })
 
   it('completeTask sets status=done through db_execute', async () => {

@@ -1,4 +1,3 @@
-import { MODEL_ENABLED_KEY } from '../../ai/boundary'
 import { aiProviderIdSchema, type AiProviderId } from '../../ai/provider-catalog'
 import { defaultAiProvider, type AiProvidersState } from '../../ai/provider-config'
 import { db } from '../../db/client'
@@ -10,8 +9,8 @@ import { z } from 'zod'
 
 /**
  * Typed model-boundary configuration stored in the `settings` table. This is the
- * non-secret config (kill-switch, selected provider/model); the provider *key*
- * lives only in the OS keychain (see `ipc/storage.ts`).
+ * non-secret config (selected provider/model); the provider *key* lives only in
+ * the OS keychain (see `ipc/storage.ts`).
  */
 
 export const MODEL_PROVIDER_KEY = 'model.provider'
@@ -41,8 +40,6 @@ export const aiProvidersSchema = z
 export const defaultAiProviderIdSchema = z.string().nullable().catch(null)
 
 export interface ModelSettings {
-  /** External-calls kill switch. */
-  enabled: boolean
   /** Configured providers. API keys live in the OS keychain, not here. */
   providers: AiProviderConfig[]
   /** The configured provider id AI features use by default. */
@@ -54,8 +51,7 @@ export interface ModelSettings {
 }
 
 export async function getModelSettings(): Promise<ModelSettings> {
-  const [enabled, rawProviders, defaultProviderId] = await Promise.all([
-    getSetting<boolean>(MODEL_ENABLED_KEY, true),
+  const [rawProviders, defaultProviderId] = await Promise.all([
     getSetting<unknown[]>(MODEL_AI_PROVIDERS_KEY, []),
     getSetting<string | null>(MODEL_DEFAULT_AI_PROVIDER_KEY, null),
   ])
@@ -63,16 +59,11 @@ export async function getModelSettings(): Promise<ModelSettings> {
   const defaultId = defaultAiProviderIdSchema.parse(defaultProviderId)
   const resolved = defaultAiProvider({ providers, defaultProviderId: defaultId })
   return {
-    enabled,
     providers,
     defaultProviderId: defaultId,
     provider: resolved?.provider ?? null,
     model: resolved?.model ?? null,
   }
-}
-
-export function setModelEnabled(enabled: boolean): Promise<void> {
-  return setSetting(MODEL_ENABLED_KEY, enabled)
 }
 
 export function setModelProviderSetting(provider: string | null): Promise<void> {

@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { type EmbedStatus, setBridge } from '@local-brain/core'
 import { act, render, waitFor } from '@testing-library/react'
 import { EmbeddingsSync } from './embeddings-sync'
-import { EMBEDDINGS_STATUS_KEY } from '../lib/queries'
+import { EMBEDDINGS_STATUS_KEY, todayLocalDayKey } from '../lib/queries'
 
 /**
  * Auto-load policy (Bugbot #27 follow-up): `EmbeddingsSync` brings the runtime up
@@ -30,7 +30,12 @@ function installStatusBridge(runtime: EmbedStatus): string[] {
           return Promise.resolve(runtime)
         case 'db_query': {
           const sql = String((args as { sql?: unknown }).sql ?? '')
-          if (sql.includes('settings')) return Promise.resolve([{ valueJson: 'true' }]) // enabled
+          const params = ((args as { params?: unknown[] }).params ?? []) as unknown[]
+          if (sql.includes('settings')) {
+            const key = params[0]
+            if (key === 'embeddings.enabled') return Promise.resolve([{ valueJson: 'true' }])
+            return Promise.resolve([])
+          }
           if (/count/i.test(sql)) return Promise.resolve([{ count: 0 }]) // no chunks
           return Promise.resolve([]) // no pending chunks
         }
@@ -50,6 +55,7 @@ function installStatusBridge(runtime: EmbedStatus): string[] {
 function installFailingBackfillBridge() {
   const commands: string[] = []
   let persistedError: string | null = null
+  let persistedDay: string | null = null
   setBridge({
     invoke: (command, args) => {
       commands.push(command)
@@ -65,6 +71,11 @@ function installFailingBackfillBridge() {
           if (sql.includes('settings')) {
             const key = params[0]
             if (key === 'embeddings.enabled') return Promise.resolve([{ valueJson: 'true' }])
+            if (key === 'embeddings.lastBackfillAttemptDay') {
+              return Promise.resolve(
+                persistedDay === null ? [] : [{ valueJson: JSON.stringify(persistedDay) }],
+              )
+            }
             // The sticky backfill-error read drives the poll/retry gate.
             return Promise.resolve(
               persistedError === null ? [] : [{ valueJson: JSON.stringify(persistedError) }],
@@ -80,6 +91,9 @@ function installFailingBackfillBridge() {
           if (sql.includes('settings') && params[0] === 'embeddings.backfillError') {
             persistedError = JSON.parse(String(params[1])) as string | null
           }
+          if (sql.includes('settings') && params[0] === 'embeddings.lastBackfillAttemptDay') {
+            persistedDay = JSON.parse(String(params[1])) as string | null
+          }
           return Promise.resolve(1)
         }
         case 'db_batch':
@@ -92,6 +106,72 @@ function installFailingBackfillBridge() {
   return {
     commands,
     persistedError: () => persistedError,
+    persistedDay: () => persistedDay,
+  }
+}
+
+function installPendingBackfillBridge(options: { lastDay?: string | null; failEmbed?: boolean } = {}) {
+  const commands: string[] = []
+  const events: string[] = []
+  let persistedError: string | null = null
+  let persistedDay: string | null = options.lastDay ?? null
+  setBridge({
+    invoke: (command, args) => {
+      commands.push(command)
+      const params = ((args as { params?: unknown[] }).params ?? []) as unknown[]
+      switch (command) {
+        case 'embed_status':
+        case 'embed_ensure':
+          return Promise.resolve({ status: 'ready', model: 'all-MiniLM-L6-v2' })
+        case 'embed_texts':
+          events.push('embed_texts')
+          return options.failEmbed
+            ? Promise.reject(new Error('onnx blew up'))
+            : Promise.resolve(((args as { texts: string[] }).texts ?? []).map(() => [0.1, 0.2, 0.3]))
+        case 'db_query': {
+          const sql = String((args as { sql?: unknown }).sql ?? '')
+          if (sql.includes('settings')) {
+            const key = params[0]
+            if (key === 'embeddings.enabled') return Promise.resolve([{ valueJson: 'true' }])
+            if (key === 'embeddings.backfillError') {
+              return Promise.resolve(
+                persistedError === null ? [] : [{ valueJson: JSON.stringify(persistedError) }],
+              )
+            }
+            if (key === 'embeddings.lastBackfillAttemptDay') {
+              return Promise.resolve(
+                persistedDay === null ? [] : [{ valueJson: JSON.stringify(persistedDay) }],
+              )
+            }
+            return Promise.resolve([])
+          }
+          if (/count/i.test(sql)) return Promise.resolve([{ count: 1 }])
+          if (sql.includes('from "chunk_embeddings"')) return Promise.resolve([])
+          return Promise.resolve([{ chunkId: 'c1', text: 'hello', storedHash: null }])
+        }
+        case 'db_execute': {
+          const sql = String((args as { sql?: unknown }).sql ?? '')
+          if (sql.includes('settings') && params[0] === 'embeddings.backfillError') {
+            persistedError = JSON.parse(String(params[1])) as string | null
+          }
+          if (sql.includes('settings') && params[0] === 'embeddings.lastBackfillAttemptDay') {
+            events.push('set_last_day')
+            persistedDay = JSON.parse(String(params[1])) as string | null
+          }
+          return Promise.resolve(1)
+        }
+        case 'db_batch':
+          return Promise.resolve([])
+        default:
+          return Promise.resolve(null)
+      }
+    },
+  })
+  return {
+    commands,
+    events,
+    persistedError: () => persistedError,
+    persistedDay: () => persistedDay,
   }
 }
 
@@ -132,12 +212,35 @@ describe('EmbeddingsSync', () => {
 
     // The error must be persisted (surfaced) rather than swallowed.
     await waitFor(() => expect(bridge.persistedError()).toBe('onnx blew up'))
+    expect(bridge.persistedDay()).toBe(todayLocalDayKey())
 
     // And, like the failed runtime, the failing backfill must not be re-attempted
     // on every poll: once the error is sticky, no further `embed_texts` calls fire.
     const attempts = bridge.commands.filter((c) => c === 'embed_texts').length
     await act(() => new Promise((resolve) => setTimeout(resolve, 100)))
     expect(bridge.commands.filter((c) => c === 'embed_texts').length).toBe(attempts)
+  })
+
+  it('runs automatic backfill when pending and no backfill has run today', async () => {
+    const bridge = installPendingBackfillBridge()
+    renderSync()
+    await waitFor(() => expect(bridge.commands).toContain('embed_texts'))
+    expect(bridge.persistedDay()).toBe(todayLocalDayKey())
+  })
+
+  it('does not run automatic backfill when the daily cap was already used', async () => {
+    const bridge = installPendingBackfillBridge({ lastDay: todayLocalDayKey() })
+    renderSync()
+    await waitFor(() => expect(bridge.commands).toContain('embed_status'))
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
+    expect(bridge.commands).not.toContain('embed_texts')
+  })
+
+  it('records the daily cap marker before automatic embedding starts', async () => {
+    const bridge = installPendingBackfillBridge()
+    renderSync()
+    await waitFor(() => expect(bridge.events).toContain('embed_texts'))
+    expect(bridge.events.slice(0, 2)).toEqual(['set_last_day', 'embed_texts'])
   })
 
   it('aborts an in-flight backfill when semantic search is disabled mid-pass', async () => {

@@ -5,17 +5,23 @@ import {
   type EmbeddingsStatus,
   embedEnsure,
   setBackfillError,
+  setLastBackfillAttemptDay,
 } from '@local-brain/core'
 import { runExclusiveBackfill } from '../lib/embeddings-coordinator'
-import { EMBEDDINGS_STATUS_KEY, useEmbeddingsStatus } from '../lib/queries'
+import {
+  EMBEDDINGS_STATUS_KEY,
+  todayLocalDayKey,
+  useEmbeddingsStatus,
+  withBackfillActive,
+} from '../lib/queries'
 import { errorMessage } from '../lib/utils'
 
 /**
  * Headless coordinator for semantic search (Reflect-embeddings port). Mounted
  * once at the app root; renders nothing. When the feature is enabled it loads
- * the model (downloading on first use) and runs an incremental backfill so new
- * documents/interactions — including those the `brain` CLI wrote while the app
- * was closed — get embedded. Backfill is hash-skip cheap, so re-runs are fine.
+ * the model (downloading on first use) and runs at most one automatic
+ * incremental backfill per local day. Manual Settings actions can still backfill
+ * or rebuild on demand.
  */
 export function EmbeddingsSync(): null {
   const status = useEmbeddingsStatus()
@@ -43,15 +49,15 @@ export function EmbeddingsSync(): null {
       return
     }
 
-    // 2. Once ready, embed whatever is still pending. A prior failure is sticky
-    //    (`data.backfillError`): pending never drains on its own, so re-running the
-    //    same failing backfill on every poll would just hammer it — like the
-    //    `failed` runtime above, recovery is an explicit user action (re-enable /
-    //    "Rebuild index"), both of which clear the error before retrying.
+    // 2. Once ready, embed pending chunks at most once per local calendar day.
+    //    A prior failure is sticky (`data.backfillError`) and the day marker is
+    //    written before the attempt so a broken backfill cannot retry-loop.
+    const today = todayLocalDayKey()
     if (
       data.runtime.status === 'ready' &&
       data.pending > 0 &&
       !data.backfillError &&
+      data.lastBackfillAttemptDay !== today &&
       !backfilling.current
     ) {
       backfilling.current = true
@@ -60,30 +66,60 @@ export function EmbeddingsSync(): null {
       // otherwise land mid-pass). Record the backfill outcome INSIDE the
       // exclusive section so "backfill + setBackfillError" is atomic: a stale
       // pass can't clear an error a rebuild recorded in a later locked turn.
-      void runExclusiveBackfill(async () => {
-        try {
-          await backfillEmbeddings({
-            // Observe the LIVE enabled flag from the query cache, not the render
-            // snapshot that kicked off this run: disabling semantic search mid-pass
-            // must abort the backfill between batches. A captured `status.data` would
-            // keep reporting the stale `enabled: true` and let the pass run to the end.
-            isStale: () =>
-              queryClient.getQueryData<EmbeddingsStatus>(EMBEDDINGS_STATUS_KEY)?.enabled === false,
-          })
-          // A clean run (completed or cooperatively aborted on disable) clears any
-          // stale marker.
-          await setBackfillError(null)
-        } catch (error: unknown) {
-          // A throw is persisted so the status/UI stops pretending indexing is
-          // progressing and the poll/retry loop above halts.
-          await setBackfillError(errorMessage(error))
-        }
-      }).finally(() => {
+      const backfill = withBackfillActive(() =>
+        runExclusiveBackfill(async () => {
+          try {
+            await setLastBackfillAttemptDay(today)
+            await backfillEmbeddings({
+              // Observe the LIVE enabled flag from the query cache, not the render
+              // snapshot that kicked off this run: disabling semantic search mid-pass
+              // must abort the backfill between batches. A captured `status.data` would
+              // keep reporting the stale `enabled: true` and let the pass run to the end.
+              isStale: () =>
+                queryClient.getQueryData<EmbeddingsStatus>(EMBEDDINGS_STATUS_KEY)?.enabled ===
+                false,
+            })
+            // A clean run (completed or cooperatively aborted on disable) clears any
+            // stale marker.
+            await setBackfillError(null)
+          } catch (error: unknown) {
+            // A throw is persisted so the status/UI stops pretending indexing is
+            // progressing and the poll/retry loop above halts.
+            await setBackfillError(errorMessage(error))
+          }
+        }),
+      )
+      void queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY })
+      void backfill.finally(() => {
         backfilling.current = false
         void queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY })
       })
     }
   }, [data, queryClient, status.data])
+
+  useEffect(() => {
+    if (!data?.enabled || data.runtime.status === 'failed' || data.backfillError) return
+
+    let timer: ReturnType<typeof window.setTimeout> | null = null
+    const schedule = () => {
+      const now = new Date()
+      const midnight = new Date(now)
+      midnight.setDate(midnight.getDate() + 1)
+      midnight.setHours(0, 0, 0, 0)
+      const delay = Math.max(1_000, midnight.getTime() - now.getTime() + 1_000)
+
+      timer = window.setTimeout(() => {
+        void queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY })
+        schedule()
+      }, delay)
+    }
+
+    schedule()
+
+    return () => {
+      if (timer !== null) window.clearTimeout(timer)
+    }
+  }, [data?.enabled, data?.runtime.status, data?.backfillError, queryClient])
 
   return null
 }

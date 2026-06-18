@@ -26,7 +26,7 @@ questions needing Alex.
 - **Phase:** 08 — Settings, backup, export & privacy (**complete, PR #17 open**). SQLite backup
   (`VACUUM INTO` → integrity check → atomic rename), JSON export (versioned, atomic), provider keys
   in the macOS keychain (the desktop registers the model provider from it at startup, completing
-  DEC-14), an interactive Settings → Model boundary (set/clear key, kill-switch, live status),
+  DEC-14), an interactive Settings → Model boundary (set/clear key, live status),
   hard-delete with cascade + derived-chunk cleanup + FTS rebuild, and richer Diagnostics (db path /
   migrations / FTS / semantic / keychain / model / CLI-skill + restore instructions). **36 Rust
   tests**, **155 JS tests**, desktop build — all green. **Plan 08 complete.** Stack continues to
@@ -120,7 +120,7 @@ questions needing Alex.
   `domains/maintenance/` (`hardDeleteRecord` — cascade + content-chunk cleanup; `rebuildSearchIndexes`
   — FTS5 rebuild), `ipc/storage.ts` bindings, `executeRaw`.
 - **Desktop:** `installModel` reads the key from the keychain (env override for dev) and registers
-  the provider; Settings → Model is interactive (set/clear key, kill-switch toggle, live status);
+  the provider; Settings → Model is interactive (set/clear key, live status);
   Backup & export performs real backup + JSON export with product states; Local database shows the
   resolved path; Diagnostics shows db path / migrations / FTS / semantic / keychain / model /
   CLI-skill + restore instructions.
@@ -175,7 +175,7 @@ questions needing Alex.
   tasks + recent interactions + reconnects + counts), `planDay`, `getWaitingItems`,
   `getChangesSince`.
 - **Settings store (`packages/core/src/domains/settings`):** typed key/value over the `settings`
-  table (`getSetting`/`setSetting`/`listSettings`), backing the model-enabled flag (and Plans 08+).
+  table (`getSetting`/`setSetting`/`listSettings`) for provider and app settings.
 - **Desktop:** Ask rewritten to the real cited pipeline — answers render with a numbered source
   list that opens the owning document/interaction, model id shown, and a closed-boundary banner;
   the command palette now uses FTS `globalSearch`; Settings → Model shows the live boundary status;
@@ -204,13 +204,14 @@ questions needing Alex.
 - **Relationship intelligence (`packages/core/src/domains/relationships`):**
   - `strength.ts` — pure date math (`daysBetween`/`addDays`) + a transparent 1–5
     `relationshipStrength` (frequency + recency + shared open tasks), returning `null` when
-    there is no signal so manual values survive.
+    there is no signal.
   - `recompute.ts` — `recomputeRelationshipIntelligence` derives `last_interaction_at`,
-    `next_reconnect_at`, and `relationship_strength` from interactions/tasks;
-    `recomputeAllRelationships` for bulk/first-run. Wired to run after a relevant interaction
+    `next_reconnect_at` from interactions/cadence; `recomputeAllRelationships` for
+    bulk/first-run. Wired to run after a relevant interaction
     (`createInteraction`, `ingestInteraction`, and `applyExtraction` on an interaction source).
-  - `getters.ts` — `listReconnectSuggestions` reads the derived `next_reconnect_at` column.
-  - **DEC-13:** strength is recompute-owned (written only with a signal); `reconnect_interval_days`
+  - `getters.ts` — `listReconnectSuggestions` reads the derived `next_reconnect_at` column and
+    joins the SELECT-only `relationship_strengths` SQL view.
+  - **DEC-13:** strength is select-only, not writable SQLite state; `reconnect_interval_days`
     stays a user input; `important_dates_json` is **not** derived (no schema field supplies
     dates) — left for a later data source, as Plan 05 step 9 permits.
 - **UI (`apps/desktop`):** shared `LinkedRecords` / `MemoryList` / `CitationList` gained
