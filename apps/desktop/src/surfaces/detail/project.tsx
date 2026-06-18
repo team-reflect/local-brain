@@ -3,11 +3,12 @@ import { DetailFields } from '../../components/detail-fields'
 import { EmptyState } from '../../components/empty-state'
 import { LinkedRecords } from '../../components/linked-records'
 import { PageHead } from '../../components/page-head'
-import { useProject, useProjectLinks } from '../../lib/queries'
+import { useProject, useProjectLinks, useUnlinkFrom } from '../../lib/queries'
 
 export function ProjectDetail({ id }: { id: string }): ReactNode {
   const project = useProject(id)
   const links = useProjectLinks(id)
+  const onUnlink = useUnlinkFrom({ kind: 'project', id })
 
   if (project.isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>
   if (!project.data) return <EmptyState title="Project not found" />
@@ -28,11 +29,11 @@ export function ProjectDetail({ id }: { id: string }): ReactNode {
       {p.summary ? <p className="text-sm text-foreground">{p.summary}</p> : null}
       {links.data ? (
         <>
-          <LinkedRecords title="Tasks" records={links.data.tasks} />
-          <LinkedRecords title="People" records={links.data.people} />
-          <LinkedRecords title="Organizations" records={links.data.organizations} />
-          <LinkedRecords title="Documents" records={links.data.documents} />
-          <LinkedRecords title="Interactions" records={links.data.interactions} />
+          <LinkedRecords title="Tasks" records={links.data.tasks} onUnlink={onUnlink} />
+          <LinkedRecords title="People" records={links.data.people} onUnlink={onUnlink} />
+          <LinkedRecords title="Organizations" records={links.data.organizations} onUnlink={onUnlink} />
+          <LinkedRecords title="Documents" records={links.data.documents} onUnlink={onUnlink} />
+          <LinkedRecords title="Interactions" records={links.data.interactions} onUnlink={onUnlink} />
         </>
       ) : null}
     </div>

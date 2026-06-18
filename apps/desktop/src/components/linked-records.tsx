@@ -34,13 +34,19 @@ function hint(subtitle: string | null): string | null {
  * A linked-record section: a titled list of navigable references to related
  * records. Renders nothing when empty so detail pages can list every relation
  * without leaving blank sections behind.
+ *
+ * When `onUnlink` is supplied, each row gains an Unlink control so the user can
+ * sever a wrong link in place (Plan 05b correction flow). The record itself is
+ * never deleted — only the link.
  */
 export function LinkedRecords({
   title,
   records,
+  onUnlink,
 }: {
   title: string
   records: LinkedRecord[]
+  onUnlink?: (record: LinkedRecord) => void
 }): ReactNode {
   const { navigate } = useRouter()
   if (records.length === 0) return null
@@ -52,12 +58,12 @@ export function LinkedRecords({
           const route = routeForLinkedRecord(record)
           const subtitle = hint(record.subtitle)
           return (
-            <li key={`${record.kind}:${record.id}`}>
+            <li key={`${record.kind}:${record.id}`} className="group flex items-center gap-1">
               <button
                 type="button"
                 disabled={route === null}
                 onClick={route ? () => navigate(route) : undefined}
-                className="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left text-sm enabled:hover:bg-secondary/60 disabled:cursor-default"
+                className="flex flex-1 items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left text-sm enabled:hover:bg-secondary/60 disabled:cursor-default"
               >
                 <span className="truncate text-foreground">{record.title}</span>
                 {subtitle ? (
@@ -66,6 +72,17 @@ export function LinkedRecords({
                   </span>
                 ) : null}
               </button>
+              {onUnlink ? (
+                <button
+                  type="button"
+                  aria-label={`Unlink ${record.title}`}
+                  title="Unlink"
+                  onClick={() => onUnlink(record)}
+                  className="shrink-0 rounded-md px-2 py-1 text-[11px] text-muted-foreground opacity-0 hover:text-destructive focus:opacity-100 group-hover:opacity-100"
+                >
+                  Unlink
+                </button>
+              ) : null}
             </li>
           )
         })}

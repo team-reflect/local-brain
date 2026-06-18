@@ -48,7 +48,7 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 | 04b | Rust file-read primitives (safe reads, size caps, hashing, folder enum) | `codex/local-brain-04b-ingestion-fs` | `…-04a-ingestion-core` | open | [#10](https://github.com/maccman/local-brain/pull/10) |
 | 04c | Ingestion UI (paste/import flows, folder import, Add actions) | `codex/local-brain-04c-ingestion-ui` | `…-04b-ingestion-fs` | open | [#11](https://github.com/maccman/local-brain/pull/11) |
 | 05a | Extraction engine (contracts, preprocessing, merge/apply, model seam) | `codex/local-brain-05a-extraction-engine` | `…-04c-ingestion-ui` | open | [#12](https://github.com/maccman/local-brain/pull/12) |
-| 05b | Extraction corrections + relationship intelligence (UI/setters) | `codex/local-brain-05b-corrections` | `…-05a-extraction-engine` | pending | — |
+| 05b | Extraction corrections + relationship intelligence (UI/setters) | `codex/local-brain-05b-corrections` | `…-05a-extraction-engine` | open | [#14](https://github.com/maccman/local-brain/pull/14) |
 | 06 | Search, retrieval & AI (incl. the model-backed extractor) | `codex/local-brain-06-search-ai` | `…-05b-corrections` | pending | — |
 | 07 | CLI & agent skills | `codex/local-brain-07-cli-skills` | `…-06-search-ai` | pending | — |
 | 08 | Settings, backup, export & privacy | `codex/local-brain-08-settings` | `…-07-cli-skills` | pending | — |
@@ -278,12 +278,46 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
   deferred to 05b. The model-backed extractor and golden tests over *live model output*
   await Plan 06.
 
-### 05b–09
-- Scope mirrors `docs/plans/05..09`: 05b = extraction corrections (unlink/edit/archive,
-  fix citations) + relationship-intelligence recompute (last interaction, reconnect,
-  strength, important dates); 06 = search/retrieval/Ask **and the model-backed extractor**
-  that feeds 05a's seam; 07 = `brain` CLI + skills (sidecar via `bundle.externalBin`);
-  08 = settings/backup/export; 09 = macOS packaging, first-run, signing checklist.
+### 05b — Extraction corrections + relationship intelligence (Plan 05 complete)
+- **Scope (Plan 05, steps 8–9, deterministic):**
+  - **Correction setters (`packages/core`):**
+    - memories (`memories/setters.ts`): `updateMemory`, `archiveMemory` (soft-delete),
+      `unlinkMemoryFromRecord` / `linkMemoryToRecord` (fix a memory's `memory_links`).
+    - typed record links (`relations/setters.ts`): `unlinkRecords(a, b)` — one undirected,
+      order-independent setter over a 15-relation registry covering every join surfaced on
+      the detail pages, plus the two non-join cases (person↔org `affiliations`, project↔task
+      `tasks.project_id`). Each maps to a single delete/clearing update, so the write is
+      inherently atomic.
+    - evidence/citations (`citations/setters.ts`): `updateEvidenceRef` (repoint chunk / fix
+      span / edit note) and `removeEvidenceRef` (drop a wrong citation; the grounded subject
+      is untouched).
+  - **Relationship intelligence (`relationships/`):** `strength.ts` (pure, unit-tested date
+    math + the transparent 1–5 strength formula), `recompute.ts`
+    (`recomputeRelationshipIntelligence` / `recomputeAllRelationships` — derive
+    `last_interaction_at`, `next_reconnect_at`, and `relationship_strength` from
+    interactions/tasks), and `getters.ts` (`listReconnectSuggestions`). Recompute runs
+    incrementally after a relevant interaction (create/ingest/apply) and in bulk on first-run
+    seed. See **DEC-13** for what it owns and why important dates are deferred.
+  - **UI (`apps/desktop`):** the shared `LinkedRecords`, `MemoryList`, and `CitationList`
+    gained in-place correction affordances (Unlink / Archive / Remove), wired through all six
+    detail pages; person detail shows the derived "Reconnect by" field; Today gained a
+    **Reconnect** section over `listReconnectSuggestions`. New TanStack hooks
+    (`useUnlinkFrom`, `useUnlinkRecord`, `useArchiveMemory`, `useUnlinkMemory`,
+    `useRemoveEvidenceRef`, `useReconnectSuggestions`) invalidate broadly.
+- **Verification:** `pnpm check` ✓ — typecheck + oxlint (clean) + **109 tests** (72 core:
+  +7 strength unit, +10 real-SQLite corrections/recompute round-trips; 4 db; 33 desktop: +2
+  correction-affordance render tests, +1 Today reconnect render test). `pnpm --filter
+  @local-brain/desktop build` ✓ (2057 modules). `cargo check --workspace` n/a (no Rust this
+  layer). `git diff --check` ✓.
+- **Caveats:** `important_dates_json` is not derived (no schema field supplies dates — DEC-13).
+  Recompute is per-person sequential (fine at personal-CRM scale). A full assembled
+  `pnpm tauri dev`/`build` launch remains pending (no GUI session this layer).
+
+### 06–09
+- Scope mirrors `docs/plans/06..09`: 06 = search/retrieval/Ask **and the model-backed
+  extractor** that feeds 05a's seam; 07 = `brain` CLI + skills (sidecar via
+  `bundle.externalBin`); 08 = settings/backup/export; 09 = macOS packaging, first-run,
+  signing checklist.
 
 ## Open / Updated PR URLs
 
@@ -299,3 +333,4 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 - PR #10 — Build 04b Rust file-read primitives (safe reads, size caps, hashing, folder enum) — https://github.com/maccman/local-brain/pull/10 (base `…-04a-ingestion-core`, open)
 - PR #11 — Build 04c ingestion UI (paste/import dialog, folder import, Add actions) — https://github.com/maccman/local-brain/pull/11 (base `…-04b-ingestion-fs`, open)
 - PR #12 — Build 05a extraction engine (contracts, preprocessing, merge/apply, model seam) — https://github.com/maccman/local-brain/pull/12 (base `…-04c-ingestion-ui`, open)
+- PR #14 — Build 05b extraction corrections + relationship intelligence — https://github.com/maccman/local-brain/pull/14 (base `…-05a-extraction-engine`, open)

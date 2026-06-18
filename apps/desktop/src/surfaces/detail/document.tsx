@@ -6,12 +6,20 @@ import { EmptyState } from '../../components/empty-state'
 import { LinkedRecords } from '../../components/linked-records'
 import { PageHead } from '../../components/page-head'
 import { Section } from '../../components/section'
-import { useDocument, useDocumentLinks, useEvidenceFromDocument } from '../../lib/queries'
+import {
+  useDocument,
+  useDocumentLinks,
+  useEvidenceFromDocument,
+  useRemoveEvidenceRef,
+  useUnlinkFrom,
+} from '../../lib/queries'
 
 export function DocumentDetail({ id }: { id: string }): ReactNode {
   const document = useDocument(id)
   const links = useDocumentLinks(id)
   const evidence = useEvidenceFromDocument(id)
+  const onUnlink = useUnlinkFrom({ kind: 'document', id })
+  const removeEvidence = useRemoveEvidenceRef()
 
   if (document.isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>
   if (!document.data) return <EmptyState title="Document not found" />
@@ -44,13 +52,17 @@ export function DocumentDetail({ id }: { id: string }): ReactNode {
       ) : null}
       {links.data ? (
         <>
-          <LinkedRecords title="People" records={links.data.people} />
-          <LinkedRecords title="Projects" records={links.data.projects} />
-          <LinkedRecords title="Interactions" records={links.data.interactions} />
-          <LinkedRecords title="Tasks" records={links.data.tasks} />
+          <LinkedRecords title="People" records={links.data.people} onUnlink={onUnlink} />
+          <LinkedRecords title="Projects" records={links.data.projects} onUnlink={onUnlink} />
+          <LinkedRecords title="Interactions" records={links.data.interactions} onUnlink={onUnlink} />
+          <LinkedRecords title="Tasks" records={links.data.tasks} onUnlink={onUnlink} />
         </>
       ) : null}
-      <CitationList title="Cited as evidence for" citations={citedFor} />
+      <CitationList
+        title="Cited as evidence for"
+        citations={citedFor}
+        onRemove={(citation) => removeEvidence.mutate(citation.id)}
+      />
     </div>
   )
 }

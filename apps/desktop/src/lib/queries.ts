@@ -19,6 +19,7 @@ import {
   getSelf,
   getTask,
   getTaskLinks,
+  archiveMemory,
   ingestDocument,
   ingestInteraction,
   listCitationsForSubject,
@@ -31,11 +32,18 @@ import {
   listOrganizations,
   listPeople,
   listProjects,
+  listReconnectSuggestions,
   listTasks,
   quickSearch,
+  recomputeAllRelationships,
+  removeEvidenceRef,
   seedDemoData,
+  unlinkMemoryFromRecord,
+  unlinkRecords,
   type IngestDocumentInput,
   type IngestInteractionInput,
+  type LinkedRecord,
+  type LinkRef,
   type ListTasksOptions,
   type NewChatMessage,
 } from '@local-brain/core'
@@ -54,8 +62,12 @@ export function useEnsureSeed(): void {
     if (started.current) return
     started.current = true
     void seedDemoData()
-      .then((result) => {
-        if (result.seeded) void queryClient.invalidateQueries()
+      .then(async (result) => {
+        if (!result.seeded) return
+        // Derive relationship hints (last interaction, reconnect, strength) from
+        // the seeded interactions/tasks so Today's reconnect list is populated.
+        await recomputeAllRelationships()
+        void queryClient.invalidateQueries()
       })
       .catch(() => {
         /* surfaced by the data queries themselves */
@@ -191,6 +203,62 @@ export function useEvidenceFromDocument(documentId: string) {
   return useQuery({
     queryKey: ['document', documentId, 'evidence'],
     queryFn: () => listEvidenceFromDocument(documentId),
+  })
+}
+
+// Corrections (Plan 05b). Each touches links/memories that fan out across many
+// detail pages, the graph, and Today, so they invalidate broadly.
+export function useUnlinkRecord() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { a: LinkRef; b: LinkRef }) => unlinkRecords(vars.a, vars.b),
+    onSuccess: () => queryClient.invalidateQueries(),
+  })
+}
+
+/**
+ * A ready-made unlink handler for a detail page: returns a callback that severs
+ * the link between the page's record (`source`) and a linked record. Memory
+ * links are corrected separately, so memory targets are ignored here.
+ */
+export function useUnlinkFrom(source: LinkRef): (record: LinkedRecord) => void {
+  const unlink = useUnlinkRecord()
+  return (record: LinkedRecord) => {
+    if (record.kind === 'memory') return
+    unlink.mutate({ a: source, b: { kind: record.kind, id: record.id } })
+  }
+}
+
+export function useArchiveMemory() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => archiveMemory(id),
+    onSuccess: () => queryClient.invalidateQueries(),
+  })
+}
+
+export function useUnlinkMemory() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { memoryId: string; recordType: string; recordId: string }) =>
+      unlinkMemoryFromRecord(vars.memoryId, vars.recordType, vars.recordId),
+    onSuccess: () => queryClient.invalidateQueries(),
+  })
+}
+
+export function useRemoveEvidenceRef() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => removeEvidenceRef(id),
+    onSuccess: () => queryClient.invalidateQueries(),
+  })
+}
+
+// Relationship intelligence (Plan 05b)
+export function useReconnectSuggestions(limit?: number) {
+  return useQuery({
+    queryKey: ['reconnect-suggestions', limit ?? null],
+    queryFn: () => listReconnectSuggestions(limit !== undefined ? { limit } : {}),
   })
 }
 

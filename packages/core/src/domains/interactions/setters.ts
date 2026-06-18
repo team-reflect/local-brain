@@ -4,6 +4,7 @@ import { db } from '../../db/client'
 import { batch, execute } from '../../db/commands'
 import { newId } from '../../db/id'
 import { nowIso } from '../../db/time'
+import { recomputeRelationshipIntelligence } from '../relationships/recompute'
 
 export type NewInteraction = Omit<Insertable<Interactions>, 'id' | 'createdAt' | 'updatedAt'>
 export type InteractionPatch = Omit<Updateable<Interactions>, 'id' | 'createdAt'>
@@ -35,6 +36,11 @@ export async function createInteraction(
     ),
   ]
   await batch(statements)
+  // Relationship hints update after a relevant interaction (Plan 05 step 9).
+  // Runs after the interaction transaction commits so the recompute sees it.
+  for (const participant of participants) {
+    await recomputeRelationshipIntelligence(participant.personId)
+  }
   return id
 }
 
