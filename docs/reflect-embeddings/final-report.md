@@ -92,4 +92,4 @@ vec0 cosine-KNN ordering, and a real end-to-end model + KNN test (ranks by meani
 
 ## Repo state
 - Branch: `codex/local-brain-reflect-embeddings`
-- PR: _<filled in after opening>_
+- PR: https://github.com/maccman/local-brain/pull/27 (base `master`)
