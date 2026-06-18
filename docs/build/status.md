@@ -7,6 +7,23 @@ questions needing Alex.
 
 ## Current State
 
+- **Phase:** 07 — CLI & agent skills (**complete, PR #16 open**). The `brain` CLI grew from the
+  Plan 01 scaffold into the full agent contract: a standalone Rust binary that opens SQLite
+  directly (no Tauri IPC), with `add document|interaction|task`, `remember`, `search`, `ask`
+  (grounded — always returns cited evidence; synthesizes + persists when a model is configured),
+  `today`, `report daily`, `tasks plan-day`, `relationships followups`, `changes`, `graph`,
+  `show`, and `status/path/doctor`. Stable `--json` camelCase, typed exit codes, stdout=data /
+  stderr=diagnostics. ULID + normalize/chunk/SHA-256 ports keep CLI writes byte-compatible with
+  app writes. Sidecar wired (`bundle.externalBin` + `pnpm sidecar` before dev/build) and staged.
+  Agent skill authored at `skills/brain/SKILL.md` and registered; Settings → Skills updated.
+  **34 Rust tests** green (incl. 12 CLI integration + skill-lint), `pnpm check` 144 green, desktop
+  build green. **Plan 07 complete.** Stack continues to Plan 08 (settings/backup/privacy).
+- **Active branch:** `codex/local-brain-07-cli-skills` (base `…-06-search-ai`).
+- **Blockers:** none. `brain ask` synthesis uses `curl` (dependency-free) and degrades to
+  evidence-only without a key; sidecar *detection* in Settings + PATH install is Plan 09.
+
+### Prior phase (06)
+
 - **Phase:** 06 — Search, retrieval & AI (**complete, PR #15 open**). Built the one shared
   FTS5 `retrieve()` contract + `globalSearch()`, the BYOK model boundary (`ModelProvider` seam,
   checked `getModelStatus()`, the single typed `assembleAnswerContext` helper), the cited
@@ -43,6 +60,32 @@ questions needing Alex.
 - **Blockers:** none at this checkpoint.
 
 ## Log
+
+### 2026-06-17 — Phase 07: CLI & agent skills (Plan 07 complete)
+- **`apps/cli` (`brain`)** grew from the Plan 01 scaffold into the full agent contract — a
+  standalone Rust binary opening SQLite directly via `brain-schema` (no Tauri IPC), so it runs
+  with the app closed and at the same migration version.
+  - **Ports for write parity:** `id.rs` (dependency-free ULID, Crockford base32, 26 chars),
+    `text.rs` (normalize/paragraph-chunk/SHA-256 — faithful ports of the core ingest so a
+    CLI-added note dedupes against and chunks identically to an app-added one).
+  - **Commands:** `add document|interaction|task` (record + chunks + links in one transaction),
+    `remember` (memory + memory_links), `search` (FTS over docs/interactions + name LIKE),
+    `ask` (grounded — retrieves cited chunks; with `ANTHROPIC_API_KEY` synthesizes via `curl` and
+    persists a conversation + evidence_refs; without, returns `answered:false` + evidence for the
+    calling agent), `today`/`report daily`/`tasks plan-day`/`relationships followups`/`changes`/
+    `graph --center self`/`show`, plus `status`/`path`/`doctor`. Stable `--json` camelCase, typed
+    exit codes (0/1/3/4), stdout=data / stderr=diagnostics.
+  - **Model boundary:** `model.rs` — key from `ANTHROPIC_API_KEY` (never settings), HTTP via
+    `curl` to stay dependency-free; degrades cleanly when absent. Mirrors the app's checked seam.
+- **Sidecar:** `tauri.conf.json` gains `bundle.externalBin: ["binaries/brain"]`; `beforeDev/Build`
+  runs `pnpm sidecar` first; staged `brain-aarch64-apple-darwin` runs (`--version` ✓).
+- **Skill:** `skills/brain/SKILL.md` (nouns, query-before-write, stdout/stderr contract, write/read
+  recipes, daily automation, what-not-to-store), registered in `packages/skills`; Settings → Skills
+  shows usage + the skill path.
+- **Verification:** `cargo fmt --all -- --check` ✓; `cargo check --workspace` ✓; `cargo test
+  --workspace` ✓ — **34 Rust tests** (4 CLI unit + 10 CLI integration over a temp DB + 2 skill-lint
+  + 18 existing). `pnpm check` ✓ (144 JS tests); `pnpm --filter @local-brain/desktop build` ✓;
+  sidecar staged + smoke-run; `git diff --check` ✓.
 
 ### 2026-06-17 — Phase 06: Search, retrieval & AI (Plan 06 complete)
 - **Retrieval (`packages/core/src/retrieval`):** one shared `retrieve()` over FTS5

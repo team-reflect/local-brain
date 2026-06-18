@@ -1,20 +1,28 @@
-//! The `brain` CLI. Foundation scaffold: it resolves the database path
-//! (`--db` > `$BRAIN_DB` > platform default), opens/migrates via the shared
-//! `brain-schema` crate, and reports status. The write/read command surface
-//! (add, remember, search, ask, today, report) is built in Plan 07.
+//! The `brain` CLI — the supported agent interface to a Local Brain database.
 //!
-//! Conventions: data on stdout, diagnostics on stderr, `--json` for stable
-//! machine output, typed exit codes (see `error::CliError`).
+//! It opens the SQLite file directly via the shared `brain-schema` crate (no
+//! Tauri IPC), so it runs with the desktop app closed and always at the same
+//! migration version. Conventions: **data on stdout, diagnostics on stderr**,
+//! `--json` for stable camelCase machine output, and typed exit codes (see
+//! `error::CliError`).
 
+mod commands;
+mod db;
 mod error;
+mod id;
+mod model;
+mod output;
+mod text;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use serde::Serialize;
+use serde_json::json;
 
+use commands::{add, graph as graph_cmd, parse_links, read, report, resolve_text};
 use error::CliError;
+use output::{diag, print_json};
 
 #[derive(Parser)]
 #[command(
@@ -41,76 +49,358 @@ enum Command {
     Status,
     /// Print the resolved database path only.
     Path,
+    /// Report environment, database, and model-boundary health.
+    Doctor,
+    /// Add a record (document, interaction, or task).
+    Add {
+        #[command(subcommand)]
+        what: AddCommand,
+    },
+    /// Add a hidden memory (atomic claim) with provenance links.
+    Remember(RememberArgs),
+    /// Full-text search across your records.
+    Search(SearchArgs),
+    /// Ask a grounded, cited question.
+    Ask(AskArgs),
+    /// Today's brief: tasks, recent interactions, reconnects.
+    Today,
+    /// Generate a report.
+    Report {
+        #[command(subcommand)]
+        what: ReportCommand,
+    },
+    /// Task planning helpers.
+    Tasks {
+        #[command(subcommand)]
+        what: TasksCommand,
+    },
+    /// Relationship helpers.
+    Relationships {
+        #[command(subcommand)]
+        what: RelCommand,
+    },
+    /// Records created/updated since a timestamp.
+    Changes(ChangesArgs),
+    /// The user-centered knowledge graph as JSON.
+    Graph(GraphArgs),
+    /// Show a record by kind and id.
+    Show {
+        /// person | organization | project | task
+        kind: String,
+        id: String,
+    },
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct StatusJson {
-    db_path: String,
-    exists: bool,
-    schema_version: i64,
+#[derive(Subcommand)]
+enum AddCommand {
+    /// Add a reference document.
+    Document(AddDocumentArgs),
+    /// Add a human interaction (meeting, call, note, …).
+    Interaction(AddInteractionArgs),
+    /// Add a task.
+    Task(AddTaskArgs),
+}
+
+#[derive(Parser)]
+struct AddDocumentArgs {
+    #[arg(long)]
+    title: Option<String>,
+    #[arg(long)]
+    kind: Option<String>,
+    #[arg(long)]
+    text: Option<String>,
+    #[arg(long, value_name = "PATH")]
+    text_file: Option<PathBuf>,
+    /// Link to a record, e.g. `--link person:01ABC` (repeatable).
+    #[arg(long = "link", value_name = "KIND:ID")]
+    links: Vec<String>,
+    #[arg(long)]
+    allow_duplicate: bool,
+}
+
+#[derive(Parser)]
+struct AddInteractionArgs {
+    #[arg(long, default_value = "note")]
+    kind: String,
+    #[arg(long)]
+    title: Option<String>,
+    #[arg(long)]
+    occurred_at: Option<String>,
+    #[arg(long)]
+    text: Option<String>,
+    #[arg(long, value_name = "PATH")]
+    text_file: Option<PathBuf>,
+    #[arg(long = "link", value_name = "KIND:ID")]
+    links: Vec<String>,
+    #[arg(long)]
+    allow_duplicate: bool,
+}
+
+#[derive(Parser)]
+struct AddTaskArgs {
+    #[arg(long)]
+    title: String,
+    #[arg(long, default_value = "open")]
+    status: String,
+    #[arg(long)]
+    due_at: Option<String>,
+    #[arg(long = "link", value_name = "KIND:ID")]
+    links: Vec<String>,
+}
+
+#[derive(Parser)]
+struct RememberArgs {
+    #[arg(long, default_value = "fact")]
+    kind: String,
+    #[arg(long)]
+    claim: String,
+    #[arg(long = "link", value_name = "KIND:ID")]
+    links: Vec<String>,
+}
+
+#[derive(Parser)]
+struct SearchArgs {
+    query: String,
+    #[arg(long, default_value_t = 20)]
+    limit: usize,
+}
+
+#[derive(Parser)]
+struct AskArgs {
+    question: String,
+    #[arg(long, default_value_t = 8)]
+    limit: usize,
+    /// Skip the model call; return retrieved evidence only.
+    #[arg(long)]
+    no_model: bool,
+}
+
+#[derive(Parser)]
+struct ChangesArgs {
+    #[arg(long)]
+    since: String,
+    #[arg(long, default_value_t = 50)]
+    limit: usize,
+}
+
+#[derive(Parser)]
+struct GraphArgs {
+    /// Currently only `self` is supported.
+    #[arg(long, default_value = "self")]
+    center: String,
+}
+
+#[derive(Subcommand)]
+enum ReportCommand {
+    /// The daily report.
+    Daily,
+}
+
+#[derive(Subcommand)]
+enum TasksCommand {
+    /// A prioritized todo list for the day.
+    PlanDay {
+        #[arg(long, default_value_t = 25)]
+        limit: usize,
+    },
+}
+
+#[derive(Subcommand)]
+enum RelCommand {
+    /// People due (or overdue) for a reconnect.
+    Followups,
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    match run(&cli) {
+    match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            eprintln!("brain: {err}");
+            diag(&err.to_string());
             ExitCode::from(err.exit_code())
         }
     }
 }
 
-fn run(cli: &Cli) -> Result<(), CliError> {
-    let db_path = resolve_db_path(cli.db.as_deref())?;
+fn run(cli: Cli) -> Result<(), CliError> {
+    let db_path = db::resolve_db_path(cli.db.as_deref())?;
+    let json = cli.json;
 
-    match &cli.command {
+    match cli.command {
         Command::Path => {
-            if cli.json {
-                let payload = serde_json::json!({ "dbPath": db_path.display().to_string() });
-                println!("{}", serde_json::to_string_pretty(&payload)?);
+            if json {
+                print_json(&json!({ "dbPath": db_path.display().to_string() }))
             } else {
                 println!("{}", db_path.display());
+                Ok(())
             }
-            Ok(())
         }
         Command::Status => {
             let exists = db_path.is_file();
-            // Open + migrate to report the live schema version (creates the file).
-            let conn = brain_schema::open_and_migrate(&db_path)?;
-            let schema_version: i64 =
-                conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-
-            if cli.json {
-                let payload = StatusJson {
-                    db_path: db_path.display().to_string(),
-                    exists,
-                    schema_version,
-                };
-                println!("{}", serde_json::to_string_pretty(&payload)?);
+            let conn = db::open(&db_path)?;
+            let version = db::schema_version(&conn)?;
+            if json {
+                print_json(&json!({
+                    "dbPath": db_path.display().to_string(),
+                    "exists": exists,
+                    "schemaVersion": version,
+                }))
             } else {
-                eprintln!("database: {}", db_path.display());
-                println!("ok schema v{schema_version}");
+                diag(&format!("database: {}", db_path.display()));
+                println!("ok schema v{version}");
+                Ok(())
             }
-            Ok(())
+        }
+        Command::Doctor => doctor(&db_path, json),
+
+        Command::Add { what } => {
+            let mut conn = db::open(&db_path)?;
+            match what {
+                AddCommand::Document(a) => add::add_document(
+                    &mut conn,
+                    json,
+                    add::AddDocumentArgs {
+                        title: a.title.as_deref(),
+                        kind: a.kind.as_deref(),
+                        body: resolve_text(a.text.as_deref(), a.text_file.as_deref())?,
+                        links: parse_links(&a.links)?,
+                        allow_duplicate: a.allow_duplicate,
+                    },
+                ),
+                AddCommand::Interaction(a) => add::add_interaction(
+                    &mut conn,
+                    json,
+                    add::AddInteractionArgs {
+                        title: a.title.as_deref(),
+                        kind: &a.kind,
+                        occurred_at: a.occurred_at.as_deref(),
+                        body: resolve_text(a.text.as_deref(), a.text_file.as_deref())?,
+                        links: parse_links(&a.links)?,
+                        allow_duplicate: a.allow_duplicate,
+                    },
+                ),
+                AddCommand::Task(a) => add::add_task(
+                    &mut conn,
+                    json,
+                    add::AddTaskArgs {
+                        title: &a.title,
+                        status: &a.status,
+                        due_at: a.due_at.as_deref(),
+                        project_id: None,
+                        links: parse_links(&a.links)?,
+                    },
+                ),
+            }
+        }
+        Command::Remember(a) => {
+            let mut conn = db::open(&db_path)?;
+            add::remember(
+                &mut conn,
+                json,
+                add::RememberArgs {
+                    kind: &a.kind,
+                    claim: &a.claim,
+                    links: parse_links(&a.links)?,
+                },
+            )
+        }
+
+        Command::Search(a) => {
+            let conn = db::open_existing(&db_path)?;
+            read::search(&conn, json, &a.query, a.limit)
+        }
+        Command::Ask(a) => {
+            let mut conn = db::open_existing(&db_path)?;
+            read::ask(&mut conn, json, &a.question, a.limit, a.no_model)
+        }
+        Command::Show { kind, id } => {
+            let conn = db::open_existing(&db_path)?;
+            read::show(&conn, json, &kind, &id)
+        }
+
+        Command::Today => {
+            let conn = db::open_existing(&db_path)?;
+            report::today_brief(&conn, json)
+        }
+        Command::Report { what } => {
+            let conn = db::open_existing(&db_path)?;
+            match what {
+                ReportCommand::Daily => report::report_daily(&conn, json),
+            }
+        }
+        Command::Tasks { what } => {
+            let conn = db::open_existing(&db_path)?;
+            match what {
+                TasksCommand::PlanDay { limit } => report::plan_day(&conn, json, limit),
+            }
+        }
+        Command::Relationships { what } => {
+            let conn = db::open_existing(&db_path)?;
+            match what {
+                RelCommand::Followups => report::followups(&conn, json),
+            }
+        }
+        Command::Changes(a) => {
+            let conn = db::open_existing(&db_path)?;
+            report::changes(&conn, json, &a.since, a.limit)
+        }
+        Command::Graph(a) => {
+            if a.center != "self" {
+                return Err(CliError::Runtime(format!(
+                    "unsupported --center '{}' (only 'self')",
+                    a.center
+                )));
+            }
+            let conn = db::open_existing(&db_path)?;
+            graph_cmd::graph(&conn, json)
         }
     }
 }
 
-/// Resolve the database path: `--db` flag, then `$BRAIN_DB`, then the platform
-/// data directory. Plan 02 also lets the desktop app persist a chosen path that
-/// the CLI can read.
-fn resolve_db_path(flag: Option<&Path>) -> Result<PathBuf, CliError> {
-    if let Some(path) = flag {
-        return Ok(path.to_path_buf());
+/// `brain doctor` — environment, database, and model-boundary health.
+fn doctor(db_path: &std::path::Path, json: bool) -> Result<(), CliError> {
+    let exists = db_path.is_file();
+    let (schema_version, ok) = match db::open(db_path) {
+        Ok(conn) => (db::schema_version(&conn).unwrap_or(-1), true),
+        Err(_) => (-1, false),
+    };
+    let model_configured = std::env::var("ANTHROPIC_API_KEY")
+        .map(|k| !k.trim().is_empty())
+        .unwrap_or(false);
+    let curl = std::process::Command::new("curl")
+        .arg("--version")
+        .output()
+        .is_ok();
+
+    if json {
+        print_json(&json!({
+            "dbPath": db_path.display().to_string(),
+            "dbExists": exists,
+            "dbOk": ok,
+            "schemaVersion": schema_version,
+            "expectedSchemaVersion": brain_schema::LATEST_SCHEMA_VERSION,
+            "modelConfigured": model_configured,
+            "curlAvailable": curl,
+        }))
+    } else {
+        diag(&format!(
+            "database: {} ({})",
+            db_path.display(),
+            if exists { "exists" } else { "absent" }
+        ));
+        println!(
+            "schema: v{schema_version} (expected v{})",
+            brain_schema::LATEST_SCHEMA_VERSION
+        );
+        println!(
+            "model: {}",
+            if model_configured {
+                "configured (ANTHROPIC_API_KEY)"
+            } else {
+                "not configured"
+            }
+        );
+        println!("curl: {}", if curl { "available" } else { "missing" });
+        Ok(())
     }
-    if let Some(env) = std::env::var_os("BRAIN_DB") {
-        if !env.is_empty() {
-            return Ok(PathBuf::from(env));
-        }
-    }
-    let base = dirs::data_dir()
-        .ok_or_else(|| CliError::NoDatabase("could not resolve a data directory".to_string()))?;
-    Ok(base.join("local-brain").join("brain.sqlite"))
 }

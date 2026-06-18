@@ -50,7 +50,7 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 | 05a | Extraction engine (contracts, preprocessing, merge/apply, model seam) | `codex/local-brain-05a-extraction-engine` | `…-04c-ingestion-ui` | open | [#12](https://github.com/maccman/local-brain/pull/12) |
 | 05b | Extraction corrections + relationship intelligence (UI/setters) | `codex/local-brain-05b-corrections` | `…-05a-extraction-engine` | open | [#14](https://github.com/maccman/local-brain/pull/14) |
 | 06 | Search, retrieval & AI (incl. the model-backed extractor) | `codex/local-brain-06-search-ai` | `…-05b-corrections` | open | [#15](https://github.com/maccman/local-brain/pull/15) |
-| 07 | CLI & agent skills | `codex/local-brain-07-cli-skills` | `…-06-search-ai` | pending | — |
+| 07 | CLI & agent skills | `codex/local-brain-07-cli-skills` | `…-06-search-ai` | open | [#16](https://github.com/maccman/local-brain/pull/16) |
 | 08 | Settings, backup, export & privacy | `codex/local-brain-08-settings-backup-privacy` | `…-07-cli-skills` | pending | — |
 | 09 | Packaging & launch | `codex/local-brain-09-packaging-launch` | `…-08-settings-backup-privacy` | pending | — |
 
@@ -347,10 +347,41 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
   wiring is Plan 08); the `brain ask`/`search` CLI path reimplements the same retrieval SQL in
   Rust in Plan 07. A full assembled `pnpm tauri dev/build` launch remains pending.
 
-### 07–09
-- Scope mirrors `docs/plans/07..09`: 07 = `brain` CLI + skills (sidecar via
-  `bundle.externalBin`); 08 = settings/backup/export; 09 = macOS packaging, first-run,
-  signing checklist.
+### 07 — CLI & agent skills
+- **Scope (Plan 07):** the `brain` CLI grown from the foundation scaffold into the full agent
+  contract, plus the agent skill and sidecar wiring.
+  - **`apps/cli`** (standalone Rust, opens SQLite directly via `brain-schema` — no Tauri IPC):
+    `id.rs` (dependency-free ULID matching the app's), `text.rs` (normalize/chunk/SHA-256 ports
+    so CLI-written records dedupe and chunk identically to app-written ones), `db.rs` (resolve
+    `--db`/`$BRAIN_DB`/default + open/migrate), `output.rs` (stdout=data, stderr=diagnostics),
+    `model.rs` (BYOK boundary via `ANTHROPIC_API_KEY` + `curl`, degrades when absent), and
+    `commands/` — `add document|interaction|task`, `remember`, `search`, `ask` (grounded:
+    always returns cited evidence; synthesizes + persists a conversation/evidence_refs when a
+    model is configured), `today`, `report daily`, `tasks plan-day`, `relationships followups`,
+    `changes --since`, `graph --center self`, `show`, plus `status`/`path`/`doctor`. Stable
+    `--json` camelCase contracts; typed exit codes (0/1/3/4).
+  - **Sidecar:** `tauri.conf.json` gains `bundle.externalBin: ["binaries/brain"]` and the
+    `beforeDev/BuildCommand` now runs `pnpm sidecar` first; the existing `build-sidecar.mjs`
+    stages `brain-<triple>`. Staged + smoke-run locally.
+  - **Skill:** `skills/brain/SKILL.md` (the agent-readable skill — nouns, query-before-write,
+    stdout/stderr contract, write/read recipes, daily automation, what-not-to-store), registered
+    in `packages/skills`. Desktop Settings → Skills shows the CLI usage + skill path.
+- **Verification:** `cargo fmt --all -- --check` ✓; `cargo check --workspace` ✓; `cargo test
+  --workspace` ✓ — **34 Rust tests** (4 CLI unit: ULID/normalize/hash/chunk; 10 CLI integration
+  against a temp DB: status schema, dedupe, FTS search, ask-degrades-to-evidence, plan-day
+  buckets, show camelCase, today/changes JSON, graph, stdout/stderr separation, no-database exit
+  4; 2 skill-lint: documented commands are real + the doc covers the nouns; + 18 existing). Sidecar
+  staged and the staged `brain --version` runs. `pnpm check` ✓ (144 JS tests; settings/skills
+  changes typecheck); `pnpm --filter @local-brain/desktop build` ✓. `git diff --check` ✓.
+- **Caveats:** `brain ask` synthesis shells out to `curl` to stay dependency-free; with no key it
+  returns the cited evidence for the calling agent to reason over (it is itself the model). CLI
+  retrieval is lexical (the same FTS SQL as the app, no recency re-rank, for stable snapshots).
+  Sidecar *detection* in Settings + PATH install is Plan 09. A full `tauri build` was not run this
+  layer (no GUI session); the sidecar staging path is verified.
+
+### 08–09
+- Scope mirrors `docs/plans/08..09`: 08 = settings/backup/export/privacy; 09 = macOS packaging,
+  first-run, signing checklist.
 
 ## Open / Updated PR URLs
 
@@ -368,3 +399,4 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 - PR #12 — Build 05a extraction engine (contracts, preprocessing, merge/apply, model seam) — https://github.com/maccman/local-brain/pull/12 (base `…-04c-ingestion-ui`, open)
 - PR #14 — Build 05b extraction corrections + relationship intelligence — https://github.com/maccman/local-brain/pull/14 (base `…-05a-extraction-engine`, open)
 - PR #15 — Build 06 search, retrieval & AI (FTS5 retrieve, cited Ask, model boundary, model-backed extractor, report endpoints) — https://github.com/maccman/local-brain/pull/15 (base `…-05b-corrections`, open)
+- PR #16 — Build 07 CLI & agent skills (`brain` CLI add/search/ask/today/report/graph/show, JSON contracts, sidecar bundling, skill doc) — https://github.com/maccman/local-brain/pull/16 (base `…-06-search-ai`, open)
