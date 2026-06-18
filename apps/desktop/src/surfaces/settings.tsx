@@ -447,9 +447,9 @@ function LocalDatabase(): ReactNode {
       <div className="flex flex-col gap-2 text-sm text-muted-foreground">
         <p>
           Each brain is a folder on this machine. This is the SQLite path inside the active
-          brain{active.data ? ` (“${active.data.name}”)` : ''}; manage and switch brains under{' '}
-          <strong className="font-medium text-foreground">Settings → Brain</strong>. Migrations run
-          automatically when a brain is opened; the schema is versioned in the app.
+          brain{active.data ? ` (“${active.data.name}”)` : ''}; switch, create, and open brains
+          from the sidebar brain switcher. Migrations run automatically when a brain is opened; the
+          schema is versioned in the app.
         </p>
         <div className="rounded-md border border-border bg-card px-4 py-3 font-mono text-xs text-card-foreground break-all">
           {path.data ?? 'resolving…'}
