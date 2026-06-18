@@ -50,6 +50,12 @@ function installBrainBridge(captured: Captured[]): void {
   })
 }
 
+function openBrainMenu(): void {
+  const trigger = screen.getByRole('button', { name: /My brain/ })
+  trigger.focus()
+  fireEvent.keyDown(trigger, { key: 'Enter', code: 'Enter' })
+}
+
 describe('BrainSwitcher', () => {
   it('shows the active brain and switches to another from the menu', async () => {
     const captured: Captured[] = []
@@ -60,7 +66,7 @@ describe('BrainSwitcher', () => {
     await waitFor(() => expect(screen.getByText('My brain')).toBeDefined())
 
     // Opening the menu reveals the other brain; selecting it switches.
-    fireEvent.click(screen.getByText('My brain'))
+    openBrainMenu()
     const workItem = await screen.findByText('Work')
     fireEvent.click(workItem)
 
@@ -78,7 +84,7 @@ describe('BrainSwitcher', () => {
     renderWithProviders(<BrainSwitcher />)
     await waitFor(() => expect(screen.getByText('My brain')).toBeDefined())
 
-    fireEvent.click(screen.getByText('My brain'))
+    openBrainMenu()
     fireEvent.click(await screen.findByText('New brain…'))
 
     expect(await screen.findByRole('dialog', { name: 'New brain' })).toBeDefined()
