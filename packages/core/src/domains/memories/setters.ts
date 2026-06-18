@@ -1,8 +1,8 @@
-import type { Updateable } from 'kysely'
 import type { Memories } from '@local-brain/db'
 import { db } from '../../db/client'
 import { execute } from '../../db/commands'
 import { newId } from '../../db/id'
+import type { RecordPatch } from '../../db/records'
 import { nowIso } from '../../db/time'
 
 /**
@@ -14,7 +14,7 @@ import { nowIso } from '../../db/time'
  * any evidence intact.
  */
 
-export type MemoryPatch = Omit<Updateable<Memories>, 'id' | 'createdAt'>
+export type MemoryPatch = RecordPatch<Memories>
 
 /** Edit a memory's claim / kind / confidence / validity window. */
 export function updateMemory(id: string, patch: MemoryPatch): Promise<number> {

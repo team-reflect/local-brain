@@ -1,12 +1,12 @@
-import type { Insertable, Updateable } from 'kysely'
 import type { Documents } from '@local-brain/db'
 import { db } from '../../db/client'
 import { execute } from '../../db/commands'
 import { newId } from '../../db/id'
+import type { NewRecord, RecordPatch } from '../../db/records'
 import { nowIso } from '../../db/time'
 
-export type NewDocument = Omit<Insertable<Documents>, 'id' | 'createdAt' | 'updatedAt'>
-export type DocumentPatch = Omit<Updateable<Documents>, 'id' | 'createdAt'>
+export type NewDocument = NewRecord<Documents>
+export type DocumentPatch = RecordPatch<Documents>
 
 export async function createDocument(input: NewDocument): Promise<string> {
   const id = newId()

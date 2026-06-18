@@ -1,12 +1,12 @@
-import type { Insertable, Updateable } from 'kysely'
 import type { People } from '@local-brain/db'
 import { db } from '../../db/client'
 import { execute } from '../../db/commands'
 import { newId } from '../../db/id'
+import type { NewRecord, RecordPatch } from '../../db/records'
 import { nowIso } from '../../db/time'
 
-export type NewPerson = Omit<Insertable<People>, 'id' | 'createdAt' | 'updatedAt'>
-export type PersonPatch = Omit<Updateable<People>, 'id' | 'createdAt'>
+export type NewPerson = NewRecord<People>
+export type PersonPatch = RecordPatch<People>
 
 /** Create a person and return its generated id. */
 export async function createPerson(input: NewPerson): Promise<string> {
