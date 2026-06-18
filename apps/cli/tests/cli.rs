@@ -215,6 +215,21 @@ fn add_person_dedupes_and_returns_contact_fields() {
     assert_eq!(second["isDuplicate"], true);
     assert_eq!(second["id"], first["id"]);
 
+    let same_name_other_email = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Maya Chen",
+            "--email",
+            "other-maya@example.com",
+        ],
+    );
+    assert_eq!(same_name_other_email["isDuplicate"], false);
+    assert_ne!(same_name_other_email["id"], first["id"]);
+
     let by_name = run_json(
         &db,
         &["--json", "add", "person", "--full-name", "Maya   Chen"],
@@ -279,6 +294,17 @@ fn add_person_dedupes_and_returns_contact_fields() {
     assert_eq!(enriched_shown["summary"], "Met through a contact export.");
     assert_eq!(enriched_shown["notes"], "Prefers concise updates.");
     assert_eq!(enriched_shown["reconnectIntervalDays"], 14);
+
+    let ascii_name = run_json(
+        &db,
+        &["--json", "add", "person", "--full-name", "Renee Muller"],
+    );
+    let accented_name = run_json(
+        &db,
+        &["--json", "add", "person", "--full-name", "Renée Müller"],
+    );
+    assert_eq!(accented_name["isDuplicate"], true);
+    assert_eq!(accented_name["id"], ascii_name["id"]);
 }
 
 #[test]

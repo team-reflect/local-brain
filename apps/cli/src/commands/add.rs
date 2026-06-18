@@ -8,6 +8,7 @@ use std::path::Path;
 use rusqlite::{params, Connection};
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use unicode_normalization::{char::is_combining_mark, UnicodeNormalization};
 
 use super::{now_iso, LinkKind, LinkRef};
 use crate::error::CliError;
@@ -27,7 +28,8 @@ fn normalize_email(raw: Option<&str>) -> Option<String> {
 
 fn normalize_name(raw: &str) -> String {
     raw.to_lowercase()
-        .chars()
+        .nfkd()
+        .filter(|c| !is_combining_mark(*c))
         .map(|c| {
             if c.is_alphanumeric() || c.is_whitespace() {
                 c
@@ -175,14 +177,15 @@ fn find_duplicate_person(
     full_name: &str,
     primary_email: Option<&str>,
 ) -> Result<Option<String>, CliError> {
-    if let Some(email) = normalize_email(primary_email) {
+    let incoming_email = normalize_email(primary_email);
+    if let Some(email) = &incoming_email {
         let id = conn
             .query_row(
                 "SELECT id FROM people
                  WHERE archived_at IS NULL
                    AND primary_email IS NOT NULL
                    AND lower(primary_email) = ?1
-                 LIMIT 1",
+                LIMIT 1",
                 params![email],
                 |row| row.get::<_, String>(0),
             )
@@ -196,13 +199,21 @@ fn find_duplicate_person(
     if name.is_empty() {
         return Ok(None);
     }
-    let mut stmt = conn.prepare("SELECT id, full_name FROM people WHERE archived_at IS NULL")?;
+    let mut stmt =
+        conn.prepare("SELECT id, full_name, primary_email FROM people WHERE archived_at IS NULL")?;
     let rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+        ))
     })?;
     for row in rows {
-        let (id, candidate) = row?;
+        let (id, candidate, candidate_email) = row?;
         if normalize_name(&candidate) == name {
+            if incoming_email.is_some() && normalize_email(candidate_email.as_deref()).is_some() {
+                continue;
+            }
             return Ok(Some(id));
         }
     }
