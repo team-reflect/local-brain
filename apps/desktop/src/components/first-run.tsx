@@ -12,7 +12,8 @@ import { useRouter } from '../routing/router'
 /**
  * First-run onboarding (Plan 09). Shown once on a fresh install: it confirms
  * where the local brain lives, the (honest) model-boundary status, and how to
- * start — add a record, set an AI provider, or drive it from the `brain` CLI.
+<<<<<<< HEAD
+ * start — set an AI provider or drive it from the `brain` CLI.
  * Dismissing it sets a settings flag so it never reappears.
  */
 export function FirstRun(): ReactNode {
