@@ -7,18 +7,27 @@ import { installFakeBridge, renderWithProviders } from '../test/utils'
 describe('TodaySurface reconnect section (Plan 05b)', () => {
   it('lists overdue reconnect suggestions from the derived columns', async () => {
     installFakeBridge({
-      query: (sql) =>
-        sql.includes('next_reconnect_at')
-          ? [
-              {
-                id: 'p1',
-                full_name: 'Jordan Lee',
-                relationship_strength: 3,
-                last_interaction_at: '2026-04-01T00:00:00.000Z',
-                next_reconnect_at: '2026-04-22T00:00:00.000Z',
-              },
-            ]
-          : [],
+      query: (sql) => {
+        if (sql.includes('"people"."reconnect_interval_days" is not null')) {
+          return [
+            {
+              id: 'p1',
+              full_name: 'Jordan Lee',
+              reconnect_interval_days: 21,
+            },
+          ]
+        }
+        if (sql.includes('max("interactions"."occurred_at")')) {
+          return [{ last_at: '2026-04-01T00:00:00.000Z' }]
+        }
+        if (sql.includes('count(*)') && sql.includes('from "interactions"')) {
+          return [{ n: 1 }]
+        }
+        if (sql.includes('count(*)') && sql.includes('from "tasks"')) {
+          return [{ n: 0 }]
+        }
+        return []
+      },
     })
     renderWithProviders(<TodaySurface />)
 
