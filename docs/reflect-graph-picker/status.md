@@ -4,7 +4,8 @@ Branch: `codex/local-brain-reflect-graph-picker` · base `58c801f`.
 
 ## Phase
 
-Implementation complete and verified. Ready to push + open PR.
+Complete. Pushed; PR #26 open against master
+(https://github.com/maccman/local-brain/pull/26).
 
 ## Progress
 

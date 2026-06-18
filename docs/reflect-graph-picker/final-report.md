@@ -95,4 +95,4 @@ Network visualization.
 - Branch `codex/local-brain-reflect-graph-picker`, base `58c801f`.
 - Commits: docs/plan → Rust registry+swap → desktop+core UI → docs terminology →
   this report.
-- PR: see below.
+- PR: **#26** — https://github.com/maccman/local-brain/pull/26 (base `master`).
