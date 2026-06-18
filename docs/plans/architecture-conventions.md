@@ -242,7 +242,7 @@ Settings owns:
 
 - the active brain's identity: name, color, location, and schema version, plus
   the list of known brains (switch / forget / create / open)
-- model keys
+- AI providers
 - storage path
 - diagnostics
 - CLI and skill setup

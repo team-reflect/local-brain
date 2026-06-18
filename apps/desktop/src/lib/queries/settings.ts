@@ -1,13 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  aiKeySecretName,
+  apiKeyHint,
+  defaultAiProvider,
   databasePath,
   getModelSettings,
   hardDeleteRecord,
   keychainDelete,
+  keychainGet,
   keychainHas,
   keychainSet,
   rebuildSearchIndexes,
+  setAiProvidersState,
   setModelEnabled,
+  withAiProviderAdded,
+  withAiProviderRemoved,
+  type AiProviderConfig,
+  type AiProviderId,
   type DeletableKind,
 } from '@local-brain/core'
 
@@ -39,20 +48,92 @@ export function useSetModelEnabled() {
   })
 }
 
-/** Store/clear the provider key in the keychain, then re-register the provider. */
-export function useSetProviderKey() {
+async function refreshModelQueries(queryClient: ReturnType<typeof useQueryClient>): Promise<void> {
+  const { refreshModelProvider } = await import('../ai/install-model')
+  await refreshModelProvider()
+  void queryClient.invalidateQueries({ queryKey: ['keychain-has'] })
+  void queryClient.invalidateQueries({ queryKey: ['model-status'] })
+  void queryClient.invalidateQueries({ queryKey: ['model-settings'] })
+}
+
+export interface NewAiProvider {
+  provider: AiProviderId
+  model: string
+  apiKey: string
+  isDefault: boolean
+}
+
+export function useAddAiProvider() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (vars: { account: string; secret: string | null }) => {
-      if (vars.secret && vars.secret.trim()) await keychainSet(vars.account, vars.secret.trim())
-      else await keychainDelete(vars.account)
-      const { refreshModelProvider } = await import('../ai/install-model')
-      await refreshModelProvider()
+    mutationFn: async (draft: NewAiProvider) => {
+      const settings = await getModelSettings()
+      const id = crypto.randomUUID()
+      const key = draft.apiKey.trim()
+      const entry: AiProviderConfig = {
+        id,
+        provider: draft.provider,
+        model: draft.model,
+        keyHint: apiKeyHint(key),
+      }
+      const secretName = aiKeySecretName(id)
+      await keychainSet(secretName, key)
+      const next = withAiProviderAdded(
+        { providers: settings.providers, defaultProviderId: settings.defaultProviderId },
+        entry,
+        draft.isDefault,
+      )
+      try {
+        await setAiProvidersState(next.providers, next.defaultProviderId)
+      } catch (error) {
+        await keychainDelete(secretName).catch(() => {})
+        throw error
+      }
     },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['keychain-has'] })
-      void queryClient.invalidateQueries({ queryKey: ['model-status'] })
-      void queryClient.invalidateQueries({ queryKey: ['model-settings'] })
+    onSuccess: async () => {
+      await refreshModelQueries(queryClient)
+    },
+  })
+}
+
+export function useRemoveAiProvider() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const secretName = aiKeySecretName(id)
+      const priorSecret = await keychainGet(secretName).catch(() => null)
+      await keychainDelete(secretName)
+      const settings = await getModelSettings()
+      const next = withAiProviderRemoved(
+        { providers: settings.providers, defaultProviderId: settings.defaultProviderId },
+        id,
+      )
+      try {
+        await setAiProvidersState(next.providers, next.defaultProviderId)
+      } catch (error) {
+        if (priorSecret) await keychainSet(secretName, priorSecret).catch(() => {})
+        throw error
+      }
+    },
+    onSuccess: async () => {
+      await refreshModelQueries(queryClient)
+    },
+  })
+}
+
+export function useMakeDefaultAiProvider() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const settings = await getModelSettings()
+      const fallback = defaultAiProvider({
+        providers: settings.providers,
+        defaultProviderId: id,
+      })
+      await setAiProvidersState(settings.providers, fallback?.id ?? null)
+    },
+    onSuccess: async () => {
+      await refreshModelQueries(queryClient)
     },
   })
 }

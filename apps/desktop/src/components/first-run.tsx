@@ -12,7 +12,8 @@ import { useRouter } from '../routing/router'
 /**
  * First-run onboarding (Plan 09). Shown once on a fresh install: it confirms
  * where the local brain lives, the (honest) model-boundary status, and how to
- * start — set a provider key or drive it from the `brain` CLI.
+<<<<<<< HEAD
+ * start — set an AI provider or drive it from the `brain` CLI.
  * Dismissing it sets a settings flag so it never reappears.
  */
 export function FirstRun(): ReactNode {
@@ -103,7 +104,7 @@ export function FirstRun(): ReactNode {
             <span>
               <span className="font-medium text-foreground">Bring your own model (optional)</span>
               <span className="mt-0.5 block text-muted-foreground">
-                Ask and extraction stay off until you add a provider key.{' '}
+                Ask and extraction stay off until you add an AI provider.{' '}
                 {model.data?.configured
                   ? model.data.canRun
                     ? 'A model is configured.'
@@ -129,11 +130,11 @@ export function FirstRun(): ReactNode {
             type="button"
             onClick={() => {
               complete.mutate()
-              navigate({ kind: 'settings', section: 'model-keys' })
+              navigate({ kind: 'settings', section: 'ai-providers' })
             }}
             className="text-sm text-muted-foreground hover:text-foreground"
           >
-            Set up a model key
+            Set up an AI provider
           </button>
           <button
             type="button"

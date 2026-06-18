@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { appVersion, type BrainInfo } from '@local-brain/core'
+import { AiProvidersSettings } from '../components/ai-providers-settings'
 import { Check, FolderOpen, Plus, SquareArrowOutUpRight } from 'lucide-react'
 import { BrainDialog, type BrainDialogMode } from '../components/brain-dialog'
 import { BrainSwatch } from '../components/brain-swatch'
@@ -15,7 +16,6 @@ import {
   useDatabasePath,
   useEmbeddingsStatus,
   useForgetBrain,
-  useKeychainHas,
   useModelSettings,
   useModelStatus,
   useOpenBrain,
@@ -24,8 +24,6 @@ import {
   useRevealBrain,
   useSetBrainColor,
   useSetEmbeddingsEnabled,
-  useSetModelEnabled,
-  useSetProviderKey,
 } from '../lib/queries'
 import type { EmbeddingsStatus } from '@local-brain/core'
 import { useRouter } from '../routing/router'
@@ -40,7 +38,7 @@ interface SettingsSection {
 const SECTIONS: readonly SettingsSection[] = [
   { key: 'general', label: 'General' },
   { key: 'brain', label: 'Brain' },
-  { key: 'model-keys', label: 'Model keys' },
+  { key: 'ai-providers', label: 'AI providers' },
   { key: 'search', label: 'Semantic search' },
   { key: 'database', label: 'Local database' },
   { key: 'skills', label: 'Skills' },
@@ -107,7 +105,8 @@ function SectionBody({ section }: { section: string }): ReactNode {
     case 'brain':
       return <BrainSettings />
     case 'model-keys':
-      return <ModelBoundary />
+    case 'ai-providers':
+      return <AiProvidersSettings />
     case 'search':
       return <SemanticSearch />
     case 'database':
@@ -343,95 +342,6 @@ function Skills(): ReactNode {
   )
 }
 
-function ModelBoundary(): ReactNode {
-  const status = useModelStatus()
-  const settings = useModelSettings()
-  const hasKey = useKeychainHas('anthropic')
-  const setKey = useSetProviderKey()
-  const setEnabled = useSetModelEnabled()
-  const [draftKey, setDraftKey] = useState('')
-  const data = status.data
-
-  return (
-    <Section title="Model keys">
-      <div className="flex flex-col gap-3 text-sm">
-        <p className="text-muted-foreground">
-          Ask and model-backed extraction call your own provider key (BYOK). The key is stored in the
-          OS keychain — never in app settings — and is sent only to the provider you choose.
-        </p>
-
-        <div className="flex items-center gap-2">
-          <input
-            type="password"
-            value={draftKey}
-            onChange={(event) => setDraftKey(event.target.value)}
-            placeholder={hasKey.data ? 'A key is stored — enter a new one to replace it' : 'sk-ant-…'}
-            className="flex-1 rounded-md border border-border bg-card px-3 py-2 font-mono text-xs outline-none focus:border-primary/50"
-          />
-          <button
-            type="button"
-            disabled={setKey.isPending || draftKey.trim().length === 0}
-            onClick={() => {
-              setKey.mutate({ account: 'anthropic', secret: draftKey })
-              setDraftKey('')
-            }}
-            className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-40"
-          >
-            Save key
-          </button>
-          {hasKey.data ? (
-            <button
-              type="button"
-              disabled={setKey.isPending}
-              onClick={() => setKey.mutate({ account: 'anthropic', secret: null })}
-              className="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-secondary/60"
-            >
-              Clear
-            </button>
-          ) : null}
-        </div>
-
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
-          <input
-            type="checkbox"
-            checked={settings.data?.enabled ?? true}
-            onChange={(event) => setEnabled.mutate(event.target.checked)}
-          />
-          Allow external model calls (master kill switch)
-        </label>
-
-        <div className="rounded-md border border-border bg-card px-4 py-3">
-          {data ? (
-            <dl className="grid grid-cols-[8rem_1fr] gap-x-3 gap-y-1.5 text-xs">
-              <dt className="text-muted-foreground">Key stored</dt>
-              <dd className="font-mono text-foreground">{hasKey.data ? 'yes (keychain)' : 'no'}</dd>
-              <dt className="text-muted-foreground">External calls</dt>
-              <dd className="font-mono text-foreground">{data.enabled ? 'enabled' : 'disabled'}</dd>
-              <dt className="text-muted-foreground">Provider</dt>
-              <dd className="font-mono text-foreground">{data.providerId ?? '—'}</dd>
-              <dt className="text-muted-foreground">Model</dt>
-              <dd className="font-mono text-foreground">{data.model ?? '—'}</dd>
-              <dt className="text-muted-foreground">Status</dt>
-              <dd
-                className={cn(
-                  'font-mono',
-                  data.canRun ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400',
-                )}
-              >
-                {data.canRun ? 'ready' : 'not ready'}
-              </dd>
-              <dt className="text-muted-foreground">Detail</dt>
-              <dd className="text-foreground">{data.reason}</dd>
-            </dl>
-          ) : (
-            <span className="text-muted-foreground">Checking model status…</span>
-          )}
-        </div>
-      </div>
-    </Section>
-  )
-}
-
 function megabytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
@@ -618,8 +528,8 @@ function LocalDatabase(): ReactNode {
 function Diagnostics(): ReactNode {
   const info = useQuery({ queryKey: ['app-version'], queryFn: appVersion })
   const model = useModelStatus()
+  const settings = useModelSettings()
   const path = useDatabasePath()
-  const hasKey = useKeychainHas('anthropic')
   const active = useActiveBrain()
   const brains = useBrains()
   const embeddings = useEmbeddingsStatus()
@@ -638,7 +548,14 @@ function Diagnostics(): ReactNode {
     ['migrations', 'applied at startup (schema versioned)'],
     ['lexical search', 'FTS5 (available)'],
     ['semantic search', describeSemantic(embeddings.data)],
-    ['keychain', hasKey.data === undefined ? '…' : hasKey.data ? 'anthropic key stored' : 'no provider key'],
+    [
+      'keychain',
+      settings.data
+        ? settings.data.providers.length > 0
+          ? `${settings.data.providers.length} provider key${settings.data.providers.length === 1 ? '' : 's'} configured`
+          : 'no provider key'
+        : '…',
+    ],
     ['model', model.data ? (model.data.canRun ? 'ready' : `unavailable (${model.data.reason})`) : '…'],
     ['CLI / skill', 'brain sidecar bundled · skills/brain/SKILL.md'],
   ]

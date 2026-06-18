@@ -37,7 +37,7 @@ Top-level sections:
 - **Network:** graph, people, and organizations, with Graph as the default tab.
 - **Projects:** active, waiting, paused, done, and archived projects.
 - **Ask:** AI chat over the local brain with citations.
-- **Settings:** the active brain's identity (name, color, location), model keys,
+- **Settings:** the active brain's identity (name, color, location), AI providers,
   local database path, diagnostics, and skill setup.
 
 A **brain** is the top-level workspace — one local SQLite database. The sidebar
@@ -109,7 +109,7 @@ Ask
 
 Settings
   - brain (identity: name, color, location, schema version; switch/create/open/forget)
-  - model keys
+  - AI providers
   - local database path
   - diagnostics
   - agent skill setup
