@@ -74,7 +74,7 @@ export function SettingsSurface({ section }: { section: string | undefined }): R
         if (!isSettingsSection(next) || suppressScrollRouteSync.current) return
         setActive(next)
         if (next !== (isSettingsSection(section) ? section : DEFAULT_SECTION)) {
-          navigate({ kind: 'settings', section: next })
+          navigate({ kind: 'settings', section: next }, { replace: true })
         }
       },
       { root: null, rootMargin: '-16% 0px -68% 0px', threshold: [0, 0.1, 1] },
