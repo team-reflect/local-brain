@@ -15,11 +15,15 @@ use rusqlite_migration::{Migrations, M};
 
 /// Bumped whenever a migration is appended below. Asserted against the applied
 /// `user_version` in tests so the constant can never drift from the list.
-pub const LATEST_SCHEMA_VERSION: usize = 1;
+pub const LATEST_SCHEMA_VERSION: usize = 2;
 
 /// Ordered schema migrations, embedded from `migrations/*.sql`.
-static MIGRATIONS: LazyLock<Migrations<'static>> =
-    LazyLock::new(|| Migrations::new(vec![M::up(include_str!("../migrations/0001_init.sql"))]));
+static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
+    Migrations::new(vec![
+        M::up(include_str!("../migrations/0001_init.sql")),
+        M::up(include_str!("../migrations/0002_launch_schema.sql")),
+    ])
+});
 
 /// A schema/open/migrate failure, surfaced to the desktop app and CLI.
 #[derive(Debug)]
@@ -136,5 +140,86 @@ mod tests {
         let path = dir.path().join("brain.sqlite");
         let _conn = open_and_migrate(&path).unwrap();
         assert!(path.exists());
+    }
+
+    /// Every durable product table named in docs/launch-schema.md exists.
+    #[test]
+    fn durable_tables_exist() {
+        let conn = open_in_memory().unwrap();
+        let durable = [
+            "people",
+            "organizations",
+            "affiliations",
+            "projects",
+            "tasks",
+            "interactions",
+            "documents",
+            "content_chunks",
+            "memories",
+            "memory_links",
+            "evidence_refs",
+            "tags",
+            "taggings",
+            "chat_conversations",
+            "chat_messages",
+            "settings",
+        ];
+        for table in durable {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1, "missing durable table: {table}");
+        }
+    }
+
+    #[test]
+    fn foreign_keys_are_enforced() {
+        let conn = open_in_memory().unwrap();
+        let result = conn.execute(
+            "INSERT INTO affiliations (id, person_id, organization_id) VALUES ('a1', 'nope', 'nope')",
+            [],
+        );
+        assert!(result.is_err(), "expected a foreign-key violation");
+    }
+
+    #[test]
+    fn at_most_one_self_person() {
+        let conn = open_in_memory().unwrap();
+        conn.execute(
+            "INSERT INTO people (id, full_name, is_self) VALUES ('p1', 'Me', 1)",
+            [],
+        )
+        .unwrap();
+        let second = conn.execute(
+            "INSERT INTO people (id, full_name, is_self) VALUES ('p2', 'Also Me', 1)",
+            [],
+        );
+        assert!(
+            second.is_err(),
+            "expected the self-row unique index to fire"
+        );
+    }
+
+    #[test]
+    fn fts_indexes_document_body_text() {
+        let conn = open_in_memory().unwrap();
+        conn.execute(
+            "INSERT INTO documents (id, title, body_text) VALUES ('d1', 'Roadmap', 'quarterly planning notes')",
+            [],
+        )
+        .unwrap();
+        let id: String = conn
+            .query_row(
+                "SELECT d.id FROM documents_fts f JOIN documents d ON d.rowid = f.rowid \
+                 WHERE documents_fts MATCH 'planning'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(id, "d1");
     }
 }
