@@ -52,7 +52,6 @@ export function AppShell(): ReactNode {
   return (
     <div className="flex h-full min-h-0">
       <aside className="flex min-h-0 w-[260px] shrink-0 flex-col overflow-y-auto overscroll-contain border-r border-border bg-[hsl(var(--lb-sidebar))] py-5">
-        <BrainSwitcher />
         <div className="flex items-center justify-end gap-1 px-4 pb-3">
           <button
             type="button"
@@ -95,7 +94,8 @@ export function AppShell(): ReactNode {
             )
           })}
         </nav>
-        <div className="mt-auto flex items-center justify-end px-4 pt-4">
+        <div className="mt-auto flex items-center gap-1 px-4 pt-4">
+          <BrainSwitcher />
           <button
             type="button"
             onClick={() => navigate({ kind: 'settings' })}

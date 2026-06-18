@@ -12,7 +12,7 @@ const ITEM_CLASS =
 
 /**
  * The top-level brain picker — Local Brain's port of Reflect's graph switcher.
- * Sits in the sidebar brand slot: the active brain's swatch + name, opening a
+ * Sits in the sidebar footer: the active brain's swatch + name, opening a
  * keyboard-navigable menu to switch brain, create or open another, reveal the
  * file, or jump to brain settings. "Brain" is the workspace container; the word
  * "Graph" stays reserved for the Network visualization.
@@ -79,13 +79,13 @@ export function BrainSwitcher(): ReactNode {
   }
 
   return (
-    <div className="relative px-4 pb-1">
+    <div className="relative min-w-0 flex-1">
       <button
         type="button"
         aria-haspopup="menu"
         aria-expanded={menuOpen}
         onClick={() => setMenuOpen((open) => !open)}
-        className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-secondary/60"
+        className="flex h-8 w-full items-center gap-2.5 rounded-md px-2 text-left transition-colors hover:bg-secondary/60"
       >
         <BrainSwatch color={activeBrain?.color} className="size-[18px]" />
         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
@@ -102,7 +102,7 @@ export function BrainSwitcher(): ReactNode {
             role="menu"
             aria-label="Switch brain"
             onKeyDown={onMenuKeyDown}
-            className="absolute left-3 right-3 top-full z-50 mt-1 flex flex-col gap-0.5 rounded-lg border border-border bg-popover p-1 shadow-[0_8px_28px_rgba(2,6,23,0.16)]"
+            className="absolute bottom-full left-0 right-0 z-50 mb-1 flex flex-col gap-0.5 rounded-lg border border-border bg-popover p-1 shadow-[0_8px_28px_rgba(2,6,23,0.16)]"
           >
             {others.map((brain) => (
               <button
