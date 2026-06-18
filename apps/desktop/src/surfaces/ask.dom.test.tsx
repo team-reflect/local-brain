@@ -15,4 +15,29 @@ describe('AskSurface model boundary', () => {
     renderWithProviders(<AskSurface conversationId={undefined} />)
     await waitFor(() => expect(screen.getByText(/No model provider is configured/)).toBeDefined())
   })
+
+  it('keeps existing messages visible when the model boundary is closed', async () => {
+    installFakeBridge({
+      query: (sql) => {
+        if (sql.includes('chat_messages') || sql.includes('chatMessages')) {
+          return [
+            {
+              id: 'msg-1',
+              conversationId: 'chat-1',
+              role: 'user',
+              content: 'What did we decide?',
+              model: null,
+              createdAt: '2026-06-18T00:00:00.000Z',
+            },
+          ]
+        }
+        return []
+      },
+    })
+
+    renderWithProviders(<AskSurface conversationId="chat-1" />)
+
+    await waitFor(() => expect(screen.getByText('What did we decide?')).toBeDefined())
+    expect(screen.queryByText(/No model provider is configured/)).toBeNull()
+  })
 })

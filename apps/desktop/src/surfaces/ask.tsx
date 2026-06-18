@@ -49,11 +49,13 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
   const status = modelStatus.data
   const messageList = messages.data ?? []
   const closed = status && !status.canRun
+  const closedReason = closed ? status.reason : null
+  const showClosedBoundary = closedReason !== null && messageList.length === 0
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {closed ? (
-        <ClosedBoundary reason={status.reason} />
+      {showClosedBoundary ? (
+        <ClosedBoundary reason={closedReason} />
       ) : (
         <MessageList conversationId={conversationId} messages={messageList} pending={pending} />
       )}
