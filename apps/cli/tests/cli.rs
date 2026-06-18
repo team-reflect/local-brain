@@ -484,6 +484,114 @@ fn add_asset_rolls_back_manifest_when_file_write_fails() {
 }
 
 #[test]
+fn add_interaction_dedupes_by_external_id_and_enriches_provenance() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let person = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Sam Rivera",
+            "--email",
+            "sam@example.com",
+        ],
+    );
+    let person_id = person["id"].as_str().unwrap();
+    let link = format!("person:{person_id}");
+
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Intro",
+            "--text",
+            "Thanks for the introduction.",
+        ],
+    );
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Intro",
+            "--text",
+            "Thanks for the introduction.",
+            "--external-id",
+            "gmail:msg-1",
+            "--original-url",
+            "https://mail.google.com/mail/u/0/#inbox/msg-1",
+            "--link",
+            &link,
+        ],
+    );
+    assert_eq!(second["isDuplicate"], true);
+    assert_eq!(second["id"], first["id"]);
+
+    let third = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Intro updated",
+            "--text",
+            "A later import has slightly different body text.",
+            "--external-id",
+            "gmail:msg-1",
+            "--link",
+            &link,
+        ],
+    );
+    assert_eq!(third["isDuplicate"], true);
+    assert_eq!(third["id"], first["id"]);
+
+    let conn = Connection::open(&db).unwrap();
+    let (external_id, original_url): (String, String) = conn
+        .query_row(
+            "SELECT external_id, original_url FROM interactions WHERE id = ?1",
+            [first["id"].as_str().unwrap()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(external_id, "gmail:msg-1");
+    assert_eq!(
+        original_url,
+        "https://mail.google.com/mail/u/0/#inbox/msg-1"
+    );
+    let interactions: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM interactions WHERE external_id = 'gmail:msg-1'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(interactions, 1);
+    let participants: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM interaction_participants WHERE interaction_id = ?1 AND person_id = ?2",
+            (first["id"].as_str().unwrap(), person_id),
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(participants, 1);
+}
+
+#[test]
 fn search_finds_added_records_by_full_text() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);

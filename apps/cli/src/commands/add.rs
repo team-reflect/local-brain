@@ -104,7 +104,9 @@ fn insert_links(
 ) -> Result<(), CliError> {
     for link in links {
         let (table, owner_col, other_col, other) = link_table(owner, link)?;
-        let sql = format!("INSERT INTO {table} (id, {owner_col}, {other_col}) VALUES (?1,?2,?3)");
+        let sql = format!(
+            "INSERT OR IGNORE INTO {table} (id, {owner_col}, {other_col}) VALUES (?1,?2,?3)"
+        );
         conn.execute(&sql, params![new_id(), owner_id, link.id])
             .map_err(|e| CliError::Runtime(format!("could not link {other}: {e}")))?;
     }
@@ -595,6 +597,57 @@ pub struct AddInteractionArgs<'a> {
     pub allow_duplicate: bool,
 }
 
+fn find_duplicate_interaction(
+    conn: &Connection,
+    hash: &str,
+    external_id: Option<&str>,
+) -> Result<Option<String>, CliError> {
+    if let Some(external_id) = normalize_optional(external_id) {
+        let id = conn
+            .query_row(
+                "SELECT id FROM interactions
+                 WHERE archived_at IS NULL
+                   AND external_id IS NOT NULL
+                   AND external_id = ?1
+                 LIMIT 1",
+                params![external_id],
+                |row| row.get::<_, String>(0),
+            )
+            .ok();
+        if id.is_some() {
+            return Ok(id);
+        }
+    }
+    find_duplicate(conn, "interactions", hash)
+}
+
+fn enrich_duplicate_interaction(
+    conn: &Connection,
+    id: &str,
+    args: &AddInteractionArgs,
+) -> Result<(), CliError> {
+    conn.execute(
+        "UPDATE interactions
+         SET external_id = CASE
+               WHEN (external_id IS NULL OR trim(external_id) = '') AND ?1 IS NOT NULL
+               THEN ?1 ELSE external_id END,
+             original_url = CASE
+               WHEN (original_url IS NULL OR trim(original_url) = '') AND ?2 IS NOT NULL
+               THEN ?2 ELSE original_url END,
+             updated_at = CASE
+               WHEN ((external_id IS NULL OR trim(external_id) = '') AND ?1 IS NOT NULL)
+                 OR ((original_url IS NULL OR trim(original_url) = '') AND ?2 IS NOT NULL)
+               THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE updated_at END
+         WHERE id = ?3",
+        params![
+            normalize_optional(args.external_id),
+            normalize_optional(args.original_url),
+            id,
+        ],
+    )?;
+    Ok(())
+}
+
 pub fn add_interaction(
     conn: &mut Connection,
     json: bool,
@@ -602,8 +655,12 @@ pub fn add_interaction(
 ) -> Result<(), CliError> {
     let body = normalize_text(&args.body);
     let hash = content_hash(&body);
-    if let Some(existing) = find_duplicate(conn, "interactions", &hash)? {
+    if let Some(existing) = find_duplicate_interaction(conn, &hash, args.external_id)? {
         if !args.allow_duplicate {
+            let tx = conn.transaction()?;
+            enrich_duplicate_interaction(&tx, &existing, &args)?;
+            insert_links(&tx, "interaction", &existing, &args.links)?;
+            tx.commit()?;
             return report_record(json, "interaction", &existing, true, 0);
         }
     }
