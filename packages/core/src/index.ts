@@ -186,6 +186,82 @@ export {
 // Quick search (command palette)
 export { quickSearch } from './search/getters'
 
+// Retrieval (the one shared FTS5 retrieve() contract + global search)
+export {
+  retrieve,
+  globalSearch,
+  toMatchQuery,
+  toLikePattern,
+  lexicalScore,
+  recencyScore,
+  combineScore,
+  RECENCY_HALF_LIFE_DAYS,
+  RETRIEVABLE_SOURCE_KINDS,
+  type RetrievalMode,
+  type RetrievalResult,
+  type RetrievedChunk,
+  type RetrieveOptions,
+  type SourceRecordType as RetrievalSourceType,
+  type SearchHit,
+  type SearchOptions,
+  type RankInputs,
+} from './retrieval'
+
+// Settings (typed key/value store backing the model boundary, storage, backup)
+export {
+  getSetting,
+  getSettingRaw,
+  listSettings,
+  setSetting,
+  deleteSetting,
+  type SettingEntry,
+} from './domains/settings'
+
+// AI: BYOK model boundary, cited Ask, model-backed extractor
+export {
+  setModelProvider,
+  getModelProvider,
+  getModelStatus,
+  ModelUnavailableError,
+  MODEL_ENABLED_KEY,
+  assembleAnswerContext,
+  citedSubset,
+  ask,
+  createModelExtractor,
+  extractJsonObject,
+  createAnthropicProvider,
+  buildAnthropicBody,
+  readAnthropicText,
+  type ModelProvider,
+  type ModelRequest,
+  type ModelMessage,
+  type ModelCompletion,
+  type ModelUsage,
+  type ModelStatus,
+  type AssembledContext,
+  type AnswerCitation,
+  type AskResult,
+  type AskCitation,
+  type AskOptions,
+  type AnthropicOptions,
+} from './ai'
+
+// Agent report endpoints (daily brief, plan-day, changes, waiting items)
+export {
+  getDailyBrief,
+  planDay,
+  getWaitingItems,
+  getChangesSince,
+  OPEN_TASK_STATUSES,
+  type DailyBrief,
+  type DailyBriefOptions,
+  type BriefTask,
+  type BriefInteraction,
+  type TaskBucket,
+  type PlanDayOptions,
+  type ChangedRecord,
+} from './reports'
+
 // Ingestion (paste/import → document/interaction + chunks + links)
 export { normalizeText, chunkText, type Chunk, type ChunkOptions } from './ingest/chunk'
 export { contentHash } from './ingest/hash'

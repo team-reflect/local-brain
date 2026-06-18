@@ -7,6 +7,23 @@ questions needing Alex.
 
 ## Current State
 
+- **Phase:** 06 — Search, retrieval & AI (**complete, PR #15 open**). Built the one shared
+  FTS5 `retrieve()` contract + `globalSearch()`, the BYOK model boundary (`ModelProvider` seam,
+  checked `getModelStatus()`, the single typed `assembleAnswerContext` helper), the cited
+  `ask()` pipeline (persists `evidence_refs` per cited source), the model-backed
+  `createModelExtractor()` feeding the 05a seam, a concrete Anthropic provider, and the agent
+  report endpoints (`getDailyBrief`/`planDay`/`getWaitingItems`/`getChangesSince`). Desktop: Ask
+  rewritten to real cited answers with source-opening citations + honest closed-boundary banner;
+  palette upgraded to FTS; Settings → Model + Diagnostics show live boundary/search status.
+  `pnpm check` green (**144 tests**), Vite build green, cargo gates green. **Plan 06 complete.**
+  Stack continues to Plan 07 (CLI + skills) on top of `…-06-search-ai`. See DEC-14.
+- **Active branch:** `codex/local-brain-06-search-ai` (base `…-05b-corrections`).
+- **Blockers:** none. Embeddings/semantic deferred (clean lexical fallback); live desktop model
+  answers need a provider key (keychain wiring is Plan 08); CLI Ask/search reimplements
+  retrieval SQL in Rust in Plan 07.
+
+### Prior phase (05b)
+
 - **Phase:** 05b — Extraction corrections + relationship intelligence: the deterministic
   second half of Plan 05 (steps 8–9), which **completes Plan 05**. Correction setters in
   `packages/core` (memories: `updateMemory`/`archiveMemory`/`unlink|linkMemoryToRecord`;
@@ -26,6 +43,38 @@ questions needing Alex.
 - **Blockers:** none at this checkpoint.
 
 ## Log
+
+### 2026-06-17 — Phase 06: Search, retrieval & AI (Plan 06 complete)
+- **Retrieval (`packages/core/src/retrieval`):** one shared `retrieve()` over FTS5
+  `content_chunks` (bm25 + `snippet()`; OR-recall sanitization so question stopwords don't gate;
+  recency + explicit-link re-rank; `mode` accepts lexical/semantic/hybrid and degrades to lexical
+  with `semanticAvailable:false`). `globalSearch()` spans the six record types (FTS for
+  documents/interactions, name LIKE for the rest). Pure `match-query`/`ranking` unit-tested.
+- **Model boundary (`packages/core/src/ai`):** a runtime `ModelProvider` seam (`setModelProvider`),
+  `getModelStatus()` gating on *both* a present/available provider and the external-calls setting,
+  the single typed `assembleAnswerContext` + `citedSubset` (all external context flows through it),
+  the cited `ask()` pipeline (retrieve → assemble → generate → persist answer + one `evidence_refs`
+  per cited source on the assistant message; honest "not configured" turn when the boundary is
+  closed, `answered:false`), the model-backed `createModelExtractor()` (prompts the contract,
+  parses JSON, feeds the 05a apply seam), and a concrete `createAnthropicProvider`.
+- **Reports (`packages/core/src/reports`):** `getDailyBrief` (bucketed overdue/today/soon/open
+  tasks + recent interactions + reconnects + counts), `planDay`, `getWaitingItems`,
+  `getChangesSince`.
+- **Settings store (`packages/core/src/domains/settings`):** typed key/value over the `settings`
+  table (`getSetting`/`setSetting`/`listSettings`), backing the model-enabled flag (and Plans 08+).
+- **Desktop:** Ask rewritten to the real cited pipeline — answers render with a numbered source
+  list that opens the owning document/interaction, model id shown, and a closed-boundary banner;
+  the command palette now uses FTS `globalSearch`; Settings → Model shows the live boundary status;
+  Diagnostics shows model + lexical(FTS5)/semantic status; `installModel()` registers the provider
+  (optional `VITE_ANTHROPIC_API_KEY` dev key) and the extractor at startup.
+- **Decision DEC-14:** provider seam now; key source per host later (desktop keychain in Plan 08,
+  CLI env in Plan 07). No heuristic faking — the boundary is exercised with a mock provider.
+- **Verification:** `pnpm check` ✓ — typecheck + oxlint (clean) + **144 tests** (111 core: +8
+  match-query, +6 ranking, +4 context, +5 extractor-json, +4 anthropic, +10 real-SQLite Plan-06
+  round-trips; 4 db; 33 desktop incl. a new Ask closed-boundary render test + the palette switched
+  to global search). `pnpm --filter @local-brain/desktop build` ✓ (2075 modules). `cargo fmt
+  --all -- --check` ✓; `cargo check --workspace` ✓; `cargo test --workspace` ✓ (18 tests).
+  `git diff --check` ✓.
 
 ### 2026-06-17 — Phase 05b: Extraction corrections + relationship intelligence (Plan 05 complete)
 - Built the deterministic second half of Plan 05 (steps 8–9). **No model**; everything is a

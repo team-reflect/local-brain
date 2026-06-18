@@ -40,6 +40,11 @@ import {
   seedDemoData,
   unlinkMemoryFromRecord,
   unlinkRecords,
+  ask,
+  getDailyBrief,
+  getModelStatus,
+  globalSearch,
+  type AskOptions,
   type IngestDocumentInput,
   type IngestInteractionInput,
   type LinkedRecord,
@@ -325,4 +330,42 @@ export function useAddMessage() {
       void queryClient.invalidateQueries({ queryKey: ['conversations'] })
     },
   })
+}
+
+// Ask: the cited-answer pipeline (Plan 06). Persists user + assistant turns and
+// evidence; invalidates the thread, the conversation list, and the assistant
+// message's citations.
+export function useAsk() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { question: string } & AskOptions) => {
+      const { question, ...options } = vars
+      return ask(question, options)
+    },
+    onSuccess: (result) => {
+      void queryClient.invalidateQueries({ queryKey: ['messages', result.conversationId] })
+      void queryClient.invalidateQueries({ queryKey: ['conversations'] })
+      void queryClient.invalidateQueries({ queryKey: ['citations', 'chat_message', result.messageId] })
+    },
+  })
+}
+
+/** The model-boundary status (configured? enabled? can it run?). */
+export function useModelStatus() {
+  return useQuery({ queryKey: ['model-status'], queryFn: getModelStatus })
+}
+
+/** Full-text global search across record types (Plan 06). */
+export function useGlobalSearch(query: string) {
+  const trimmed = query.trim()
+  return useQuery({
+    queryKey: ['global-search', trimmed],
+    queryFn: () => globalSearch(trimmed),
+    enabled: trimmed.length > 0,
+  })
+}
+
+/** The daily brief: bucketed tasks, recent interactions, reconnects. */
+export function useDailyBrief() {
+  return useQuery({ queryKey: ['daily-brief'], queryFn: () => getDailyBrief() })
 }
