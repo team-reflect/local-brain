@@ -22,7 +22,12 @@ export function EmbeddingsSync(): null {
     if (!data || !data.enabled) return
 
     // 1. Bring the runtime up (idempotent; the command coalesces concurrent calls).
-    if ((data.runtime.status === 'uninitialized' || data.runtime.status === 'failed') && !ensuring.current) {
+    //    Only auto-ensure from `uninitialized`. A `failed` runtime means the load
+    //    already errored (download/onnx); retrying it on every 1.5s poll would
+    //    hammer a permanent failure, so we stop and wait for an explicit user
+    //    action — re-enabling the setting or "Rebuild index" both call
+    //    `embedEnsure()` directly (see lib/queries/embeddings.ts).
+    if (data.runtime.status === 'uninitialized' && !ensuring.current) {
       ensuring.current = true
       void embedEnsure().finally(() => {
         ensuring.current = false

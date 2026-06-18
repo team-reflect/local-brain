@@ -104,6 +104,20 @@ vec0 cosine-KNN ordering, and a real end-to-end model + KNN test (ranks by meani
 - Re-verified: `git diff --check` clean, `pnpm check` (138 core + 43 desktop), desktop
   build, `cargo fmt`/`check`, `cargo test --workspace` (50 tests).
 
+## Post-review fixes — second pass (Cursor Bugbot on PR #27, head 8470dd5)
+- **Medium — failed load retriggered the ensure loop:** `EmbeddingsSync` now auto-loads the
+  runtime only from `uninitialized`; a `failed` runtime is left alone instead of re-running
+  the model download/load on every 1.5s status poll. `useEmbeddingsStatus` also stops polling
+  on `failed` (backfill is gated on `ready`, so pending can't drain by itself). Recovery is
+  user-driven — re-enabling the setting and "Rebuild index" both call `embedEnsure()`
+  directly. New `apps/desktop/src/components/embeddings-sync.dom.test.tsx`.
+- **Medium — KNN ignored the embedding model id:** `semanticHits` pins the `chunk_embeddings`
+  join to the current `EMBEDDING_MODEL_ID`, so stale vectors from a previous model (after a
+  model change or partial rebuild) can't rank into semantic/hybrid results. New model-id
+  restriction case in `semantic.test.ts`.
+- Re-verified (TypeScript-only pass; no `src-tauri`/crate edits, so Rust checks not re-run):
+  `git diff --check` clean, `pnpm check` (139 core + 45 desktop), desktop build pass.
+
 ## Repo state
 - Branch: `codex/local-brain-reflect-embeddings`
 - PR: https://github.com/maccman/local-brain/pull/27 (base `master`)

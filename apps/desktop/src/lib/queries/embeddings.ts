@@ -25,6 +25,11 @@ export function useEmbeddingsStatus() {
     refetchInterval: (query) => {
       const data = query.state.data
       if (!data || !data.enabled) return false
+      // Don't poll a `failed` runtime: backfill is gated on `ready`, so pending
+      // never drains on its own, and `EmbeddingsSync` no longer auto-retries the
+      // load. Recovery comes from an explicit user action (re-enable / rebuild),
+      // whose mutation invalidates this query.
+      if (data.runtime.status === 'failed') return false
       const busy = data.runtime.status === 'loading' || data.pending > 0
       return busy ? 1500 : false
     },

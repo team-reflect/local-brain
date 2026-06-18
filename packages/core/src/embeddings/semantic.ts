@@ -1,6 +1,7 @@
 import { sql } from 'kysely'
 import { db } from '../db/client'
 import type { RetrievedChunk, SourceRecordType } from '../retrieval/retrieve'
+import { EMBEDDING_MODEL_ID } from './model'
 
 /**
  * Semantic retrieval over the `chunk_vectors` (sqlite-vec) projection, plus the
@@ -42,7 +43,10 @@ function previewOf(text: string, max = 240): string {
  * Nearest chunks to `queryVector` by cosine distance, mapped to the shared
  * {@link RetrievedChunk} shape. The KNN runs in a CTE so the `MATCH … AND k`
  * constraint stays on the vec0 table alone, then the join + archived/record-type
- * filters apply to the neighbours. `score` is cosine similarity (1 − distance).
+ * filters apply to the neighbours. The `chunk_embeddings` join is pinned to the
+ * current {@link EMBEDDING_MODEL_ID} so vectors left over from an older model
+ * (after a model change or a partial rebuild) can never rank into the results.
+ * `score` is cosine similarity (1 − distance).
  */
 export async function semanticHits(
   queryVector: readonly number[],
@@ -69,7 +73,7 @@ export async function semanticHits(
       COALESCE(d.title, i.title) AS "recordTitle",
       knn.distance               AS "distance"
     FROM knn
-    JOIN chunk_embeddings ce ON ce.id = knn.rowid
+    JOIN chunk_embeddings ce ON ce.id = knn.rowid AND ce.model_id = ${EMBEDDING_MODEL_ID}
     JOIN content_chunks cc   ON cc.id = ce.chunk_id
     LEFT JOIN documents d    ON d.id = cc.record_id AND cc.record_type = 'document'
     LEFT JOIN interactions i ON i.id = cc.record_id AND cc.record_type = 'interaction'

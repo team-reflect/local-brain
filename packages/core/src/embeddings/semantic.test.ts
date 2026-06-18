@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { setBridge } from '../ipc/bridge'
 import type { RetrievedChunk } from '../retrieval/retrieve'
+import { EMBEDDING_MODEL_ID } from './model'
 import { fuseRanked, semanticHits, MAX_COSINE_DISTANCE } from './semantic'
 
 function hit(chunkId: string, overrides: Partial<RetrievedChunk> = {}): RetrievedChunk {
@@ -66,5 +67,22 @@ describe('semanticHits', () => {
     expect(hits[0]?.score).toBeCloseTo(0.9)
     expect(hits[0]?.semanticScore).toBeCloseTo(0.9)
     expect(hits[1]?.score).toBeCloseTo(0.5)
+  })
+
+  it('restricts the KNN join to the current embedding model id (excludes stale vectors)', async () => {
+    // A real vec0 KNN can't run under Node's SQLite (see pipeline.test.mjs), so
+    // assert the contract at the query level: the chunk_embeddings join must pin
+    // model_id so vectors from an older model can't rank in after a model change.
+    let captured: { sql: string; params: unknown[] } | undefined
+    setBridge({
+      invoke: (command, args) => {
+        if (command !== 'db_query') return Promise.reject(new Error(`unexpected ${command}`))
+        captured = args as { sql: string; params: unknown[] }
+        return Promise.resolve([])
+      },
+    })
+    await semanticHits([0.1, 0.2], { limit: 10 })
+    expect(captured?.sql).toMatch(/ce\.model_id\s*=/)
+    expect(captured?.params).toContain(EMBEDDING_MODEL_ID)
   })
 })

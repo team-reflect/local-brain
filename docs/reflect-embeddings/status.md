@@ -48,15 +48,27 @@ Branch: `codex/local-brain-reflect-embeddings` · Base: `master` @ 58c801f
   `download_model_files` and `TextEmbedding::try_new`, so progress and the loader agree on
   one cache path. Pure `resolve_cache_dir` unit tests in `embed/mod.rs` (`cache_dir` mod).
 
-## Verification results
+## Bugbot fixes (second review pass on PR #27, head 8470dd5)
+- ✅ **Medium — failed load retriggered the ensure loop.** `EmbeddingsSync` only
+  auto-`embedEnsure()`s from `uninitialized` now; a `failed` runtime no longer re-triggers
+  the model download/load on every status poll. Recovery is user-driven — re-enabling the
+  setting and "Rebuild index" both call `embedEnsure()` directly. The status poll also
+  stops when the runtime is `failed` (`useEmbeddingsStatus` `refetchInterval`), since
+  backfill is gated on `ready` and pending can never drain on its own. Test:
+  `apps/desktop/src/components/embeddings-sync.dom.test.tsx` (ensures on `uninitialized`,
+  does not on `failed`).
+- ✅ **Medium — KNN ignored the embedding model id.** `semanticHits` now pins the
+  `chunk_embeddings` join to the current `EMBEDDING_MODEL_ID`, so vectors left from an
+  older model (after a model change or partial rebuild) can't rank into semantic/hybrid
+  results. Test added in `semantic.test.ts` (query restricts `model_id`).
+
+## Verification results (second review pass, no Rust touched)
 - `git diff --check` — clean
-- `pnpm check` — pass (lint + typecheck + 138 core + 43 desktop tests + schema-drift)
+- `pnpm check` — pass (lint + typecheck + 139 core + 45 desktop tests + schema-drift)
 - `pnpm --filter @local-brain/desktop build` — pass
-- `cargo fmt --all -- --check` — pass
-- `cargo check --workspace` — pass
-- `cargo test --workspace` — pass (50 tests incl. 3 new `cache_dir` tests)
-- `cargo test -p local-brain-desktop -- --ignored embeds_and_ranks_by_meaning` — pass
-  (real fastembed model + real sqlite-vec KNN ranked by meaning)
+- Rust checks not re-run: this pass changed only TypeScript (no `src-tauri`/crates edits).
+  Prior Rust verification still holds — `cargo fmt`/`check`/`test --workspace` (50 tests)
+  and the ignored `embeds_and_ranks_by_meaning` e2e all passed in the first review pass.
 
 ## Caveats
 - Bundling/notarizing the ONNX runtime and the on-demand ~90MB model download still need a
