@@ -44,6 +44,23 @@ Two Bugbot findings on PR #26, both resolved against the SQLite-backed registry:
 New regression tests (`brains.rs`): persist-fails-no-swap, success persists-then-swaps,
 and failed-metadata-write-leaves-state-unchanged. `cargo test`/`clippy`/`fmt` green.
 
+## Bugbot review fix (2026-06-18, head 7a72f41)
+
+One new Bugbot finding on PR #26, resolved:
+
+1. **Medium — stale workspace key after switch.** `useOpenBrain`/`useCreateBrain`
+   only invalidated the query cache on success, so `App` kept `BrainWorkspace`
+   keyed on the previous brain's path until `active_brain` refetched, while other
+   invalidated queries could already return data from the newly active brain
+   (brief mixed workspace state). Fixed with a `useApplyBrainSwitch` helper that
+   seeds `active-brain` with the returned `BrainInfo` via `setQueryData` *before*
+   invalidating everything else, so `App` re-keys the workspace immediately and
+   the remount reads every invalidated query fresh under the new path.
+
+New regression test (`lib/queries/brains.dom.test.tsx`): a switchable bridge proves
+both open and create seed `active-brain` with the new brain synchronously, before
+any invalidation refetch. `pnpm check` + desktop build green.
+
 ## Progress
 
 - [x] Read AGENTS.md, docs, supervisor skill; mapped Local Brain + both Reflect refs.

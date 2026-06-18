@@ -123,6 +123,23 @@ swap-then-persist ordering), `switch_persists_then_swaps_on_success`, and
 `PRAGMA query_only` does not change read-back state). `cargo test`/`clippy`/`fmt`
 green.
 
+### Follow-up Bugbot finding (head `7a72f41`)
+
+- **Medium — stale workspace key after switch.** `useOpenBrain`/`useCreateBrain`
+  (`apps/desktop/src/lib/queries/brains.ts`) only called `invalidateQueries()` on
+  success and never seeded `active-brain` with the returned `BrainInfo`. `App`
+  keys `<BrainWorkspace>` on `active_brain.data.path`, so it stayed mounted under
+  the *previous* brain's path until `active_brain` refetched — meanwhile other
+  invalidated queries could already resolve against the newly active brain,
+  producing a brief mixed-brain workspace. Fixed by a `useApplyBrainSwitch` helper
+  that `setQueryData(ACTIVE_BRAIN_KEY, brain)` **before** invalidating the rest of
+  the cache: `App` re-keys the workspace to the new path immediately and the
+  remounted tree reads every invalidated query fresh. Metadata-only edits (rename,
+  color) are unchanged. Regression test `apps/desktop/src/lib/queries/brains.dom.test.tsx`
+  drives a switchable bridge and asserts both open and create leave `active-brain`
+  holding the new brain synchronously, before any refetch (the assertion fails
+  under the old invalidate-only behaviour).
+
 ## Caveats / deferred (honest scope)
 
 - **Path field as fallback.** The native OS dialog is the primary affordance; the
