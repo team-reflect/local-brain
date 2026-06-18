@@ -38,7 +38,10 @@ export {
   setEmbeddingsEnabled,
   getBackfillError,
   setBackfillError,
+  getLastBackfillAttemptDay,
+  setLastBackfillAttemptDay,
   EMBEDDINGS_ENABLED_KEY,
   EMBEDDINGS_BACKFILL_ERROR_KEY,
+  EMBEDDINGS_LAST_BACKFILL_ATTEMPT_DAY_KEY,
   type EmbeddingsStatus,
 } from './status'

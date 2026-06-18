@@ -14,11 +14,13 @@ import {
   countPending,
   getBackfillError,
   getEmbeddingsStatus,
+  getLastBackfillAttemptDay,
   ingestDocument,
   pruneOrphanEmbeddings,
   setBackfillError,
   setBridge,
   setEmbeddingsEnabled,
+  setLastBackfillAttemptDay,
 } from '@local-brain/core'
 import { freshDatabase } from '../db/sqlite-harness.mjs'
 
@@ -182,6 +184,7 @@ describe('getEmbeddingsStatus', () => {
     expect(status.pending).toBe(3)
     expect(status.ready).toBe(false)
     expect(status.backfillError).toBeNull()
+    expect(status.lastBackfillAttemptDay).toBeNull()
   })
 
   it('surfaces a persisted backfill error and clears it on null', async () => {
@@ -204,6 +207,16 @@ describe('getEmbeddingsStatus', () => {
     await setBackfillError(null)
     const cleared = await getEmbeddingsStatus()
     expect(cleared.backfillError).toBeNull()
+  })
+
+  it('reports the last local-day backfill attempt marker', async () => {
+    const database = freshDatabase()
+    installComboBridge(database)
+    await setLastBackfillAttemptDay('2026-06-18')
+
+    expect(await getLastBackfillAttemptDay()).toBe('2026-06-18')
+    const status = await getEmbeddingsStatus()
+    expect(status.lastBackfillAttemptDay).toBe('2026-06-18')
   })
 
   it('reports ready once enabled, indexed, and nothing pending', async () => {

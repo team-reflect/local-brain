@@ -14,6 +14,8 @@ import {
   useActiveBrain,
   useBrains,
   useDatabasePath,
+  todayLocalDayKey,
+  useBackfillEmbeddingsNow,
   useEmbeddingsStatus,
   useModelSettings,
   useModelStatus,
@@ -306,13 +308,19 @@ function describeSemantic(status: EmbeddingsStatus | undefined): string {
   }
 }
 
+function describeLastBackfill(day: string | null | undefined): string {
+  if (!day) return 'never'
+  return day === todayLocalDayKey() ? 'today' : day
+}
+
 function SemanticSearch(): ReactNode {
   const query = useEmbeddingsStatus()
   const setEnabled = useSetEmbeddingsEnabled()
+  const backfill = useBackfillEmbeddingsNow()
   const rebuild = useRebuildEmbeddings()
   const status = query.data
   const runtime = status?.runtime
-  const busy = setEnabled.isPending || rebuild.isPending
+  const busy = setEnabled.isPending || backfill.isPending || rebuild.isPending
 
   const indexedPct =
     status && status.totalChunks > 0 ? Math.round((status.indexed / status.totalChunks) * 100) : 0
@@ -410,12 +418,24 @@ function SemanticSearch(): ReactNode {
                   <dd className="font-mono text-foreground">{status.pending} to embed</dd>
                 </>
               ) : null}
+              <dt className="text-muted-foreground">Last backfill</dt>
+              <dd className="font-mono text-foreground">
+                {describeLastBackfill(status.lastBackfillAttemptDay)}
+              </dd>
             </dl>
           </div>
         ) : null}
 
         {status?.enabled ? (
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => backfill.mutate()}
+              className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-40"
+            >
+              {backfill.isPending ? 'Backfilling…' : 'Backfill now'}
+            </button>
             <button
               type="button"
               disabled={busy}
