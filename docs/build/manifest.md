@@ -48,7 +48,7 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 | 04b | Rust file-read primitives (safe reads, size caps, hashing, folder enum) | `codex/local-brain-04b-ingestion-fs` | `…-04a-ingestion-core` | open | [#10](https://github.com/maccman/local-brain/pull/10) |
 | 04c | Ingestion UI (paste/import flows, folder import, Add actions) | `codex/local-brain-04c-ingestion-ui` | `…-04b-ingestion-fs` | open | [#11](https://github.com/maccman/local-brain/pull/11) |
 | 05a | Extraction engine (contracts, preprocessing, merge/apply, model seam) | `codex/local-brain-05a-extraction-engine` | `…-04c-ingestion-ui` | open | [#12](https://github.com/maccman/local-brain/pull/12) |
-| 05b | Extraction corrections + relationship intelligence (UI/setters) | `codex/local-brain-05b-corrections` | `…-05a-extraction-engine` | open | [#13](https://github.com/maccman/local-brain/pull/13) |
+| 05b | Extraction corrections + relationship intelligence (UI/setters) | `codex/local-brain-05b-corrections` | `…-05a-extraction-engine` | open | [#14](https://github.com/maccman/local-brain/pull/14) |
 | 06 | Search, retrieval & AI (incl. the model-backed extractor) | `codex/local-brain-06-search-ai` | `…-05b-corrections` | pending | — |
 | 07 | CLI & agent skills | `codex/local-brain-07-cli-skills` | `…-06-search-ai` | pending | — |
 | 08 | Settings, backup, export & privacy | `codex/local-brain-08-settings` | `…-07-cli-skills` | pending | — |
@@ -333,4 +333,4 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 - PR #10 — Build 04b Rust file-read primitives (safe reads, size caps, hashing, folder enum) — https://github.com/maccman/local-brain/pull/10 (base `…-04a-ingestion-core`, open)
 - PR #11 — Build 04c ingestion UI (paste/import dialog, folder import, Add actions) — https://github.com/maccman/local-brain/pull/11 (base `…-04b-ingestion-fs`, open)
 - PR #12 — Build 05a extraction engine (contracts, preprocessing, merge/apply, model seam) — https://github.com/maccman/local-brain/pull/12 (base `…-04c-ingestion-ui`, open)
-- PR #13 — Build 05b extraction corrections + relationship intelligence — https://github.com/maccman/local-brain/pull/13 (base `…-05a-extraction-engine`, open)
+- PR #14 — Build 05b extraction corrections + relationship intelligence — https://github.com/maccman/local-brain/pull/14 (base `…-05a-extraction-engine`, open)

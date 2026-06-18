@@ -349,7 +349,7 @@ questions needing Alex.
   (schema), **#4** (db package), **#5** (Rust IPC bridge), **#6** (core actions + seed),
   **#7** (03a desktop shell), **#8** (03b desktop shell II), **#9** (04a ingestion core),
   **#10** (04b Rust file-read primitives), **#11** (04c ingestion UI), **#12** (05a
-  extraction engine), **#13** (05b corrections + relationship intelligence — `pnpm check` +
+  extraction engine), **#14** (05b corrections + relationship intelligence — `pnpm check` +
   Vite build green). Plans 02 (DB layer), 03 (desktop shell), 04 (ingestion), and **05
   (memory extraction & correction)** are complete; Plan 06 is next.
   A full end-to-end run of the assembled app (`pnpm tauri dev`/`build`) is still pending and
