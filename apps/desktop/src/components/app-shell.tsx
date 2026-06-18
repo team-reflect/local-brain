@@ -20,6 +20,7 @@ import { BrainSwitcher } from './brain-switcher'
 import { CommandPalette } from './command-palette'
 import { FirstRun } from './first-run'
 import { RouteContent } from './route-content'
+import { WindowDragRegion } from './window-drag-region'
 
 interface NavItem {
   section: string
@@ -51,8 +52,9 @@ export function AppShell(): ReactNode {
 
   return (
     <div className="flex h-full min-h-0">
+      <WindowDragRegion />
       <aside className="flex min-h-0 w-[260px] shrink-0 flex-col overflow-y-auto overscroll-contain border-r border-border bg-[hsl(var(--lb-sidebar))] py-5">
-        <div className="flex items-center justify-end gap-1 px-4 pb-3">
+        <div className="window-drag-control flex items-center justify-end gap-1 px-4 pb-3">
           <button
             type="button"
             onClick={back}
@@ -118,7 +120,7 @@ export function AppShell(): ReactNode {
             type="button"
             onClick={openPalette}
             aria-label="Search or run a command"
-            className="flex h-8 w-[min(760px,100%)] items-center gap-2 rounded-md border border-input bg-card px-3 text-xs text-muted-foreground shadow-sm transition-colors hover:text-foreground"
+            className="window-drag-control flex h-8 w-[min(760px,100%)] items-center gap-2 rounded-md border border-input bg-card px-3 text-xs text-muted-foreground shadow-sm transition-colors hover:text-foreground"
           >
             <Search className="size-3.5" />
             <span className="flex-1 truncate text-left">Search anything…</span>

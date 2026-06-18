@@ -79,7 +79,7 @@ export function BrainSwitcher(): ReactNode {
   }
 
   return (
-    <div className="relative min-w-0 flex-1">
+    <div className="window-drag-control min-w-0 flex-1">
       <button
         type="button"
         aria-haspopup="menu"

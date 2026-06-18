@@ -3,6 +3,13 @@
 /* Dark variant keyed to the `.dark` scope set on <html> by the theme provider. */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Controls inside the overlaid macOS title-bar drag strip must share the
+   strip's z-index so they win by tree order without jumping above overlays. */
+@utility window-drag-control {
+  position: relative;
+  z-index: 40;
+}
+
 /*
  * Reflect design-system tokens (see docs/design-system.md). Adapted from the
  * Reflect Open / Reflect Local design system: cool-grey neutrals, a single
