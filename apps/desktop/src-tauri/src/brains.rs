@@ -7,20 +7,24 @@
 //! A brain's own `settings` table lives *inside* that brain, so it cannot hold
 //! the cross-brain catalogue the switcher needs (it must render brains that
 //! aren't open). Following Reflect Open's "recents in OS app-config, not in a
-//! graph" rule, this registry is a Rust-owned JSON file at
-//! `<app data dir>/brains.json`. It records every known brain's path, display
-//! name, identity color, and timestamps, plus which brain is active.
+//! graph" rule — but keeping Local Brain SQLite-first/local-first for durable
+//! product state — this registry is its own small SQLite database at
+//! `<app data dir>/registry.sqlite`, deliberately separate from every switchable
+//! brain DB. It records every known brain's path, display name, identity color,
+//! and timestamps (table `brains`), plus which brain is active (`registry_meta`).
 //!
-//! Rust owns it end to end: atomic writes (temp file + rename), canonical paths,
-//! and the actual connection swap (see [`DbState::swap`]). A failed open leaves
-//! the previously active brain intact.
+//! Rust owns it end to end: writes land in a WAL-backed SQLite transaction,
+//! paths are canonicalized, and the actual connection swap (see [`DbState::swap`])
+//! happens here. A failed open leaves the previously active brain intact, and a
+//! corrupt registry file is moved aside and recreated so the app still starts.
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Mutex, MutexGuard};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use serde::{Deserialize, Serialize};
+use rusqlite::{params, Connection, OptionalExtension};
+use serde::Serialize;
 use tauri::State;
 
 use crate::db::DbState;
@@ -33,7 +37,6 @@ const BRAIN_COLORS: [&str; 9] = [
 ];
 
 const DEFAULT_COLOR: &str = "indigo";
-const REGISTRY_VERSION: u32 = 1;
 
 /// One brain as the frontend sees it (camelCase to match the zod schema).
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -53,110 +56,14 @@ pub struct BrainInfo {
     pub schema_version: Option<i64>,
 }
 
-/// A persisted registry entry (internal on-disk shape).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+/// One catalogued brain (a row of the registry `brains` table).
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct BrainRecord {
     path: String,
     name: String,
-    #[serde(default = "default_color")]
     color: String,
-    #[serde(default)]
     created_ms: u64,
-    #[serde(default)]
     last_opened_ms: u64,
-}
-
-fn default_color() -> String {
-    DEFAULT_COLOR.to_string()
-}
-
-/// The whole registry file.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Registry {
-    #[serde(default = "registry_version")]
-    version: u32,
-    #[serde(default)]
-    active_path: String,
-    #[serde(default)]
-    brains: Vec<BrainRecord>,
-}
-
-fn registry_version() -> u32 {
-    REGISTRY_VERSION
-}
-
-impl Default for Registry {
-    fn default() -> Self {
-        Self {
-            version: REGISTRY_VERSION,
-            active_path: String::new(),
-            brains: Vec::new(),
-        }
-    }
-}
-
-impl Registry {
-    fn find(&self, path: &str) -> Option<&BrainRecord> {
-        self.brains.iter().find(|brain| brain.path == path)
-    }
-
-    fn find_mut(&mut self, path: &str) -> Option<&mut BrainRecord> {
-        self.brains.iter_mut().find(|brain| brain.path == path)
-    }
-
-    /// Insert (or refresh) the record for `path` and mark it active.
-    fn mark_opened(&mut self, path: &str, name: Option<&str>) {
-        let now = now_ms();
-        if let Some(record) = self.find_mut(path) {
-            record.last_opened_ms = now;
-            if let Some(name) = name {
-                if !name.trim().is_empty() {
-                    record.name = name.trim().to_string();
-                }
-            }
-        } else {
-            self.brains.push(BrainRecord {
-                path: path.to_string(),
-                name: name
-                    .map(str::trim)
-                    .filter(|name| !name.is_empty())
-                    .map(str::to_string)
-                    .unwrap_or_else(|| derive_name(Path::new(path))),
-                color: DEFAULT_COLOR.to_string(),
-                created_ms: now,
-                last_opened_ms: now,
-            });
-        }
-        self.active_path = path.to_string();
-    }
-
-    /// Brains as [`BrainInfo`], newest-opened first, with the active flag set.
-    fn infos(&self, active_schema_version: Option<i64>) -> Vec<BrainInfo> {
-        let mut infos: Vec<BrainInfo> = self
-            .brains
-            .iter()
-            .map(|record| {
-                let is_active = record.path == self.active_path;
-                BrainInfo {
-                    path: record.path.clone(),
-                    name: record.name.clone(),
-                    color: record.color.clone(),
-                    created_ms: record.created_ms,
-                    last_opened_ms: record.last_opened_ms,
-                    is_active,
-                    schema_version: if is_active {
-                        active_schema_version
-                    } else {
-                        None
-                    },
-                }
-            })
-            .collect();
-        infos.sort_by(|a, b| b.last_opened_ms.cmp(&a.last_opened_ms));
-        infos
-    }
 }
 
 /// Milliseconds since the Unix epoch (0 if the clock is before the epoch).
@@ -196,28 +103,192 @@ fn normalize(path: &str) -> String {
         .unwrap_or_else(|_| path.to_string())
 }
 
-/// The process-wide brain registry, persisted to `registry_path`.
+fn require_color(color: &str) -> AppResult<()> {
+    if BRAIN_COLORS.contains(&color) {
+        Ok(())
+    } else {
+        Err(AppError::parse(format!("unknown brain color: {color}")))
+    }
+}
+
+// ---- Registry SQLite store ------------------------------------------------
+
+/// Create the registry tables if missing. Run on every open; the first
+/// statement also fails fast when `conn` points at a file that is not a valid
+/// SQLite database, which drives the corrupt-file recovery in [`open_resilient`].
+fn ensure_schema(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;\
+         PRAGMA synchronous = NORMAL;\
+         CREATE TABLE IF NOT EXISTS brains (\
+             path TEXT PRIMARY KEY,\
+             name TEXT NOT NULL,\
+             color TEXT NOT NULL DEFAULT 'indigo',\
+             created_ms INTEGER NOT NULL DEFAULT 0,\
+             last_opened_ms INTEGER NOT NULL DEFAULT 0\
+         );\
+         CREATE TABLE IF NOT EXISTS registry_meta (\
+             key TEXT PRIMARY KEY,\
+             value TEXT NOT NULL\
+         );",
+    )?;
+    Ok(())
+}
+
+/// Open (creating if needed) the registry database at `path` with the shared
+/// WAL + busy-timeout settings, and ensure its schema.
+fn open_registry(path: &Path) -> AppResult<Connection> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let conn = Connection::open(path)?;
+    conn.busy_timeout(Duration::from_millis(5000))?;
+    ensure_schema(&conn)?;
+    Ok(conn)
+}
+
+/// An always-usable in-memory registry — the last-resort fallback so the app can
+/// still start (with an empty catalogue) even if no on-disk registry can open.
+fn open_memory_registry() -> Connection {
+    let conn = Connection::open_in_memory().expect("an in-memory SQLite database must open");
+    ensure_schema(&conn).expect("the in-memory registry schema must apply");
+    conn
+}
+
+/// Open the registry resiliently: a corrupt or non-SQLite file is moved aside
+/// (`registry.sqlite.corrupt`) and recreated empty rather than failing startup —
+/// matching the old JSON registry's "corrupt → empty default" behavior.
+fn open_resilient(path: &Path) -> Connection {
+    match open_registry(path) {
+        Ok(conn) => conn,
+        Err(_) => {
+            let _ = fs::rename(path, path.with_extension("sqlite.corrupt"));
+            open_registry(path).unwrap_or_else(|_| open_memory_registry())
+        }
+    }
+}
+
+/// The active brain path recorded in `registry_meta`, if any.
+fn active_path(conn: &Connection) -> AppResult<Option<String>> {
+    conn.query_row(
+        "SELECT value FROM registry_meta WHERE key = 'active_path'",
+        [],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(AppError::from)
+}
+
+/// Record `path` as the active brain.
+fn set_active_path(conn: &Connection, path: &str) -> AppResult<()> {
+    conn.execute(
+        "INSERT INTO registry_meta (key, value) VALUES ('active_path', ?1)\
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [path],
+    )?;
+    Ok(())
+}
+
+/// One brain record by path.
+fn find(conn: &Connection, path: &str) -> AppResult<Option<BrainRecord>> {
+    conn.query_row(
+        "SELECT path, name, color, created_ms, last_opened_ms FROM brains WHERE path = ?1",
+        [path],
+        row_to_record,
+    )
+    .optional()
+    .map_err(AppError::from)
+}
+
+/// Every catalogued brain, newest-opened first.
+fn all_records(conn: &Connection) -> AppResult<Vec<BrainRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT path, name, color, created_ms, last_opened_ms FROM brains \
+         ORDER BY last_opened_ms DESC, name ASC",
+    )?;
+    let rows = stmt.query_map([], row_to_record)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(AppError::from)
+}
+
+fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<BrainRecord> {
+    Ok(BrainRecord {
+        path: row.get(0)?,
+        name: row.get(1)?,
+        color: row.get(2)?,
+        created_ms: row.get::<_, i64>(3)? as u64,
+        last_opened_ms: row.get::<_, i64>(4)? as u64,
+    })
+}
+
+/// Insert (or refresh) the record for `path` and mark it active, in one atomic
+/// upsert. A provided non-empty `name` overwrites the stored name; otherwise the
+/// existing name (or a derived default for a new brain) is kept.
+fn mark_opened(conn: &Connection, path: &str, name: Option<&str>) -> AppResult<()> {
+    let now = now_ms() as i64;
+    let provided = name
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string);
+    let name_provided = provided.is_some();
+    let name_value = provided.unwrap_or_else(|| derive_name(Path::new(path)));
+    conn.execute(
+        "INSERT INTO brains (path, name, color, created_ms, last_opened_ms)
+         VALUES (?1, ?2, ?3, ?4, ?4)
+         ON CONFLICT(path) DO UPDATE SET
+             last_opened_ms = excluded.last_opened_ms,
+             name = CASE WHEN ?5 THEN excluded.name ELSE brains.name END",
+        params![path, name_value, DEFAULT_COLOR, now, name_provided],
+    )?;
+    set_active_path(conn, path)
+}
+
+/// Catalogued brains as [`BrainInfo`], newest-opened first, active flag set.
+fn infos(conn: &Connection, active_schema_version: Option<i64>) -> AppResult<Vec<BrainInfo>> {
+    let active = active_path(conn)?.unwrap_or_default();
+    let records = all_records(conn)?;
+    Ok(records
+        .into_iter()
+        .map(|record| {
+            let is_active = record.path == active;
+            BrainInfo {
+                path: record.path,
+                name: record.name,
+                color: record.color,
+                created_ms: record.created_ms,
+                last_opened_ms: record.last_opened_ms,
+                is_active,
+                schema_version: if is_active {
+                    active_schema_version
+                } else {
+                    None
+                },
+            }
+        })
+        .collect())
+}
+
+// ---- State ----------------------------------------------------------------
+
+/// The process-wide brain registry, backed by its own SQLite database.
 pub struct BrainState {
-    registry_path: PathBuf,
-    registry: Mutex<Registry>,
+    registry: Mutex<Connection>,
 }
 
 impl BrainState {
-    /// Load (or default) the registry for the given app data layout. The default
-    /// brain `default_db_path` only fixes where `brains.json` lands when no
-    /// platform data dir resolves; it is not yet registered (open does that).
+    /// Load (or create) the registry for the given app data layout. The default
+    /// brain `default_db_path` only fixes where `registry.sqlite` lands when no
+    /// platform data dir resolves; a brain is not registered until it is opened.
     pub fn load(default_db_path: &Path) -> Self {
         let registry_path = brain_schema::app_data_dir()
-            .map(|dir| dir.join("brains.json"))
-            .unwrap_or_else(|| default_db_path.with_file_name("brains.json"));
-        let registry = read_registry(&registry_path);
+            .map(|dir| dir.join("registry.sqlite"))
+            .unwrap_or_else(|| default_db_path.with_file_name("registry.sqlite"));
         Self {
-            registry_path,
-            registry: Mutex::new(registry),
+            registry: Mutex::new(open_resilient(&registry_path)),
         }
     }
 
-    fn lock(&self) -> AppResult<std::sync::MutexGuard<'_, Registry>> {
+    fn lock(&self) -> AppResult<MutexGuard<'_, Connection>> {
         self.registry
             .lock()
             .map_err(|_| AppError::io("the brain registry lock was poisoned by an earlier panic"))
@@ -231,10 +302,11 @@ impl BrainState {
                 return PathBuf::from(env);
             }
         }
-        if let Ok(registry) = self.registry.lock() {
-            let active = &registry.active_path;
-            if !active.is_empty() && Path::new(active).is_file() {
-                return PathBuf::from(active);
+        if let Ok(conn) = self.registry.lock() {
+            if let Ok(Some(active)) = active_path(&conn) {
+                if !active.is_empty() && Path::new(&active).is_file() {
+                    return PathBuf::from(active);
+                }
             }
         }
         default_db_path.to_path_buf()
@@ -245,20 +317,19 @@ impl BrainState {
     /// brain is still open) but is surfaced for logging.
     pub fn register_active(&self, canonical: &Path, name: Option<&str>) -> AppResult<()> {
         let path = canonical.display().to_string();
-        let mut registry = self.lock()?;
-        registry.mark_opened(&path, name);
-        write_registry(&self.registry_path, &registry)
+        let conn = self.lock()?;
+        mark_opened(&conn, &path, name)
     }
 
     fn active_info(&self, db: &DbState) -> AppResult<BrainInfo> {
-        let active_path = db.active_path()?.display().to_string();
+        let active = db.active_path()?.display().to_string();
         let schema_version = db.schema_version().ok();
-        let registry = self.lock()?;
-        if let Some(record) = registry.find(&active_path) {
+        let conn = self.lock()?;
+        if let Some(record) = find(&conn, &active)? {
             Ok(BrainInfo {
-                path: record.path.clone(),
-                name: record.name.clone(),
-                color: record.color.clone(),
+                path: record.path,
+                name: record.name,
+                color: record.color,
                 created_ms: record.created_ms,
                 last_opened_ms: record.last_opened_ms,
                 is_active: true,
@@ -268,45 +339,15 @@ impl BrainState {
             // Defensive: the open brain isn't catalogued (e.g. a `$BRAIN_DB`
             // pin we never persisted). Synthesize a record from the path.
             Ok(BrainInfo {
-                name: derive_name(Path::new(&active_path)),
+                name: derive_name(Path::new(&active)),
                 color: DEFAULT_COLOR.to_string(),
                 created_ms: 0,
                 last_opened_ms: 0,
                 is_active: true,
                 schema_version,
-                path: active_path,
+                path: active,
             })
         }
-    }
-}
-
-/// Read the registry, resiliently: a missing or corrupt file yields the empty
-/// default rather than failing app startup.
-fn read_registry(path: &Path) -> Registry {
-    let Ok(text) = fs::read_to_string(path) else {
-        return Registry::default();
-    };
-    serde_json::from_str(&text).unwrap_or_default()
-}
-
-/// Persist the registry atomically (temp file + rename) so a crash mid-write
-/// never truncates the catalogue.
-fn write_registry(path: &Path, registry: &Registry) -> AppResult<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let json = serde_json::to_string_pretty(registry)?;
-    let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, json.as_bytes())?;
-    fs::rename(&tmp, path)?;
-    Ok(())
-}
-
-fn require_color(color: &str) -> AppResult<()> {
-    if BRAIN_COLORS.contains(&color) {
-        Ok(())
-    } else {
-        Err(AppError::parse(format!("unknown brain color: {color}")))
     }
 }
 
@@ -319,8 +360,8 @@ pub fn list_brains(
     brains: State<'_, BrainState>,
 ) -> AppResult<Vec<BrainInfo>> {
     let schema_version = db.schema_version().ok();
-    let registry = brains.lock()?;
-    Ok(registry.infos(schema_version))
+    let conn = brains.lock()?;
+    infos(&conn, schema_version)
 }
 
 /// The currently open brain.
@@ -394,12 +435,16 @@ pub fn rename_brain(
     }
     let key = normalize(&path);
     {
-        let mut registry = brains.lock()?;
-        let record = registry
-            .find_mut(&key)
-            .ok_or_else(|| AppError::not_found(format!("no brain registered at {path}")))?;
-        record.name = trimmed.to_string();
-        write_registry(&brains.registry_path, &registry)?;
+        let conn = brains.lock()?;
+        let affected = conn.execute(
+            "UPDATE brains SET name = ?2 WHERE path = ?1",
+            params![key, trimmed],
+        )?;
+        if affected == 0 {
+            return Err(AppError::not_found(format!(
+                "no brain registered at {path}"
+            )));
+        }
     }
     brains.active_info(&db)
 }
@@ -415,12 +460,16 @@ pub fn set_brain_color(
     require_color(&color)?;
     let key = normalize(&path);
     {
-        let mut registry = brains.lock()?;
-        let record = registry
-            .find_mut(&key)
-            .ok_or_else(|| AppError::not_found(format!("no brain registered at {path}")))?;
-        record.color = color;
-        write_registry(&brains.registry_path, &registry)?;
+        let conn = brains.lock()?;
+        let affected = conn.execute(
+            "UPDATE brains SET color = ?2 WHERE path = ?1",
+            params![key, color],
+        )?;
+        if affected == 0 {
+            return Err(AppError::not_found(format!(
+                "no brain registered at {path}"
+            )));
+        }
     }
     brains.active_info(&db)
 }
@@ -430,15 +479,14 @@ pub fn set_brain_color(
 #[tauri::command]
 pub fn forget_brain(brains: State<'_, BrainState>, path: String) -> AppResult<Vec<BrainInfo>> {
     let key = normalize(&path);
-    let mut registry = brains.lock()?;
-    if registry.active_path == key {
+    let conn = brains.lock()?;
+    if active_path(&conn)?.as_deref() == Some(key.as_str()) {
         return Err(AppError::parse(
             "cannot forget the active brain — switch to another brain first",
         ));
     }
-    registry.brains.retain(|brain| brain.path != key);
-    write_registry(&brains.registry_path, &registry)?;
-    Ok(registry.infos(None))
+    conn.execute("DELETE FROM brains WHERE path = ?1", [&key])?;
+    infos(&conn, None)
 }
 
 /// Reveal a brain's database file in the OS file manager (best effort).
@@ -453,10 +501,17 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
-    fn state_with_registry(dir: &Path) -> BrainState {
+    /// A registry backed by an in-memory SQLite database (no file on disk).
+    fn memory_state() -> BrainState {
         BrainState {
-            registry_path: dir.join("brains.json"),
-            registry: Mutex::new(Registry::default()),
+            registry: Mutex::new(open_memory_registry()),
+        }
+    }
+
+    /// A registry backed by an on-disk SQLite file, for persistence tests.
+    fn file_state(path: &Path) -> BrainState {
+        BrainState {
+            registry: Mutex::new(open_registry(path).unwrap()),
         }
     }
 
@@ -469,64 +524,72 @@ mod tests {
     #[test]
     fn register_active_persists_and_round_trips() {
         let dir = tempdir().unwrap();
-        let brains = state_with_registry(dir.path());
+        let registry_path = dir.path().join("registry.sqlite");
         let path = dir.path().join("Work").join("brain.sqlite");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, b"db").unwrap();
         let canonical = path.canonicalize().unwrap();
 
-        brains.register_active(&canonical, None).unwrap();
+        {
+            let brains = file_state(&registry_path);
+            brains.register_active(&canonical, None).unwrap();
+        } // drop the connection so the WAL is flushed before reopening
 
-        // Reload from disk: the entry, name, and active pointer survive.
-        let reloaded = read_registry(&brains.registry_path);
-        assert_eq!(reloaded.brains.len(), 1);
-        assert_eq!(reloaded.active_path, canonical.display().to_string());
-        assert_eq!(reloaded.brains[0].name, "Work");
-        assert_eq!(reloaded.brains[0].color, DEFAULT_COLOR);
-        assert!(reloaded.brains[0].created_ms > 0);
+        // Reopen from disk: the entry, name, color, and active pointer survive.
+        let reopened = open_registry(&registry_path).unwrap();
+        let records = all_records(&reopened).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            active_path(&reopened).unwrap().unwrap(),
+            canonical.display().to_string()
+        );
+        assert_eq!(records[0].name, "Work");
+        assert_eq!(records[0].color, DEFAULT_COLOR);
+        assert!(records[0].created_ms > 0);
     }
 
     #[test]
     fn rename_and_color_mutate_the_record() {
-        let dir = tempdir().unwrap();
-        let brains = state_with_registry(dir.path());
-        let path = dir.path().join("brain.sqlite");
-        std::fs::write(&path, b"db").unwrap();
-        let canonical = path.canonicalize().unwrap();
-        brains.register_active(&canonical, None).unwrap();
-        let key = canonical.display().to_string();
+        let brains = memory_state();
+        let conn = brains.lock().unwrap();
+        mark_opened(&conn, "/x/brain.sqlite", None).unwrap();
 
-        {
-            let mut registry = brains.lock().unwrap();
-            registry.find_mut(&key).unwrap().name = "Renamed".to_string();
-        }
+        conn.execute(
+            "UPDATE brains SET name = 'Renamed' WHERE path = ?1",
+            ["/x/brain.sqlite"],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE brains SET color = 'teal' WHERE path = ?1",
+            ["/x/brain.sqlite"],
+        )
+        .unwrap();
+
+        let record = find(&conn, "/x/brain.sqlite").unwrap().unwrap();
+        assert_eq!(record.name, "Renamed");
+        assert_eq!(record.color, "teal");
+
         require_color("teal").unwrap();
         assert!(require_color("chartreuse").is_err());
-
-        let mut registry = brains.lock().unwrap();
-        assert_eq!(registry.find(&key).unwrap().name, "Renamed");
-        registry.find_mut(&key).unwrap().color = "teal".to_string();
-        assert_eq!(registry.find(&key).unwrap().color, "teal");
     }
 
     #[test]
     fn forget_removes_non_active_and_keeps_active() {
-        let dir = tempdir().unwrap();
-        let brains = state_with_registry(dir.path());
-        let mut registry = brains.lock().unwrap();
-        registry.mark_opened("/a/brain.sqlite", Some("A"));
-        registry.mark_opened("/b/brain.sqlite", Some("B")); // active = B
-        assert_eq!(registry.active_path, "/b/brain.sqlite");
+        let brains = memory_state();
+        let conn = brains.lock().unwrap();
+        mark_opened(&conn, "/a/brain.sqlite", Some("A")).unwrap();
+        mark_opened(&conn, "/b/brain.sqlite", Some("B")).unwrap(); // active = B
+        assert_eq!(active_path(&conn).unwrap().unwrap(), "/b/brain.sqlite");
 
         // Forgetting A (non-active) succeeds; B stays.
-        registry
-            .brains
-            .retain(|brain| brain.path != "/a/brain.sqlite");
-        assert_eq!(registry.brains.len(), 1);
-        assert_eq!(registry.brains[0].path, "/b/brain.sqlite");
+        conn.execute("DELETE FROM brains WHERE path = ?1", ["/a/brain.sqlite"])
+            .unwrap();
+        let records = all_records(&conn).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].path, "/b/brain.sqlite");
 
         // infos() marks the active brain and orders newest-opened first.
-        let infos = registry.infos(Some(2));
+        let infos = infos(&conn, Some(2)).unwrap();
         assert!(infos[0].is_active);
         assert_eq!(infos[0].schema_version, Some(2));
     }
@@ -534,17 +597,19 @@ mod tests {
     #[test]
     fn corrupt_registry_falls_back_to_empty() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("brains.json");
-        std::fs::write(&path, b"not json at all").unwrap();
-        let registry = read_registry(&path);
-        assert!(registry.brains.is_empty());
-        assert_eq!(registry.version, REGISTRY_VERSION);
+        let path = dir.path().join("registry.sqlite");
+        std::fs::write(&path, b"this is not a sqlite database at all").unwrap();
+
+        let conn = open_resilient(&path);
+        assert!(all_records(&conn).unwrap().is_empty());
+        // The corrupt file is moved aside, not silently overwritten.
+        assert!(path.with_extension("sqlite.corrupt").exists());
     }
 
     #[test]
     fn active_candidate_prefers_existing_active_then_default() {
         let dir = tempdir().unwrap();
-        let brains = state_with_registry(dir.path());
+        let brains = memory_state();
         let default = dir.path().join("default.sqlite");
 
         // No active set and BRAIN_DB unset → default. (Guard against a stray env.)
@@ -555,7 +620,10 @@ mod tests {
         // A real active file is preferred.
         let active = dir.path().join("active.sqlite");
         std::fs::write(&active, b"db").unwrap();
-        brains.lock().unwrap().active_path = active.display().to_string();
+        {
+            let conn = brains.lock().unwrap();
+            set_active_path(&conn, &active.display().to_string()).unwrap();
+        }
         if std::env::var_os("BRAIN_DB").is_none() {
             assert_eq!(brains.active_candidate(&default), active);
         }

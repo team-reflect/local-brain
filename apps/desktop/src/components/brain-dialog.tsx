@@ -2,16 +2,19 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { isAppError, type BrainInfo } from '@local-brain/core'
 import { controlClass, sectionLabel } from '../lib/ui'
 import { useCreateBrain, useOpenBrain } from '../lib/queries'
+import { pickBrainToCreate, pickBrainToOpen } from '../lib/native-dialog'
 import { Alert } from './alert'
 import { Button } from './button'
 
 export type BrainDialogMode = 'create' | 'open'
 
 /**
- * Create a new brain, or open an existing one, by absolute path. A native file
- * picker is a documented follow-up (Local Brain doesn't yet bundle the Tauri
- * dialog plugin); the path is validated by Rust, so this is fully functional —
- * a bad path or an existing file surfaces the error rather than failing quietly.
+ * Create a new brain, or open an existing one. The primary affordance is the
+ * native OS file dialog (via `@tauri-apps/plugin-dialog`): "Browse…" opens a
+ * file picker for an existing brain, or a save dialog for a new one. The path
+ * field stays editable as a validated fallback (and to show the chosen path) —
+ * Rust validates either way, so a bad path or an existing file surfaces the
+ * error rather than failing quietly.
  */
 export function BrainDialog({
   open,
@@ -50,6 +53,16 @@ export function BrainDialog({
 
   const busy = createBrain.isPending || openBrain.isPending
   const isCreate = mode === 'create'
+
+  async function browse(): Promise<void> {
+    setError(null)
+    try {
+      const chosen = isCreate ? await pickBrainToCreate() : await pickBrainToOpen()
+      if (chosen) setPath(chosen)
+    } catch {
+      setError('Could not open the file picker — enter the path manually instead.')
+    }
+  }
 
   async function submit(): Promise<void> {
     setError(null)
@@ -94,8 +107,8 @@ export function BrainDialog({
           {error ? <Alert variant="error">{error}</Alert> : null}
           <p className="text-xs text-muted-foreground">
             {isCreate
-              ? 'A brain is one SQLite database file. Give an absolute path that does not exist yet — the file and its folders are created for you.'
-              : 'Enter the absolute path to an existing brain database file (a .sqlite created by Local Brain).'}
+              ? 'A brain is one SQLite database file. Choose where to create it (the file and its folders are created for you), or type an absolute path that does not exist yet.'
+              : 'Choose an existing brain database file (a .sqlite created by Local Brain), or type its absolute path.'}
           </p>
           {isCreate ? (
             <label className="flex flex-col gap-1">
@@ -110,17 +123,22 @@ export function BrainDialog({
           ) : null}
           <label className="flex flex-col gap-1">
             <span className={sectionLabel}>Database path</span>
-            <input
-              ref={inputRef}
-              value={path}
-              onChange={(event) => setPath(event.target.value)}
-              placeholder={isCreate ? '/Users/you/brains/work.sqlite' : '/Users/you/brains/work.sqlite'}
-              spellCheck={false}
-              className={`${controlClass} font-mono text-xs`}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') void submit()
-              }}
-            />
+            <div className="flex items-center gap-2">
+              <input
+                ref={inputRef}
+                value={path}
+                onChange={(event) => setPath(event.target.value)}
+                placeholder="/Users/you/brains/work.sqlite"
+                spellCheck={false}
+                className={`${controlClass} flex-1 font-mono text-xs`}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') void submit()
+                }}
+              />
+              <Button variant="secondary" onClick={() => void browse()}>
+                Browse…
+              </Button>
+            </div>
           </label>
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-border px-4 py-2.5">

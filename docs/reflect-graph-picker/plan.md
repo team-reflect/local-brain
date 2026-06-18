@@ -40,25 +40,30 @@ Mapping from the references:
 
 A brain's own `settings` table lives *inside* that brain, so it cannot hold the
 cross-brain catalogue (the switcher must render brains that aren't open). Following
-Reflect Open (recents in OS app-config, not in a graph), Local Brain adds a **brain
-registry** JSON file owned by Rust at `<data_dir>/local-brain/brains.json`:
+Reflect Open (recents in OS app-config, not in a graph) — but keeping Local Brain
+SQLite-first/local-first for durable product state — the **brain registry** is its
+own dedicated SQLite database owned by Rust at `<data_dir>/local-brain/registry.sqlite`,
+separate from every switchable brain DB:
 
-```jsonc
-{
-  "version": 1,
-  "activePath": "/abs/.../brain.sqlite",
-  "brains": [
-    { "path": "...", "name": "My brain", "color": "indigo",
-      "createdMs": 0, "lastOpenedMs": 0 }
-  ]
-}
+```sql
+CREATE TABLE brains (
+  path TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  color TEXT NOT NULL DEFAULT 'indigo',
+  created_ms INTEGER NOT NULL DEFAULT 0,
+  last_opened_ms INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE registry_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+-- registry_meta holds key='active_path' → the open brain.
 ```
 
-- Rust owns it: atomic write (temp file + rename), path canonicalisation, traversal
-  guards, OS-native semantics — consistent with the file-safety conventions.
+- Rust owns it: WAL-backed SQLite writes (atomic upsert/transaction), path
+  canonicalisation, OS-native semantics — consistent with the file-safety conventions.
+- A corrupt/non-SQLite registry file is moved aside (`registry.sqlite.corrupt`) and
+  recreated empty so the app still starts (mirrors the old "corrupt → empty" rule).
 - Name + color are catalogue metadata so the switcher can render any known brain.
-- On startup: load registry; if empty, seed it from the existing `resolve_db_path()`
-  default as "My brain" (backward compatible — today's single brain just works).
+- On startup: open the registry; the resolved active brain is recorded as opened,
+  so today's single default brain just works (backward compatible).
 
 ### Runtime switching (real, not relaunch)
 
@@ -81,8 +86,11 @@ brain path and invalidates the TanStack Query cache, so all reads hit the new br
 - **apps/desktop/src/lib/queries/brains.ts**: TanStack hooks; switch invalidates cache.
 - **apps/desktop/src/components/brain-switcher.tsx**: sidebar brand-slot button + custom
   accessible dropdown (switch brain, new brain, open another, reveal, brain settings).
-- **apps/desktop/src/components/brain-dialog.tsx**: small path-input dialog for
-  create/open (no native picker dependency yet — see deferred).
+- **apps/desktop/src/components/brain-dialog.tsx**: create/open dialog whose primary
+  affordance is the native OS file dialog (`@tauri-apps/plugin-dialog`), with the
+  validated path field kept as an editable fallback.
+- **apps/desktop/src/lib/native-dialog.ts**: thin wrappers over the dialog plugin's
+  `open`/`save` (file picker for open, save dialog for create).
 - **apps/desktop/src/components/brain-chooser.tsx**: no-active-brain fallback screen.
 - **app-shell.tsx**: brain switcher in the top brand slot; `brain.*` commands.
 - **App.tsx**: gate on active brain; remount keyed by brain path.
@@ -94,8 +102,9 @@ brain path and invalidates the TanStack Query cache, so all reads hit the new br
 1. Brain picker: list/select current brain, create/open/switch, visible sidebar
    affordance, keyboard-accessible dropdown + palette commands.
 2. Settings/diagnostics for top-level brain identity/location/state.
-3. Durable multi-brain storage model (registry) with real runtime switching; native
-   OS file picker deferred and documented (path-input used meanwhile — fully functional).
+3. Durable multi-brain storage model (a dedicated SQLite registry, **not** JSON) with
+   real runtime switching; native OS file dialog wired for create/open (validated
+   path field kept as an editable fallback).
 4. Terminology aligned: **Brain** (container) vs **Graph** (network viz) across UI/docs.
 5. Tests: Rust registry/switch, core schemas/bindings, switcher + settings DOM, colors,
    commands.
@@ -106,8 +115,8 @@ brain path and invalidates the TanStack Query cache, so all reads hit the new br
 
 - Connection swap mid-query: the mutex serialises; remount + cache invalidation refetch
   against the new brain. Low risk.
-- No native file/folder picker dependency yet → path-input dialog (real, validated by
-  Rust). Native picker is a documented follow-up.
+- Native file dialog (`@tauri-apps/plugin-dialog`) drives create/open; the validated
+  path field stays as an editable fallback so manual entry still works.
 - `reveal_brain` uses the opener plugin from Rust; best-effort and isolated so it can be
   dropped if the API differs.
 - Cannot launch the full Tauri app in this environment; verification is `pnpm check`,

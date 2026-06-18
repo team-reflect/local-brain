@@ -17,13 +17,15 @@ base while preserving Local Brain's SQLite-first product model.
 A **brain** is one such SQLite database — the top-level workspace the user picks
 and switches between (Reflect calls this a "graph"; Local Brain keeps "graph" for
 the Network visualization, see Product Nouns). The set of known brains is a small
-Rust-owned **brain registry** JSON file in the app data directory
-(`<app data dir>/brains.json`), separate from any brain's durable tables because a
-brain's own `settings` live inside it and cannot catalogue the others. The
-registry records each brain's path, display name, identity color, and timestamps,
-plus the active brain; Rust writes it atomically (temp file + rename) and owns the
-connection swap so switching brains is real, not a relaunch. `$BRAIN_DB` still
-pins a single brain for the CLI and overrides the registry at startup.
+Rust-owned **brain registry** — its own SQLite database in the app data directory
+(`<app data dir>/registry.sqlite`), kept SQLite-first like the rest of Local
+Brain's durable state and deliberately separate from any switchable brain's
+tables (a brain's own `settings` live inside it and cannot catalogue the others).
+The registry records each brain's path, display name, identity color, and
+timestamps, plus the active brain; Rust owns its WAL-backed writes and the
+connection swap so switching brains is real, not a relaunch. A corrupt registry
+file is moved aside and recreated so the app still starts. `$BRAIN_DB` still pins
+a single brain for the CLI and overrides the registry at startup.
 
 Durable tables:
 

@@ -9,8 +9,8 @@ import {
 
 /**
  * Typed IPC bindings for the brain picker. Rust owns the durable registry
- * (`brains.json`) and the connection swap; these wrappers validate every
- * response so the UI never touches the bridge directly.
+ * (a dedicated `registry.sqlite` database) and the connection swap; these
+ * wrappers validate every response so the UI never touches the bridge directly.
  */
 
 const voidSchema = z.unknown()

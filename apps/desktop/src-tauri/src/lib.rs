@@ -20,7 +20,7 @@ pub(crate) fn resolve_db_path() -> PathBuf {
 pub fn run() {
     // Resolve which brain to open: the registry's last active brain (or
     // `$BRAIN_DB` / the default) — see `brains::BrainState`. The default path
-    // only fixes where `brains.json` lands when no platform data dir resolves.
+    // only fixes where `registry.sqlite` lands when no platform data dir resolves.
     let default_db_path = resolve_db_path();
     let brains = brains::BrainState::load(&default_db_path);
     let active = brains.active_candidate(&default_db_path);
@@ -32,6 +32,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(db::DbState::new(conn, canonical))
         .manage(brains)
         .invoke_handler(tauri::generate_handler![
