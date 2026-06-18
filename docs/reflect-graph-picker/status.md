@@ -178,6 +178,25 @@ New Rust tests: `open_brain_rejects_the_registry_file`, `open_brain_opens_a_real
 and `durable_registry_still_allows_writes`; `corrupt_registry_falls_back_to_empty` now
 also asserts the recreated registry stays durable.
 
+## Bugbot review fixes (2026-06-18, head 8e18b20)
+
+Two new Bugbot findings on commit `8e18b20`, both resolved in `brains.rs`:
+
+1. **Medium — Registry update not atomic.** `mark_opened` ran the catalogue upsert
+   and `registry_meta` active-path update as two autocommit writes. If the active
+   metadata write failed after the upsert committed, the catalogue could record a
+   brain as opened while `active_path` stayed stale, violating the documented
+   persist-before-swap guarantee. `mark_opened` now wraps both writes in one SQLite
+   transaction, so a failed active-path write rolls the catalogue upsert back too.
+   New Rust test `mark_opened_rolls_back_catalogue_when_active_update_fails`.
+2. **Low — Forget silently no-ops.** `forget_brain_impl` issued `DELETE FROM brains`
+   but ignored the affected-row count. A stale path or legacy spelling could return
+   success and an unchanged list, implying the brain was forgotten when no row was
+   removed. The command now checks the delete count and returns `not_found` when no
+   catalogue row matched, while preserving the active-brain and non-durable registry
+   guards. New Rust tests `forget_unknown_path_errors_instead_of_silent_no_op` and
+   `forget_removes_catalogued_non_active_brain`.
+
 ## Progress
 
 - [x] Read AGENTS.md, docs, supervisor skill; mapped Local Brain + both Reflect refs.
@@ -193,7 +212,7 @@ also asserts the recreated registry stays durable.
       design-system, launch/README).
 - [x] Tests: Rust (registry + swap), core (IPC bindings), DOM (switcher, settings).
 - [x] Verification suite (all green — see final-report.md).
-- [ ] final-report.md (writing) + PR (next).
+- [x] final-report.md + PR.
 
 ## Blockers
 

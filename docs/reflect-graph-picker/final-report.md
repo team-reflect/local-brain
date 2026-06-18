@@ -260,6 +260,26 @@ green.
   also asserts the recreated registry stays durable. `cargo test -p local-brain-desktop`
   (30 tests) and `cargo clippy` are green.
 
+### Follow-up Bugbot findings (comments on head `8e18b20`)
+
+- **Medium — Registry update not atomic.** `mark_opened`
+  (`apps/desktop/src-tauri/src/brains.rs`) upserted the catalogue row and then wrote
+  `registry_meta.active_path` as two autocommit statements. If the metadata write
+  failed after the upsert committed, the registry catalogue could show the brain as
+  opened while the active pointer stayed stale, breaking the branch's
+  persist-before-swap invariant. Fixed by wrapping the catalogue upsert and active
+  metadata update in one SQLite transaction; if `set_active_path` fails, dropping the
+  uncommitted transaction rolls back the upsert too. New Rust test
+  `mark_opened_rolls_back_catalogue_when_active_update_fails` forces the active-path
+  write to fail and proves no catalogue row or active pointer survives.
+- **Low — Forget silently no-ops.** `forget_brain_impl`
+  (`apps/desktop/src-tauri/src/brains.rs`) ignored the affected-row count from
+  `DELETE FROM brains`, so a stale path or legacy spelling could return success with
+  an unchanged list. Fixed by returning `not_found` when no row is deleted, while
+  preserving the active-brain guard and the non-durable registry guard. New Rust tests
+  `forget_unknown_path_errors_instead_of_silent_no_op` and
+  `forget_removes_catalogued_non_active_brain` cover the failure and success paths.
+
 ## Caveats / deferred (honest scope)
 
 - **Path field as fallback.** The native OS dialog is the primary affordance; the

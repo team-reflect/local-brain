@@ -257,9 +257,15 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<BrainRecord> {
     })
 }
 
-/// Insert (or refresh) the record for `path` and mark it active, in one atomic
-/// upsert. A provided non-empty `name` overwrites the stored name; otherwise the
-/// existing name (or a derived default for a new brain) is kept.
+/// Insert (or refresh) the record for `path` and mark it active. The catalogue
+/// upsert and the `active_path` metadata update run in **one SQLite transaction**
+/// so the two registry stores can never disagree: if the active-path write fails
+/// after the upsert, the whole transaction rolls back and the catalogue keeps no
+/// orphaned row pointing at a brain the registry doesn't consider active. This
+/// upholds the persist-before-swap guarantee — a half-applied open (catalogued
+/// but not active) can't survive. A provided non-empty `name` overwrites the
+/// stored name; otherwise the existing name (or a derived default for a new
+/// brain) is kept.
 ///
 /// The path is [`normalize`]d into the catalogue key (and the active pointer) so
 /// the same brain reached by different spellings — a `$BRAIN_DB` pin, a stored
@@ -275,7 +281,12 @@ fn mark_opened(conn: &Connection, path: &str, name: Option<&str>) -> AppResult<(
         .map(str::to_string);
     let name_provided = provided.is_some();
     let name_value = provided.unwrap_or_else(|| derive_name(Path::new(&key)));
-    conn.execute(
+    // One transaction over both writes: an `unchecked_transaction` keeps the
+    // shared `&Connection` signature (callers hold the registry mutex, so there
+    // is no concurrent transaction on this connection). Dropping `tx` without a
+    // commit — e.g. when `set_active_path` fails — rolls the upsert back too.
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
         "INSERT INTO brains (path, name, color, created_ms, last_opened_ms)
          VALUES (?1, ?2, ?3, ?4, ?4)
          ON CONFLICT(path) DO UPDATE SET
@@ -283,7 +294,8 @@ fn mark_opened(conn: &Connection, path: &str, name: Option<&str>) -> AppResult<(
              name = CASE WHEN ?5 THEN excluded.name ELSE brains.name END",
         params![key, name_value, DEFAULT_COLOR, now, name_provided],
     )?;
-    set_active_path(conn, &key)
+    set_active_path(&tx, &key)?;
+    tx.commit().map_err(AppError::from)
 }
 
 /// Ensure a catalogue row exists for the live active brain so a metadata edit
@@ -712,7 +724,16 @@ fn forget_brain_impl(db: &DbState, brains: &BrainState, path: &str) -> AppResult
     brains.require_durable()?;
     let schema_version = db.schema_version().ok();
     let conn = brains.lock()?;
-    conn.execute("DELETE FROM brains WHERE path = ?1", [&key])?;
+    // A DELETE that matches no row means the requested brain isn't catalogued
+    // (a stale path, or a legacy spelling that no longer normalizes to the
+    // stored key). Returning the unchanged list would imply the forget
+    // succeeded, so surface it as "not found" instead of a silent no-op.
+    let affected = conn.execute("DELETE FROM brains WHERE path = ?1", [&key])?;
+    if affected == 0 {
+        return Err(AppError::not_found(format!(
+            "no brain registered at {path}"
+        )));
+    }
     infos(&conn, live_active.as_deref(), schema_version)
 }
 
@@ -810,6 +831,39 @@ mod tests {
     }
 
     #[test]
+    fn mark_opened_rolls_back_catalogue_when_active_update_fails() {
+        // Bugbot Medium regression: the catalogue upsert and the active-path
+        // metadata update must run in one transaction. If the active-path write
+        // fails after the upsert, the whole thing rolls back — otherwise the
+        // catalogue would record the open while `active_path` stayed stale,
+        // contradicting the persist-before-swap guarantee.
+        let brains = memory_state();
+        let conn = brains.lock().unwrap();
+
+        // Force only the second write (into registry_meta) to fail, after the
+        // catalogue upsert has already run inside the transaction.
+        conn.execute_batch(
+            "CREATE TRIGGER fail_active BEFORE INSERT ON registry_meta \
+             BEGIN SELECT RAISE(ABORT, 'simulated active-path write failure'); END;",
+        )
+        .unwrap();
+
+        let result = mark_opened(&conn, "/x/brain.sqlite", Some("X"));
+        assert!(result.is_err(), "the active-path write must fail");
+
+        // The catalogue upsert rolled back with it: no orphaned row, and no
+        // active pointer left dangling.
+        assert!(
+            all_records(&conn).unwrap().is_empty(),
+            "the catalogue upsert must roll back when the active-path update fails"
+        );
+        assert!(
+            active_path(&conn).unwrap().is_none(),
+            "no active pointer must survive a rolled-back open"
+        );
+    }
+
+    #[test]
     fn rename_and_color_mutate_the_record() {
         let brains = memory_state();
         let conn = brains.lock().unwrap();
@@ -853,6 +907,59 @@ mod tests {
         let infos = infos(&conn, Some(Path::new("/b/brain.sqlite")), Some(2)).unwrap();
         assert!(infos[0].is_active);
         assert_eq!(infos[0].schema_version, Some(2));
+    }
+
+    #[test]
+    fn forget_unknown_path_errors_instead_of_silent_no_op() {
+        // Bugbot Low regression: forgetting a path that matches no catalogue row
+        // (a stale path, or a legacy spelling that no longer normalizes to the
+        // stored key) must report failure. A DELETE affecting zero rows used to
+        // succeed and return an unchanged list, which reads as "forgotten".
+        let dir = tempdir().unwrap();
+        let active = dir.path().join("active.sqlite");
+        let (db, _) = live_db(&active);
+        let brains = memory_state();
+        {
+            let conn = brains.lock().unwrap();
+            mark_opened(&conn, "/a/brain.sqlite", Some("A")).unwrap();
+        }
+
+        let result = forget_brain_impl(&db, &brains, "/nope/missing.sqlite");
+        assert!(
+            result.is_err(),
+            "forgetting an uncatalogued brain must error, not silently no-op"
+        );
+
+        // The catalogued brain is untouched by the failed forget.
+        let conn = brains.lock().unwrap();
+        let records = all_records(&conn).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].path, "/a/brain.sqlite");
+    }
+
+    #[test]
+    fn forget_removes_catalogued_non_active_brain() {
+        // The companion to the guard above: a forget that matches a real,
+        // non-active catalogue row still succeeds and drops it.
+        let dir = tempdir().unwrap();
+        let active = dir.path().join("active.sqlite");
+        let (db, _) = live_db(&active);
+        let brains = memory_state();
+        {
+            let conn = brains.lock().unwrap();
+            mark_opened(&conn, "/a/brain.sqlite", Some("A")).unwrap();
+        }
+
+        let remaining = forget_brain_impl(&db, &brains, "/a/brain.sqlite").unwrap();
+        assert!(
+            remaining.iter().all(|info| info.path != "/a/brain.sqlite"),
+            "the forgotten brain must not appear in the returned list"
+        );
+        let conn = brains.lock().unwrap();
+        assert!(
+            all_records(&conn).unwrap().is_empty(),
+            "the catalogue row must be gone"
+        );
     }
 
     #[test]
