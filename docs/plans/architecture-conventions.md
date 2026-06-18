@@ -14,6 +14,17 @@ base while preserving Local Brain's SQLite-first product model.
 - Derived indexes can always be rebuilt from durable tables.
 - Markdown export can exist later, but markdown is not the storage format.
 
+A **brain** is one such SQLite database — the top-level workspace the user picks
+and switches between (Reflect calls this a "graph"; Local Brain keeps "graph" for
+the Network visualization, see Product Nouns). The set of known brains is a small
+Rust-owned **brain registry** JSON file in the app data directory
+(`<app data dir>/brains.json`), separate from any brain's durable tables because a
+brain's own `settings` live inside it and cannot catalogue the others. The
+registry records each brain's path, display name, identity color, and timestamps,
+plus the active brain; Rust writes it atomically (temp file + rename) and owns the
+connection swap so switching brains is real, not a relaunch. `$BRAIN_DB` still
+pins a single brain for the CLI and overrides the registry at startup.
+
 Durable tables:
 
 - people
@@ -131,6 +142,14 @@ Keyboard-native operation is a product principle for agent-native technical user
 
 ## Product Nouns
 
+**Brain vs Graph.** A **brain** is the top-level container — one local SQLite
+database, the workspace the picker switches between. The **Graph** is the Network
+visualization *inside* a brain (the user-centered node view). These are different
+things and the words are not interchangeable: never call the top-level container a
+"graph", and never call the visualization a "brain". This is Local Brain's
+deliberate rename of Reflect's "graph" (which there means the workspace) to avoid
+colliding with the existing Network graph surface.
+
 Use typed records for the visible app. Avoid introducing a generic graph-node layer
 unless there is a strong reason after the MVP exists.
 
@@ -177,7 +196,9 @@ rebuilds, and lexical fallback if unavailable.
 
 ## UI
 
-The sidebar is:
+The sidebar top holds the **brain switcher** (the active brain's color swatch +
+name, opening a keyboard-navigable menu to switch, create, or open another brain,
+or jump to brain settings). Below it the navigation is:
 
 - Today
 - Tasks
@@ -217,6 +238,8 @@ mono metadata, compact controls, a sunken sidebar, and token-derived graph chrom
 
 Settings owns:
 
+- the active brain's identity: name, color, location, and schema version, plus
+  the list of known brains (switch / forget / create / open)
 - model keys
 - storage path
 - diagnostics
