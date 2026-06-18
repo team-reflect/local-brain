@@ -1,18 +1,13 @@
 import { useEffect, useRef } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import {
-  ingestDocument,
-  ingestInteraction,
   recomputeAllRelationships,
   seedDemoData,
-  type IngestDocumentInput,
-  type IngestInteractionInput,
 } from '@local-brain/core'
 
 /**
- * First-run seeding and ingestion (paste/import). A new document/interaction
- * touches many lists (links, graph, search, Today), so ingestion invalidates
- * broadly.
+ * First-run seeding. Durable record ingestion is owned by the CLI/agent skill
+ * path, not by manual desktop creation surfaces.
  */
 
 /** Seed demo data once on first run, then refresh queries if anything was inserted. */
@@ -34,20 +29,4 @@ export function useEnsureSeed(): void {
         /* surfaced by the data queries themselves */
       })
   }, [queryClient])
-}
-
-export function useIngestDocument() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (input: IngestDocumentInput) => ingestDocument(input),
-    onSuccess: () => queryClient.invalidateQueries(),
-  })
-}
-
-export function useIngestInteraction() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (input: IngestInteractionInput) => ingestInteraction(input),
-    onSuccess: () => queryClient.invalidateQueries(),
-  })
 }
