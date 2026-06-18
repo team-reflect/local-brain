@@ -2,26 +2,43 @@ import {
   createAnthropicProvider,
   createModelExtractor,
   installExtractionPipeline,
+  keychainGet,
   setModelProvider,
 } from '@local-brain/core'
 
 /**
- * Wire the BYOK model boundary for the desktop (Plan 06).
+ * Wire the BYOK model boundary for the desktop (Plans 06 + 08).
  *
- * The provider key lives in the OS keychain (Plan 08 wires that read path). For
- * local development and demos, a `VITE_ANTHROPIC_API_KEY` build-time env var is
- * honored as an escape hatch — nothing is persisted, and when no key is present
- * the whole AI surface degrades cleanly (Ask shows "not configured", and the
- * model-backed extractor is a safe no-op).
+ * The provider key is read from the OS keychain (`keychain_get`, Plan 08). For
+ * local development a `VITE_ANTHROPIC_API_KEY` build-time env var takes
+ * precedence as a no-persist escape hatch. With no key, the whole AI surface
+ * degrades cleanly (Ask shows "not configured"; the extractor no-ops).
  *
- * It also installs the model-backed extractor onto the ingest queue, so newly
- * captured documents/interactions are extracted when a provider is available.
+ * The model-backed extractor is registered regardless; it is a safe no-op until
+ * a provider exists. Call after the Tauri bridge is installed.
  */
-export function installModel(): void {
-  const key = import.meta.env.VITE_ANTHROPIC_API_KEY
-  if (typeof key === 'string' && key.trim().length > 0) {
+export async function installModel(): Promise<void> {
+  installExtractionPipeline(createModelExtractor())
+
+  let key: string | undefined = import.meta.env.VITE_ANTHROPIC_API_KEY
+  if (!key) {
+    try {
+      key = (await keychainGet('anthropic')) ?? undefined
+    } catch {
+      // The keychain (or Tauri bridge) may be unavailable in dev/browser; degrade.
+    }
+  }
+  if (key && key.trim().length > 0) {
     setModelProvider(createAnthropicProvider({ apiKey: key.trim() }))
   }
-  // Register the extractor seam regardless; it no-ops until a provider exists.
-  installExtractionPipeline(createModelExtractor())
+}
+
+/** Re-read the key from the keychain and (de)register the provider live. */
+export async function refreshModelProvider(): Promise<void> {
+  try {
+    const key = (await keychainGet('anthropic')) ?? import.meta.env.VITE_ANTHROPIC_API_KEY
+    setModelProvider(key && key.trim() ? createAnthropicProvider({ apiKey: key.trim() }) : null)
+  } catch {
+    setModelProvider(null)
+  }
 }

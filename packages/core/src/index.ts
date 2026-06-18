@@ -12,7 +12,7 @@ export {
 
 // Database access layer
 export { db } from './db/client'
-export { execute, batch, type DbStatement } from './db/commands'
+export { execute, executeRaw, batch, type DbStatement } from './db/commands'
 export { newId } from './db/id'
 export { nowIso } from './db/time'
 
@@ -216,6 +216,48 @@ export {
   deleteSetting,
   type SettingEntry,
 } from './domains/settings'
+export {
+  getModelSettings,
+  setModelEnabled,
+  setModelProviderSetting,
+  setModelModelSetting,
+  MODEL_PROVIDER_KEY,
+  MODEL_MODEL_KEY,
+  type ModelSettings,
+} from './domains/settings/model'
+
+// Native storage + keychain bindings (Plan 08)
+export {
+  databasePath,
+  backupDatabase,
+  writeFileAtomic,
+  keychainSet,
+  keychainGet,
+  keychainHas,
+  keychainDelete,
+  type BackupInfo,
+} from './ipc/storage'
+
+// Backup & export (Plan 08)
+export {
+  assembleExport,
+  exportCounts,
+  createBackup,
+  exportToFile,
+  defaultBackupPath,
+  defaultExportPath,
+  EXPORT_VERSION,
+  type BrainExport,
+  type BackupState,
+  type ExportResult,
+} from './domains/backup'
+
+// Destructive-operation maintenance (hard delete + derived-index rebuild)
+export {
+  hardDeleteRecord,
+  rebuildSearchIndexes,
+  type DeletableKind,
+} from './domains/maintenance'
 
 // AI: BYOK model boundary, cited Ask, model-backed extractor
 export {

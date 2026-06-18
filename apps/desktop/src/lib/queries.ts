@@ -44,7 +44,22 @@ import {
   getDailyBrief,
   getModelStatus,
   globalSearch,
+  databasePath,
+  getModelSettings,
+  setModelEnabled,
+  createBackup,
+  exportToFile,
+  exportCounts,
+  defaultBackupPath,
+  defaultExportPath,
+  assembleExport,
+  keychainSet,
+  keychainDelete,
+  keychainHas,
+  hardDeleteRecord,
+  rebuildSearchIndexes,
   type AskOptions,
+  type DeletableKind,
   type IngestDocumentInput,
   type IngestInteractionInput,
   type LinkedRecord,
@@ -368,4 +383,80 @@ export function useGlobalSearch(query: string) {
 /** The daily brief: bucketed tasks, recent interactions, reconnects. */
 export function useDailyBrief() {
   return useQuery({ queryKey: ['daily-brief'], queryFn: () => getDailyBrief() })
+}
+
+// Settings: storage, model boundary, backup/export, keychain (Plan 08)
+export function useDatabasePath() {
+  return useQuery({ queryKey: ['database-path'], queryFn: databasePath })
+}
+
+export function useModelSettings() {
+  return useQuery({ queryKey: ['model-settings'], queryFn: getModelSettings })
+}
+
+export function useKeychainHas(account: string) {
+  return useQuery({ queryKey: ['keychain-has', account], queryFn: () => keychainHas(account) })
+}
+
+export function useExportSummary() {
+  return useQuery({ queryKey: ['export-summary'], queryFn: () => assembleExport().then(exportCounts) })
+}
+
+export function useSetModelEnabled() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (enabled: boolean) => setModelEnabled(enabled),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['model-settings'] })
+      void queryClient.invalidateQueries({ queryKey: ['model-status'] })
+    },
+  })
+}
+
+/** Store/clear the provider key in the keychain, then re-register the provider. */
+export function useSetProviderKey() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (vars: { account: string; secret: string | null }) => {
+      if (vars.secret && vars.secret.trim()) await keychainSet(vars.account, vars.secret.trim())
+      else await keychainDelete(vars.account)
+      const { refreshModelProvider } = await import('./ai/install-model')
+      await refreshModelProvider()
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['keychain-has'] })
+      void queryClient.invalidateQueries({ queryKey: ['model-status'] })
+      void queryClient.invalidateQueries({ queryKey: ['model-settings'] })
+    },
+  })
+}
+
+export function useCreateBackup() {
+  return useMutation({ mutationFn: (dest: string) => createBackup(dest) })
+}
+
+export function useExportJson() {
+  return useMutation({ mutationFn: (dest: string) => exportToFile(dest) })
+}
+
+export function useDefaultPaths(stamp: string) {
+  return useQuery({
+    queryKey: ['default-paths', stamp],
+    queryFn: async () => ({
+      backup: await defaultBackupPath(stamp),
+      export: await defaultExportPath(stamp),
+    }),
+  })
+}
+
+/** Hard-delete a record (with cascade) and rebuild derived indexes. */
+export function useHardDelete() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (vars: { kind: DeletableKind; id: string }) => {
+      await hardDeleteRecord(vars.kind, vars.id)
+      await rebuildSearchIndexes()
+    },
+    onSuccess: () => queryClient.invalidateQueries(),
+  })
 }

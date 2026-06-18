@@ -32,6 +32,15 @@ export function execute(query: Compilable): Promise<number> {
 }
 
 /**
+ * Execute a raw write statement. For the few writes Kysely cannot express —
+ * notably FTS5 maintenance (`INSERT INTO …_fts(…_fts) VALUES('rebuild')`) and
+ * hard deletes during maintenance. Reads still go through Kysely.
+ */
+export function executeRaw(sql: string, params: readonly unknown[] = []): Promise<number> {
+  return call('db_execute', { sql, params }, affectedSchema)
+}
+
+/**
  * Execute several compiled writes in one Rust transaction. Resolves to the
  * affected-row count per statement; rejects (and rolls back) if any fails.
  */

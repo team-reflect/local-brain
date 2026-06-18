@@ -10,7 +10,7 @@ import './app/globals.css'
 
 installTauriBridge()
 registerAppCommands()
-installModel()
+void installModel()
 
 const rootElement = document.getElementById('root')
 if (!rootElement) {

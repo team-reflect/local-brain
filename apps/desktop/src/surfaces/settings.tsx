@@ -1,10 +1,21 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { appVersion } from '@local-brain/core'
 import { PageHead } from '../components/page-head'
 import { Section } from '../components/section'
 import { cn } from '../lib/utils'
-import { useModelStatus } from '../lib/queries'
+import {
+  useCreateBackup,
+  useDatabasePath,
+  useDefaultPaths,
+  useExportJson,
+  useExportSummary,
+  useKeychainHas,
+  useModelSettings,
+  useModelStatus,
+  useSetModelEnabled,
+  useSetProviderKey,
+} from '../lib/queries'
 import { useRouter } from '../routing/router'
 
 interface SettingsSection {
@@ -18,7 +29,7 @@ const SECTIONS: readonly SettingsSection[] = [
   { key: 'general', label: 'General' },
   { key: 'model-keys', label: 'Model keys' },
   { key: 'database', label: 'Local database' },
-  { key: 'backup', label: 'Backup & export', plan: 'Plan 08' },
+  { key: 'backup', label: 'Backup & export' },
   { key: 'skills', label: 'Skills' },
   { key: 'diagnostics', label: 'Diagnostics' },
 ]
@@ -66,27 +77,9 @@ function SectionBody({ section }: { section: string }): ReactNode {
     case 'model-keys':
       return <ModelBoundary />
     case 'database':
-      return (
-        <Section title="Local database">
-          <div className="flex flex-col gap-2 text-sm text-muted-foreground">
-            <p>
-              Local Brain keeps everything in a single SQLite database on this machine. The path is
-              resolved from <code className="font-mono text-foreground">$BRAIN_DB</code> when set,
-              otherwise the platform data directory.
-            </p>
-            <p>Migrations run automatically at startup; the schema is versioned in the app.</p>
-          </div>
-        </Section>
-      )
+      return <LocalDatabase />
     case 'backup':
-      return (
-        <Section title="Backup &amp; export">
-          <p className="text-sm text-muted-foreground">
-            One-click database backup and a portable export of your records. Lands with the
-            settings/backup work in Plan 08.
-          </p>
-        </Section>
-      )
+      return <BackupExport />
     case 'skills':
       return (
         <Section title="Skills">
@@ -129,17 +122,66 @@ function SectionBody({ section }: { section: string }): ReactNode {
 
 function ModelBoundary(): ReactNode {
   const status = useModelStatus()
+  const settings = useModelSettings()
+  const hasKey = useKeychainHas('anthropic')
+  const setKey = useSetProviderKey()
+  const setEnabled = useSetModelEnabled()
+  const [draftKey, setDraftKey] = useState('')
   const data = status.data
+
   return (
     <Section title="Model keys">
       <div className="flex flex-col gap-3 text-sm">
         <p className="text-muted-foreground">
-          Ask and model-backed extraction call your own provider key (BYOK). Keys are read from the
-          OS keychain and never stored in app settings or sent anywhere but the provider you choose.
+          Ask and model-backed extraction call your own provider key (BYOK). The key is stored in the
+          OS keychain — never in app settings — and is sent only to the provider you choose.
         </p>
+
+        <div className="flex items-center gap-2">
+          <input
+            type="password"
+            value={draftKey}
+            onChange={(event) => setDraftKey(event.target.value)}
+            placeholder={hasKey.data ? 'A key is stored — enter a new one to replace it' : 'sk-ant-…'}
+            className="flex-1 rounded-md border border-border bg-card px-3 py-2 font-mono text-xs outline-none focus:border-primary/50"
+          />
+          <button
+            type="button"
+            disabled={setKey.isPending || draftKey.trim().length === 0}
+            onClick={() => {
+              setKey.mutate({ account: 'anthropic', secret: draftKey })
+              setDraftKey('')
+            }}
+            className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-40"
+          >
+            Save key
+          </button>
+          {hasKey.data ? (
+            <button
+              type="button"
+              disabled={setKey.isPending}
+              onClick={() => setKey.mutate({ account: 'anthropic', secret: null })}
+              className="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-secondary/60"
+            >
+              Clear
+            </button>
+          ) : null}
+        </div>
+
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={settings.data?.enabled ?? true}
+            onChange={(event) => setEnabled.mutate(event.target.checked)}
+          />
+          Allow external model calls (master kill switch)
+        </label>
+
         <div className="rounded-md border border-border bg-card px-4 py-3">
           {data ? (
             <dl className="grid grid-cols-[8rem_1fr] gap-x-3 gap-y-1.5 text-xs">
+              <dt className="text-muted-foreground">Key stored</dt>
+              <dd className="font-mono text-foreground">{hasKey.data ? 'yes (keychain)' : 'no'}</dd>
               <dt className="text-muted-foreground">External calls</dt>
               <dd className="font-mono text-foreground">{data.enabled ? 'enabled' : 'disabled'}</dd>
               <dt className="text-muted-foreground">Provider</dt>
@@ -162,9 +204,116 @@ function ModelBoundary(): ReactNode {
             <span className="text-muted-foreground">Checking model status…</span>
           )}
         </div>
+      </div>
+    </Section>
+  )
+}
+
+function LocalDatabase(): ReactNode {
+  const path = useDatabasePath()
+  return (
+    <Section title="Local database">
+      <div className="flex flex-col gap-2 text-sm text-muted-foreground">
+        <p>
+          Local Brain keeps everything in a single SQLite database on this machine. Migrations run
+          automatically at startup; the schema is versioned in the app.
+        </p>
+        <div className="rounded-md border border-border bg-card px-4 py-3 font-mono text-xs text-card-foreground break-all">
+          {path.data ?? 'resolving…'}
+        </div>
+        <p className="text-xs">
+          The path is resolved from <code className="font-mono text-foreground">$BRAIN_DB</code> when
+          set, otherwise the platform data directory. The <code className="font-mono text-foreground">brain</code> CLI
+          resolves it identically.
+        </p>
+      </div>
+    </Section>
+  )
+}
+
+function BackupExport(): ReactNode {
+  // A filesystem-safe timestamp for default filenames (no colons).
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+  const paths = useDefaultPaths(stamp)
+  const summary = useExportSummary()
+  const backup = useCreateBackup()
+  const exportJson = useExportJson()
+  const [backupDest, setBackupDest] = useState('')
+  const [exportDest, setExportDest] = useState('')
+
+  const backupPath = backupDest || paths.data?.backup || ''
+  const exportPath = exportDest || paths.data?.export || ''
+
+  const total = summary.data ? Object.values(summary.data).reduce((a, b) => a + b, 0) : 0
+
+  return (
+    <Section title="Backup &amp; export">
+      <div className="flex flex-col gap-4 text-sm">
+        <p className="text-muted-foreground">
+          A <strong className="text-foreground">backup</strong> is a consistent, restorable copy of
+          the SQLite database. An <strong className="text-foreground">export</strong> is a portable,
+          inspectable JSON dump of your records. Both write atomically; provider keys are never
+          included.
+        </p>
+
+        <div className="flex flex-col gap-2 rounded-md border border-border bg-card px-4 py-3">
+          <p className="font-medium text-foreground">Backup database</p>
+          <input
+            value={backupPath}
+            onChange={(event) => setBackupDest(event.target.value)}
+            className="rounded-md border border-border bg-background px-3 py-2 font-mono text-xs outline-none focus:border-primary/50"
+          />
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              disabled={backup.isPending || !backupPath}
+              onClick={() => backup.mutate(backupPath)}
+              className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-40"
+            >
+              {backup.isPending ? 'Backing up…' : 'Create backup'}
+            </button>
+            {backup.data ? (
+              <span className="text-xs text-emerald-600 dark:text-emerald-400">
+                Backed up · v{backup.data.schemaVersion} · {Math.round(backup.data.sizeBytes / 1024)} KB
+              </span>
+            ) : null}
+            {backup.isError ? (
+              <span className="text-xs text-red-600 dark:text-red-400">Backup failed</span>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-2 rounded-md border border-border bg-card px-4 py-3">
+          <p className="font-medium text-foreground">Export JSON ({total} records)</p>
+          <input
+            value={exportPath}
+            onChange={(event) => setExportDest(event.target.value)}
+            className="rounded-md border border-border bg-background px-3 py-2 font-mono text-xs outline-none focus:border-primary/50"
+          />
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              disabled={exportJson.isPending || !exportPath}
+              onClick={() => exportJson.mutate(exportPath)}
+              className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-40"
+            >
+              {exportJson.isPending ? 'Exporting…' : 'Export JSON'}
+            </button>
+            {exportJson.data ? (
+              <span className="text-xs text-emerald-600 dark:text-emerald-400">
+                Exported · {Math.round(exportJson.data.bytes / 1024)} KB
+              </span>
+            ) : null}
+            {exportJson.isError ? (
+              <span className="text-xs text-red-600 dark:text-red-400">Export failed</span>
+            ) : null}
+          </div>
+        </div>
+
         <p className="text-xs text-muted-foreground">
-          Provider key management (keychain) and the enable/disable toggle ship with Settings &amp;
-          privacy in Plan 08.
+          Tip: keep backups outside any cloud-synced folder unless that folder has a tested SQLite
+          locking story. To restore, replace the database file at the path shown in Local database
+          and reopen the app.
         </p>
       </div>
     </Section>
@@ -174,27 +323,36 @@ function ModelBoundary(): ReactNode {
 function Diagnostics(): ReactNode {
   const info = useQuery({ queryKey: ['app-version'], queryFn: appVersion })
   const model = useModelStatus()
+  const path = useDatabasePath()
+  const hasKey = useKeychainHas('anthropic')
+
+  const lines: [string, string][] = [
+    ['app', info.data ? `${info.data.name} v${info.data.version} · ${info.data.platform}` : '…'],
+    ['database', path.data ?? '…'],
+    ['migrations', 'applied at startup (schema versioned)'],
+    ['lexical search', 'FTS5 (available)'],
+    ['semantic search', 'off (lexical fallback)'],
+    ['keychain', hasKey.data === undefined ? '…' : hasKey.data ? 'anthropic key stored' : 'no provider key'],
+    ['model', model.data ? (model.data.canRun ? 'ready' : `unavailable (${model.data.reason})`) : '…'],
+    ['CLI / skill', 'brain sidecar bundled · skills/brain/SKILL.md'],
+  ]
+
   return (
     <Section title="Diagnostics">
-      <div className="flex flex-col gap-2">
-        <div className="rounded-md border border-border bg-card px-4 py-3 font-mono text-xs text-card-foreground">
-          {info.data ? (
-            <span>
-              {info.data.name} v{info.data.version} · {info.data.platform}
-            </span>
-          ) : (
-            <span className="text-muted-foreground">Loading app info…</span>
-          )}
-        </div>
-        <div className="rounded-md border border-border bg-card px-4 py-3 font-mono text-xs text-card-foreground">
-          <span className="text-muted-foreground">model: </span>
-          {model.data ? (model.data.canRun ? 'ready' : `unavailable (${model.data.reason})`) : '…'}
-        </div>
-        <div className="rounded-md border border-border bg-card px-4 py-3 font-mono text-xs text-card-foreground">
-          <span className="text-muted-foreground">lexical search: </span>FTS5 (available)
-          <span className="text-muted-foreground"> · semantic: </span>off (lexical fallback)
-        </div>
+      <div className="rounded-md border border-border bg-card px-4 py-3 font-mono text-xs text-card-foreground">
+        <dl className="grid grid-cols-[8rem_1fr] gap-x-3 gap-y-1.5">
+          {lines.map(([key, value]) => (
+            <div key={key} className="contents">
+              <dt className="text-muted-foreground">{key}</dt>
+              <dd className="break-all">{value}</dd>
+            </div>
+          ))}
+        </dl>
       </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Restore: replace the database file at the path above with a backup and reopen the app. Derived
+        search indexes rebuild from durable records.
+      </p>
     </Section>
   )
 }
