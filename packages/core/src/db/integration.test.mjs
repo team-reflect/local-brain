@@ -59,10 +59,10 @@ describe('core domain actions (real SQLite round-trip)', () => {
   })
 
   it('creates, reads, completes and archives across domains', async () => {
-    const personId = await createPerson({ fullName: 'Ada Lovelace', relationshipStrength: 5 })
+    const personId = await createPerson({ fullName: 'Ada Lovelace' })
     const person = await getPerson(personId)
     expect(person?.fullName).toBe('Ada Lovelace')
-    expect(person?.relationshipStrength).toBe(5)
+    expect(person?.relationshipStrength).toBeNull()
     // SQLite fills created_at/updated_at via the column defaults.
     expect(person?.createdAt).toBeTruthy()
 

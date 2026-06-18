@@ -17,6 +17,8 @@ export type Generated<T> =
     ? ColumnType<S, I | undefined, U>
     : ColumnType<T, T | undefined, T>
 
+export type SelectOnly<T> = ColumnType<T, never, never>
+
 export interface Affiliations {
   id: string
   personId: string
@@ -211,7 +213,6 @@ export interface People {
   primaryPhone: string | null
   location: string | null
   isSelf: Generated<number>
-  relationshipStrength: number | null
   reconnectIntervalDays: number | null
   lastInteractionAt: string | null
   nextReconnectAt: string | null
@@ -277,6 +278,14 @@ export interface Projects {
   createdAt: Generated<string>
   updatedAt: Generated<string>
   archivedAt: string | null
+}
+
+export interface RelationshipStrengths {
+  personId: SelectOnly<string | null>
+  relationshipStrength: SelectOnly<number | null>
+  recentInteractions: SelectOnly<number | null>
+  daysSinceLast: SelectOnly<number | null>
+  openTasks: SelectOnly<number | null>
 }
 
 export interface SchemaMeta {
@@ -381,6 +390,7 @@ export interface Database {
   projectPeople: ProjectPeople
   projectTasks: ProjectTasks
   projects: Projects
+  relationshipStrengths: RelationshipStrengths
   schemaMeta: SchemaMeta
   settings: Settings
   taggings: Taggings

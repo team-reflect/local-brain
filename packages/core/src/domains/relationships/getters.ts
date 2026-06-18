@@ -6,8 +6,8 @@ import { daysBetween } from './strength'
  * Read side of relationship intelligence (Plan 05 step 9): the reconnect
  * suggestions that feed Today and a person's detail page. These read the derived
  * `next_reconnect_at` column that {@link recomputeRelationshipIntelligence}
- * keeps fresh — so suggestions are just a fast, indexed projection, no scoring at
- * read time.
+ * keeps fresh and join the SELECT-only `relationship_strengths` view for network
+ * strength.
  */
 
 export interface ReconnectSuggestion {
@@ -37,12 +37,19 @@ export async function listReconnectSuggestions(
   const asOf = options.asOf ?? nowIso()
   let query = db
     .selectFrom('people')
-    .where('isSelf', '=', 0)
-    .where('archivedAt', 'is', null)
-    .where('nextReconnectAt', 'is not', null)
-    .where('nextReconnectAt', '<=', asOf)
-    .orderBy('nextReconnectAt', 'asc')
-    .select(['id', 'fullName', 'relationshipStrength', 'lastInteractionAt', 'nextReconnectAt'])
+    .leftJoin('relationshipStrengths', 'relationshipStrengths.personId', 'people.id')
+    .where('people.isSelf', '=', 0)
+    .where('people.archivedAt', 'is', null)
+    .where('people.nextReconnectAt', 'is not', null)
+    .where('people.nextReconnectAt', '<=', asOf)
+    .orderBy('people.nextReconnectAt', 'asc')
+    .select([
+      'people.id',
+      'people.fullName',
+      'relationshipStrengths.relationshipStrength',
+      'people.lastInteractionAt',
+      'people.nextReconnectAt',
+    ])
   if (options.limit !== undefined) {
     query = query.limit(options.limit)
   }

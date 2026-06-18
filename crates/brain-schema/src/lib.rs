@@ -404,6 +404,59 @@ mod tests {
     }
 
     #[test]
+    fn relationship_strength_is_a_select_only_view() {
+        let conn = open_in_memory().unwrap();
+        let people_column_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('people') WHERE name = 'relationship_strength'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            people_column_count, 0,
+            "relationship strength must not be writable people state"
+        );
+
+        let view_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'view' AND name = 'relationship_strengths'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(view_count, 1, "missing relationship_strengths view");
+
+        conn.execute(
+            "INSERT INTO people (id, full_name) VALUES ('p1', 'Ada Lovelace')",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO tasks (id, title) VALUES ('t1', 'Follow up')", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO task_people (id, task_id, person_id) VALUES ('tp1', 't1', 'p1')",
+            [],
+        )
+        .unwrap();
+
+        let strength: i64 = conn
+            .query_row(
+                "SELECT relationship_strength FROM relationship_strengths WHERE person_id = 'p1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(strength, 1);
+
+        let update = conn.execute(
+            "UPDATE relationship_strengths SET relationship_strength = 5 WHERE person_id = 'p1'",
+            [],
+        );
+        assert!(update.is_err(), "relationship_strengths must stay select-only");
+    }
+
+    #[test]
     fn foreign_keys_are_enforced() {
         let conn = open_in_memory().unwrap();
         let result = conn.execute(

@@ -172,8 +172,11 @@ describe('05b correction setters (real SQLite)', () => {
 })
 
 describe('05b relationship intelligence recompute (real SQLite)', () => {
+  let sqlite
+
   beforeEach(() => {
-    installSqliteBridge(freshDatabase())
+    sqlite = freshDatabase()
+    installSqliteBridge(sqlite)
   })
 
   it('derives last-interaction, next-reconnect, and strength from interactions', async () => {
@@ -216,13 +219,21 @@ describe('05b relationship intelligence recompute (real SQLite)', () => {
     expect((await getPerson(personId))?.relationshipStrength).toBe(2)
   })
 
-  it('leaves strength untouched for a person with no signal', async () => {
-    const personId = await createPerson({ fullName: 'Unknown Contact', relationshipStrength: 4 })
+  it('leaves strength null for a person with no deterministic signal', async () => {
+    const personId = await createPerson({ fullName: 'Unknown Contact' })
     await recomputeRelationshipIntelligence(personId, { asOf: '2026-06-01T00:00:00.000Z' })
     const person = await getPerson(personId)
-    expect(person?.relationshipStrength).toBe(4) // manual value preserved
+    expect(person?.relationshipStrength).toBeNull()
     expect(person?.lastInteractionAt).toBeNull()
     expect(person?.nextReconnectAt).toBeNull()
+  })
+
+  it('does not expose a writable people.relationship_strength column', async () => {
+    expect(() =>
+      sqlite
+        .prepare("INSERT INTO people (id, full_name, relationship_strength) VALUES ('p_manual', 'Manual', 4)")
+        .run(),
+    ).toThrow(/relationship_strength/)
   })
 
   it('surfaces overdue people as reconnect suggestions, most overdue first', async () => {

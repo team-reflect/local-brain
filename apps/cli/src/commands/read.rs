@@ -281,7 +281,17 @@ pub fn show(conn: &Connection, json: bool, kind: &str, id: &str) -> Result<(), C
     let record = match kind {
         "person" => fetch_one(
             conn,
-            "SELECT id, full_name AS title, headline AS subtitle, summary, notes, relationship_strength, last_interaction_at, next_reconnect_at FROM people WHERE id = ?1",
+            "SELECT people.id,
+                    people.full_name AS title,
+                    people.headline AS subtitle,
+                    people.summary,
+                    people.notes,
+                    relationship_strengths.relationship_strength,
+                    people.last_interaction_at,
+                    people.next_reconnect_at
+             FROM people
+             LEFT JOIN relationship_strengths ON relationship_strengths.person_id = people.id
+             WHERE people.id = ?1",
             id,
         )?,
         "organization" => fetch_one(

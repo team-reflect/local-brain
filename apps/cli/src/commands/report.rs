@@ -91,12 +91,17 @@ fn soon_cutoff(conn: &Connection, days: i64) -> Result<String, CliError> {
 
 fn reconnect_suggestions(conn: &Connection) -> Result<Vec<Value>, CliError> {
     let mut stmt = conn.prepare(
-        "SELECT id, full_name, relationship_strength, last_interaction_at, next_reconnect_at
+        "SELECT people.id,
+                people.full_name,
+                relationship_strengths.relationship_strength,
+                people.last_interaction_at,
+                people.next_reconnect_at
          FROM people
-         WHERE is_self = 0 AND archived_at IS NULL
-           AND next_reconnect_at IS NOT NULL
-           AND next_reconnect_at <= strftime('%Y-%m-%dT%H:%M:%fZ','now')
-         ORDER BY next_reconnect_at ASC",
+         LEFT JOIN relationship_strengths ON relationship_strengths.person_id = people.id
+         WHERE people.is_self = 0 AND people.archived_at IS NULL
+           AND people.next_reconnect_at IS NOT NULL
+           AND people.next_reconnect_at <= strftime('%Y-%m-%dT%H:%M:%fZ','now')
+         ORDER BY people.next_reconnect_at ASC",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(json!({

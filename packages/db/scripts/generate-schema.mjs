@@ -12,11 +12,12 @@
 //
 // Columns are snake_case in SQLite and camelCase in TypeScript; the
 // CamelCasePlugin bridges the two at the dialect boundary (see db.ts), so this
-// file maps both column identifiers and table keys to camelCase. FTS5 virtual
-// tables and their shadow tables are excluded — search uses raw SQL (Plan 06),
-// not the typed query builder. The sqlite-vec (vec0) virtual tables are likewise
-// excluded; their CREATE statements are stripped before replay because Node's
-// built-in SQLite lacks the extension (see stripVec0).
+// file maps both column identifiers and table keys to camelCase. Read-only SQL
+// views are included with select-only columns. FTS5 virtual tables and their
+// shadow tables are excluded — search uses raw SQL (Plan 06), not the typed
+// query builder. The sqlite-vec (vec0) virtual tables are likewise excluded;
+// their CREATE statements are stripped before replay because Node's built-in
+// SQLite lacks the extension (see stripVec0).
 
 import { DatabaseSync } from 'node:sqlite'
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -45,11 +46,15 @@ function toPascalCase(name) {
 }
 
 /** Map a SQLite declared type to a TypeScript type via column affinity. */
-function tsTypeForColumn(declaredType) {
+function tsTypeForColumn(declaredType, columnName) {
   const type = (declaredType ?? '').toUpperCase()
   if (type.includes('INT')) return 'number'
   if (type.includes('CHAR') || type.includes('CLOB') || type.includes('TEXT')) return 'string'
-  if (type.includes('BLOB') || type === '') return 'Uint8Array'
+  if (type === '') {
+    if (columnName === 'id' || columnName.endsWith('_id')) return 'string'
+    return 'number'
+  }
+  if (type.includes('BLOB')) return 'Uint8Array'
   if (type.includes('REAL') || type.includes('FLOA') || type.includes('DOUB')) return 'number'
   return 'number'
 }
@@ -82,30 +87,33 @@ function migratedDatabase() {
 /** Build the schema.gen.ts source string from the migrated database. */
 export function generateSchemaSource() {
   const db = migratedDatabase()
-  const tableNames = db
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+  const relations = db
+    .prepare("SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY name")
     .all()
-    .map((row) => row.name)
-    .filter((name) => !isExcluded(name))
+    .filter((row) => !isExcluded(row.name))
 
   const interfaces = []
-  for (const tableName of tableNames) {
-    const columns = db.prepare(`PRAGMA table_info("${tableName}")`).all()
+  for (const relation of relations) {
+    const columns = db.prepare(`PRAGMA table_info("${relation.name}")`).all()
     const lines = columns.map((column) => {
       const nonNull = column.notnull === 1 || column.pk > 0
       const hasDefault = column.dflt_value !== null
-      let type = tsTypeForColumn(column.type)
+      let type = tsTypeForColumn(column.type, column.name)
       if (!nonNull) type = `${type} | null`
-      if (hasDefault) type = `Generated<${type}>`
+      if (relation.type === 'view') {
+        type = `SelectOnly<${type}>`
+      } else if (hasDefault) {
+        type = `Generated<${type}>`
+      }
       return `  ${toCamelCase(column.name)}: ${type}`
     })
-    interfaces.push(`export interface ${toPascalCase(tableName)} {\n${lines.join('\n')}\n}`)
+    interfaces.push(`export interface ${toPascalCase(relation.name)} {\n${lines.join('\n')}\n}`)
   }
 
   db.close()
 
-  const databaseFields = tableNames
-    .map((name) => `  ${toCamelCase(name)}: ${toPascalCase(name)}`)
+  const databaseFields = relations
+    .map((relation) => `  ${toCamelCase(relation.name)}: ${toPascalCase(relation.name)}`)
     .join('\n')
 
   return `${header()}
@@ -119,6 +127,8 @@ export type Generated<T> =
   T extends ColumnType<infer S, infer I, infer U>
     ? ColumnType<S, I | undefined, U>
     : ColumnType<T, T | undefined, T>
+
+export type SelectOnly<T> = ColumnType<T, never, never>
 
 ${interfaces.join('\n\n')}
 

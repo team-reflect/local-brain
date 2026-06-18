@@ -3,7 +3,7 @@
 -- A personal CRM with first-class people, organizations, projects, tasks,
 -- interactions, documents, hidden atomic memories, tags, AI chat, and settings.
 -- SQLite is the durable source of truth; only content_chunks and the FTS tables
--- are derived and rebuildable.
+-- plus read-only views are derived and rebuildable.
 --
 -- Conventions:
 --   * Ids are app-generated ULIDs stored as TEXT primary keys.
@@ -50,7 +50,6 @@ CREATE TABLE people (
   primary_phone           TEXT,
   location                TEXT,
   is_self                 INTEGER NOT NULL DEFAULT 0 CHECK (is_self IN (0, 1)),
-  relationship_strength   INTEGER,
   reconnect_interval_days INTEGER,
   last_interaction_at     TEXT,
   next_reconnect_at       TEXT,
@@ -446,6 +445,69 @@ CREATE INDEX idx_taggings_tag ON taggings (tag_id);
 CREATE INDEX idx_taggings_record ON taggings (record_type, record_id);
 
 CREATE INDEX idx_chat_messages_conversation ON chat_messages (conversation_id);
+
+----------------------------------------------------------------------
+-- Read-only deterministic relationship intelligence.
+----------------------------------------------------------------------
+-- Network strength is intentionally not a people column: agents and third-party
+-- SQLite clients should only be able to SELECT it. The formula mirrors
+-- packages/core/src/domains/relationships/strength.ts.
+CREATE VIEW relationship_strengths AS
+WITH signals AS (
+  SELECT
+    people.id AS person_id,
+    COUNT(DISTINCT CASE
+      WHEN interactions.archived_at IS NULL
+       AND interactions.occurred_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-365 days')
+      THEN interactions.id
+    END) AS recent_interactions,
+    CAST(julianday('now') - julianday(MAX(CASE
+      WHEN interactions.archived_at IS NULL AND interactions.occurred_at IS NOT NULL
+      THEN interactions.occurred_at
+    END)) AS INTEGER) AS days_since_last,
+    COUNT(DISTINCT CASE
+      WHEN tasks.archived_at IS NULL AND tasks.status != 'done'
+      THEN tasks.id
+    END) AS open_tasks
+  FROM people
+  LEFT JOIN interaction_participants ON interaction_participants.person_id = people.id
+  LEFT JOIN interactions ON interactions.id = interaction_participants.interaction_id
+  LEFT JOIN task_people ON task_people.person_id = people.id
+  LEFT JOIN tasks ON tasks.id = task_people.task_id
+  WHERE people.is_self = 0 AND people.archived_at IS NULL
+  GROUP BY people.id
+),
+scores AS (
+  SELECT
+    person_id,
+    recent_interactions,
+    days_since_last,
+    open_tasks,
+    min(recent_interactions, 5)
+      + CASE
+          WHEN days_since_last IS NULL THEN 0
+          WHEN days_since_last <= 30 THEN 3
+          WHEN days_since_last <= 90 THEN 2
+          WHEN days_since_last <= 180 THEN 1
+          ELSE 0
+        END
+      + min(open_tasks, 2) AS score
+  FROM signals
+)
+SELECT
+  person_id,
+  CASE
+    WHEN recent_interactions = 0 AND open_tasks = 0 THEN NULL
+    WHEN score >= 8 THEN 5
+    WHEN score >= 6 THEN 4
+    WHEN score >= 4 THEN 3
+    WHEN score >= 2 THEN 2
+    ELSE 1
+  END AS relationship_strength,
+  recent_interactions,
+  days_since_last,
+  open_tasks
+FROM scores;
 
 ----------------------------------------------------------------------
 -- FTS5 over document/interaction text and derived chunks (Plan 02 step 4).
