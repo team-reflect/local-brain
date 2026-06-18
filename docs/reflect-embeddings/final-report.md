@@ -226,9 +226,15 @@ vec0 cosine-KNN ordering, and a real end-to-end model + KNN test (ranks by meani
   intact and the delete is retryable; if the later batch fails, the surviving chunks are simply
   re-embedded by the idempotent backfill. Test: `settings-maintenance.test.mjs` simulates
   `embed_delete` failure and verifies the document, chunks, and embeddings all remain.
-- Re-verified: `git diff --check` clean, focused desktop coordinator/rebuild/sync tests (16 pass),
-  focused core maintenance/pipeline tests (11 pass), and `pnpm check` (147 core + 56 desktop tests,
-  existing first-run `act(...)` warning).
+- **High — Failed mutations skip invalidation (Bugbot rerun on head 3e13b11):** the rebuild now
+  persists more durable state (`setBackfillError`, `embed_clear`) before the backfill can throw, so
+  `useRebuildEmbeddings`/`useSetEmbeddingsEnabled` invalidating `embeddings-status` only `onSuccess`
+  left the Settings UI showing a full/healthy index after a rebuild wipe that then failed (no
+  `refetchOnWindowFocus`). Both mutations now invalidate `onSettled`, so a failed run still refreshes
+  the cache to the wiped/error state. Test: `embeddings-mutations.dom.test.tsx`.
+- Re-verified: `git diff --check` clean, focused desktop coordinator/rebuild/sync/mutation tests and
+  core maintenance/pipeline tests pass, and `pnpm check` (148 core + 58 desktop tests, existing
+  first-run `act(...)` warning).
 
 ## Repo state
 - Branch: `codex/local-brain-reflect-embeddings`

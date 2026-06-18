@@ -74,7 +74,12 @@ export function useSetEmbeddingsEnabled() {
         await embedEnsure()
       }
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY }),
+    // Invalidate on settle, not just success: `setEmbeddingsEnabled` /
+    // `setBackfillError` persist durable state before `embedEnsure` can throw, so
+    // a failed run still changed the DB. With `refetchOnWindowFocus` off, an
+    // onSuccess-only refresh would leave the UI showing stale enabled/error state
+    // until the next slow poll.
+    onSettled: () => queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY }),
   })
 }
 
@@ -144,6 +149,11 @@ export function useRebuildEmbeddings() {
         isStale: () =>
           queryClient.getQueryData<EmbeddingsStatus>(EMBEDDINGS_STATUS_KEY)?.enabled === false,
       }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY }),
+    // Invalidate on settle, not just success: a rebuild persists `embed_clear`
+    // (and `setBackfillError`) before the backfill can throw, so a failure leaves
+    // the index wiped on disk. An onSuccess-only refresh would let Settings keep
+    // showing a full/healthy index while the vectors are actually empty until the
+    // next poll; on settle the UI reflects the wipe + sticky error immediately.
+    onSettled: () => queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY }),
   })
 }
