@@ -56,8 +56,8 @@ export function AppShell(): ReactNode {
   const settingsActive = activeSection === 'settings'
 
   return (
-    <div className="flex h-full">
-      <aside className="flex w-[260px] shrink-0 flex-col border-r border-border bg-[hsl(var(--lb-sidebar))] py-5">
+    <div className="flex h-full min-h-0">
+      <aside className="flex min-h-0 w-[260px] shrink-0 flex-col border-r border-border bg-[hsl(var(--lb-sidebar))] py-5">
         <div className="flex items-center justify-end gap-1 px-4 pb-3">
           <button
             type="button"
@@ -125,7 +125,7 @@ export function AppShell(): ReactNode {
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col bg-background">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
         <header className="flex h-12 items-center justify-center border-b border-border px-4">
           <button
             type="button"
@@ -138,7 +138,7 @@ export function AppShell(): ReactNode {
             <kbd className={keycapClass}>⌘K</kbd>
           </button>
         </header>
-        <main className="flex-1 overflow-y-auto px-7 py-6">
+        <main className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
           <RouteContent route={route} />
         </main>
       </div>
