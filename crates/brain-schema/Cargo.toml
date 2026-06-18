@@ -1,0 +1,12 @@
+[package]
+name = "brain-schema"
+version = "0.1.0"
+edition = "2021"
+description = "Durable SQLite schema, migrations, and open/migrate helpers for Local Brain"
+
+[dependencies]
+rusqlite = { workspace = true }
+rusqlite_migration = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
