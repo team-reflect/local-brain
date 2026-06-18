@@ -26,10 +26,8 @@ export function TodaySurface(): ReactNode {
     <div className="mx-auto flex max-w-3xl flex-col gap-7">
       <PageHead eyebrow={todayLabel()} title={`Good to see you, ${name}`} />
 
-      <div className="rounded-md border border-border bg-card px-4 py-3.5">
-        <p className="font-mono text-[11px] uppercase tracking-wide text-muted-foreground">
-          Daily brief
-        </p>
+      <div className="rounded-lg border border-border bg-card px-4 py-3.5">
+        <p className="text-[11px] font-medium tracking-wide text-muted-foreground">Daily brief</p>
         <p className="mt-1.5 text-sm text-foreground">
           Your AI daily brief lands here once retrieval is wired up (Plan 06). For now,
           Today reads your open tasks, recent interactions, and active projects straight

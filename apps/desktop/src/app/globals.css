@@ -4,83 +4,100 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
- * Warm paper theme tokens (see docs/design-system.md). Values are HSL triplets
- * consumed as `hsl(var(--token))`; the @theme block below maps them onto
- * Tailwind color utilities and shadcn semantic roles.
+ * Reflect design-system tokens (see docs/design-system.md). Adapted from the
+ * Reflect Open / Reflect Local design system: cool-grey neutrals, a single
+ * indigo brand/action accent, dense spacing, small radii, and Inter/system
+ * typography with mono reserved for metadata and shortcuts.
+ *
+ * Values are HSL triplets consumed as `hsl(var(--token))`; the @theme block
+ * below maps them onto Tailwind color utilities and shadcn semantic roles.
+ * Reference ramps (Tailwind cool grey + indigo) expressed as HSL:
+ *   gray-50  210 20% 98%   gray-500 220 9% 46%
+ *   gray-100 220 14% 96%   gray-600 215 14% 34%
+ *   gray-200 220 13% 91%   gray-700 217 19% 27%
+ *   gray-300 216 12% 84%   gray-800 215 28% 17%
+ *   gray-400 218 11% 65%   gray-900 221 39% 11%
+ *   indigo-100 226 100% 94%  indigo-500 239 84% 67%
+ *   indigo-600 243 75% 59%   indigo-700 245 58% 51%
  */
 :root {
-  --background: 48 31% 95%;
-  --foreground: 42 16% 9%;
+  /* White editor/content canvas on a faintly cool app field. */
+  --background: 210 20% 99%;
+  --foreground: 221 39% 11%;
 
-  --card: 45 45% 97%;
-  --card-foreground: 42 16% 9%;
+  --card: 0 0% 100%;
+  --card-foreground: 221 39% 11%;
 
-  --popover: 45 45% 97%;
-  --popover-foreground: 42 16% 9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 221 39% 11%;
 
-  --primary: 18 56% 38%;
-  --primary-foreground: 45 45% 97%;
+  /* Indigo is the sole saturated accent: every solid action. */
+  --primary: 243 75% 59%;
+  --primary-foreground: 0 0% 100%;
 
-  --secondary: 43 28% 91%;
-  --secondary-foreground: 42 16% 18%;
+  /* Soft cool-grey wash for hovers, active rows, and segmented controls. */
+  --secondary: 220 14% 96%;
+  --secondary-foreground: 217 19% 27%;
 
-  --muted: 43 28% 91%;
-  --muted-foreground: 42 8% 46%;
+  --muted: 220 14% 96%;
+  --muted-foreground: 220 9% 46%;
 
-  --accent: 18 56% 38%;
-  --accent-foreground: 45 45% 97%;
+  /* Soft indigo tint for secondary/selected emphasis. */
+  --accent: 226 100% 94%;
+  --accent-foreground: 245 58% 51%;
 
-  --destructive: 4 61% 42%;
-  --destructive-foreground: 45 45% 97%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
 
-  --border: 43 22% 81%;
-  --input: 43 22% 81%;
-  --ring: 18 56% 38%;
+  --border: 220 13% 91%;
+  --input: 220 13% 91%;
+  --ring: 239 84% 67%;
 
-  --radius: 0.375rem;
+  --radius: 0.5rem;
 
   /* Local Brain surface aliases for recurring app chrome. */
-  --lb-bg-2: 43 28% 91%;
-  --lb-line-soft: 43 22% 86%;
-  --lb-ink-2: 42 12% 26%;
-  --lb-ink-3: 42 8% 46%;
-  --lb-sidebar: 45 45% 97%;
+  --lb-bg-2: 220 14% 96%;
+  --lb-line-soft: 220 14% 96%;
+  --lb-ink-2: 215 14% 34%;
+  --lb-ink-3: 220 9% 46%;
+  --lb-sidebar: 210 20% 98%;
 }
 
 .dark {
-  --background: 40 10% 8%;
-  --foreground: 44 24% 92%;
+  --background: 224 45% 7%;
+  --foreground: 210 40% 98%;
 
-  --card: 40 10% 11%;
-  --card-foreground: 44 24% 92%;
+  --card: 222 40% 11%;
+  --card-foreground: 210 40% 98%;
 
-  --popover: 40 10% 11%;
-  --popover-foreground: 44 24% 92%;
+  --popover: 222 40% 11%;
+  --popover-foreground: 210 40% 98%;
 
-  --primary: 18 60% 52%;
-  --primary-foreground: 40 10% 8%;
+  /* Brand shifts up to indigo-500 on dark surfaces. */
+  --primary: 239 84% 67%;
+  --primary-foreground: 0 0% 100%;
 
-  --secondary: 40 8% 16%;
-  --secondary-foreground: 44 24% 92%;
+  --secondary: 215 28% 17%;
+  --secondary-foreground: 210 40% 98%;
 
-  --muted: 40 8% 16%;
-  --muted-foreground: 42 8% 60%;
+  --muted: 215 28% 17%;
+  --muted-foreground: 218 11% 65%;
 
-  --accent: 18 60% 52%;
-  --accent-foreground: 40 10% 8%;
+  --accent: 245 47% 34%;
+  --accent-foreground: 0 0% 100%;
 
-  --destructive: 4 64% 56%;
-  --destructive-foreground: 40 10% 8%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
 
-  --border: 40 8% 20%;
-  --input: 40 8% 20%;
-  --ring: 18 60% 52%;
+  --border: 215 20% 20%;
+  --input: 215 20% 20%;
+  --ring: 239 84% 67%;
 
-  --lb-bg-2: 40 8% 14%;
-  --lb-line-soft: 40 8% 18%;
-  --lb-ink-2: 44 16% 78%;
-  --lb-ink-3: 42 8% 60%;
-  --lb-sidebar: 40 10% 11%;
+  --lb-bg-2: 215 28% 17%;
+  --lb-line-soft: 215 20% 20%;
+  --lb-ink-2: 216 12% 76%;
+  --lb-ink-3: 218 11% 65%;
+  --lb-sidebar: 224 45% 9%;
 }
 
 @theme inline {
@@ -109,9 +126,12 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 
-  --font-sans: 'Inter Tight', 'Inter', ui-sans-serif, system-ui, sans-serif;
-  --font-serif: 'Source Serif 4', ui-serif, Georgia, serif;
-  --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, monospace;
+  --font-sans:
+    'Inter', 'Inter Variable', ui-sans-serif, system-ui, -apple-system,
+    'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Monaco, Consolas,
+    'Liberation Mono', monospace;
 }
 
 @layer base {
@@ -132,7 +152,9 @@
     font-family: var(--font-sans);
     font-size: 13px;
     line-height: 1.5;
+    letter-spacing: -0.006em;
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
 
   /* Accessibility (Plan 09): a visible, consistent keyboard focus ring on every

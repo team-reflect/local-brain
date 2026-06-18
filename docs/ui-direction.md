@@ -1,14 +1,16 @@
 # UI Direction
 
-Local Brain should borrow the calm, dense, data-first feel of the Picardo internal UI,
-but translate it into a personal context app. The UI is a window into a brain mostly
-written and read by AI agents through the CLI and local skills.
+Local Brain uses the **Reflect Open / Reflect Local design system**: calm, dense, and
+data-first, with cool greys, a single indigo accent, a fixed sunken left sidebar, and a
+quiet command/search trigger. The UI is a window into a brain mostly written and read by
+AI agents through the CLI and local skills. We translate Reflect's visual language, not
+its product model — this is a personal CRM and memory surface, not a note editor.
 
 The UI should support quick browsing, correction, inspection, and demonstration. It is
 not the primary bulk-entry or reporting interface.
 
-Use [Design System](design-system.md) for concrete component, token, typography, graph,
-and shadcn guidance.
+Use [Design System](design-system.md) for concrete tokens, typography, components, and
+the Reflect reference paths.
 
 ## Navigation
 
@@ -113,14 +115,19 @@ Settings
 
 ## Visual Style
 
-- Left sidebar with compact navigation and a clear active state.
-- Main surfaces should favor tables, split panes, detail drawers, filters, and search.
-- Use cards only for repeated summary items or modals, not as the default page layout.
+- Fixed 260px sunken left sidebar with compact navigation; active rows use a grey wash
+  and an indigo icon. A quiet ⌘K search field sits at the sidebar top.
+- Main surfaces favor dense tables, split panes, detail blocks, filters, and search on a
+  white content area over a faint cool field.
+- Use cards only for repeated summary items or modals, never as the default page layout;
+  no nested cards.
 - Keep density high enough for real work.
-- Use restrained color, crisp typography, and predictable spacing.
+- Restrained color (cool grey + one indigo accent), crisp Inter typography (no serif),
+  mono only for metadata and shortcuts, predictable 8px-based spacing.
 - Prefer visible data over explanatory copy.
 - Make it obvious what changed recently and which records support an AI-generated
   report or todo list.
+- See the Graph note below; node and chrome colors derive from the same token palette.
 
 ## Core Screens
 

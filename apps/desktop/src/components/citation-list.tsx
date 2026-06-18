@@ -36,9 +36,9 @@ export function CitationList({
           return (
             <li
               key={citation.id}
-              className="rounded-md border border-border bg-card px-3 py-2 text-sm"
+              className="rounded-lg border border-border bg-card px-3 py-2 text-sm"
             >
-              <p className="border-l-2 border-border pl-2.5 italic text-foreground">
+              <p className="border-l-2 border-primary/40 pl-2.5 text-foreground">
                 “{citation.quote}”
               </p>
               <div className="mt-1.5 flex items-center justify-between gap-3">

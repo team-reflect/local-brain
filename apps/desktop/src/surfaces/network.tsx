@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { Organization, Person } from '@local-brain/core'
+import { Badge } from '../components/badge'
 import { DataList, type Column } from '../components/data-list'
 import { EmptyState } from '../components/empty-state'
 import { PageHead } from '../components/page-head'
@@ -47,7 +48,9 @@ export function NetworkSurface({ tab }: { tab: 'people' | 'organizations' }): Re
         <span className="text-foreground">
           {person.fullName}
           {person.isSelf ? (
-            <span className="ml-2 font-mono text-[10px] uppercase text-muted-foreground">you</span>
+            <Badge tone="accent" className="ml-2">
+              You
+            </Badge>
           ) : null}
         </span>
       ),
@@ -84,7 +87,7 @@ export function NetworkSurface({ tab }: { tab: 'people' | 'organizations' }): Re
                 type="button"
                 onClick={() => navigate({ kind: 'network', tab: option.key })}
                 className={cn(
-                  'rounded px-2 py-1 text-xs transition-colors',
+                  'rounded-md px-2 py-1 text-xs font-medium transition-colors',
                   tab === option.key
                     ? 'bg-secondary text-foreground'
                     : 'text-muted-foreground hover:bg-secondary/60',

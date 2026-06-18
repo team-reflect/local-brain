@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Search } from 'lucide-react'
 import { listCommands } from '../lib/commands/registry'
 import type { CommandContext } from '../lib/commands/types'
 import { useGlobalSearch } from '../lib/queries'
@@ -92,38 +93,41 @@ export function CommandPalette({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 pt-[12vh]"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-foreground/25 pt-[12vh] backdrop-blur-[1px]"
       onClick={onClose}
     >
       <div
-        className="w-[34rem] max-w-[90vw] overflow-hidden rounded-lg border border-border bg-popover shadow-lg"
+        className="w-[36rem] max-w-[90vw] overflow-hidden rounded-xl border border-border bg-popover shadow-[0_8px_28px_rgba(2,6,23,0.16)]"
         onClick={(event) => event.stopPropagation()}
       >
-        <input
-          // eslint-disable-next-line jsx-a11y/no-autofocus
-          autoFocus
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Escape') {
-              onClose()
-            } else if (event.key === 'ArrowDown') {
-              event.preventDefault()
-              setSelected((index) => Math.min(index + 1, items.length - 1))
-            } else if (event.key === 'ArrowUp') {
-              event.preventDefault()
-              setSelected((index) => Math.max(index - 1, 0))
-            } else if (event.key === 'Enter') {
-              event.preventDefault()
-              items[activeIndex]?.run()
-            }
-          }}
-          placeholder="Search records or run a command…"
-          className="w-full border-b border-border bg-transparent px-4 py-3 text-sm outline-none"
-        />
-        <div className="max-h-80 overflow-y-auto py-1">
+        <div className="flex items-center gap-2.5 border-b border-border px-4">
+          <Search className="size-4 shrink-0 text-muted-foreground" />
+          <input
+            // eslint-disable-next-line jsx-a11y/no-autofocus
+            autoFocus
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                onClose()
+              } else if (event.key === 'ArrowDown') {
+                event.preventDefault()
+                setSelected((index) => Math.min(index + 1, items.length - 1))
+              } else if (event.key === 'ArrowUp') {
+                event.preventDefault()
+                setSelected((index) => Math.max(index - 1, 0))
+              } else if (event.key === 'Enter') {
+                event.preventDefault()
+                items[activeIndex]?.run()
+              }
+            }}
+            placeholder="Search records or run a command…"
+            className="w-full bg-transparent py-3 text-sm text-foreground outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+        <div className="max-h-80 overflow-y-auto p-1.5">
           {items.length === 0 ? (
-            <p className="px-4 py-3 text-sm text-muted-foreground">No matches</p>
+            <p className="px-3 py-6 text-center text-sm text-muted-foreground">No matches</p>
           ) : (
             <>
               {commandItems.length > 0 ? (
@@ -161,7 +165,7 @@ function Group({
 }): ReactNode {
   return (
     <ul className="py-1">
-      <li className="px-4 pb-1 pt-1 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+      <li className="px-2.5 pb-1 pt-1.5 text-[11px] font-medium tracking-wide text-muted-foreground">
         {label}
       </li>
       {items.map((item, offset) => {
@@ -172,8 +176,8 @@ function Group({
               type="button"
               onMouseMove={() => onSelect(index)}
               onClick={item.run}
-              className={`flex w-full items-center justify-between gap-3 px-4 py-2 text-left text-sm ${
-                index === activeIndex ? 'bg-secondary' : ''
+              className={`flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-2 text-left text-sm transition-colors ${
+                index === activeIndex ? 'bg-secondary text-foreground' : 'text-foreground'
               }`}
             >
               <span className="truncate">{item.label}</span>
