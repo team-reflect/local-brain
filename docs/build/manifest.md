@@ -294,10 +294,11 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
   - **Relationship intelligence (`relationships/`):** `strength.ts` (pure, unit-tested date
     math + the transparent 1–5 strength formula), `recompute.ts`
     (`recomputeRelationshipIntelligence` / `recomputeAllRelationships` — derive
-    `last_interaction_at`, `next_reconnect_at`, and `relationship_strength` from
-    interactions/tasks), and `getters.ts` (`listReconnectSuggestions`). Recompute runs
-    incrementally after a relevant interaction (create/ingest/apply) and in bulk on first-run
-    seed. See **DEC-13** for what it owns and why important dates are deferred.
+    `last_interaction_at` and `next_reconnect_at` from interactions/cadence), and
+    `getters.ts` (`listReconnectSuggestions`, joining the SELECT-only
+    `relationship_strengths` view). Recompute runs incrementally after a relevant
+    interaction (create/ingest/apply) and in bulk on first-run seed. See **DEC-13** for what
+    it owns and why important dates are deferred.
   - **UI (`apps/desktop`):** the shared `LinkedRecords`, `MemoryList`, and `CitationList`
     gained in-place correction affordances (Unlink / Archive / Remove), wired through all six
     detail pages; person detail shows the derived "Reconnect by" field; Today gained a

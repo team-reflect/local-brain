@@ -204,13 +204,14 @@ questions needing Alex.
 - **Relationship intelligence (`packages/core/src/domains/relationships`):**
   - `strength.ts` — pure date math (`daysBetween`/`addDays`) + a transparent 1–5
     `relationshipStrength` (frequency + recency + shared open tasks), returning `null` when
-    there is no signal so manual values survive.
+    there is no signal.
   - `recompute.ts` — `recomputeRelationshipIntelligence` derives `last_interaction_at`,
-    `next_reconnect_at`, and `relationship_strength` from interactions/tasks;
-    `recomputeAllRelationships` for bulk/first-run. Wired to run after a relevant interaction
+    `next_reconnect_at` from interactions/cadence; `recomputeAllRelationships` for
+    bulk/first-run. Wired to run after a relevant interaction
     (`createInteraction`, `ingestInteraction`, and `applyExtraction` on an interaction source).
-  - `getters.ts` — `listReconnectSuggestions` reads the derived `next_reconnect_at` column.
-  - **DEC-13:** strength is recompute-owned (written only with a signal); `reconnect_interval_days`
+  - `getters.ts` — `listReconnectSuggestions` reads the derived `next_reconnect_at` column and
+    joins the SELECT-only `relationship_strengths` SQL view.
+  - **DEC-13:** strength is select-only, not writable SQLite state; `reconnect_interval_days`
     stays a user input; `important_dates_json` is **not** derived (no schema field supplies
     dates) — left for a later data source, as Plan 05 step 9 permits.
 - **UI (`apps/desktop`):** shared `LinkedRecords` / `MemoryList` / `CitationList` gained

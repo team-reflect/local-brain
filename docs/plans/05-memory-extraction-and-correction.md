@@ -57,7 +57,7 @@ detail pages.
 9. Update relationship-intelligence hints from interactions and tasks:
    - last interaction date
    - reconnect suggestions
-   - relationship strength
+   - relationship strength as a deterministic SELECT-only projection
    - important dates
 10. Add extraction job status on the imported record or job table if needed for UI
    progress.
