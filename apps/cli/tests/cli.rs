@@ -232,6 +232,46 @@ fn add_person_dedupes_and_returns_contact_fields() {
     assert_eq!(shown["location"], "Austin");
     assert_eq!(shown["reconnectIntervalDays"], 30);
     assert_eq!(shown["relationshipStrength"], Value::Null);
+
+    let sparse = run_json(
+        &db,
+        &["--json", "add", "person", "--full-name", "Jordan Lee"],
+    );
+    let enriched = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Jordan   Lee",
+            "--email",
+            "JORDAN@EXAMPLE.COM",
+            "--phone",
+            "+1 555 0200",
+            "--headline",
+            "Investor",
+            "--location",
+            "New York",
+            "--summary",
+            "Met through a contact export.",
+            "--notes",
+            "Prefers concise updates.",
+            "--reconnect-interval-days",
+            "14",
+        ],
+    );
+    assert_eq!(enriched["isDuplicate"], true);
+    assert_eq!(enriched["id"], sparse["id"]);
+    let enriched_id = sparse["id"].as_str().unwrap();
+    let enriched_shown = run_json(&db, &["--json", "show", "person", enriched_id]);
+    assert_eq!(enriched_shown["primaryEmail"], "jordan@example.com");
+    assert_eq!(enriched_shown["primaryPhone"], "+1 555 0200");
+    assert_eq!(enriched_shown["subtitle"], "Investor");
+    assert_eq!(enriched_shown["location"], "New York");
+    assert_eq!(enriched_shown["summary"], "Met through a contact export.");
+    assert_eq!(enriched_shown["notes"], "Prefers concise updates.");
+    assert_eq!(enriched_shown["reconnectIntervalDays"], 14);
 }
 
 #[test]
@@ -327,6 +367,26 @@ fn add_asset_copies_file_and_links_to_interaction() {
     assert_eq!(restored["isDuplicate"], true);
     assert_eq!(restored["id"], asset["id"]);
     assert!(root.join(&storage_path).is_file());
+
+    std::fs::write(root.join(&storage_path), "truncated").unwrap();
+    let repaired = run_brain_json(
+        &root,
+        &[
+            "--json",
+            "add",
+            "asset",
+            "--file",
+            source.to_str().unwrap(),
+            "--link",
+            &link,
+        ],
+    );
+    assert_eq!(repaired["isDuplicate"], true);
+    assert_eq!(repaired["id"], asset["id"]);
+    assert_eq!(
+        std::fs::read_to_string(root.join(&storage_path)).unwrap(),
+        "attachment bytes"
+    );
 
     conn.execute(
         "UPDATE assets SET archived_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",

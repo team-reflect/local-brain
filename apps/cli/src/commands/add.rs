@@ -209,6 +209,104 @@ fn find_duplicate_person(
     Ok(None)
 }
 
+fn has_text(value: &Option<String>) -> bool {
+    value.as_deref().is_some_and(|text| !text.trim().is_empty())
+}
+
+fn is_blank(value: &Option<String>) -> bool {
+    !has_text(value)
+}
+
+fn enrich_duplicate_person(
+    conn: &Connection,
+    id: &str,
+    args: &AddPersonArgs,
+) -> Result<bool, CliError> {
+    let preferred_name = normalize_optional(args.preferred_name);
+    let primary_email = normalize_email(args.primary_email);
+    let primary_phone = normalize_optional(args.primary_phone);
+    let headline = normalize_optional(args.headline);
+    let location = normalize_optional(args.location);
+    let summary = normalize_optional(args.summary);
+    let notes = normalize_optional(args.notes);
+    let reconnect_interval_days = args.reconnect_interval_days;
+
+    let current = conn.query_row(
+        "SELECT preferred_name, primary_email, primary_phone, headline, location,
+                summary, notes, reconnect_interval_days
+         FROM people
+         WHERE id = ?1",
+        params![id],
+        |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<i64>>(7)?,
+            ))
+        },
+    )?;
+
+    let changed = (has_text(&preferred_name) && is_blank(&current.0))
+        || (has_text(&primary_email) && is_blank(&current.1))
+        || (has_text(&primary_phone) && is_blank(&current.2))
+        || (has_text(&headline) && is_blank(&current.3))
+        || (has_text(&location) && is_blank(&current.4))
+        || (has_text(&summary) && is_blank(&current.5))
+        || (has_text(&notes) && is_blank(&current.6))
+        || (reconnect_interval_days.is_some() && current.7.is_none());
+
+    if !changed {
+        return Ok(false);
+    }
+
+    conn.execute(
+        "UPDATE people
+         SET preferred_name = CASE
+               WHEN (preferred_name IS NULL OR trim(preferred_name) = '') AND ?1 IS NOT NULL
+               THEN ?1 ELSE preferred_name END,
+             primary_email = CASE
+               WHEN (primary_email IS NULL OR trim(primary_email) = '') AND ?2 IS NOT NULL
+               THEN ?2 ELSE primary_email END,
+             primary_phone = CASE
+               WHEN (primary_phone IS NULL OR trim(primary_phone) = '') AND ?3 IS NOT NULL
+               THEN ?3 ELSE primary_phone END,
+             headline = CASE
+               WHEN (headline IS NULL OR trim(headline) = '') AND ?4 IS NOT NULL
+               THEN ?4 ELSE headline END,
+             location = CASE
+               WHEN (location IS NULL OR trim(location) = '') AND ?5 IS NOT NULL
+               THEN ?5 ELSE location END,
+             summary = CASE
+               WHEN (summary IS NULL OR trim(summary) = '') AND ?6 IS NOT NULL
+               THEN ?6 ELSE summary END,
+             notes = CASE
+               WHEN (notes IS NULL OR trim(notes) = '') AND ?7 IS NOT NULL
+               THEN ?7 ELSE notes END,
+             reconnect_interval_days = CASE
+               WHEN reconnect_interval_days IS NULL AND ?8 IS NOT NULL
+               THEN ?8 ELSE reconnect_interval_days END,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE id = ?9",
+        params![
+            preferred_name,
+            primary_email,
+            primary_phone,
+            headline,
+            location,
+            summary,
+            notes,
+            reconnect_interval_days,
+            id,
+        ],
+    )?;
+    Ok(true)
+}
+
 pub fn add_person(conn: &mut Connection, json: bool, args: AddPersonArgs) -> Result<(), CliError> {
     let full_name = args.full_name.trim();
     if full_name.is_empty() {
@@ -216,6 +314,7 @@ pub fn add_person(conn: &mut Connection, json: bool, args: AddPersonArgs) -> Res
     }
     if let Some(existing) = find_duplicate_person(conn, full_name, args.primary_email)? {
         if !args.allow_duplicate {
+            enrich_duplicate_person(conn, &existing, &args)?;
             return report_person(json, &existing, true);
         }
     }
@@ -306,7 +405,17 @@ fn ensure_asset_file(assets_path: &Path, storage_path: &str, bytes: &[u8]) -> Re
             CliError::Runtime(format!("could not create {}: {e}", parent.display()))
         })?;
     }
-    if !destination.exists() {
+    let needs_write = match std::fs::read(&destination) {
+        Ok(existing) => existing != bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+        Err(e) => {
+            return Err(CliError::Runtime(format!(
+                "could not read {}: {e}",
+                destination.display()
+            )));
+        }
+    };
+    if needs_write {
         std::fs::write(&destination, bytes).map_err(|e| {
             CliError::Runtime(format!("could not write {}: {e}", destination.display()))
         })?;
