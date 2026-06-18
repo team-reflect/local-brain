@@ -2,8 +2,10 @@
 
 Working name: **Local Brain**.
 
-This repo is currently a planning space for a consumer version of Company Brain built
-on Reflect Open's local-first desktop technology. The product direction is:
+This repo holds a consumer version of Company Brain built on Reflect Open's
+local-first desktop technology. It began as a planning space; the implementation
+stack is now complete through Plan 09 (see [Current Product State](current-state.md)
+for the as-built view). The product direction is:
 
 > An agent-operated local brain with a private desktop UI.
 
@@ -13,8 +15,13 @@ reading from the brain through a CLI and local skills. The UI exists for quick
 browsing, correction, inspection, and showing someone else what the brain knows,
 including a graph view centered on the user.
 
+The implementation stack is complete through Plan 09. For a grounded, as-built
+overview of what Local Brain currently is and how it works, start with
+[Current Product State](current-state.md).
+
 ## Docs
 
+- [Current Product State](current-state.md) — as-built overview (start here)
 - [Product Thesis](product-thesis.md)
 - [Reflect Open Technology Base](reflect-open-technology-base.md)
 - [Launch Schema](launch-schema.md)
