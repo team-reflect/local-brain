@@ -52,7 +52,7 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 | 06 | Search, retrieval & AI (incl. the model-backed extractor) | `codex/local-brain-06-search-ai` | `…-05b-corrections` | open | [#15](https://github.com/maccman/local-brain/pull/15) |
 | 07 | CLI & agent skills | `codex/local-brain-07-cli-skills` | `…-06-search-ai` | open | [#16](https://github.com/maccman/local-brain/pull/16) |
 | 08 | Settings, backup, export & privacy | `codex/local-brain-08-settings-backup-privacy` | `…-07-cli-skills` | open | [#17](https://github.com/maccman/local-brain/pull/17) |
-| 09 | Packaging & launch | `codex/local-brain-09-packaging-launch` | `…-08-settings-backup-privacy` | open | [#18](https://github.com/maccman/local-brain/pull/18) |
+| 09 | Packaging & launch | `codex/local-brain-09-packaging-launch` | `…-08-settings-backup-privacy` | open | [#19](https://github.com/maccman/local-brain/pull/19) |
 
 Status legend: `pending` → not started · `in progress` → branch exists, work underway ·
 `open` → PR opened · `merged` · `blocked` (see status.md).
@@ -453,4 +453,4 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 - PR #15 — Build 06 search, retrieval & AI (FTS5 retrieve, cited Ask, model boundary, model-backed extractor, report endpoints) — https://github.com/maccman/local-brain/pull/15 (base `…-05b-corrections`, open)
 - PR #16 — Build 07 CLI & agent skills (`brain` CLI add/search/ask/today/report/graph/show, JSON contracts, sidecar bundling, skill doc) — https://github.com/maccman/local-brain/pull/16 (base `…-06-search-ai`, open)
 - PR #17 — Build 08 settings, backup, export & privacy (SQLite backup, JSON export, keychain, model boundary settings, hard delete + FTS rebuild) — https://github.com/maccman/local-brain/pull/17 (base `…-07-cli-skills`, open)
-- PR #18 — Build 09 packaging & launch (macOS `.app` + embedded sidecar smoke, first-run flow, accessibility, launch docs + checklist) — https://github.com/maccman/local-brain/pull/18 (base `…-08-settings-backup-privacy`, open)
+- PR #19 — Build 09 packaging & launch (macOS `.app` + embedded sidecar smoke, first-run flow, accessibility, launch docs + checklist) — https://github.com/maccman/local-brain/pull/19 (base `…-08-settings-backup-privacy`, open)

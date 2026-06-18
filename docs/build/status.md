@@ -7,8 +7,9 @@ questions needing Alex.
 
 ## Current State
 
-- **Phase:** 09 — Packaging & launch (**complete, PR #18 open**). **All Plans 00–09 are now
-  built and open as a stacked set of PRs (#1–#18, minus the consolidation PR #13).** Plan 09 ran the
+- **Phase:** 09 — Packaging & launch (**complete, PR #19 open**). **All Plans 00–09 are now
+  built and open as a stacked set of PRs: #1–#12, #14–#17, #19 (the standalone mega PR #13 and the
+  unrelated #18 are not part of this stack).** Plan 09 ran the
   strongest available packaging smoke: `pnpm tauri build` compiled and produced
   `Local Brain.app` with the `brain` sidecar embedded and runnable (`brain 0.1.0`); only the `.dmg`
   step is GUI-blocked (documented). Added a one-time first-run welcome flow, a keyboard focus ring +
