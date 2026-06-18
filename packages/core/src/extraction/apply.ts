@@ -352,7 +352,7 @@ export async function applyExtraction(
 
   // ---- Link every resolved entity back to the source record ------------
   for (const entity of resolved.values()) {
-    const statement = sourceLinkStatement(source, entity, sourceLinks)
+    const statement = sourceLinkStatement(source, entity.type, entity.id, sourceLinks)
     if (statement) {
       linkInserts.push(statement)
       summary.links.created++
