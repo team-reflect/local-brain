@@ -22,6 +22,8 @@ pub enum LinkKind {
     Organization,
     Project,
     Task,
+    Document,
+    Interaction,
 }
 
 /// A parsed `--link kind:id` reference.
@@ -41,6 +43,8 @@ pub fn parse_link(raw: &str) -> Result<LinkRef, CliError> {
         "organization" | "org" => LinkKind::Organization,
         "project" => LinkKind::Project,
         "task" => LinkKind::Task,
+        "document" | "doc" => LinkKind::Document,
+        "interaction" => LinkKind::Interaction,
         other => return Err(CliError::Runtime(format!("unknown link kind '{other}'"))),
     };
     if id.is_empty() {

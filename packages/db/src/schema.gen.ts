@@ -33,6 +33,34 @@ export interface Affiliations {
   updatedAt: Generated<string>
 }
 
+export interface AssetLinks {
+  id: string
+  assetId: string
+  recordType: string
+  recordId: string
+  role: string | null
+  caption: string | null
+  sortOrder: number | null
+  createdAt: Generated<string>
+}
+
+export interface Assets {
+  id: string
+  kind: Generated<string>
+  mimeType: string | null
+  byteSize: number
+  contentHash: string
+  storagePath: string
+  originalFilename: string | null
+  originalPath: string | null
+  originalUrl: string | null
+  width: number | null
+  height: number | null
+  createdAt: Generated<string>
+  updatedAt: Generated<string>
+  archivedAt: string | null
+}
+
 export interface ChatConversations {
   id: string
   title: string | null
@@ -368,6 +396,8 @@ export interface Tasks {
 
 export interface Database {
   affiliations: Affiliations
+  assetLinks: AssetLinks
+  assets: Assets
   chatConversations: ChatConversations
   chatMessages: ChatMessages
   chunkEmbeddings: ChunkEmbeddings

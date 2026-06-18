@@ -55,7 +55,7 @@ enum Command {
     Path,
     /// Report environment, database, and model-boundary health.
     Doctor,
-    /// Add a record (document, interaction, or task).
+    /// Add a record (person, asset, document, interaction, or task).
     Add {
         #[command(subcommand)]
         what: AddCommand,
@@ -97,12 +97,62 @@ enum Command {
 
 #[derive(Subcommand)]
 enum AddCommand {
+    /// Add a person.
+    Person(AddPersonArgs),
+    /// Add a binary asset file.
+    Asset(AddAssetArgs),
     /// Add a reference document.
     Document(AddDocumentArgs),
     /// Add a human interaction (meeting, call, note, …).
     Interaction(AddInteractionArgs),
     /// Add a task.
     Task(AddTaskArgs),
+}
+
+#[derive(Parser)]
+struct AddPersonArgs {
+    #[arg(long)]
+    full_name: String,
+    #[arg(long)]
+    preferred_name: Option<String>,
+    #[arg(long)]
+    email: Option<String>,
+    #[arg(long)]
+    phone: Option<String>,
+    #[arg(long)]
+    headline: Option<String>,
+    #[arg(long)]
+    location: Option<String>,
+    #[arg(long)]
+    summary: Option<String>,
+    #[arg(long)]
+    notes: Option<String>,
+    #[arg(long)]
+    reconnect_interval_days: Option<i64>,
+    #[arg(long)]
+    allow_duplicate: bool,
+}
+
+#[derive(Parser)]
+struct AddAssetArgs {
+    #[arg(long, value_name = "PATH")]
+    file: PathBuf,
+    #[arg(long, default_value = "attachment")]
+    kind: String,
+    #[arg(long)]
+    mime_type: Option<String>,
+    #[arg(long)]
+    original_filename: Option<String>,
+    #[arg(long)]
+    original_url: Option<String>,
+    #[arg(long, default_value = "attachment")]
+    role: String,
+    #[arg(long)]
+    caption: Option<String>,
+    #[arg(long = "link", value_name = "KIND:ID")]
+    links: Vec<String>,
+    #[arg(long)]
+    allow_duplicate: bool,
 }
 
 #[derive(Parser)]
@@ -130,6 +180,10 @@ struct AddInteractionArgs {
     title: Option<String>,
     #[arg(long)]
     occurred_at: Option<String>,
+    #[arg(long)]
+    external_id: Option<String>,
+    #[arg(long)]
+    original_url: Option<String>,
     #[arg(long)]
     text: Option<String>,
     #[arg(long, value_name = "PATH")]
@@ -267,6 +321,38 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Command::Add { what } => {
             let mut conn = db::open(&db_path)?;
             match what {
+                AddCommand::Person(a) => add::add_person(
+                    &mut conn,
+                    json,
+                    add::AddPersonArgs {
+                        full_name: &a.full_name,
+                        preferred_name: a.preferred_name.as_deref(),
+                        primary_email: a.email.as_deref(),
+                        primary_phone: a.phone.as_deref(),
+                        headline: a.headline.as_deref(),
+                        location: a.location.as_deref(),
+                        summary: a.summary.as_deref(),
+                        notes: a.notes.as_deref(),
+                        reconnect_interval_days: a.reconnect_interval_days,
+                        allow_duplicate: a.allow_duplicate,
+                    },
+                ),
+                AddCommand::Asset(a) => add::add_asset(
+                    &mut conn,
+                    storage.assets_path.as_deref(),
+                    json,
+                    add::AddAssetArgs {
+                        file: &a.file,
+                        kind: &a.kind,
+                        mime_type: a.mime_type.as_deref(),
+                        original_filename: a.original_filename.as_deref(),
+                        original_url: a.original_url.as_deref(),
+                        role: &a.role,
+                        caption: a.caption.as_deref(),
+                        links: parse_links(&a.links)?,
+                        allow_duplicate: a.allow_duplicate,
+                    },
+                ),
                 AddCommand::Document(a) => add::add_document(
                     &mut conn,
                     json,
@@ -285,6 +371,8 @@ fn run(cli: Cli) -> Result<(), CliError> {
                         title: a.title.as_deref(),
                         kind: &a.kind,
                         occurred_at: a.occurred_at.as_deref(),
+                        external_id: a.external_id.as_deref(),
+                        original_url: a.original_url.as_deref(),
                         body: resolve_text(a.text.as_deref(), a.text_file.as_deref())?,
                         links: parse_links(&a.links)?,
                         allow_duplicate: a.allow_duplicate,

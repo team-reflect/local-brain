@@ -7,7 +7,9 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 use brain_schema::LATEST_SCHEMA_VERSION;
+use rusqlite::Connection;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
 const BIN: &str = env!("CARGO_BIN_EXE_brain");
@@ -68,6 +70,12 @@ fn run_brain_json(root: &Path, args: &[&str]) -> Value {
 
 fn db_path(dir: &TempDir) -> std::path::PathBuf {
     dir.path().join("brain.sqlite")
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
 }
 
 #[test]
@@ -159,6 +167,428 @@ fn add_dedupes_identical_content() {
     );
     assert_eq!(second["isDuplicate"], true);
     assert_eq!(second["id"], first["id"]); // points back at the original
+}
+
+#[test]
+fn add_person_dedupes_and_returns_contact_fields() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Maya Chen",
+            "--preferred-name",
+            "Maya",
+            "--email",
+            "MAYA@EXAMPLE.COM",
+            "--phone",
+            "+1 555 0100",
+            "--headline",
+            "Designer",
+            "--location",
+            "Austin",
+            "--notes",
+            "Imported from a contact export.",
+            "--reconnect-interval-days",
+            "30",
+        ],
+    );
+    assert_eq!(first["kind"], "person");
+    assert_eq!(first["isDuplicate"], false);
+
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Maya Chen",
+            "--email",
+            "maya@example.com",
+        ],
+    );
+    assert_eq!(second["isDuplicate"], true);
+    assert_eq!(second["id"], first["id"]);
+
+    let same_name_other_email = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Maya Chen",
+            "--email",
+            "other-maya@example.com",
+        ],
+    );
+    assert_eq!(same_name_other_email["isDuplicate"], false);
+    assert_ne!(same_name_other_email["id"], first["id"]);
+
+    let by_name = run_json(
+        &db,
+        &["--json", "add", "person", "--full-name", "Maya   Chen"],
+    );
+    assert_eq!(by_name["isDuplicate"], true);
+    assert_eq!(by_name["id"], first["id"]);
+
+    let search = run_json(&db, &["--json", "search", "Maya"]);
+    assert!(search["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|h| h["kind"] == "person" && h["title"] == "Maya Chen"));
+
+    let id = first["id"].as_str().unwrap();
+    let shown = run_json(&db, &["--json", "show", "person", id]);
+    assert_eq!(shown["title"], "Maya Chen");
+    assert_eq!(shown["preferredName"], "Maya");
+    assert_eq!(shown["primaryEmail"], "maya@example.com");
+    assert_eq!(shown["primaryPhone"], "+1 555 0100");
+    assert_eq!(shown["subtitle"], "Designer");
+    assert_eq!(shown["location"], "Austin");
+    assert_eq!(shown["reconnectIntervalDays"], 30);
+    assert_eq!(shown["relationshipStrength"], Value::Null);
+
+    let sparse = run_json(
+        &db,
+        &["--json", "add", "person", "--full-name", "Jordan Lee"],
+    );
+    let enriched = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Jordan   Lee",
+            "--email",
+            "JORDAN@EXAMPLE.COM",
+            "--phone",
+            "+1 555 0200",
+            "--headline",
+            "Investor",
+            "--location",
+            "New York",
+            "--summary",
+            "Met through a contact export.",
+            "--notes",
+            "Prefers concise updates.",
+            "--reconnect-interval-days",
+            "14",
+        ],
+    );
+    assert_eq!(enriched["isDuplicate"], true);
+    assert_eq!(enriched["id"], sparse["id"]);
+    let enriched_id = sparse["id"].as_str().unwrap();
+    let enriched_shown = run_json(&db, &["--json", "show", "person", enriched_id]);
+    assert_eq!(enriched_shown["primaryEmail"], "jordan@example.com");
+    assert_eq!(enriched_shown["primaryPhone"], "+1 555 0200");
+    assert_eq!(enriched_shown["subtitle"], "Investor");
+    assert_eq!(enriched_shown["location"], "New York");
+    assert_eq!(enriched_shown["summary"], "Met through a contact export.");
+    assert_eq!(enriched_shown["notes"], "Prefers concise updates.");
+    assert_eq!(enriched_shown["reconnectIntervalDays"], 14);
+
+    let ascii_name = run_json(
+        &db,
+        &["--json", "add", "person", "--full-name", "Renee Muller"],
+    );
+    let accented_name = run_json(
+        &db,
+        &["--json", "add", "person", "--full-name", "Renée Müller"],
+    );
+    assert_eq!(accented_name["isDuplicate"], true);
+    assert_eq!(accented_name["id"], ascii_name["id"]);
+}
+
+#[test]
+fn add_asset_copies_file_and_links_to_interaction() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().join("AssetsBrain");
+    let source = dir.path().join("invoice.txt");
+    std::fs::write(&source, "attachment bytes").unwrap();
+
+    let interaction = run_brain_json(
+        &root,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Email with attachment",
+            "--text",
+            "Plain text email body.",
+        ],
+    );
+    let interaction_id = interaction["id"].as_str().unwrap();
+    let link = format!("interaction:{interaction_id}");
+    let asset = run_brain_json(
+        &root,
+        &[
+            "--json",
+            "add",
+            "asset",
+            "--file",
+            source.to_str().unwrap(),
+            "--kind",
+            "attachment",
+            "--mime-type",
+            "text/plain",
+            "--link",
+            &link,
+        ],
+    );
+    assert_eq!(asset["kind"], "asset");
+    assert_eq!(asset["isDuplicate"], false);
+    assert_eq!(asset["linkCount"], 1);
+
+    let conn = Connection::open(root.join("brain.sqlite")).unwrap();
+    let storage_path: String = conn
+        .query_row(
+            "SELECT storage_path FROM assets WHERE id = ?1",
+            [asset["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(root.join(&storage_path).is_file());
+    let linked: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM asset_links WHERE asset_id = ?1 AND record_type = 'interaction' AND record_id = ?2",
+            (asset["id"].as_str().unwrap(), interaction_id),
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(linked, 1);
+
+    let duplicate = run_brain_json(
+        &root,
+        &[
+            "--json",
+            "add",
+            "asset",
+            "--file",
+            source.to_str().unwrap(),
+            "--link",
+            &link,
+        ],
+    );
+    assert_eq!(duplicate["isDuplicate"], true);
+    assert_eq!(duplicate["id"], asset["id"]);
+    assert_eq!(duplicate["linkCount"], 0);
+
+    std::fs::remove_file(root.join(&storage_path)).unwrap();
+    let restored = run_brain_json(
+        &root,
+        &[
+            "--json",
+            "add",
+            "asset",
+            "--file",
+            source.to_str().unwrap(),
+            "--link",
+            &link,
+        ],
+    );
+    assert_eq!(restored["isDuplicate"], true);
+    assert_eq!(restored["id"], asset["id"]);
+    assert!(root.join(&storage_path).is_file());
+
+    std::fs::write(root.join(&storage_path), "truncated").unwrap();
+    let repaired = run_brain_json(
+        &root,
+        &[
+            "--json",
+            "add",
+            "asset",
+            "--file",
+            source.to_str().unwrap(),
+            "--link",
+            &link,
+        ],
+    );
+    assert_eq!(repaired["isDuplicate"], true);
+    assert_eq!(repaired["id"], asset["id"]);
+    assert_eq!(
+        std::fs::read_to_string(root.join(&storage_path)).unwrap(),
+        "attachment bytes"
+    );
+
+    conn.execute(
+        "UPDATE assets SET archived_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+        [asset["id"].as_str().unwrap()],
+    )
+    .unwrap();
+    let reimported = run_brain_json(
+        &root,
+        &[
+            "--json",
+            "add",
+            "asset",
+            "--file",
+            source.to_str().unwrap(),
+            "--link",
+            &link,
+        ],
+    );
+    assert_eq!(reimported["isDuplicate"], false);
+    assert_ne!(reimported["id"], asset["id"]);
+    let reimported_storage_path: String = conn
+        .query_row(
+            "SELECT storage_path FROM assets WHERE id = ?1",
+            [reimported["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_ne!(reimported_storage_path, storage_path);
+    assert!(root.join(reimported_storage_path).is_file());
+}
+
+#[test]
+fn add_asset_rolls_back_manifest_when_file_write_fails() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().join("BrokenAssetsBrain");
+    let source = dir.path().join("blocked.txt");
+    let bytes = b"blocked bytes";
+    std::fs::write(&source, bytes).unwrap();
+
+    run_brain_json(&root, &["--json", "status"]);
+    let hash = sha256_hex(bytes);
+    let prefix = &hash[0..2];
+    let blocked_prefix = root.join("assets").join("objects").join(prefix);
+    std::fs::create_dir_all(blocked_prefix.parent().unwrap()).unwrap();
+    std::fs::write(&blocked_prefix, "not a directory").unwrap();
+
+    let out = run_with_brain(
+        &root,
+        &["--json", "add", "asset", "--file", source.to_str().unwrap()],
+    );
+    assert!(!out.status.success());
+
+    let conn = Connection::open(root.join("brain.sqlite")).unwrap();
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM assets WHERE content_hash = ?1",
+            [&hash],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn add_interaction_dedupes_by_external_id_and_enriches_provenance() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let person = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Sam Rivera",
+            "--email",
+            "sam@example.com",
+        ],
+    );
+    let person_id = person["id"].as_str().unwrap();
+    let link = format!("person:{person_id}");
+
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Intro",
+            "--text",
+            "Thanks for the introduction.",
+        ],
+    );
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Intro",
+            "--text",
+            "Thanks for the introduction.",
+            "--external-id",
+            "gmail:msg-1",
+            "--original-url",
+            "https://mail.google.com/mail/u/0/#inbox/msg-1",
+            "--link",
+            &link,
+        ],
+    );
+    assert_eq!(second["isDuplicate"], true);
+    assert_eq!(second["id"], first["id"]);
+
+    let third = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Intro updated",
+            "--text",
+            "A later import has slightly different body text.",
+            "--external-id",
+            "gmail:msg-1",
+            "--link",
+            &link,
+        ],
+    );
+    assert_eq!(third["isDuplicate"], true);
+    assert_eq!(third["id"], first["id"]);
+
+    let conn = Connection::open(&db).unwrap();
+    let (external_id, original_url): (String, String) = conn
+        .query_row(
+            "SELECT external_id, original_url FROM interactions WHERE id = ?1",
+            [first["id"].as_str().unwrap()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(external_id, "gmail:msg-1");
+    assert_eq!(
+        original_url,
+        "https://mail.google.com/mail/u/0/#inbox/msg-1"
+    );
+    let interactions: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM interactions WHERE external_id = 'gmail:msg-1'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(interactions, 1);
+    let participants: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM interaction_participants WHERE interaction_id = ?1 AND person_id = ?2",
+            (first["id"].as_str().unwrap(), person_id),
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(participants, 1);
 }
 
 #[test]

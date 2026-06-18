@@ -26,13 +26,16 @@ operate it through the `brain` CLI — never by touching the database file direc
   you were given. Reusable knowledge. `brain add document`.
 - **interaction** — a human exchange that happened: a meeting, call, email,
   message, event. Has a date and participants. `brain add interaction`.
+- **asset** — a binary file managed under the brain's `assets/` directory:
+  avatars, logos, screenshots, images, and original attachments. `brain add asset`.
 - **task** — something to do, optionally linked to a person/project.
   `brain add task`.
 - **memory** — a hidden atomic claim about a record ("prefers async standups",
   "decided to ship in Q3"). `brain remember`. Memories cite their evidence.
-- **person / organization / project** — durable entities. You don't create
-  people directly; they emerge from extraction over documents/interactions. Link
-  to them by id with `--link person:<id>`.
+- **person / organization / project** — durable entities. Create people directly
+  when importing contacts or when the user gives you explicit contact details;
+  otherwise let extraction discover them from documents/interactions. Link to
+  them by id with `--link person:<id>`.
 
 When unsure between document and interaction: did it *happen between people at a
 time*? → interaction. Is it *material to read/reference*? → document.
@@ -64,6 +67,14 @@ or interaction so the user can open the exact source.
 brain add interaction --kind meeting --title "Northwind kickoff" \
   --text-file ./notes.md --link person:<id> --json
 
+# A person from a contact export or explicit user instruction:
+brain add person --full-name "Maya Chen" --email maya@example.com \
+  --phone "+1 555 0100" --json
+
+# A binary attachment linked to an interaction:
+brain add asset --file ./invoice.pdf --kind attachment \
+  --mime-type application/pdf --link interaction:<id> --json
+
 # A reference note (document):
 brain add document --title "Pricing model v2" --text "..." --json
 
@@ -78,8 +89,10 @@ brain remember --kind decision --claim "Agreed to a Q3 pilot" --link person:<id>
 Notes:
 - Use `--text-file <path>` (or `--text-file -` for stdin) for long content; `--text`
   for short strings.
-- Identical content dedupes automatically (`isDuplicate:true`); pass
-  `--allow-duplicate` only when you truly mean to re-import.
+- Identical document/interaction content dedupes automatically (`isDuplicate:true`);
+  people dedupe by primary email, then normalized full name; assets dedupe by content
+  hash and can still be linked to a new record. Pass `--allow-duplicate` only when
+  you truly mean to re-import.
 - Resolve link ids by `brain search` first.
 
 ## Running a daily automation

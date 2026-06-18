@@ -11,6 +11,8 @@ const DOCUMENTED: &[&[&str]] = &[
     &["status"],
     &["path"],
     &["doctor"],
+    &["add", "person"],
+    &["add", "asset"],
     &["add", "document"],
     &["add", "interaction"],
     &["add", "task"],
