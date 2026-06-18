@@ -170,6 +170,34 @@ green.
   `pnpm check`, and the desktop build are all green (20 desktop-lib Rust tests,
   48 desktop tests).
 
+### Follow-up Bugbot finding (comment on head `11c81ff`)
+
+- **Medium — Overlapping brain switches desync.** `switch_to`
+  (`apps/desktop/src-tauri/src/brains.rs`) persisted the new active brain to the
+  registry (`register_active`) and then swapped the live `DbState` connection
+  (`db.swap`) under two *separate* locks, with no single critical section spanning
+  both. Overlapping `open_brain` / `create_brain` calls (rapid Switch clicks) could
+  interleave — both threads persist, then swap in the opposite order — settling with
+  `registry_meta` recording one brain while the live SQLite connection was open on
+  another. (In-session, `active_brain`/`list_brains` already derive active-ness from
+  the live connection, so the UI wouldn't mislabel; but the registry's recorded
+  active path and the live connection still disagreed on disk, so the next startup's
+  `active_candidate` would reopen the wrong brain.) Fixed by adding a dedicated
+  **switch mutex** to `BrainState`; `switch_to` now holds it across *both* the
+  registry persist and the live swap, making that pair one indivisible critical
+  section with respect to other switches, so the last switch to start wins both
+  stores and they can never diverge. The persist-before-swap invariant is preserved
+  (a failed durable registry persist still returns the error without swapping the
+  live connection); ordinary reads and writes never take the switch lock, so query
+  throughput is unaffected. `brain-switcher.tsx` additionally ignores a new pick
+  while `openBrain` is pending, so a rapid double-click can't fire a redundant second
+  switch that would needlessly churn the cache. New Rust test
+  `overlapping_switches_keep_registry_and_live_db_in_sync` hammers 200 rounds of two
+  simultaneous opposite-direction switches and asserts `registry_meta` and the live
+  `DbState` always name the same brain. `cargo fmt`/`clippy`/`check`/`test` (21
+  desktop-lib Rust tests), `pnpm check` (48 desktop tests), and the desktop build are
+  all green.
+
 ## Caveats / deferred (honest scope)
 
 - **Path field as fallback.** The native OS dialog is the primary affordance; the

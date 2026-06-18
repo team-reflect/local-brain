@@ -26,6 +26,17 @@
 //! and writes hit another. Because the registry *is* a SQLite database read on
 //! demand (no separate in-memory catalogue), a failed metadata write likewise
 //! leaves the observable state exactly as it was; memory cannot drift from disk.
+//!
+//! That persist-before-swap ordering only protects a single switch; the registry
+//! write and the live swap still take *separate* locks, so two overlapping
+//! switches (rapid Switch clicks → concurrent `open_brain`/`create_brain`) could
+//! interleave — both persist, then swap in the opposite order — and settle with
+//! `registry_meta` recording one brain while the live connection is open on the
+//! other. A dedicated switch mutex ([`BrainState::switch`]) closes that window:
+//! every switch holds it across both the persist and the swap, so the two steps
+//! are one indivisible critical section with respect to other switches and the
+//! last switch to start always wins both stores. Ordinary reads and writes never
+//! take this lock, so concurrent query throughput is unaffected.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -296,6 +307,13 @@ fn infos(
 /// The process-wide brain registry, backed by its own SQLite database.
 pub struct BrainState {
     registry: Mutex<Connection>,
+    /// Serializes brain switches. A switch persists the new active brain to
+    /// `registry` and then swaps the live [`DbState`] connection under two
+    /// separate locks; holding this mutex across both makes that pair one
+    /// indivisible critical section, so overlapping switches cannot interleave
+    /// and leave `registry_meta` and the live connection on different brains.
+    /// It guards only switches — ordinary reads/writes never take it.
+    switch: Mutex<()>,
 }
 
 impl BrainState {
@@ -308,6 +326,7 @@ impl BrainState {
             .unwrap_or_else(|| default_db_path.with_file_name("registry.sqlite"));
         Self {
             registry: Mutex::new(open_resilient(&registry_path)),
+            switch: Mutex::new(()),
         }
     }
 
@@ -315,6 +334,14 @@ impl BrainState {
         self.registry
             .lock()
             .map_err(|_| AppError::io("the brain registry lock was poisoned by an earlier panic"))
+    }
+
+    /// Acquire the switch lock, held for the whole of a [`switch_to`] so the
+    /// registry persist and the live swap stay indivisible against other switches.
+    fn switch_guard(&self) -> AppResult<MutexGuard<'_, ()>> {
+        self.switch
+            .lock()
+            .map_err(|_| AppError::io("the brain switch lock was poisoned by an earlier panic"))
     }
 
     /// The brain to open at startup: `$BRAIN_DB` (CLI parity / explicit pin),
@@ -377,14 +404,22 @@ impl BrainState {
 
 /// Switch the live database to an already-opened, migrated brain.
 ///
-/// Ordering is the invariant here: the durable registry update
-/// ([`BrainState::register_active`]) must commit *before* the live [`DbState`]
-/// connection is swapped. If persistence fails we return that error without
-/// swapping, so the open connection — and the registry's recorded active brain —
-/// both stay on the previous brain, leaving nothing for the frontend to fall out
-/// of sync with. Swapping first (the old ordering) could leave the SQLite
-/// connection pointing at the newly opened brain while the command reports
-/// failure and the UI keeps showing — and reading/writing through — the old one.
+/// Two invariants combine here:
+///
+/// 1. **Ordering.** The durable registry update ([`BrainState::register_active`])
+///    must commit *before* the live [`DbState`] connection is swapped. If
+///    persistence fails we return that error without swapping, so the open
+///    connection — and the registry's recorded active brain — both stay on the
+///    previous brain, leaving nothing for the frontend to fall out of sync with.
+///    Swapping first (the old ordering) could leave the SQLite connection
+///    pointing at the newly opened brain while the command reports failure and
+///    the UI keeps showing — and reading/writing through — the old one.
+/// 2. **Atomicity against other switches.** The persist and the swap take
+///    separate locks, so we hold the switch mutex
+///    ([`BrainState::switch_guard`]) across both. Without it, two overlapping
+///    switches could both persist and then swap in the opposite order, settling
+///    with `registry_meta` on one brain and the live connection on another;
+///    holding it serializes switches so the last to start wins both stores.
 fn switch_to(
     db: &DbState,
     brains: &BrainState,
@@ -392,6 +427,9 @@ fn switch_to(
     canonical: &Path,
     name: Option<&str>,
 ) -> AppResult<BrainInfo> {
+    // One switch at a time: persist + swap is a single critical section so
+    // overlapping switches can't interleave the two stores onto different brains.
+    let _switch = brains.switch_guard()?;
     // Durable first: persist the new active brain to the registry database.
     brains.register_active(canonical, name)?;
     // Only now point the live connection at it — this cannot fail except on a
@@ -563,6 +601,7 @@ mod tests {
     fn memory_state() -> BrainState {
         BrainState {
             registry: Mutex::new(open_memory_registry()),
+            switch: Mutex::new(()),
         }
     }
 
@@ -570,6 +609,7 @@ mod tests {
     fn file_state(path: &Path) -> BrainState {
         BrainState {
             registry: Mutex::new(open_registry(path).unwrap()),
+            switch: Mutex::new(()),
         }
     }
 
@@ -580,6 +620,7 @@ mod tests {
         conn.execute_batch("PRAGMA query_only = ON;").unwrap();
         BrainState {
             registry: Mutex::new(conn),
+            switch: Mutex::new(()),
         }
     }
 
@@ -791,6 +832,63 @@ mod tests {
             active_path(&conn).unwrap().unwrap(),
             canonical.display().to_string()
         );
+    }
+
+    #[test]
+    fn overlapping_switches_keep_registry_and_live_db_in_sync() {
+        // Bug regression: overlapping switches (rapid Switch clicks driving
+        // concurrent open_brain/create_brain) must not interleave the registry
+        // persist and the live swap such that `registry_meta` settles on one brain
+        // while the live connection is open on another. switch_to holds the switch
+        // mutex across both steps, so however the two threads interleave the last
+        // switch to start wins *both* stores and they always agree.
+        let dir = tempdir().unwrap();
+
+        let start = dir.path().join("start.sqlite");
+        let db = DbState::new(
+            brain_schema::open_and_migrate(&start).unwrap(),
+            start.clone(),
+        );
+
+        let a = dir.path().join("a.sqlite");
+        let b = dir.path().join("b.sqlite");
+        // Migrate both up front so the threads only race the register + swap.
+        brain_schema::open_and_migrate(&a).unwrap();
+        brain_schema::open_and_migrate(&b).unwrap();
+        let a = a.canonicalize().unwrap();
+        let b = b.canonicalize().unwrap();
+
+        let brains = memory_state();
+
+        // Many rounds of two simultaneous switches in opposite directions: the
+        // window the switch mutex closes is timing-dependent, so we hammer it.
+        for _ in 0..200 {
+            std::thread::scope(|scope| {
+                scope.spawn(|| {
+                    let conn = brain_schema::open_and_migrate(&a).unwrap();
+                    let _ = switch_to(&db, &brains, conn, &a, None);
+                });
+                scope.spawn(|| {
+                    let conn = brain_schema::open_and_migrate(&b).unwrap();
+                    let _ = switch_to(&db, &brains, conn, &b, None);
+                });
+            });
+
+            // Whichever switch resolved last, both stores must name the same brain.
+            let live = db.active_path().unwrap().display().to_string();
+            let recorded = {
+                let conn = brains.lock().unwrap();
+                active_path(&conn).unwrap().unwrap()
+            };
+            assert_eq!(
+                live, recorded,
+                "registry_meta and the live DbState must not desync after overlapping switches"
+            );
+            assert!(
+                live == a.display().to_string() || live == b.display().to_string(),
+                "the live brain must be one of the two switch targets"
+            );
+        }
     }
 
     #[test]

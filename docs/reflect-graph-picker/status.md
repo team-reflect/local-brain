@@ -93,6 +93,33 @@ New tests: `brains.dom.test.tsx` (stale brain-scoped caches removed on switch),
 `brains.rs::infos_derives_active_from_live_db_not_stale_registry`. Full suite
 (`pnpm check`, desktop build, `cargo fmt`/`clippy`/`check`/`test`) green.
 
+## Bugbot review fix (2026-06-18, head cec2308 · comment on 11c81ff)
+
+One new Bugbot finding (comment `3437049057`) on commit `11c81ff`, resolved:
+
+1. **Medium — Overlapping brain switches desync** (`apps/desktop/src-tauri/src/brains.rs`,
+   `apps/desktop/src/components/brain-switcher.tsx`). `switch_to` persisted the new
+   active brain to the registry and then swapped the live `DbState` under two
+   *separate* locks with no single critical section. Overlapping `open_brain` /
+   `create_brain` calls (rapid Switch clicks) could interleave — both persist, then
+   swap in the opposite order — leaving `registry_meta` recording one brain while the
+   live SQLite connection was open on another, so the next startup's
+   `active_candidate` would reopen the wrong brain (no in-session desync now that
+   `active_brain`/`list_brains` derive active-ness from the live connection, but the
+   two stores still disagreed on disk until restart). Fixed by adding a dedicated
+   **switch mutex** to `BrainState` that `switch_to` holds across *both* the registry
+   persist and the live swap, making the pair one indivisible critical section with
+   respect to other switches; the last switch to start wins both stores. The
+   persist-before-swap invariant is preserved (a failed durable persist still returns
+   without swapping). Ordinary reads/writes never take the switch lock. The switcher
+   UI also ignores a new pick while `openBrain` is pending, avoiding a redundant
+   second switch. New Rust test `overlapping_switches_keep_registry_and_live_db_in_sync`
+   hammers 200 rounds of two simultaneous opposite-direction switches and asserts
+   `registry_meta` and the live `DbState` always name the same brain.
+
+`cargo fmt`/`clippy`/`check`/`test` (21 desktop-lib tests), `pnpm check` (48 desktop
+tests), and the desktop build are all green.
+
 ## Progress
 
 - [x] Read AGENTS.md, docs, supervisor skill; mapped Local Brain + both Reflect refs.

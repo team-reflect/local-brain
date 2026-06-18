@@ -47,6 +47,11 @@ export function BrainSwitcher(): ReactNode {
 
   function switchTo(brain: BrainInfo): void {
     closeMenu()
+    // Guard rapid Switch clicks: a switch in flight is already repointing the
+    // live brain, so ignore further picks until it settles. The Rust side
+    // serializes switches regardless (see brains.rs), but this avoids firing a
+    // redundant second open_brain that would just churn the cache.
+    if (openBrain.isPending) return
     if (!brain.isActive) openBrain.mutate(brain.path)
   }
 
