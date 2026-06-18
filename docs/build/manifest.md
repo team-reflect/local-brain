@@ -52,7 +52,7 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 | 06 | Search, retrieval & AI (incl. the model-backed extractor) | `codex/local-brain-06-search-ai` | `…-05b-corrections` | open | [#15](https://github.com/maccman/local-brain/pull/15) |
 | 07 | CLI & agent skills | `codex/local-brain-07-cli-skills` | `…-06-search-ai` | open | [#16](https://github.com/maccman/local-brain/pull/16) |
 | 08 | Settings, backup, export & privacy | `codex/local-brain-08-settings-backup-privacy` | `…-07-cli-skills` | open | [#17](https://github.com/maccman/local-brain/pull/17) |
-| 09 | Packaging & launch | `codex/local-brain-09-packaging-launch` | `…-08-settings-backup-privacy` | pending | — |
+| 09 | Packaging & launch | `codex/local-brain-09-packaging-launch` | `…-08-settings-backup-privacy` | open | [#19](https://github.com/maccman/local-brain/pull/19) |
 
 Status legend: `pending` → not started · `in progress` → branch exists, work underway ·
 `open` → PR opened · `merged` · `blocked` (see status.md).
@@ -409,9 +409,31 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
   follow-up); the export is JSON interchange (not a re-import path yet). A full `tauri build` was
   not run this layer.
 
-### 09
-- Scope mirrors `docs/plans/09`: macOS packaging, sidecar bundling, first-run, accessibility/
-  performance/privacy checks, launch docs, smoke checklist.
+### 09 — Packaging & launch
+- **Scope (Plan 09):**
+  - **Packaging smoke (strongest available on this host):** `pnpm tauri build` compiled the app and
+    produced `target/release/bundle/macos/Local Brain.app` with the **`brain` sidecar embedded** at
+    `Contents/MacOS/brain` (runs: `brain 0.1.0`), identity `app.localbrain.desktop` v0.1.0. Only the
+    `.dmg` step failed — `bundle_dmg.sh` drives Finder via AppleScript and needs a GUI/login session
+    (documented; the `.app` is the runnable artifact, produce the DMG on a dev workstation).
+  - **First-run flow:** a one-time welcome overlay (tracked by a `firstRun.completed` settings flag)
+    confirming where the data lives, the honest model-boundary status, and how to start (add a record
+    / set a key / use the CLI).
+  - **Accessibility:** a visible keyboard `:focus-visible` ring on all interactive elements and a
+    `prefers-reduced-motion` block in `globals.css`.
+  - **Launch docs:** `docs/launch/README.md` (install, storage, importing, Codex, backup/export,
+    model boundaries, troubleshooting) and `docs/launch/checklist.md` (packaging status, first-run
+    smoke checklist, accessibility/performance/privacy gates, signing/notarization checklist,
+    update-path decision).
+- **Verification:** `pnpm tauri build` → `.app` + embedded runnable sidecar ✓ (`.dmg` step
+  GUI-blocked, documented). `pnpm check` ✓ — **161 JS tests** (119 core; 4 db; 38 desktop: +1
+  Settings, +2 first-run render tests over the prior layer). `pnpm --filter @local-brain/desktop
+  build` ✓. `cargo fmt --all -- --check` ✓; `cargo check --workspace` ✓; `cargo test --workspace` ✓
+  (36 tests). `git diff --check` ✓.
+- **Caveats:** DMG bundling + signing/notarization need a developer workstation (unsigned alpha
+  supported, checklist provided); a manual VoiceOver pass and on-device performance measurement are
+  recommended before public alpha; the GUI app was not launched headless (no window server) — the
+  compile + bundle + embedded-sidecar run is the smoke.
 
 ## Open / Updated PR URLs
 
@@ -431,3 +453,4 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 - PR #15 — Build 06 search, retrieval & AI (FTS5 retrieve, cited Ask, model boundary, model-backed extractor, report endpoints) — https://github.com/maccman/local-brain/pull/15 (base `…-05b-corrections`, open)
 - PR #16 — Build 07 CLI & agent skills (`brain` CLI add/search/ask/today/report/graph/show, JSON contracts, sidecar bundling, skill doc) — https://github.com/maccman/local-brain/pull/16 (base `…-06-search-ai`, open)
 - PR #17 — Build 08 settings, backup, export & privacy (SQLite backup, JSON export, keychain, model boundary settings, hard delete + FTS rebuild) — https://github.com/maccman/local-brain/pull/17 (base `…-07-cli-skills`, open)
+- PR #19 — Build 09 packaging & launch (macOS `.app` + embedded sidecar smoke, first-run flow, accessibility, launch docs + checklist) — https://github.com/maccman/local-brain/pull/19 (base `…-08-settings-backup-privacy`, open)

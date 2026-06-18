@@ -19,6 +19,7 @@ import { sectionForRoute, type Route } from '../routing/route'
 import { useRouter } from '../routing/router'
 import { AddRecordDialog, type AddRecordType } from './add-record-dialog'
 import { CommandPalette } from './command-palette'
+import { FirstRun } from './first-run'
 import { RouteContent } from './route-content'
 
 interface NavItem {
@@ -136,6 +137,7 @@ export function AppShell(): ReactNode {
         initialType={addState.type}
         onClose={() => setAddState((current) => ({ ...current, open: false }))}
       />
+      <FirstRun />
     </div>
   )
 }

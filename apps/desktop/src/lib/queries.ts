@@ -58,6 +58,8 @@ import {
   keychainHas,
   hardDeleteRecord,
   rebuildSearchIndexes,
+  getSetting,
+  setSetting,
   type AskOptions,
   type DeletableKind,
   type IngestDocumentInput,
@@ -446,6 +448,24 @@ export function useDefaultPaths(stamp: string) {
       backup: await defaultBackupPath(stamp),
       export: await defaultExportPath(stamp),
     }),
+  })
+}
+
+// First-run onboarding (Plan 09). Tracked by a settings flag so it shows once.
+const FIRST_RUN_KEY = 'firstRun.completed'
+
+export function useFirstRun() {
+  return useQuery({
+    queryKey: ['first-run'],
+    queryFn: () => getSetting<boolean>(FIRST_RUN_KEY, false),
+  })
+}
+
+export function useCompleteFirstRun() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => setSetting(FIRST_RUN_KEY, true),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['first-run'] }),
   })
 }
 
