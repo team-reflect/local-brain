@@ -1,12 +1,15 @@
 import {
   AI_PROVIDERS,
   aiKeySecretName,
+  apiKeyHint,
   createConfiguredProvider,
   createModelExtractor,
   defaultAiProvider,
   getModelSettings,
   installExtractionPipeline,
   keychainGet,
+  keychainSet,
+  setAiProvidersState,
   setModelProvider,
   type AiProviderConfig,
   type AiProviderId,
@@ -55,13 +58,40 @@ function envOnlyConfig(): { config: AiProviderConfig; key: string } | null {
   return null
 }
 
+async function legacyAnthropicConfig(): Promise<{ config: AiProviderConfig; key: string } | null> {
+  let key: string | null
+  try {
+    key = await keychainGet('anthropic')
+  } catch {
+    return null
+  }
+  if (!key) return null
+
+  const provider = AI_PROVIDERS.find((candidate) => candidate.id === 'anthropic')!
+  const config: AiProviderConfig = {
+    id: 'legacy:anthropic',
+    provider: 'anthropic',
+    model: provider.models[0].id,
+    keyHint: apiKeyHint(key),
+  }
+
+  try {
+    await keychainSet(aiKeySecretName(config.id), key)
+    await setAiProvidersState([config], config.id)
+  } catch {
+    // Even if migration cannot persist, keep the legacy key working this session.
+  }
+
+  return { config, key }
+}
+
 async function resolveProvider(): Promise<{ config: AiProviderConfig; key: string } | null> {
   const settings = await getModelSettings()
   const config = defaultAiProvider({
     providers: settings.providers,
     defaultProviderId: settings.defaultProviderId,
   })
-  if (!config) return envOnlyConfig()
+  if (!config) return envOnlyConfig() ?? (await legacyAnthropicConfig())
 
   const envKey = envKeyFor(config.provider)
   if (envKey) return { config, key: envKey }

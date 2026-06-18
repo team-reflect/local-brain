@@ -5,15 +5,14 @@ import {
   defaultAiProvider,
   databasePath,
   getModelSettings,
-  getSetting,
   hardDeleteRecord,
   keychainDelete,
+  keychainGet,
   keychainHas,
   keychainSet,
   rebuildSearchIndexes,
   setAiProvidersState,
   setModelEnabled,
-  setSetting,
   withAiProviderAdded,
   withAiProviderRemoved,
   type AiProviderConfig,
@@ -77,13 +76,19 @@ export function useAddAiProvider() {
         model: draft.model,
         keyHint: apiKeyHint(key),
       }
-      await keychainSet(aiKeySecretName(id), key)
+      const secretName = aiKeySecretName(id)
+      await keychainSet(secretName, key)
       const next = withAiProviderAdded(
         { providers: settings.providers, defaultProviderId: settings.defaultProviderId },
         entry,
         draft.isDefault,
       )
-      await setAiProvidersState(next.providers, next.defaultProviderId)
+      try {
+        await setAiProvidersState(next.providers, next.defaultProviderId)
+      } catch (error) {
+        await keychainDelete(secretName).catch(() => {})
+        throw error
+      }
     },
     onSuccess: async () => {
       await refreshModelQueries(queryClient)
@@ -95,13 +100,20 @@ export function useRemoveAiProvider() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (id: string) => {
-      await keychainDelete(aiKeySecretName(id))
+      const secretName = aiKeySecretName(id)
+      const priorSecret = await keychainGet(secretName).catch(() => null)
+      await keychainDelete(secretName)
       const settings = await getModelSettings()
       const next = withAiProviderRemoved(
         { providers: settings.providers, defaultProviderId: settings.defaultProviderId },
         id,
       )
-      await setAiProvidersState(next.providers, next.defaultProviderId)
+      try {
+        await setAiProvidersState(next.providers, next.defaultProviderId)
+      } catch (error) {
+        if (priorSecret) await keychainSet(secretName, priorSecret).catch(() => {})
+        throw error
+      }
     },
     onSuccess: async () => {
       await refreshModelQueries(queryClient)
@@ -126,20 +138,44 @@ export function useMakeDefaultAiProvider() {
   })
 }
 
-// First-run onboarding (Plan 09). Tracked by a settings flag so it shows once.
+// First-run onboarding (Plan 09). Completion is once per app install, NOT per
+// brain. Switching or creating a brain remounts the workspace keyed by the brain
+// path, so a per-brain `settings` row would re-show onboarding on every new or
+// different brain. We persist the flag in `localStorage`, which is scoped to the
+// desktop webview origin (the install/profile) and shared across every brain DB.
 const FIRST_RUN_KEY = 'firstRun.completed'
+
+function readFirstRunCompleted(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(FIRST_RUN_KEY) === 'true'
+  } catch {
+    // A locked-down or unavailable store means we cannot know; show onboarding.
+    return false
+  }
+}
+
+function writeFirstRunCompleted(): void {
+  try {
+    globalThis.localStorage?.setItem(FIRST_RUN_KEY, 'true')
+  } catch {
+    // Best effort: if the store rejects the write, onboarding simply reappears.
+  }
+}
 
 export function useFirstRun() {
   return useQuery({
     queryKey: ['first-run'],
-    queryFn: () => getSetting<boolean>(FIRST_RUN_KEY, false),
+    queryFn: () => readFirstRunCompleted(),
   })
 }
 
 export function useCompleteFirstRun() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: () => setSetting(FIRST_RUN_KEY, true),
+    mutationFn: () => {
+      writeFirstRunCompleted()
+      return Promise.resolve(true)
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['first-run'] }),
   })
 }

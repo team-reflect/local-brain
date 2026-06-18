@@ -1,5 +1,7 @@
 use serde::Serialize;
+use tauri::State;
 
+use crate::db::DbState;
 use crate::error::AppResult;
 
 /// Basic app identity, surfaced to the foundation UI. Serialized camelCase to
@@ -23,8 +25,10 @@ pub fn app_version() -> AppResult<AppInfo> {
     })
 }
 
-/// The resolved durable database path, for Settings → Local database / Diagnostics.
+/// The path of the currently open brain, for Settings → Local database /
+/// Diagnostics. Reads the live active path so it stays correct after a brain
+/// switch (rather than recomputing the startup default).
 #[tauri::command]
-pub fn database_path() -> AppResult<String> {
-    Ok(crate::resolve_db_path().display().to_string())
+pub fn database_path(db: State<'_, DbState>) -> AppResult<String> {
+    Ok(db.active_path()?.display().to_string())
 }
