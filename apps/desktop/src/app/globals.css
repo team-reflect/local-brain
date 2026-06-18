@@ -145,6 +145,15 @@
     height: 100%;
   }
 
+  /* The app frame never scrolls: the route surface owns vertical overflow.
+     Without this, a trackpad gesture that reaches a pane boundary chains up to
+     <body> and the WebView elastically bounces the whole window on macOS. */
+  html,
+  body {
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
   body {
     margin: 0;
     background-color: hsl(var(--background));
