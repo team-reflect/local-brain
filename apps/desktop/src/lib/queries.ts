@@ -40,6 +40,28 @@ import {
   seedDemoData,
   unlinkMemoryFromRecord,
   unlinkRecords,
+  ask,
+  getDailyBrief,
+  getModelStatus,
+  globalSearch,
+  databasePath,
+  getModelSettings,
+  setModelEnabled,
+  createBackup,
+  exportToFile,
+  exportCounts,
+  defaultBackupPath,
+  defaultExportPath,
+  assembleExport,
+  keychainSet,
+  keychainDelete,
+  keychainHas,
+  hardDeleteRecord,
+  rebuildSearchIndexes,
+  getSetting,
+  setSetting,
+  type AskOptions,
+  type DeletableKind,
   type IngestDocumentInput,
   type IngestInteractionInput,
   type LinkedRecord,
@@ -324,5 +346,137 @@ export function useAddMessage() {
       void queryClient.invalidateQueries({ queryKey: ['messages', message.conversationId] })
       void queryClient.invalidateQueries({ queryKey: ['conversations'] })
     },
+  })
+}
+
+// Ask: the cited-answer pipeline (Plan 06). Persists user + assistant turns and
+// evidence; invalidates the thread, the conversation list, and the assistant
+// message's citations.
+export function useAsk() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { question: string } & AskOptions) => {
+      const { question, ...options } = vars
+      return ask(question, options)
+    },
+    onSuccess: (result) => {
+      void queryClient.invalidateQueries({ queryKey: ['messages', result.conversationId] })
+      void queryClient.invalidateQueries({ queryKey: ['conversations'] })
+      void queryClient.invalidateQueries({ queryKey: ['citations', 'chat_message', result.messageId] })
+    },
+  })
+}
+
+/** The model-boundary status (configured? enabled? can it run?). */
+export function useModelStatus() {
+  return useQuery({ queryKey: ['model-status'], queryFn: getModelStatus })
+}
+
+/** Full-text global search across record types (Plan 06). */
+export function useGlobalSearch(query: string) {
+  const trimmed = query.trim()
+  return useQuery({
+    queryKey: ['global-search', trimmed],
+    queryFn: () => globalSearch(trimmed),
+    enabled: trimmed.length > 0,
+  })
+}
+
+/** The daily brief: bucketed tasks, recent interactions, reconnects. */
+export function useDailyBrief() {
+  return useQuery({ queryKey: ['daily-brief'], queryFn: () => getDailyBrief() })
+}
+
+// Settings: storage, model boundary, backup/export, keychain (Plan 08)
+export function useDatabasePath() {
+  return useQuery({ queryKey: ['database-path'], queryFn: databasePath })
+}
+
+export function useModelSettings() {
+  return useQuery({ queryKey: ['model-settings'], queryFn: getModelSettings })
+}
+
+export function useKeychainHas(account: string) {
+  return useQuery({ queryKey: ['keychain-has', account], queryFn: () => keychainHas(account) })
+}
+
+export function useExportSummary() {
+  return useQuery({ queryKey: ['export-summary'], queryFn: () => assembleExport().then(exportCounts) })
+}
+
+export function useSetModelEnabled() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (enabled: boolean) => setModelEnabled(enabled),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['model-settings'] })
+      void queryClient.invalidateQueries({ queryKey: ['model-status'] })
+    },
+  })
+}
+
+/** Store/clear the provider key in the keychain, then re-register the provider. */
+export function useSetProviderKey() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (vars: { account: string; secret: string | null }) => {
+      if (vars.secret && vars.secret.trim()) await keychainSet(vars.account, vars.secret.trim())
+      else await keychainDelete(vars.account)
+      const { refreshModelProvider } = await import('./ai/install-model')
+      await refreshModelProvider()
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['keychain-has'] })
+      void queryClient.invalidateQueries({ queryKey: ['model-status'] })
+      void queryClient.invalidateQueries({ queryKey: ['model-settings'] })
+    },
+  })
+}
+
+export function useCreateBackup() {
+  return useMutation({ mutationFn: (dest: string) => createBackup(dest) })
+}
+
+export function useExportJson() {
+  return useMutation({ mutationFn: (dest: string) => exportToFile(dest) })
+}
+
+export function useDefaultPaths(stamp: string) {
+  return useQuery({
+    queryKey: ['default-paths', stamp],
+    queryFn: async () => ({
+      backup: await defaultBackupPath(stamp),
+      export: await defaultExportPath(stamp),
+    }),
+  })
+}
+
+// First-run onboarding (Plan 09). Tracked by a settings flag so it shows once.
+const FIRST_RUN_KEY = 'firstRun.completed'
+
+export function useFirstRun() {
+  return useQuery({
+    queryKey: ['first-run'],
+    queryFn: () => getSetting<boolean>(FIRST_RUN_KEY, false),
+  })
+}
+
+export function useCompleteFirstRun() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => setSetting(FIRST_RUN_KEY, true),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['first-run'] }),
+  })
+}
+
+/** Hard-delete a record (with cascade) and rebuild derived indexes. */
+export function useHardDelete() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (vars: { kind: DeletableKind; id: string }) => {
+      await hardDeleteRecord(vars.kind, vars.id)
+      await rebuildSearchIndexes()
+    },
+    onSuccess: () => queryClient.invalidateQueries(),
   })
 }

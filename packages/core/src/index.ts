@@ -12,7 +12,7 @@ export {
 
 // Database access layer
 export { db } from './db/client'
-export { execute, batch, type DbStatement } from './db/commands'
+export { execute, executeRaw, batch, type DbStatement } from './db/commands'
 export { newId } from './db/id'
 export { nowIso } from './db/time'
 
@@ -185,6 +185,124 @@ export {
 
 // Quick search (command palette)
 export { quickSearch } from './search/getters'
+
+// Retrieval (the one shared FTS5 retrieve() contract + global search)
+export {
+  retrieve,
+  globalSearch,
+  toMatchQuery,
+  toLikePattern,
+  lexicalScore,
+  recencyScore,
+  combineScore,
+  RECENCY_HALF_LIFE_DAYS,
+  RETRIEVABLE_SOURCE_KINDS,
+  type RetrievalMode,
+  type RetrievalResult,
+  type RetrievedChunk,
+  type RetrieveOptions,
+  type SourceRecordType as RetrievalSourceType,
+  type SearchHit,
+  type SearchOptions,
+  type RankInputs,
+} from './retrieval'
+
+// Settings (typed key/value store backing the model boundary, storage, backup)
+export {
+  getSetting,
+  getSettingRaw,
+  listSettings,
+  setSetting,
+  deleteSetting,
+  type SettingEntry,
+} from './domains/settings'
+export {
+  getModelSettings,
+  setModelEnabled,
+  setModelProviderSetting,
+  setModelModelSetting,
+  MODEL_PROVIDER_KEY,
+  MODEL_MODEL_KEY,
+  type ModelSettings,
+} from './domains/settings/model'
+
+// Native storage + keychain bindings (Plan 08)
+export {
+  databasePath,
+  backupDatabase,
+  writeFileAtomic,
+  keychainSet,
+  keychainGet,
+  keychainHas,
+  keychainDelete,
+  type BackupInfo,
+} from './ipc/storage'
+
+// Backup & export (Plan 08)
+export {
+  assembleExport,
+  exportCounts,
+  createBackup,
+  exportToFile,
+  defaultBackupPath,
+  defaultExportPath,
+  EXPORT_VERSION,
+  type BrainExport,
+  type BackupState,
+  type ExportResult,
+} from './domains/backup'
+
+// Destructive-operation maintenance (hard delete + derived-index rebuild)
+export {
+  hardDeleteRecord,
+  rebuildSearchIndexes,
+  type DeletableKind,
+} from './domains/maintenance'
+
+// AI: BYOK model boundary, cited Ask, model-backed extractor
+export {
+  setModelProvider,
+  getModelProvider,
+  getModelStatus,
+  ModelUnavailableError,
+  MODEL_ENABLED_KEY,
+  assembleAnswerContext,
+  citedSubset,
+  ask,
+  createModelExtractor,
+  extractJsonObject,
+  createAnthropicProvider,
+  buildAnthropicBody,
+  readAnthropicText,
+  type ModelProvider,
+  type ModelRequest,
+  type ModelMessage,
+  type ModelCompletion,
+  type ModelUsage,
+  type ModelStatus,
+  type AssembledContext,
+  type AnswerCitation,
+  type AskResult,
+  type AskCitation,
+  type AskOptions,
+  type AnthropicOptions,
+} from './ai'
+
+// Agent report endpoints (daily brief, plan-day, changes, waiting items)
+export {
+  getDailyBrief,
+  planDay,
+  getWaitingItems,
+  getChangesSince,
+  OPEN_TASK_STATUSES,
+  type DailyBrief,
+  type DailyBriefOptions,
+  type BriefTask,
+  type BriefInteraction,
+  type TaskBucket,
+  type PlanDayOptions,
+  type ChangedRecord,
+} from './reports'
 
 // Ingestion (paste/import → document/interaction + chunks + links)
 export { normalizeText, chunkText, type Chunk, type ChunkOptions } from './ingest/chunk'

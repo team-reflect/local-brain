@@ -49,7 +49,7 @@ describe('CommandPalette', () => {
     installFakeBridge({
       query: (sql) =>
         sql.includes('from "people"')
-          ? [{ id: 'p1', full_name: 'Ada Lovelace', headline: 'Mathematician' }]
+          ? [{ id: 'p1', title: 'Ada Lovelace', subtitle: 'Mathematician' }]
           : [],
     })
 

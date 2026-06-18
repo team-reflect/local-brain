@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { StatusBadge } from '../../components/badge'
 import { DetailFields } from '../../components/detail-fields'
 import { EmptyState } from '../../components/empty-state'
 import { LinkedRecords } from '../../components/linked-records'
@@ -19,7 +20,7 @@ export function TaskDetail({ id }: { id: string }): ReactNode {
       <PageHead eyebrow="Task" title={t.title} />
       <DetailFields
         fields={[
-          { label: 'Status', value: t.status },
+          { label: 'Status', value: <StatusBadge status={t.status} /> },
           { label: 'Priority', value: t.priority ?? '—' },
           { label: 'Due', value: t.dueAt?.slice(0, 10) ?? '—' },
           { label: 'Scheduled', value: t.scheduledFor?.slice(0, 10) ?? '—' },

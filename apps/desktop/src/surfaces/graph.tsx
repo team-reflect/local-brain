@@ -7,16 +7,16 @@ import { layoutGraph, type PositionedNode } from './graph-layout'
 import type { Route } from '../routing/route'
 import { useRouter } from '../routing/router'
 
-/** A calm, distinguishable color per node kind (warm-paper friendly). */
+/** A calm, distinguishable color per node kind (Reflect cool palette, indigo self). */
 const KIND_COLOR: Record<GraphNodeKind, string> = {
-  self: '#c2410c',
+  self: '#4f46e5',
   person: '#2563eb',
   organization: '#7c3aed',
   project: '#059669',
-  task: '#d97706',
-  document: '#0891b2',
+  task: '#0891b2',
+  document: '#64748b',
   interaction: '#db2777',
-  memory: '#65a30d',
+  memory: '#d97706',
 }
 
 const KIND_LABEL: Record<GraphNodeKind, string> = {

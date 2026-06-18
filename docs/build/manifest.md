@@ -49,10 +49,10 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 | 04c | Ingestion UI (paste/import flows, folder import, Add actions) | `codex/local-brain-04c-ingestion-ui` | `…-04b-ingestion-fs` | open | [#11](https://github.com/maccman/local-brain/pull/11) |
 | 05a | Extraction engine (contracts, preprocessing, merge/apply, model seam) | `codex/local-brain-05a-extraction-engine` | `…-04c-ingestion-ui` | open | [#12](https://github.com/maccman/local-brain/pull/12) |
 | 05b | Extraction corrections + relationship intelligence (UI/setters) | `codex/local-brain-05b-corrections` | `…-05a-extraction-engine` | open | [#14](https://github.com/maccman/local-brain/pull/14) |
-| 06 | Search, retrieval & AI (incl. the model-backed extractor) | `codex/local-brain-06-search-ai` | `…-05b-corrections` | pending | — |
-| 07 | CLI & agent skills | `codex/local-brain-07-cli-skills` | `…-06-search-ai` | pending | — |
-| 08 | Settings, backup, export & privacy | `codex/local-brain-08-settings` | `…-07-cli-skills` | pending | — |
-| 09 | Packaging & launch | `codex/local-brain-09-packaging` | `…-08-settings` | pending | — |
+| 06 | Search, retrieval & AI (incl. the model-backed extractor) | `codex/local-brain-06-search-ai` | `…-05b-corrections` | open | [#15](https://github.com/maccman/local-brain/pull/15) |
+| 07 | CLI & agent skills | `codex/local-brain-07-cli-skills` | `…-06-search-ai` | open | [#16](https://github.com/maccman/local-brain/pull/16) |
+| 08 | Settings, backup, export & privacy | `codex/local-brain-08-settings-backup-privacy` | `…-07-cli-skills` | open | [#17](https://github.com/maccman/local-brain/pull/17) |
+| 09 | Packaging & launch | `codex/local-brain-09-packaging-launch` | `…-08-settings-backup-privacy` | open | [#19](https://github.com/maccman/local-brain/pull/19) |
 
 Status legend: `pending` → not started · `in progress` → branch exists, work underway ·
 `open` → PR opened · `merged` · `blocked` (see status.md).
@@ -313,11 +313,127 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
   Recompute is per-person sequential (fine at personal-CRM scale). A full assembled
   `pnpm tauri dev`/`build` launch remains pending (no GUI session this layer).
 
-### 06–09
-- Scope mirrors `docs/plans/06..09`: 06 = search/retrieval/Ask **and the model-backed
-  extractor** that feeds 05a's seam; 07 = `brain` CLI + skills (sidecar via
-  `bundle.externalBin`); 08 = settings/backup/export; 09 = macOS packaging, first-run,
-  signing checklist.
+### 06 — Search, retrieval & AI
+- **Scope (Plan 06):** `packages/core` —
+  - `retrieval/` — the one shared `retrieve()` contract over FTS5 `content_chunks`
+    (bm25 + `snippet()`, OR-recall query sanitization, recency + link-boost re-rank,
+    `mode: lexical|semantic|hybrid` that degrades to lexical with `semanticAvailable:false`);
+    `globalSearch()` across the six record types (FTS for documents/interactions,
+    name LIKE for people/orgs/projects/tasks); pure, unit-tested `match-query`/`ranking`.
+  - `domains/settings/` — typed key/value store backing the model boundary (and Plans 08+).
+  - `ai/` — the BYOK model boundary: a runtime `ModelProvider` seam, `getModelStatus()`
+    (provider-available **and** enabled), the single typed `assembleAnswerContext` helper +
+    `citedSubset`, the cited `ask()` pipeline (persists evidence_refs per cited source on the
+    assistant chat message), the model-backed `createModelExtractor()` feeding the 05a seam,
+    and a concrete `createAnthropicProvider`.
+  - `reports/` — agent endpoints: `getDailyBrief` (bucketed tasks + recent interactions +
+    reconnects), `planDay`, `getWaitingItems`, `getChangesSince`.
+  - **Desktop:** Ask rewritten to the real cited pipeline (answer + source list that opens the
+    owning document/interaction; honest closed-boundary banner); the command palette upgraded
+    to FTS `globalSearch`; Settings → Model shows the live boundary status; Diagnostics shows
+    model + lexical/semantic availability; `installModel()` registers the provider (dev env
+    key) + the extractor at startup.
+- **Decision:** DEC-14 (provider seam now; key source per host later — desktop keychain in
+  Plan 08, CLI env in Plan 07; degrades cleanly with no key).
+- **Verification:** `pnpm check` ✓ — typecheck + oxlint + **144 tests** (111 core: +8
+  match-query, +6 ranking, +4 context, +5 extractor-json, +4 anthropic, +10 real-SQLite Plan-06
+  round-trips — FTS retrieve/degrade, global search, cited Ask + persisted evidence_refs,
+  kill-switch, model-backed extractor, daily brief/plan-day/changes; 4 db; 33 desktop incl. a
+  new Ask closed-boundary render test). `pnpm --filter @local-brain/desktop build` ✓ (2075
+  modules). `cargo fmt --all -- --check` ✓; `cargo check --workspace` ✓; `cargo test
+  --workspace` ✓ (18 Rust tests, unchanged). `git diff --check` ✓.
+- **Caveats:** embeddings/semantic search are an additive follow-up (lexical-only today, clean
+  degradation); a stock desktop build answers only when a provider key is supplied (keychain
+  wiring is Plan 08); the `brain ask`/`search` CLI path reimplements the same retrieval SQL in
+  Rust in Plan 07. A full assembled `pnpm tauri dev/build` launch remains pending.
+
+### 07 — CLI & agent skills
+- **Scope (Plan 07):** the `brain` CLI grown from the foundation scaffold into the full agent
+  contract, plus the agent skill and sidecar wiring.
+  - **`apps/cli`** (standalone Rust, opens SQLite directly via `brain-schema` — no Tauri IPC):
+    `id.rs` (dependency-free ULID matching the app's), `text.rs` (normalize/chunk/SHA-256 ports
+    so CLI-written records dedupe and chunk identically to app-written ones), `db.rs` (resolve
+    `--db`/`$BRAIN_DB`/default + open/migrate), `output.rs` (stdout=data, stderr=diagnostics),
+    `model.rs` (BYOK boundary via `ANTHROPIC_API_KEY` + `curl`, degrades when absent), and
+    `commands/` — `add document|interaction|task`, `remember`, `search`, `ask` (grounded:
+    always returns cited evidence; synthesizes + persists a conversation/evidence_refs when a
+    model is configured), `today`, `report daily`, `tasks plan-day`, `relationships followups`,
+    `changes --since`, `graph --center self`, `show`, plus `status`/`path`/`doctor`. Stable
+    `--json` camelCase contracts; typed exit codes (0/1/3/4).
+  - **Sidecar:** `tauri.conf.json` gains `bundle.externalBin: ["binaries/brain"]` and the
+    `beforeDev/BuildCommand` now runs `pnpm sidecar` first; the existing `build-sidecar.mjs`
+    stages `brain-<triple>`. Staged + smoke-run locally.
+  - **Skill:** `skills/brain/SKILL.md` (the agent-readable skill — nouns, query-before-write,
+    stdout/stderr contract, write/read recipes, daily automation, what-not-to-store), registered
+    in `packages/skills`. Desktop Settings → Skills shows the CLI usage + skill path.
+- **Verification:** `cargo fmt --all -- --check` ✓; `cargo check --workspace` ✓; `cargo test
+  --workspace` ✓ — **34 Rust tests** (4 CLI unit: ULID/normalize/hash/chunk; 10 CLI integration
+  against a temp DB: status schema, dedupe, FTS search, ask-degrades-to-evidence, plan-day
+  buckets, show camelCase, today/changes JSON, graph, stdout/stderr separation, no-database exit
+  4; 2 skill-lint: documented commands are real + the doc covers the nouns; + 18 existing). Sidecar
+  staged and the staged `brain --version` runs. `pnpm check` ✓ (144 JS tests; settings/skills
+  changes typecheck); `pnpm --filter @local-brain/desktop build` ✓. `git diff --check` ✓.
+- **Caveats:** `brain ask` synthesis shells out to `curl` to stay dependency-free; with no key it
+  returns the cited evidence for the calling agent to reason over (it is itself the model). CLI
+  retrieval is lexical (the same FTS SQL as the app, no recency re-rank, for stable snapshots).
+  Sidecar *detection* in Settings + PATH install is Plan 09. A full `tauri build` was not run this
+  layer (no GUI session); the sidecar staging path is verified.
+
+### 08 — Settings, backup, export & privacy
+- **Scope (Plan 08):**
+  - **Rust (`src-tauri`):** `DbState::backup_to` (consistent `VACUUM INTO` snapshot → integrity
+    check → atomic rename, so a crash never leaves a corrupt partial); `storage.rs`
+    (`backup_database`, `write_file_atomic` for the JSON export); `keychain.rs` (provider keys via
+    the macOS `security` tool — never a settings row); `database_path` command.
+  - **Core (`packages/core`):** `domains/settings/model.ts` (typed model-boundary config),
+    `domains/backup/` (`assembleExport` — versioned JSON over the durable tables; `createBackup`/
+    `exportToFile`), `domains/maintenance/` (`hardDeleteRecord` — cascade + derived-chunk cleanup;
+    `rebuildSearchIndexes` — FTS5 rebuild), `ipc/storage.ts` (typed bindings), `executeRaw` for FTS
+    maintenance.
+  - **Desktop:** `installModel` now reads the key from the keychain (env override for dev);
+    Settings → Model is interactive (set/clear keychain key, kill-switch toggle, live status);
+    Backup & export does real backup + JSON export with product states; Local database shows the
+    resolved path; Diagnostics shows db path / migrations / FTS / semantic / keychain / model /
+    CLI-skill + restore instructions.
+- **Decision:** DEC-15 (keychain via macOS `security`; backup via `VACUUM INTO` + atomic rename;
+  export is JSON interchange, backup is the restore path).
+- **Verification:** `cargo fmt --all -- --check` ✓; `cargo check --workspace` ✓; `cargo test
+  --workspace` ✓ — **36 Rust tests** (incl. +2 desktop: a backup that produces a restorable copy
+  with no temp left behind + idempotent re-backup, and an atomic-write test). `pnpm check` ✓ —
+  **155 JS tests** (119 core: +6 real-SQLite Plan-08 round-trips — export assembler/counts, hard
+  delete cascade + FTS rebuild, model-settings round-trip; +4 storage IPC binding unit tests; 36
+  desktop: +2 Settings render tests). `pnpm --filter @local-brain/desktop build` ✓ (2087 modules).
+  `git diff --check` ✓.
+- **Caveats:** keychain uses the macOS `security` CLI (launch target is macOS; non-macOS returns a
+  clear error / no-op); restore is "replace the file + reopen" (a guided in-app restore is a
+  follow-up); the export is JSON interchange (not a re-import path yet). A full `tauri build` was
+  not run this layer.
+
+### 09 — Packaging & launch
+- **Scope (Plan 09):**
+  - **Packaging smoke (strongest available on this host):** `pnpm tauri build` compiled the app and
+    produced `target/release/bundle/macos/Local Brain.app` with the **`brain` sidecar embedded** at
+    `Contents/MacOS/brain` (runs: `brain 0.1.0`), identity `app.localbrain.desktop` v0.1.0. Only the
+    `.dmg` step failed — `bundle_dmg.sh` drives Finder via AppleScript and needs a GUI/login session
+    (documented; the `.app` is the runnable artifact, produce the DMG on a dev workstation).
+  - **First-run flow:** a one-time welcome overlay (tracked by a `firstRun.completed` settings flag)
+    confirming where the data lives, the honest model-boundary status, and how to start (add a record
+    / set a key / use the CLI).
+  - **Accessibility:** a visible keyboard `:focus-visible` ring on all interactive elements and a
+    `prefers-reduced-motion` block in `globals.css`.
+  - **Launch docs:** `docs/launch/README.md` (install, storage, importing, Codex, backup/export,
+    model boundaries, troubleshooting) and `docs/launch/checklist.md` (packaging status, first-run
+    smoke checklist, accessibility/performance/privacy gates, signing/notarization checklist,
+    update-path decision).
+- **Verification:** `pnpm tauri build` → `.app` + embedded runnable sidecar ✓ (`.dmg` step
+  GUI-blocked, documented). `pnpm check` ✓ — **161 JS tests** (119 core; 4 db; 38 desktop: +1
+  Settings, +2 first-run render tests over the prior layer). `pnpm --filter @local-brain/desktop
+  build` ✓. `cargo fmt --all -- --check` ✓; `cargo check --workspace` ✓; `cargo test --workspace` ✓
+  (36 tests). `git diff --check` ✓.
+- **Caveats:** DMG bundling + signing/notarization need a developer workstation (unsigned alpha
+  supported, checklist provided); a manual VoiceOver pass and on-device performance measurement are
+  recommended before public alpha; the GUI app was not launched headless (no window server) — the
+  compile + bundle + embedded-sidecar run is the smoke.
 
 ## Open / Updated PR URLs
 
@@ -334,3 +450,7 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 - PR #11 — Build 04c ingestion UI (paste/import dialog, folder import, Add actions) — https://github.com/maccman/local-brain/pull/11 (base `…-04b-ingestion-fs`, open)
 - PR #12 — Build 05a extraction engine (contracts, preprocessing, merge/apply, model seam) — https://github.com/maccman/local-brain/pull/12 (base `…-04c-ingestion-ui`, open)
 - PR #14 — Build 05b extraction corrections + relationship intelligence — https://github.com/maccman/local-brain/pull/14 (base `…-05a-extraction-engine`, open)
+- PR #15 — Build 06 search, retrieval & AI (FTS5 retrieve, cited Ask, model boundary, model-backed extractor, report endpoints) — https://github.com/maccman/local-brain/pull/15 (base `…-05b-corrections`, open)
+- PR #16 — Build 07 CLI & agent skills (`brain` CLI add/search/ask/today/report/graph/show, JSON contracts, sidecar bundling, skill doc) — https://github.com/maccman/local-brain/pull/16 (base `…-06-search-ai`, open)
+- PR #17 — Build 08 settings, backup, export & privacy (SQLite backup, JSON export, keychain, model boundary settings, hard delete + FTS rebuild) — https://github.com/maccman/local-brain/pull/17 (base `…-07-cli-skills`, open)
+- PR #19 — Build 09 packaging & launch (macOS `.app` + embedded sidecar smoke, first-run flow, accessibility, launch docs + checklist) — https://github.com/maccman/local-brain/pull/19 (base `…-08-settings-backup-privacy`, open)

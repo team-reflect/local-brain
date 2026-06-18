@@ -13,12 +13,15 @@ import {
   Users,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
+import { keycapClass } from '../lib/ui'
+import { Button } from './button'
 import { useAppShortcuts } from '../lib/commands/use-shortcuts'
 import type { CommandContext } from '../lib/commands/types'
 import { sectionForRoute, type Route } from '../routing/route'
 import { useRouter } from '../routing/router'
 import { AddRecordDialog, type AddRecordType } from './add-record-dialog'
 import { CommandPalette } from './command-palette'
+import { FirstRun } from './first-run'
 import { RouteContent } from './route-content'
 
 interface NavItem {
@@ -57,12 +60,23 @@ export function AppShell(): ReactNode {
 
   return (
     <div className="flex h-full">
-      <aside className="flex w-56 shrink-0 flex-col border-r border-border bg-[hsl(var(--lb-sidebar))]">
-        <div className="flex items-center gap-2 px-4 py-3.5">
-          <span className="size-2 rounded-full bg-primary" />
-          <span className="font-serif text-sm text-foreground">Local Brain</span>
+      <aside className="flex w-[260px] shrink-0 flex-col border-r border-border bg-[hsl(var(--lb-sidebar))]">
+        <div className="flex items-center gap-2 px-4 pb-2 pt-4">
+          <span className="size-2.5 rounded-[5px] bg-primary" />
+          <span className="text-sm font-semibold tracking-tight text-foreground">Local Brain</span>
         </div>
-        <nav className="flex flex-col gap-0.5 px-2 py-1">
+        <div className="px-3 pb-1">
+          <button
+            type="button"
+            onClick={openPalette}
+            className="flex w-full items-center gap-2 rounded-md border border-input bg-card px-2.5 py-1.5 text-left text-xs text-muted-foreground shadow-sm transition-colors hover:text-foreground"
+          >
+            <Search className="size-3.5 shrink-0" />
+            <span className="flex-1 truncate">Search anything…</span>
+            <kbd className={keycapClass}>⌘K</kbd>
+          </button>
+        </div>
+        <nav className="flex flex-col gap-0.5 px-3 py-1">
           {NAV.map((item) => {
             const Icon = item.icon
             const active = item.section === activeSection
@@ -72,28 +86,38 @@ export function AppShell(): ReactNode {
                 type="button"
                 onClick={() => navigate(item.route)}
                 className={cn(
-                  'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors',
+                  'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm font-medium transition-colors',
                   active
                     ? 'bg-secondary text-foreground'
                     : 'text-[hsl(var(--lb-ink-2))] hover:bg-secondary/60',
                 )}
               >
-                <Icon className="size-4 shrink-0 text-muted-foreground" />
+                <Icon className={cn('size-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} />
                 {item.label}
               </button>
             )
           })}
         </nav>
+        <div className="mt-auto px-3 pb-3">
+          <button
+            type="button"
+            onClick={() => openAdd('document')}
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm font-medium text-[hsl(var(--lb-ink-2))] transition-colors hover:bg-secondary/60 hover:text-foreground"
+          >
+            <Plus className="size-4 shrink-0 text-muted-foreground" />
+            Add record
+          </button>
+        </div>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-2 border-b border-border px-4 py-2">
+      <div className="flex min-w-0 flex-1 flex-col bg-background">
+        <header className="flex h-12 items-center gap-1.5 border-b border-border px-4">
           <button
             type="button"
             onClick={back}
             disabled={!canBack}
             aria-label="Back"
-            className="rounded p-1 text-muted-foreground hover:bg-secondary disabled:opacity-40"
+            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
           >
             <ChevronLeft className="size-4" />
           </button>
@@ -102,30 +126,27 @@ export function AppShell(): ReactNode {
             onClick={forward}
             disabled={!canForward}
             aria-label="Forward"
-            className="rounded p-1 text-muted-foreground hover:bg-secondary disabled:opacity-40"
+            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
           >
             <ChevronRight className="size-4" />
           </button>
+          <div className="flex-1" />
           <button
             type="button"
             onClick={openPalette}
-            className="ml-1 flex flex-1 items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-secondary/50"
+            aria-label="Search or run a command"
+            className="flex items-center gap-2 rounded-md border border-input bg-card px-2.5 py-1.5 text-xs text-muted-foreground shadow-sm transition-colors hover:text-foreground"
           >
             <Search className="size-3.5" />
-            <span>Search or run a command…</span>
-            <kbd className="ml-auto font-mono text-[10px] text-muted-foreground">⌘K</kbd>
+            <span>Search</span>
+            <kbd className={keycapClass}>⌘K</kbd>
           </button>
-          <button
-            type="button"
-            onClick={() => openAdd('document')}
-            aria-label="Add a record"
-            className="flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs text-foreground hover:bg-secondary/60"
-          >
+          <Button size="sm" onClick={() => openAdd('document')} aria-label="Add a record">
             <Plus className="size-3.5" />
             Add
-          </button>
+          </Button>
         </header>
-        <main className="flex-1 overflow-y-auto px-6 py-5">
+        <main className="flex-1 overflow-y-auto px-7 py-6">
           <RouteContent route={route} />
         </main>
       </div>
@@ -136,6 +157,7 @@ export function AppShell(): ReactNode {
         initialType={addState.type}
         onClose={() => setAddState((current) => ({ ...current, open: false }))}
       />
+      <FirstRun />
     </div>
   )
 }

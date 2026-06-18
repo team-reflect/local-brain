@@ -13,9 +13,7 @@ export function Section({
   return (
     <section className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <h2 className="font-mono text-[11px] uppercase tracking-wide text-muted-foreground">
-          {title}
-        </h2>
+        <h2 className="text-[11px] font-medium tracking-wide text-muted-foreground">{title}</h2>
         {action}
       </div>
       {children}

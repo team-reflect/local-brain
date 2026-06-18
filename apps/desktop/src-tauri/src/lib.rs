@@ -2,6 +2,8 @@ mod commands;
 mod db;
 mod error;
 mod fs;
+mod keychain;
+mod storage;
 
 use std::path::PathBuf;
 
@@ -9,8 +11,8 @@ pub use error::{AppError, AppResult};
 
 /// Resolve the durable database path the same way the `brain` CLI does, so the
 /// desktop writer and the CLI reader always agree: `$BRAIN_DB`, then the
-/// platform data directory. First-run path selection lands in Plan 03/08.
-fn resolve_db_path() -> PathBuf {
+/// platform data directory.
+pub(crate) fn resolve_db_path() -> PathBuf {
     if let Some(env) = std::env::var_os("BRAIN_DB") {
         if !env.is_empty() {
             return PathBuf::from(env);
@@ -30,11 +32,18 @@ pub fn run() {
         .manage(db::DbState::new(conn))
         .invoke_handler(tauri::generate_handler![
             commands::app_version,
+            commands::database_path,
             db::db_query,
             db::db_execute,
             db::db_batch,
             fs::read_text_file,
-            fs::read_text_folder
+            fs::read_text_folder,
+            storage::backup_database,
+            storage::write_file_atomic,
+            keychain::keychain_set,
+            keychain::keychain_get,
+            keychain::keychain_has,
+            keychain::keychain_delete
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Local Brain application");

@@ -22,6 +22,43 @@ None at this checkpoint.
 
 ## Decisions (no action needed)
 
+### DEC-15 — Plan 08 backup/keychain mechanics
+- **Keychain via the macOS `security` CLI.** Provider keys belong in the OS keychain, never a
+  settings row. Rather than add a `keyring` crate (network/build risk), the desktop shells out to
+  the built-in macOS `security` tool (`add/find/delete-generic-password`). The launch target is
+  macOS; non-macOS returns a clear error / no-op. The desktop registers the model provider from the
+  keychain at startup (completing DEC-14); a dev `VITE_ANTHROPIC_API_KEY` still overrides.
+- **Backup via `VACUUM INTO` + atomic rename.** `DbState::backup_to` writes a fresh, fully-consistent
+  copy (no WAL sidecar) into a temp file *while the app holds the connection*, integrity-checks it,
+  then renames over the destination — so a crash mid-backup can never publish a corrupt partial.
+- **Backup is the restore path; JSON export is interchange.** The SQLite backup is the
+  portability/restore story (replace the file + reopen); the versioned JSON export is the
+  inspectable interchange format (not yet a re-import path). Both write atomically; neither includes
+  provider keys.
+- **Hard delete cleans derived data.** Archiving stays the default (soft-delete setters). Hard delete
+  cascades typed links via the schema and additionally drops `content_chunks` for source records (no
+  FK there), with `rebuildSearchIndexes()` available to refresh FTS after bulk destructive ops.
+
+### DEC-14 — Plan 06 model boundary: provider seam now; key source per host later
+- **What.** Plan 06 builds the full BYOK model boundary — a runtime-registered
+  `ModelProvider` seam, a checked `getModelStatus()` gate (provider available *and* the
+  external-calls setting enabled), the single typed `assembleAnswerContext` helper through
+  which all external context passes, the cited `ask()` pipeline (persists one `evidence_refs`
+  row per cited source against the assistant `chat_message`), and the model-backed
+  `Extractor` that feeds the 05a seam. A concrete `createAnthropicProvider` (fetch-based,
+  injectable) is included.
+- **Key source is host-specific and deferred to the owning plan.** The provider *key* never
+  lives in a settings row (architecture rule: keys belong in the keychain). The desktop reads
+  an optional `VITE_ANTHROPIC_API_KEY` build-time env as a dev/demo escape hatch and otherwise
+  degrades cleanly; the keychain read + enable/disable toggle land in **Plan 08**. The CLI
+  registers a provider from an env var in **Plan 07**. So in a stock Plan 06 desktop build
+  with no key, Ask shows an honest "not configured" reason and the extractor is a safe no-op —
+  exactly the clean-degradation contract the brief requires. The boundary itself is fully
+  exercised with a mock provider in real-SQLite integration tests (no live key needed).
+- **Why honest.** Nothing fakes a model with heuristics. The deterministic retrieval (FTS5)
+  and the apply pipeline are real and tested; the model is a typed, validated seam, and the
+  one place an answer could be fabricated (no provider) is a hard, visible gate.
+
 ### DEC-1 — Stacked PRs via explicit base branches
 - `gh stack` is unavailable. Using ordinary PRs, each based on the branch below it in the
   stack, with the relationship recorded in `manifest.md`. Rebase + retarget to `master`

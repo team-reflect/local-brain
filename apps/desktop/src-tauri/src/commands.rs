@@ -13,8 +13,7 @@ pub struct AppInfo {
 }
 
 /// Diagnostic command exercised by the foundation UI through the typed IPC
-/// wrapper in `@local-brain/core`. It is the only command in Plan 01; real
-/// domain commands (`db_query`, record CRUD) arrive with Plan 02.
+/// wrapper in `@local-brain/core`.
 #[tauri::command]
 pub fn app_version() -> AppResult<AppInfo> {
     Ok(AppInfo {
@@ -22,4 +21,10 @@ pub fn app_version() -> AppResult<AppInfo> {
         version: env!("CARGO_PKG_VERSION").to_string(),
         platform: std::env::consts::OS.to_string(),
     })
+}
+
+/// The resolved durable database path, for Settings → Local database / Diagnostics.
+#[tauri::command]
+pub fn database_path() -> AppResult<String> {
+    Ok(crate::resolve_db_path().display().to_string())
 }
