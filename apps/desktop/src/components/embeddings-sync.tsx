@@ -8,7 +8,12 @@ import {
   setLastBackfillAttemptDay,
 } from '@local-brain/core'
 import { runExclusiveBackfill } from '../lib/embeddings-coordinator'
-import { EMBEDDINGS_STATUS_KEY, todayLocalDayKey, useEmbeddingsStatus } from '../lib/queries'
+import {
+  EMBEDDINGS_STATUS_KEY,
+  todayLocalDayKey,
+  useEmbeddingsStatus,
+  withBackfillActive,
+} from '../lib/queries'
 import { errorMessage } from '../lib/utils'
 
 /**
@@ -61,26 +66,31 @@ export function EmbeddingsSync(): null {
       // otherwise land mid-pass). Record the backfill outcome INSIDE the
       // exclusive section so "backfill + setBackfillError" is atomic: a stale
       // pass can't clear an error a rebuild recorded in a later locked turn.
-      void runExclusiveBackfill(async () => {
-        try {
-          await setLastBackfillAttemptDay(today)
-          await backfillEmbeddings({
-            // Observe the LIVE enabled flag from the query cache, not the render
-            // snapshot that kicked off this run: disabling semantic search mid-pass
-            // must abort the backfill between batches. A captured `status.data` would
-            // keep reporting the stale `enabled: true` and let the pass run to the end.
-            isStale: () =>
-              queryClient.getQueryData<EmbeddingsStatus>(EMBEDDINGS_STATUS_KEY)?.enabled === false,
-          })
-          // A clean run (completed or cooperatively aborted on disable) clears any
-          // stale marker.
-          await setBackfillError(null)
-        } catch (error: unknown) {
-          // A throw is persisted so the status/UI stops pretending indexing is
-          // progressing and the poll/retry loop above halts.
-          await setBackfillError(errorMessage(error))
-        }
-      }).finally(() => {
+      const backfill = withBackfillActive(() =>
+        runExclusiveBackfill(async () => {
+          try {
+            await setLastBackfillAttemptDay(today)
+            await backfillEmbeddings({
+              // Observe the LIVE enabled flag from the query cache, not the render
+              // snapshot that kicked off this run: disabling semantic search mid-pass
+              // must abort the backfill between batches. A captured `status.data` would
+              // keep reporting the stale `enabled: true` and let the pass run to the end.
+              isStale: () =>
+                queryClient.getQueryData<EmbeddingsStatus>(EMBEDDINGS_STATUS_KEY)?.enabled ===
+                false,
+            })
+            // A clean run (completed or cooperatively aborted on disable) clears any
+            // stale marker.
+            await setBackfillError(null)
+          } catch (error: unknown) {
+            // A throw is persisted so the status/UI stops pretending indexing is
+            // progressing and the poll/retry loop above halts.
+            await setBackfillError(errorMessage(error))
+          }
+        }),
+      )
+      void queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY })
+      void backfill.finally(() => {
         backfilling.current = false
         void queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY })
       })

@@ -26,6 +26,14 @@ export const EMBEDDINGS_STATUS_KEY = ['embeddings-status'] as const
 const ACTIVE_REFETCH_MS = 1500
 /** Slow discovery poll while today's automatic backfill slot is still unused. */
 const DAILY_DISCOVERY_REFETCH_MS = 60 * 60 * 1000
+let activeBackfills = 0
+
+export function withBackfillActive<T>(run: () => Promise<T>): Promise<T> {
+  activeBackfills += 1
+  return run().finally(() => {
+    activeBackfills = Math.max(0, activeBackfills - 1)
+  })
+}
 
 export function todayLocalDayKey(now = new Date()): string {
   const year = now.getFullYear()
@@ -49,6 +57,7 @@ export function embeddingsRefetchInterval(data: EmbeddingsStatus | undefined): n
   // Actively working: model still loading. Pending chunks are handled by
   // EmbeddingsSync's once-per-local-day gate, not by a retry poll loop.
   if (data.runtime.status === 'loading') return ACTIVE_REFETCH_MS
+  if (activeBackfills > 0 && data.pending > 0) return ACTIVE_REFETCH_MS
   // Low-frequency discovery only until today's automatic attempt has happened.
   // This lets a long-open app notice CLI/other-window writes without returning
   // to the old 30s idle heartbeat.
@@ -112,25 +121,27 @@ export interface BackfillNowOptions {
  * automatic coordinator does not immediately repeat the same work.
  */
 export async function backfillEmbeddingsNow(options: BackfillNowOptions = {}): Promise<void> {
-  const status = await embedEnsure()
-  if (!isEmbedReady(status)) {
-    throw new Error(
-      status.status === 'failed'
-        ? `Embedding model failed to load: ${status.message}`
-        : 'Embedding model is still loading; backfill once it is ready.',
-    )
-  }
-  await runExclusiveBackfill(async () => {
-    await setBackfillError(null)
-    await setLastBackfillAttemptDay(todayLocalDayKey())
-    try {
-      await backfillEmbeddings(
-        options.isStale === undefined ? {} : { isStale: options.isStale },
+  await withBackfillActive(async () => {
+    const status = await embedEnsure()
+    if (!isEmbedReady(status)) {
+      throw new Error(
+        status.status === 'failed'
+          ? `Embedding model failed to load: ${status.message}`
+          : 'Embedding model is still loading; backfill once it is ready.',
       )
-    } catch (error) {
-      await setBackfillError(errorMessage(error))
-      throw error
     }
+    await runExclusiveBackfill(async () => {
+      await setBackfillError(null)
+      await setLastBackfillAttemptDay(todayLocalDayKey())
+      try {
+        await backfillEmbeddings(
+          options.isStale === undefined ? {} : { isStale: options.isStale },
+        )
+      } catch (error) {
+        await setBackfillError(errorMessage(error))
+        throw error
+      }
+    })
   })
 }
 
@@ -151,30 +162,32 @@ export async function backfillEmbeddingsNow(options: BackfillNowOptions = {}): P
  * afterwards could clear the failure this rebuild recorded.
  */
 export async function rebuildEmbeddings(options: RebuildOptions = {}): Promise<void> {
-  const status = await embedEnsure()
-  if (!isEmbedReady(status)) {
-    throw new Error(
-      status.status === 'failed'
-        ? `Embedding model failed to load: ${status.message}`
-        : 'Embedding model is still loading; rebuild once it is ready.',
-    )
-  }
-  await runExclusiveBackfill(async () => {
-    // Rebuild is an explicit recovery action: clear the sticky backfill error so a
-    // success leaves a clean status, but re-persist it if this rebuild also throws
-    // so the UI keeps reporting the failure instead of silently pretending again.
-    await setBackfillError(null)
-    await clearEmbeddings()
-    try {
-      // Pass `isStale` so disabling semantic search mid-rebuild aborts between
-      // batches, exactly like the incremental coordinator pass.
-      await backfillEmbeddings(
-        options.isStale === undefined ? {} : { isStale: options.isStale },
+  await withBackfillActive(async () => {
+    const status = await embedEnsure()
+    if (!isEmbedReady(status)) {
+      throw new Error(
+        status.status === 'failed'
+          ? `Embedding model failed to load: ${status.message}`
+          : 'Embedding model is still loading; rebuild once it is ready.',
       )
-    } catch (error) {
-      await setBackfillError(errorMessage(error))
-      throw error
     }
+    await runExclusiveBackfill(async () => {
+      // Rebuild is an explicit recovery action: clear the sticky backfill error so a
+      // success leaves a clean status, but re-persist it if this rebuild also throws
+      // so the UI keeps reporting the failure instead of silently pretending again.
+      await setBackfillError(null)
+      await clearEmbeddings()
+      try {
+        // Pass `isStale` so disabling semantic search mid-rebuild aborts between
+        // batches, exactly like the incremental coordinator pass.
+        await backfillEmbeddings(
+          options.isStale === undefined ? {} : { isStale: options.isStale },
+        )
+      } catch (error) {
+        await setBackfillError(errorMessage(error))
+        throw error
+      }
+    })
   })
 }
 
@@ -182,14 +195,17 @@ export async function rebuildEmbeddings(options: RebuildOptions = {}): Promise<v
 export function useRebuildEmbeddings() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: () =>
-      rebuildEmbeddings({
+    mutationFn: () => {
+      const promise = rebuildEmbeddings({
         // Observe the LIVE enabled flag from the query cache so toggling semantic
         // search off mid-rebuild aborts the backfill between batches, matching
         // `EmbeddingsSync`. A captured snapshot would let the rebuild run on.
         isStale: () =>
           queryClient.getQueryData<EmbeddingsStatus>(EMBEDDINGS_STATUS_KEY)?.enabled === false,
-      }),
+      })
+      void queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY })
+      return promise
+    },
     // Invalidate on settle, not just success: a rebuild persists `embed_clear`
     // (and `setBackfillError`) before the backfill can throw, so a failure leaves
     // the index wiped on disk. An onSuccess-only refresh would let Settings keep
@@ -203,11 +219,14 @@ export function useRebuildEmbeddings() {
 export function useBackfillEmbeddingsNow() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: () =>
-      backfillEmbeddingsNow({
+    mutationFn: () => {
+      const promise = backfillEmbeddingsNow({
         isStale: () =>
           queryClient.getQueryData<EmbeddingsStatus>(EMBEDDINGS_STATUS_KEY)?.enabled === false,
-      }),
+      })
+      void queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY })
+      return promise
+    },
     onSettled: () => queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY }),
   })
 }

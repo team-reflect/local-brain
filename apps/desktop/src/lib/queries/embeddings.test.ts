@@ -6,6 +6,7 @@ import {
   embeddingsRefetchInterval,
   rebuildEmbeddings,
   todayLocalDayKey,
+  withBackfillActive,
 } from './embeddings'
 
 /**
@@ -115,6 +116,30 @@ describe('embeddingsRefetchInterval', () => {
     expect(embeddingsRefetchInterval(status({ lastBackfillAttemptDay: todayLocalDayKey() }))).toBe(
       false,
     )
+    expect(
+      embeddingsRefetchInterval(
+        status({ pending: 4, ready: false, lastBackfillAttemptDay: todayLocalDayKey() }),
+      ),
+    ).toBe(false)
+  })
+
+  it('fast-polls while a capped-day backfill is actively running', async () => {
+    let release: () => void = () => {}
+    const active = withBackfillActive(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        }),
+    )
+
+    expect(
+      embeddingsRefetchInterval(
+        status({ pending: 4, ready: false, lastBackfillAttemptDay: todayLocalDayKey() }),
+      ),
+    ).toBe(1500)
+
+    release()
+    await active
     expect(
       embeddingsRefetchInterval(
         status({ pending: 4, ready: false, lastBackfillAttemptDay: todayLocalDayKey() }),
