@@ -207,7 +207,7 @@ export {
   type RankInputs,
 } from './retrieval'
 
-// Settings (typed key/value store backing the model boundary, storage, backup)
+// Settings (typed key/value store backing the model boundary and storage path)
 export {
   getSetting,
   getSettingRaw,
@@ -226,31 +226,14 @@ export {
   type ModelSettings,
 } from './domains/settings/model'
 
-// Native storage + keychain bindings (Plan 08)
+// Native storage path + keychain bindings (Plan 08)
 export {
   databasePath,
-  backupDatabase,
-  writeFileAtomic,
   keychainSet,
   keychainGet,
   keychainHas,
   keychainDelete,
-  type BackupInfo,
 } from './ipc/storage'
-
-// Backup & export (Plan 08)
-export {
-  assembleExport,
-  exportCounts,
-  createBackup,
-  exportToFile,
-  defaultBackupPath,
-  defaultExportPath,
-  EXPORT_VERSION,
-  type BrainExport,
-  type BackupState,
-  type ExportResult,
-} from './domains/backup'
 
 // Destructive-operation maintenance (hard delete + derived-index rebuild)
 export {

@@ -9,7 +9,7 @@ demonstration.
 - Create the Tauri/React/Rust/pnpm/Turbo scaffold.
 - Establish app layout, package boundaries, and quality commands.
 - Open a local SQLite database from Rust.
-- Render the Picardo-inspired shell with Today, Tasks, Network, Projects, Graph, Ask, and
+- Render the Picardo-inspired shell with Today, Tasks, Network, Projects, Ask, and
   Settings.
 
 ## Phase 2 - Durable Schema
@@ -42,13 +42,14 @@ demonstration.
 - Today shows an AI daily brief with due tasks, scheduled items, waiting items,
   relationship follow-ups, recent interactions, and active project changes.
 - Tasks supports filtering, sorting, editing, and linked evidence.
-- Network supports People and Organizations tabs plus detail pages.
+- Network supports Graph, People, and Organizations tabs plus detail pages, with Graph
+  as the default tab.
 - Projects supports a list and detail pages with tasks, people, organizations,
   interactions, and documents.
-- Graph shows a user-centered node map derived from typed records and links. Filters by
-  node type, time, strength, and project are optional follow-up.
+- The Network Graph tab shows a user-centered node map derived from typed records and
+  links. Filters by node type, time, strength, and project are optional follow-up.
 - Ask supports cited answers over the local brain.
-- Settings owns model keys, backup/export, diagnostics, and skill setup.
+- Settings owns model keys, local database path, diagnostics, and skill setup.
 - The UI is optimized for quick browsing and inspection, not bulk data entry.
 
 ## Phase 6 - Agent Interface
@@ -64,7 +65,7 @@ demonstration.
 - Package the macOS desktop app.
 - Bundle or install the CLI.
 - Add first-run setup and diagnostics.
-- Document backup/export and local storage behavior.
+- Document local storage behavior.
 
 ## Launch Criteria
 
@@ -76,4 +77,4 @@ demonstration.
 - A local agent can add and query context through the CLI.
 - A Codex daily automation can update the brain and generate a daily report/todo list.
 - The daily report includes relationship follow-ups and stale relationships.
-- Backup/export is discoverable in Settings.
+- Settings shows the local database path and diagnostics.

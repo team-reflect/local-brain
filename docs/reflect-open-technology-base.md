@@ -117,7 +117,8 @@ UI influence the product surfaces:
 - restrained styling
 - powerful search
 
-Local Brain's sidebar is Today, Tasks, Network, Projects, Graph, Ask, and Settings.
+Local Brain's sidebar is Today, Tasks, Network, Projects, Ask, and Settings. The graph
+is the default tab inside Network.
 
 ## Security And Boundaries
 
@@ -127,7 +128,7 @@ For launch:
 - provider keys stored in the OS keychain
 - Settings controls whether external model calls are enabled
 - Ask and extraction should send only the context needed for the operation
-- backup/export is explicit and user-controlled
+- app-managed backup/export is deferred
 
 Future sync, git portability, or deeper privacy controls should be designed after the
 local product loop works.

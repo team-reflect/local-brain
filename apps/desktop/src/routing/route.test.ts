@@ -10,6 +10,7 @@ import {
 const ROUTES: Route[] = [
   { kind: 'today' },
   { kind: 'tasks' },
+  { kind: 'network', tab: 'graph' },
   { kind: 'network', tab: 'people' },
   { kind: 'network', tab: 'organizations' },
   { kind: 'person', id: '01ABC' },
@@ -19,7 +20,6 @@ const ROUTES: Route[] = [
   { kind: 'task', id: 't-1' },
   { kind: 'document', id: 'd-1' },
   { kind: 'interaction', id: 'i-1' },
-  { kind: 'graph' },
   { kind: 'ask' },
   { kind: 'ask', conversationId: 'c-1' },
   { kind: 'settings' },
@@ -49,6 +49,11 @@ describe('route serialization', () => {
     expect(routesEqual({ kind: 'network', tab: 'people' }, { kind: 'network', tab: 'organizations' })).toBe(
       false,
     )
+  })
+
+  it('defaults Network to the graph tab', () => {
+    expect(routeFromPath('/network')).toEqual({ kind: 'network', tab: 'graph' })
+    expect(routeFromPath('/graph')).toEqual({ kind: 'network', tab: 'graph' })
   })
 
   it('maps detail routes to their sidebar section', () => {

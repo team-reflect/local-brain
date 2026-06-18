@@ -2,34 +2,15 @@ import { z } from 'zod'
 import { call } from './invoke'
 
 /**
- * Typed bindings for the Plan 08 native storage + keychain primitives.
+ * Typed bindings for the Plan 08 native storage path + keychain primitives.
  *
- * Rust owns the durable connection, atomic file writes, and the OS keychain;
- * TypeScript decides *what* to back up/export and assembles the JSON. Provider
- * keys flow only through `keychain*` — never a settings row.
+ * Rust owns the durable connection and the OS keychain. Provider keys flow only
+ * through `keychain*` — never a settings row.
  */
 
-const backupInfoSchema = z.object({
-  path: z.string(),
-  schemaVersion: z.number().int(),
-  sizeBytes: z.number().int().nonnegative(),
-})
-
-export type BackupInfo = z.infer<typeof backupInfoSchema>
-
-/** The resolved durable database path (diagnostics / backup defaults). */
+/** The resolved durable database path (diagnostics). */
 export function databasePath(): Promise<string> {
   return call('database_path', {}, z.string())
-}
-
-/** Make a consistent, verified, atomically-published SQLite backup at `dest`. */
-export function backupDatabase(dest: string): Promise<BackupInfo> {
-  return call('backup_database', { dest }, backupInfoSchema)
-}
-
-/** Atomically write a generated artifact (e.g. the JSON export) to `dest`. */
-export function writeFileAtomic(dest: string, contents: string): Promise<number> {
-  return call('write_file_atomic', { dest, contents }, z.number())
 }
 
 // Tauri commands that return `()` serialize as JSON `null`; accept and discard it.

@@ -44,7 +44,7 @@ See [Design System](../design-system.md).
 - **jiff:** CLI local date/time handling for Today and daily reports.
 - **blake3:** content hashing for imported documents/interactions and duplicate
   detection.
-- **tempfile:** safe temporary files for import/export/backup operations.
+- **tempfile:** safe temporary files for tests and import operations.
 - **trash:** OS trash integration for user-facing destructive file operations.
 - **ulid:** Rust-side sortable IDs when generated outside SQLite.
 - **notify / notify-debouncer-full:** optional folder watching if folder import becomes

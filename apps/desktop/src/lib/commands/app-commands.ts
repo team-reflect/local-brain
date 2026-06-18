@@ -10,9 +10,9 @@ import type { AppCommand } from './types'
 export const APP_COMMANDS: readonly AppCommand[] = [
   { id: 'go.today', title: 'Go to Today', keywords: ['home', 'brief'], keybinding: 'Mod-1', run: (c) => c.navigate({ kind: 'today' }) },
   { id: 'go.tasks', title: 'Go to Tasks', keybinding: 'Mod-2', run: (c) => c.navigate({ kind: 'tasks' }) },
-  { id: 'go.network', title: 'Go to Network', keywords: ['people', 'contacts'], keybinding: 'Mod-3', run: (c) => c.navigate({ kind: 'network', tab: 'people' }) },
+  { id: 'go.network', title: 'Go to Network', keywords: ['people', 'contacts'], keybinding: 'Mod-3', run: (c) => c.navigate({ kind: 'network', tab: 'graph' }) },
   { id: 'go.projects', title: 'Go to Projects', keybinding: 'Mod-4', run: (c) => c.navigate({ kind: 'projects' }) },
-  { id: 'go.graph', title: 'Open Graph', keybinding: 'Mod-5', run: (c) => c.navigate({ kind: 'graph' }) },
+  { id: 'go.graph', title: 'Open Graph', keybinding: 'Mod-5', run: (c) => c.navigate({ kind: 'network', tab: 'graph' }) },
   { id: 'go.ask', title: 'Open Ask', keywords: ['chat', 'search'], keybinding: 'Mod-6', run: (c) => c.navigate({ kind: 'ask' }) },
   { id: 'go.settings', title: 'Open Settings', keybinding: 'Mod-,', run: (c) => c.navigate({ kind: 'settings' }) },
   { id: 'palette.open', title: 'Open command palette', keybinding: 'Mod-k', run: (c) => c.openPalette() },

@@ -47,12 +47,6 @@ import {
   databasePath,
   getModelSettings,
   setModelEnabled,
-  createBackup,
-  exportToFile,
-  exportCounts,
-  defaultBackupPath,
-  defaultExportPath,
-  assembleExport,
   keychainSet,
   keychainDelete,
   keychainHas,
@@ -387,7 +381,7 @@ export function useDailyBrief() {
   return useQuery({ queryKey: ['daily-brief'], queryFn: () => getDailyBrief() })
 }
 
-// Settings: storage, model boundary, backup/export, keychain (Plan 08)
+// Settings: storage path, model boundary, keychain (Plan 08)
 export function useDatabasePath() {
   return useQuery({ queryKey: ['database-path'], queryFn: databasePath })
 }
@@ -398,10 +392,6 @@ export function useModelSettings() {
 
 export function useKeychainHas(account: string) {
   return useQuery({ queryKey: ['keychain-has', account], queryFn: () => keychainHas(account) })
-}
-
-export function useExportSummary() {
-  return useQuery({ queryKey: ['export-summary'], queryFn: () => assembleExport().then(exportCounts) })
 }
 
 export function useSetModelEnabled() {
@@ -430,24 +420,6 @@ export function useSetProviderKey() {
       void queryClient.invalidateQueries({ queryKey: ['model-status'] })
       void queryClient.invalidateQueries({ queryKey: ['model-settings'] })
     },
-  })
-}
-
-export function useCreateBackup() {
-  return useMutation({ mutationFn: (dest: string) => createBackup(dest) })
-}
-
-export function useExportJson() {
-  return useMutation({ mutationFn: (dest: string) => exportToFile(dest) })
-}
-
-export function useDefaultPaths(stamp: string) {
-  return useQuery({
-    queryKey: ['default-paths', stamp],
-    queryFn: async () => ({
-      backup: await defaultBackupPath(stamp),
-      export: await defaultExportPath(stamp),
-    }),
   })
 }
 

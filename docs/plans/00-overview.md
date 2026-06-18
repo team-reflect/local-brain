@@ -42,7 +42,7 @@ and uses SQLite as a projection. Local Brain stores durable structured memory in
 5. [Memory Extraction and Linking](05-memory-extraction-and-correction.md)
 6. [Search, Retrieval, and AI](06-search-retrieval-and-ai.md)
 7. [CLI and Agent Skills](07-cli-and-agent-skills.md)
-8. [Settings, Backup, Export, and Privacy Boundaries](08-backup-export-and-privacy.md)
+8. [Settings and Privacy Boundaries](08-backup-export-and-privacy.md)
 9. [Packaging and Launch](09-packaging-and-launch.md)
 
 Support docs:
@@ -60,9 +60,9 @@ Support docs:
 - The first audience is agent-native technical users.
 - The primary operating path is local AI agents reading and writing through the CLI and
   skills.
-- The first user-visible surfaces are Today, Tasks, Network, Projects, Graph, Ask, and
+- The first user-visible surfaces are Today, Tasks, Network, Projects, Ask, and
   Settings.
-- Network contains People and Organizations.
+- Network contains Graph, People, and Organizations, with Graph as the default tab.
 - Document and interaction records are first-class, but top-level navigation stays
   focused on the main work surfaces.
 - Graph is a derived user-centered visualization over typed records and links.

@@ -54,7 +54,7 @@ function clip(label: string): string {
   return label.length > 22 ? `${label.slice(0, 21)}…` : label
 }
 
-export function GraphSurface(): ReactNode {
+export function GraphSurface({ showHeader = true }: { showHeader?: boolean } = {}): ReactNode {
   const { navigate } = useRouter()
   const graph = useGraph()
   const layout = useMemo(() => (graph.data ? layoutGraph(graph.data) : null), [graph.data])
@@ -67,7 +67,7 @@ export function GraphSurface(): ReactNode {
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-4">
-      <PageHead eyebrow="Graph" title="Graph" />
+      {showHeader ? <PageHead eyebrow="Graph" title="Graph" /> : null}
       {graph.isLoading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : !layout || layout.nodes.length === 0 ? (

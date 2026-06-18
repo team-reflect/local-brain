@@ -1,16 +1,11 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { appVersion } from '@local-brain/core'
-import { Badge } from '../components/badge'
 import { PageHead } from '../components/page-head'
 import { Section } from '../components/section'
 import { cn } from '../lib/utils'
 import {
-  useCreateBackup,
   useDatabasePath,
-  useDefaultPaths,
-  useExportJson,
-  useExportSummary,
   useKeychainHas,
   useModelSettings,
   useModelStatus,
@@ -30,42 +25,90 @@ const SECTIONS: readonly SettingsSection[] = [
   { key: 'general', label: 'General' },
   { key: 'model-keys', label: 'Model keys' },
   { key: 'database', label: 'Local database' },
-  { key: 'backup', label: 'Backup & export' },
   { key: 'skills', label: 'Skills' },
   { key: 'diagnostics', label: 'Diagnostics' },
 ]
 
 const DEFAULT_SECTION = 'general'
 
+function isSettingsSection(section: string | undefined): section is SettingsSection['key'] {
+  return SECTIONS.some((s) => s.key === section)
+}
+
+function settingsSectionId(section: string): string {
+  return `settings-${section}`
+}
+
 export function SettingsSurface({ section }: { section: string | undefined }): ReactNode {
   const { navigate } = useRouter()
-  const active = SECTIONS.some((s) => s.key === section) ? (section as string) : DEFAULT_SECTION
+  const [active, setActive] = useState<string>(isSettingsSection(section) ? section : DEFAULT_SECTION)
+
+  useEffect(() => {
+    if (!isSettingsSection(section)) return
+    setActive(section)
+    requestAnimationFrame(() => {
+      document.getElementById(settingsSectionId(section))?.scrollIntoView?.({ block: 'start' })
+    })
+  }, [section])
+
+  useEffect(() => {
+    if (typeof IntersectionObserver === 'undefined') return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0]
+        if (!visible?.target.id) return
+        const next = visible.target.id.replace(/^settings-/, '')
+        if (isSettingsSection(next)) setActive(next)
+      },
+      { root: null, rootMargin: '-16% 0px -68% 0px', threshold: [0, 0.1, 1] },
+    )
+
+    for (const item of SECTIONS) {
+      const element = document.getElementById(settingsSectionId(item.key))
+      if (element) observer.observe(element)
+    }
+
+    return () => observer.disconnect()
+  }, [])
 
   return (
-    <div className="mx-auto flex h-full max-w-4xl flex-col gap-4">
-      <PageHead eyebrow="Settings" title="Settings" />
-      <div className="flex min-h-0 flex-1 gap-6">
-        <nav className="flex w-48 shrink-0 flex-col gap-0.5">
-          {SECTIONS.map((s) => (
-            <button
-              key={s.key}
-              type="button"
-              onClick={() => navigate({ kind: 'settings', section: s.key })}
-              className={cn(
-                'flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm font-medium transition-colors',
-                s.key === active
-                  ? 'bg-secondary text-foreground'
-                  : 'text-muted-foreground hover:bg-secondary/60',
-              )}
-            >
-              {s.label}
-              {s.plan ? <Badge tone="neutral">Soon</Badge> : null}
-            </button>
-          ))}
-        </nav>
-        <div className="min-w-0 flex-1">
-          <SectionBody section={active} />
-        </div>
+    <div className="mx-auto grid max-w-5xl grid-cols-[11rem_minmax(0,1fr)] gap-x-8 gap-y-5 pb-10">
+      <div className="col-span-full">
+        <PageHead eyebrow="Settings" title="Settings" />
+      </div>
+      <nav className="sticky top-0 flex h-fit flex-col gap-0.5 self-start border-l border-border py-1">
+        {SECTIONS.map((s) => (
+          <button
+            key={s.key}
+            type="button"
+            aria-current={s.key === active ? 'location' : undefined}
+            onClick={() => {
+              setActive(s.key)
+              navigate({ kind: 'settings', section: s.key })
+              document
+                .getElementById(settingsSectionId(s.key))
+                ?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+            }}
+            className={cn(
+              'rounded-r-md border-l-2 px-3 py-1.5 text-left text-sm font-medium transition-colors',
+              s.key === active
+                ? '-ml-px border-primary text-foreground'
+                : '-ml-px border-transparent text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {s.label}
+          </button>
+        ))}
+      </nav>
+      <div className="flex min-w-0 flex-col gap-7">
+        {SECTIONS.map((s) => (
+          <div key={s.key} id={settingsSectionId(s.key)} className="scroll-mt-5">
+            <SectionBody section={s.key} />
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -77,46 +120,52 @@ function SectionBody({ section }: { section: string }): ReactNode {
       return <ModelBoundary />
     case 'database':
       return <LocalDatabase />
-    case 'backup':
-      return <BackupExport />
     case 'skills':
-      return (
-        <Section title="Skills">
-          <div className="flex flex-col gap-3 text-sm text-muted-foreground">
-            <p>
-              The <code className="font-mono text-foreground">brain</code> CLI is the supported
-              agent interface — it reads and writes this same database from a terminal, with the app
-              open or closed. It ships bundled with the app as a sidecar binary.
-            </p>
-            <div className="rounded-md border border-border bg-card px-4 py-3 font-mono text-xs text-card-foreground">
-              <div>brain search "northwind" --json</div>
-              <div>brain ask "what did we decide?" --json</div>
-              <div>brain today --json</div>
-              <div>brain add interaction --kind meeting --title "…" --text-file ./notes.md --json</div>
-            </div>
-            <p>
-              The agent skill lives at{' '}
-              <code className="font-mono text-foreground">skills/brain/SKILL.md</code>; point Codex
-              (or another local agent) at it to teach safe read/write behavior. Sidecar detection and
-              a one-click PATH install land with packaging in Plan 09.
-            </p>
-          </div>
-        </Section>
-      )
+      return <Skills />
     case 'diagnostics':
       return <Diagnostics />
     case 'general':
     default:
-      return (
-        <Section title="General">
-          <p className="text-sm text-muted-foreground">
-            Local Brain is a private, local-first personal CRM and knowledge base. Use the sidebar
-            sections to browse your people, projects, tasks, and the records that connect them, or
-            press <kbd className="font-mono text-foreground">⌘K</kbd> to search and run commands.
-          </p>
-        </Section>
-      )
+      return <General />
   }
+}
+
+function General(): ReactNode {
+  return (
+    <Section title="General">
+      <p className="text-sm text-muted-foreground">
+        Local Brain is a private, local-first personal CRM and knowledge base. Use the sidebar
+        sections to browse your people, projects, tasks, and the records that connect them, or
+        press <kbd className="font-mono text-foreground">⌘K</kbd> to search and run commands.
+      </p>
+    </Section>
+  )
+}
+
+function Skills(): ReactNode {
+  return (
+    <Section title="Skills">
+      <div className="flex flex-col gap-3 text-sm text-muted-foreground">
+        <p>
+          The <code className="font-mono text-foreground">brain</code> CLI is the supported agent
+          interface — it reads and writes this same database from a terminal, with the app open or
+          closed. It ships bundled with the app as a sidecar binary.
+        </p>
+        <div className="rounded-md border border-border bg-card px-4 py-3 font-mono text-xs text-card-foreground">
+          <div>brain search "northwind" --json</div>
+          <div>brain ask "what did we decide?" --json</div>
+          <div>brain today --json</div>
+          <div>brain add interaction --kind meeting --title "…" --text-file ./notes.md --json</div>
+        </div>
+        <p>
+          The agent skill lives at{' '}
+          <code className="font-mono text-foreground">skills/brain/SKILL.md</code>; point Codex (or
+          another local agent) at it to teach safe read/write behavior. Sidecar detection and a
+          one-click PATH install land with packaging in Plan 09.
+        </p>
+      </div>
+    </Section>
+  )
 }
 
 function ModelBoundary(): ReactNode {
@@ -230,95 +279,6 @@ function LocalDatabase(): ReactNode {
   )
 }
 
-function BackupExport(): ReactNode {
-  // A filesystem-safe timestamp for default filenames (no colons).
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-  const paths = useDefaultPaths(stamp)
-  const summary = useExportSummary()
-  const backup = useCreateBackup()
-  const exportJson = useExportJson()
-  const [backupDest, setBackupDest] = useState('')
-  const [exportDest, setExportDest] = useState('')
-
-  const backupPath = backupDest || paths.data?.backup || ''
-  const exportPath = exportDest || paths.data?.export || ''
-
-  const total = summary.data ? Object.values(summary.data).reduce((a, b) => a + b, 0) : 0
-
-  return (
-    <Section title="Backup &amp; export">
-      <div className="flex flex-col gap-4 text-sm">
-        <p className="text-muted-foreground">
-          A <strong className="text-foreground">backup</strong> is a consistent, restorable copy of
-          the SQLite database. An <strong className="text-foreground">export</strong> is a portable,
-          inspectable JSON dump of your records. Both write atomically; provider keys are never
-          included.
-        </p>
-
-        <div className="flex flex-col gap-2 rounded-md border border-border bg-card px-4 py-3">
-          <p className="font-medium text-foreground">Backup database</p>
-          <input
-            value={backupPath}
-            onChange={(event) => setBackupDest(event.target.value)}
-            className="rounded-md border border-border bg-background px-3 py-2 font-mono text-xs outline-none focus:border-primary/50"
-          />
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              disabled={backup.isPending || !backupPath}
-              onClick={() => backup.mutate(backupPath)}
-              className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-40"
-            >
-              {backup.isPending ? 'Backing up…' : 'Create backup'}
-            </button>
-            {backup.data ? (
-              <span className="text-xs text-emerald-600 dark:text-emerald-400">
-                Backed up · v{backup.data.schemaVersion} · {Math.round(backup.data.sizeBytes / 1024)} KB
-              </span>
-            ) : null}
-            {backup.isError ? (
-              <span className="text-xs text-red-600 dark:text-red-400">Backup failed</span>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-2 rounded-md border border-border bg-card px-4 py-3">
-          <p className="font-medium text-foreground">Export JSON ({total} records)</p>
-          <input
-            value={exportPath}
-            onChange={(event) => setExportDest(event.target.value)}
-            className="rounded-md border border-border bg-background px-3 py-2 font-mono text-xs outline-none focus:border-primary/50"
-          />
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              disabled={exportJson.isPending || !exportPath}
-              onClick={() => exportJson.mutate(exportPath)}
-              className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-40"
-            >
-              {exportJson.isPending ? 'Exporting…' : 'Export JSON'}
-            </button>
-            {exportJson.data ? (
-              <span className="text-xs text-emerald-600 dark:text-emerald-400">
-                Exported · {Math.round(exportJson.data.bytes / 1024)} KB
-              </span>
-            ) : null}
-            {exportJson.isError ? (
-              <span className="text-xs text-red-600 dark:text-red-400">Export failed</span>
-            ) : null}
-          </div>
-        </div>
-
-        <p className="text-xs text-muted-foreground">
-          Tip: keep backups outside any cloud-synced folder unless that folder has a tested SQLite
-          locking story. To restore, replace the database file at the path shown in Local database
-          and reopen the app.
-        </p>
-      </div>
-    </Section>
-  )
-}
-
 function Diagnostics(): ReactNode {
   const info = useQuery({ queryKey: ['app-version'], queryFn: appVersion })
   const model = useModelStatus()
@@ -348,10 +308,6 @@ function Diagnostics(): ReactNode {
           ))}
         </dl>
       </div>
-      <p className="mt-2 text-xs text-muted-foreground">
-        Restore: replace the database file at the path above with a backup and reopen the app. Derived
-        search indexes rebuild from durable records.
-      </p>
     </Section>
   )
 }
