@@ -68,6 +68,34 @@ None at this checkpoint.
   04b) so a pasted note and an imported file with identical content produce the same
   `content_hash` and dedupe against each other.
 
+### DEC-12 — Plan 05 split into 05a/05b; model-backed extraction deferred to Plan 06
+- **Sequencing.** Plan 05 ("memory extraction & linking") is mostly deterministic, but its
+  one model-dependent step — step 3, *build model extraction for documents and
+  interactions* — depends on the BYOK model boundary that Plan 06 introduces (step 11,
+  model-boundary checks; keys in keychain; "external calls enabled" setting). Faking
+  extraction with brittle heuristics to satisfy the headline was explicitly out of bounds.
+- **Decision.** Build the deterministic engine *around* an explicit, typed model seam now,
+  and defer the model-backed extractor to Plan 06:
+  - **05a (this PR):** the extraction **output contract** (zod schemas + graph validation),
+    deterministic **pre-processing** (`buildExtractionContext`: chunks, date/email/
+    participant hints, dedupe candidates), deterministic **merge/upsert matching**
+    (people/orgs/projects by key + normalized name), and the transactional **apply**
+    pipeline (`applyExtraction`: resolve refs → existing-or-new rows, link to source,
+    create memories + `memory_links` + `evidence_refs`, confidence-gated suggestions, dup
+    avoidance) — all in `packages/core`, `pnpm check`-verifiable with unit + real-SQLite
+    **golden** tests over hand-authored results (the model's output contract). The
+    `Extractor` seam is wired into the ingest queue but **no extractor is registered by
+    default**, so `runExtraction` is a safe no-op until a model adapter exists.
+  - **05b:** correction flows (step 8 — unlink/edit/archive, fix citations) + relationship
+    intelligence (step 9 — last-interaction/reconnect/strength/important-dates recompute),
+    which are deterministic but UI/setter-heavy and read more cleanly as their own layer.
+  - **Plan 06:** registers the real BYOK model-backed `Extractor` (and enrichment of matched
+    records) through the same checked model boundary, plus golden tests over live output.
+- **Why this is honest.** The deterministic half — which is the part that writes to the
+  canonical SQLite store — is fully built and tested. The model is the only missing piece,
+  and the boundary it must satisfy is a typed, validated contract, not a stub pretending to
+  be a model. Downstream bases shift to `…-05a-extraction-engine` then `…-05b-corrections`.
+
 ### DEC-11 — Ingestion file selection via path field, not a native picker (04c)
 - The `AddRecordDialog` takes a typed file/folder **path** rather than opening the native
   OS picker. Rationale: the native picker needs the Tauri dialog plugin (Rust plugin +

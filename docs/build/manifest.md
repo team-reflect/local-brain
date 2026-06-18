@@ -47,8 +47,9 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 | 04a | Ingestion core engine (chunking, hashing, ingest + links + dedupe) | `codex/local-brain-04a-ingestion-core` | `…-03b-desktop-shell-ii` | open | [#9](https://github.com/maccman/local-brain/pull/9) |
 | 04b | Rust file-read primitives (safe reads, size caps, hashing, folder enum) | `codex/local-brain-04b-ingestion-fs` | `…-04a-ingestion-core` | open | [#10](https://github.com/maccman/local-brain/pull/10) |
 | 04c | Ingestion UI (paste/import flows, folder import, Add actions) | `codex/local-brain-04c-ingestion-ui` | `…-04b-ingestion-fs` | open | [#11](https://github.com/maccman/local-brain/pull/11) |
-| 05 | Memory extraction & linking | `codex/local-brain-05-extraction` | `…-04c-ingestion-ui` | pending | — |
-| 06 | Search, retrieval & AI | `codex/local-brain-06-search-ai` | `…-05-extraction` | pending | — |
+| 05a | Extraction engine (contracts, preprocessing, merge/apply, model seam) | `codex/local-brain-05a-extraction-engine` | `…-04c-ingestion-ui` | open | [#12](https://github.com/maccman/local-brain/pull/12) |
+| 05b | Extraction corrections + relationship intelligence (UI/setters) | `codex/local-brain-05b-corrections` | `…-05a-extraction-engine` | pending | — |
+| 06 | Search, retrieval & AI (incl. the model-backed extractor) | `codex/local-brain-06-search-ai` | `…-05b-corrections` | pending | — |
 | 07 | CLI & agent skills | `codex/local-brain-07-cli-skills` | `…-06-search-ai` | pending | — |
 | 08 | Settings, backup, export & privacy | `codex/local-brain-08-settings` | `…-07-cli-skills` | pending | — |
 | 09 | Packaging & launch | `codex/local-brain-09-packaging` | `…-08-settings` | pending | — |
@@ -235,10 +236,54 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
   picker is a follow-up. PDF/OCR and automatic sync remain out of scope (Plan 04 open
   questions). A full assembled `pnpm tauri dev`/`build` launch is still pending.
 
-### 05–09
-- Scope mirrors `docs/plans/05..09`: 05 = extraction; 06 = search/retrieval/Ask;
-  07 = `brain` CLI + skills (sidecar via `bundle.externalBin`); 08 = settings/backup/export;
-  09 = macOS packaging, first-run, signing checklist.
+### 05a — Extraction engine (deterministic half of Plan 05)
+- **Scope (Plan 05, steps 1-2, 4-7 — the deterministic, no-model half):**
+  `packages/core/src/extraction` —
+  - `contracts.ts`: zod schemas + types for the **extraction output contract** (the
+    exact shape a model must produce): people, organizations, affiliations, projects,
+    tasks, memories, evidence refs; entities linked by local `ref`s. `parseExtractionResult`
+    + `validateExtraction` (graph integrity: ref uniqueness, resolvable/typed references).
+  - `preprocess.ts`: deterministic pre-processing — `findDates`/`findEmails`,
+    `selectChunks`, and `buildExtractionContext` (loads a source record's chunks, hint
+    signals, known participants, and dedupe candidates for the model).
+  - `match.ts`: deterministic merge/upsert matching — `normalizeName`/`normalizeEmail`/
+    `normalizeDomain`, `matchPerson`/`matchOrganization`/`matchProject` (exact key first,
+    then normalized name).
+  - `apply.ts` + `apply-store.ts`: `applyExtraction` — resolve every ref to an
+    existing-or-new row (merge/upsert), write new records, link them back to the source,
+    create hidden memories with `memory_links`, and attach `evidence_refs` to chunks, all
+    in **one** `db_batch`. Confidence gating (`minConfidence`) turns low-confidence
+    entities into suggestions instead of writes; obvious duplicates (people/orgs by
+    key+name, projects/tasks by name, memories by claim) are skipped; unresolved
+    evidence/links are reported, never guessed.
+  - `extractor.ts`: the **typed model seam** — an `Extractor` takes the deterministic
+    context and returns model output; `runExtraction` validates + applies it;
+    `installExtractionPipeline` wires it as the fire-and-forget ingest-queue handler. No
+    extractor is registered by default (the model-backed adapter lands with Plan 06 model
+    plumbing), so `runExtraction` is a safe no-op until then — **no faked heuristics**.
+- **Sequencing (DEC-12):** Plan 05's only model-dependent step (step 3, "build model
+  extraction") needs the Plan 06 BYOK model boundary; everything else is deterministic.
+  This PR builds that deterministic engine *around* an explicit typed seam; the
+  model-backed extractor is deferred to Plan 06. Correction flows (step 8) + relationship
+  intelligence (step 9) become **05b**.
+- **Verification:** `pnpm check` ✓ — typecheck + oxlint (clean, no warnings) + **89 tests**
+  (53 core: +11 match, +5 preprocess, +6 contracts unit tests, +4 real-SQLite golden
+  apply tests — meeting→people/org/project/task/cited-memory, merge/upsert + idempotency,
+  confidence-gated suggestions, the extractor seam; 4 db; 30 desktop unchanged) plus the
+  desktop Vite build (2041 modules) and `cargo check --workspace` ✓ (no Rust this layer).
+  `git diff --check` ✓.
+- **Caveats:** matching is exact-key/normalized-name (conservative — fuzzy/embedding match
+  is a follow-up); matched existing tasks gain a source link + evidence but their fields and
+  person/org links are not mutated (correction is 05b); enrichment of matched people/orgs is
+  deferred to 05b. The model-backed extractor and golden tests over *live model output*
+  await Plan 06.
+
+### 05b–09
+- Scope mirrors `docs/plans/05..09`: 05b = extraction corrections (unlink/edit/archive,
+  fix citations) + relationship-intelligence recompute (last interaction, reconnect,
+  strength, important dates); 06 = search/retrieval/Ask **and the model-backed extractor**
+  that feeds 05a's seam; 07 = `brain` CLI + skills (sidecar via `bundle.externalBin`);
+  08 = settings/backup/export; 09 = macOS packaging, first-run, signing checklist.
 
 ## Open / Updated PR URLs
 
@@ -253,3 +298,4 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 - PR #9 — Build 04a ingestion core engine (chunking, hashing, ingest + links + dedupe) — https://github.com/maccman/local-brain/pull/9 (base `…-03b-desktop-shell-ii`, open)
 - PR #10 — Build 04b Rust file-read primitives (safe reads, size caps, hashing, folder enum) — https://github.com/maccman/local-brain/pull/10 (base `…-04a-ingestion-core`, open)
 - PR #11 — Build 04c ingestion UI (paste/import dialog, folder import, Add actions) — https://github.com/maccman/local-brain/pull/11 (base `…-04b-ingestion-fs`, open)
+- PR #12 — Build 05a extraction engine (contracts, preprocessing, merge/apply, model seam) — https://github.com/maccman/local-brain/pull/12 (base `…-04c-ingestion-ui`, open)
