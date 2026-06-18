@@ -5,7 +5,7 @@
 - Title: Mega PR: Local Brain remaining plans + Reflect redesign
 - Base: `master` (@ `9b828ab`)
 - Head: `codex/local-brain-remaining-mega-pr`
-- URL: _set on push (see PR after creation)_
+- PR: **#21** — https://github.com/maccman/local-brain/pull/21
 
 ## Merged PRs / order
 
