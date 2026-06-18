@@ -26,6 +26,27 @@ fn normalize_email(raw: Option<&str>) -> Option<String> {
     normalize_optional(raw).map(|value| value.to_lowercase())
 }
 
+fn normalize_phone(raw: Option<&str>) -> Option<String> {
+    normalize_optional(raw)
+        .map(|value| value.chars().filter(|c| c.is_ascii_digit()).collect())
+        .filter(|value: &String| !value.is_empty())
+}
+
+fn normalize_many<'a>(
+    raw: impl IntoIterator<Item = &'a str>,
+    normalize: fn(Option<&str>) -> Option<String>,
+) -> Vec<String> {
+    let mut values = Vec::new();
+    for item in raw {
+        if let Some(value) = normalize(Some(item)) {
+            if !values.iter().any(|existing| existing == &value) {
+                values.push(value);
+            }
+        }
+    }
+    values
+}
+
 fn normalize_name(raw: &str) -> String {
     raw.to_lowercase()
         .nfkd()
@@ -41,6 +62,42 @@ fn normalize_name(raw: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn normalize_source_slug(raw: &str) -> String {
+    raw.trim().to_lowercase()
+}
+
+fn valid_email(email: &str) -> bool {
+    let Some((local, domain)) = email.split_once('@') else {
+        return false;
+    };
+    !local.trim().is_empty()
+        && !domain.trim().is_empty()
+        && domain.contains('.')
+        && !email.chars().any(char::is_whitespace)
+}
+
+fn source_id(conn: &Connection, slug: Option<&str>) -> Result<Option<String>, CliError> {
+    let Some(slug) = slug.map(normalize_source_slug).filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+    let id = conn
+        .query_row(
+            "SELECT id FROM sources WHERE slug = ?1",
+            params![slug],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|_| {
+            CliError::Runtime(format!(
+                "unknown source '{slug}' (run `brain source ensure ...`)"
+            ))
+        })?;
+    Ok(Some(id))
+}
+
+fn external_kind(raw: &str) -> String {
+    normalize_optional(Some(raw)).unwrap_or_else(|| "record".to_string())
 }
 
 fn safe_filename(raw: &str) -> String {
@@ -77,6 +134,67 @@ fn find_duplicate(conn: &Connection, table: &str, hash: &str) -> Result<Option<S
         .query_row(&sql, params![hash], |row| row.get::<_, String>(0))
         .ok();
     Ok(id)
+}
+
+fn find_external_identity(
+    conn: &Connection,
+    entity_type: &str,
+    source_id: Option<&str>,
+    kind: &str,
+    external_id: Option<&str>,
+) -> Result<Option<String>, CliError> {
+    let (Some(source_id), Some(external_id)) = (
+        source_id,
+        normalize_optional(external_id).filter(|value| !value.is_empty()),
+    ) else {
+        return Ok(None);
+    };
+    let id = conn
+        .query_row(
+            "SELECT entity_id
+             FROM external_identities
+             WHERE entity_type = ?1
+               AND source_id = ?2
+               AND kind = ?3
+               AND external_id = ?4
+             LIMIT 1",
+            params![entity_type, source_id, kind, external_id],
+            |row| row.get::<_, String>(0),
+        )
+        .ok();
+    Ok(id)
+}
+
+fn insert_external_identity(
+    conn: &Connection,
+    entity_type: &str,
+    entity_id: &str,
+    source_id: Option<&str>,
+    kind: &str,
+    external_id: Option<&str>,
+    url: Option<&str>,
+) -> Result<(), CliError> {
+    let (Some(source_id), Some(external_id)) = (
+        source_id,
+        normalize_optional(external_id).filter(|value| !value.is_empty()),
+    ) else {
+        return Ok(());
+    };
+    conn.execute(
+        "INSERT OR IGNORE INTO external_identities
+         (id, entity_type, entity_id, source_id, kind, external_id, url)
+         VALUES (?1,?2,?3,?4,?5,?6,?7)",
+        params![
+            new_id(),
+            entity_type,
+            entity_id,
+            source_id,
+            kind,
+            external_id,
+            normalize_optional(url),
+        ],
+    )?;
+    Ok(())
 }
 
 fn insert_chunks(
@@ -161,33 +279,258 @@ fn link_table(
     Ok(table)
 }
 
+struct PersonImportAssessment {
+    normalized_name: String,
+    email: String,
+    should_create_person: bool,
+    reason_codes: Vec<&'static str>,
+}
+
+fn assess_person_import(raw_name: &str, email: &str) -> PersonImportAssessment {
+    let email = normalize_email(Some(email)).unwrap_or_default();
+    let (normalized_name, has_route_phrase) = normalize_untrusted_name(raw_name);
+    let mut reason_codes = Vec::new();
+    if !valid_email(&email) {
+        reason_codes.push("invalid_email");
+    }
+    if is_machine_email(&email) {
+        reason_codes.push("machine_email");
+    }
+    if normalized_name.is_empty() {
+        reason_codes.push("missing_name");
+    }
+    if !normalized_name.is_empty()
+        && (normalized_name.eq_ignore_ascii_case(&email)
+            || normalized_name.contains('@')
+            || normalize_email(Some(&normalized_name)).as_deref() == Some(email.as_str()))
+    {
+        reason_codes.push("email_as_name");
+    }
+    if has_route_phrase {
+        reason_codes.push("route_phrase");
+    }
+    if has_numeric_or_token_noise(&normalized_name) {
+        reason_codes.push("numeric_or_token_noise");
+    }
+    if !normalized_name.is_empty()
+        && !reason_codes.iter().any(|code| {
+            matches!(
+                *code,
+                "email_as_name" | "numeric_or_token_noise" | "route_phrase"
+            )
+        })
+        && !looks_like_capitalized_person_name(&normalized_name)
+    {
+        reason_codes.push("not_capitalized_first_last");
+    }
+
+    PersonImportAssessment {
+        normalized_name,
+        email,
+        should_create_person: reason_codes.is_empty(),
+        reason_codes,
+    }
+}
+
+fn normalize_untrusted_name(raw: &str) -> (String, bool) {
+    let cleaned = raw
+        .trim()
+        .trim_matches(|c: char| c == '\'' || c == '"')
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let lower = cleaned.to_lowercase();
+    let mut route_index = None;
+    for needle in [" via ", " from ", " at "] {
+        if let Some(index) = lower.rfind(needle) {
+            route_index = Some(route_index.map_or(index, |current: usize| current.min(index)));
+        }
+    }
+    let route_stripped = route_index
+        .map(|index| cleaned[..index].trim().to_string())
+        .unwrap_or(cleaned);
+    let parts: Vec<&str> = route_stripped.split(',').map(str::trim).collect();
+    let normalized = if parts.len() == 2 && !is_name_suffix(parts[1]) {
+        format!("{} {}", parts[1], parts[0])
+    } else {
+        route_stripped
+    };
+    (normalized.trim().to_string(), route_index.is_some())
+}
+
+fn is_name_suffix(raw: &str) -> bool {
+    matches!(
+        raw.trim().trim_matches('.').to_lowercase().as_str(),
+        "jr" | "sr" | "ii" | "iii" | "iv" | "md" | "m d" | "do" | "d o" | "phd" | "ph d"
+    )
+}
+
+fn is_machine_email(email: &str) -> bool {
+    if !valid_email(email) {
+        return false;
+    }
+    let (local, domain) = email.split_once('@').unwrap_or(("", ""));
+    let generic = [
+        "accounting",
+        "admin",
+        "announcements",
+        "billing",
+        "concierge",
+        "contact",
+        "customer.service",
+        "customerservice",
+        "devs",
+        "do-not-reply",
+        "donotreply",
+        "education",
+        "finance",
+        "hello",
+        "help",
+        "info",
+        "marketing",
+        "newsletter",
+        "no-reply",
+        "noreply",
+        "notifications",
+        "ops",
+        "operations",
+        "postmaster",
+        "registration",
+        "sales",
+        "ship",
+        "support",
+        "team",
+        "test",
+    ];
+    if generic.contains(&local) {
+        return true;
+    }
+    if [
+        "bounce",
+        "bounces",
+        "mailer-daemon",
+        "notification",
+        "notifications",
+        "reply",
+        "replies",
+    ]
+    .iter()
+    .any(|prefix| {
+        local == *prefix
+            || local.starts_with(&format!("{prefix}."))
+            || local.starts_with(&format!("{prefix}-"))
+            || local.starts_with(&format!("{prefix}_"))
+    }) {
+        return true;
+    }
+    if local.starts_with("no.reply")
+        || local.starts_with("no-reply")
+        || local.starts_with("noreply")
+        || local.starts_with("do-not-reply")
+        || local.starts_with("donotreply")
+    {
+        return true;
+    }
+    if [
+        "adobesign.com",
+        "docusign.net",
+        "email.pandadoc.net",
+        "facebookmail.com",
+        "info.vercel.com",
+        "login.customer.io",
+        "team.twilio.com",
+    ]
+    .contains(&domain)
+    {
+        return true;
+    }
+    if domain.ends_with(".bnc.salesforce.com") {
+        return true;
+    }
+    let compact: String = local
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+    compact.len() >= 28 && compact.chars().any(|c| c.is_ascii_digit())
+}
+
+fn has_numeric_or_token_noise(name: &str) -> bool {
+    let compact: String = name.chars().filter(|c| c.is_alphanumeric()).collect();
+    name.chars().any(|c| c.is_ascii_digit())
+        || (compact.chars().count() >= 24 && compact.chars().any(|c| c.is_ascii_digit()))
+}
+
+fn looks_like_capitalized_person_name(name: &str) -> bool {
+    let without_suffix = strip_name_suffix(name);
+    let words: Vec<&str> = without_suffix.split_whitespace().collect();
+    if words.len() < 2 || words.len() > 6 {
+        return false;
+    }
+    let particles = [
+        "de", "del", "der", "van", "von", "da", "di", "la", "le", "du",
+    ];
+    words.iter().all(|word| {
+        let trimmed = word.trim_matches(|c: char| c == '\'' || c == '.' || c == '-');
+        if trimmed.is_empty() {
+            return false;
+        }
+        let lower = trimmed.to_lowercase();
+        if particles.contains(&lower.as_str()) {
+            return true;
+        }
+        trimmed
+            .chars()
+            .next()
+            .map(|c| c.is_uppercase())
+            .unwrap_or(false)
+    })
+}
+
+fn strip_name_suffix(name: &str) -> String {
+    let parts: Vec<&str> = name.split_whitespace().collect();
+    if let Some(last) = parts.last() {
+        if is_name_suffix(last.trim_start_matches(',')) {
+            return parts[..parts.len().saturating_sub(1)].join(" ");
+        }
+    }
+    name.to_string()
+}
+
 pub struct AddPersonArgs<'a> {
     pub full_name: &'a str,
     pub preferred_name: Option<&'a str>,
-    pub primary_email: Option<&'a str>,
-    pub primary_phone: Option<&'a str>,
+    pub emails: Vec<&'a str>,
+    pub phones: Vec<&'a str>,
     pub headline: Option<&'a str>,
     pub location: Option<&'a str>,
     pub summary: Option<&'a str>,
     pub notes: Option<&'a str>,
     pub reconnect_interval_days: Option<i64>,
+    pub source_slug: Option<&'a str>,
+    pub external_kind: &'a str,
+    pub external_id: Option<&'a str>,
+    pub original_url: Option<&'a str>,
     pub allow_duplicate: bool,
 }
 
 fn find_duplicate_person(
     conn: &Connection,
     full_name: &str,
-    primary_email: Option<&str>,
+    emails: &[String],
 ) -> Result<Option<String>, CliError> {
-    let incoming_email = normalize_email(primary_email);
-    if let Some(email) = &incoming_email {
+    for email in emails {
         let id = conn
             .query_row(
-                "SELECT id FROM people
-                 WHERE archived_at IS NULL
-                   AND primary_email IS NOT NULL
-                   AND lower(primary_email) = ?1
-                LIMIT 1",
+                "SELECT p.id
+                 FROM people p
+                 LEFT JOIN person_emails pe ON pe.person_id = p.id
+                 WHERE p.archived_at IS NULL
+                   AND (
+                     lower(p.primary_email) = ?1
+                     OR pe.normalized_email = ?1
+                   )
+                 ORDER BY p.created_at ASC
+                 LIMIT 1",
                 params![email],
                 |row| row.get::<_, String>(0),
             )
@@ -201,19 +544,32 @@ fn find_duplicate_person(
     if name.is_empty() {
         return Ok(None);
     }
-    let mut stmt =
-        conn.prepare("SELECT id, full_name, primary_email FROM people WHERE archived_at IS NULL")?;
+    let mut stmt = conn.prepare(
+        "SELECT p.id,
+                p.full_name,
+                p.primary_email,
+                EXISTS (
+                  SELECT 1 FROM person_emails pe
+                  WHERE pe.person_id = p.id
+                  LIMIT 1
+                ) AS has_email_handle
+         FROM people p
+         WHERE p.archived_at IS NULL",
+    )?;
     let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
             row.get::<_, Option<String>>(2)?,
+            row.get::<_, i64>(3)?,
         ))
     })?;
     for row in rows {
-        let (id, candidate, candidate_email) = row?;
+        let (id, candidate, candidate_email, has_email_handle) = row?;
         if normalize_name(&candidate) == name {
-            if incoming_email.is_some() && normalize_email(candidate_email.as_deref()).is_some() {
+            if !emails.is_empty()
+                && (normalize_email(candidate_email.as_deref()).is_some() || has_email_handle != 0)
+            {
                 continue;
             }
             return Ok(Some(id));
@@ -234,10 +590,12 @@ fn enrich_duplicate_person(
     conn: &Connection,
     id: &str,
     args: &AddPersonArgs,
+    emails: &[String],
+    phones: &[String],
 ) -> Result<bool, CliError> {
     let preferred_name = normalize_optional(args.preferred_name);
-    let primary_email = normalize_email(args.primary_email);
-    let primary_phone = normalize_optional(args.primary_phone);
+    let primary_email = emails.first().cloned();
+    let primary_phone = phones.first().cloned();
     let headline = normalize_optional(args.headline);
     let location = normalize_optional(args.location);
     let summary = normalize_optional(args.summary);
@@ -320,20 +678,106 @@ fn enrich_duplicate_person(
     Ok(true)
 }
 
+fn enrich_duplicate_person_email(
+    conn: &Connection,
+    id: &str,
+    email: &str,
+) -> Result<bool, CliError> {
+    let email = normalize_email(Some(email));
+    let current = conn.query_row(
+        "SELECT primary_email FROM people WHERE id = ?1",
+        params![id],
+        |row| row.get::<_, Option<String>>(0),
+    )?;
+    if !has_text(&email) || !is_blank(&current) {
+        return Ok(false);
+    }
+    conn.execute(
+        "UPDATE people
+         SET primary_email = ?1,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE id = ?2",
+        params![email, id],
+    )?;
+    Ok(true)
+}
+
+fn insert_person_handles(
+    conn: &Connection,
+    person_id: &str,
+    emails: &[String],
+    phones: &[String],
+    source_id: Option<&str>,
+) -> Result<(), CliError> {
+    for (index, email) in emails.iter().enumerate() {
+        conn.execute(
+            "INSERT OR IGNORE INTO person_emails
+             (id, person_id, email, normalized_email, is_primary, source_id)
+             VALUES (?1,?2,?3,?4,?5,?6)",
+            params![
+                new_id(),
+                person_id,
+                email,
+                email,
+                if index == 0 { 1 } else { 0 },
+                source_id,
+            ],
+        )?;
+    }
+    for (index, phone) in phones.iter().enumerate() {
+        conn.execute(
+            "INSERT OR IGNORE INTO person_phones
+             (id, person_id, phone, normalized_phone, is_primary, source_id)
+             VALUES (?1,?2,?3,?4,?5,?6)",
+            params![
+                new_id(),
+                person_id,
+                phone,
+                normalize_phone(Some(phone)).unwrap_or_else(|| phone.clone()),
+                if index == 0 { 1 } else { 0 },
+                source_id,
+            ],
+        )?;
+    }
+    Ok(())
+}
+
 pub fn add_person(conn: &mut Connection, json: bool, args: AddPersonArgs) -> Result<(), CliError> {
     let full_name = args.full_name.trim();
     if full_name.is_empty() {
         return Err(CliError::Runtime("--full-name cannot be blank".into()));
     }
-    if let Some(existing) = find_duplicate_person(conn, full_name, args.primary_email)? {
+    let emails = normalize_many(args.emails.iter().copied(), normalize_email);
+    let phones = normalize_many(args.phones.iter().copied(), normalize_optional);
+    let source_id = source_id(conn, args.source_slug)?;
+    let kind = external_kind(args.external_kind);
+
+    let existing_by_external = find_external_identity(
+        conn,
+        "person",
+        source_id.as_deref(),
+        &kind,
+        args.external_id,
+    )?;
+    let existing = existing_by_external.or(find_duplicate_person(conn, full_name, &emails)?);
+    if let Some(existing) = existing {
         if !args.allow_duplicate {
-            enrich_duplicate_person(conn, &existing, &args)?;
+            insert_person_handles(conn, &existing, &emails, &phones, source_id.as_deref())?;
+            enrich_duplicate_person(conn, &existing, &args, &emails, &phones)?;
+            insert_external_identity(
+                conn,
+                "person",
+                &existing,
+                source_id.as_deref(),
+                &kind,
+                args.external_id,
+                args.original_url,
+            )?;
             return report_person(json, &existing, true);
         }
     }
 
     let id = new_id();
-    let email = normalize_email(args.primary_email);
     let tx = conn.transaction()?;
     tx.execute(
         "INSERT INTO people (
@@ -344,8 +788,8 @@ pub fn add_person(conn: &mut Connection, json: bool, args: AddPersonArgs) -> Res
             id,
             full_name,
             normalize_optional(args.preferred_name),
-            email,
-            normalize_optional(args.primary_phone),
+            emails.first(),
+            phones.first(),
             normalize_optional(args.headline),
             normalize_optional(args.location),
             normalize_optional(args.summary),
@@ -353,8 +797,92 @@ pub fn add_person(conn: &mut Connection, json: bool, args: AddPersonArgs) -> Res
             args.reconnect_interval_days,
         ],
     )?;
+    insert_person_handles(&tx, &id, &emails, &phones, source_id.as_deref())?;
+    insert_external_identity(
+        &tx,
+        "person",
+        &id,
+        source_id.as_deref(),
+        &kind,
+        args.external_id,
+        args.original_url,
+    )?;
     tx.commit()?;
     report_person(json, &id, false)
+}
+
+pub struct AddPersonFromEmailArgs<'a> {
+    pub full_name: &'a str,
+    pub email: &'a str,
+    pub source_slug: Option<&'a str>,
+    pub external_id: Option<&'a str>,
+}
+
+pub fn add_person_from_email(
+    conn: &mut Connection,
+    json: bool,
+    args: AddPersonFromEmailArgs,
+) -> Result<(), CliError> {
+    let assessment = assess_person_import(args.full_name, args.email);
+    if !assessment.should_create_person {
+        return report_person_assessment(json, None, false, false, &assessment);
+    }
+    let source_id = source_id(conn, args.source_slug)?;
+    let emails = vec![assessment.email.clone()];
+    let existing_by_external = find_external_identity(
+        conn,
+        "person",
+        source_id.as_deref(),
+        "contact",
+        args.external_id,
+    )?;
+    let existing = existing_by_external.or(find_duplicate_person(
+        conn,
+        &assessment.normalized_name,
+        &emails,
+    )?);
+    if let Some(existing) = existing {
+        insert_person_handles(conn, &existing, &emails, &[], source_id.as_deref())?;
+        enrich_duplicate_person_email(conn, &existing, &assessment.email)?;
+        insert_external_identity(
+            conn,
+            "person",
+            &existing,
+            source_id.as_deref(),
+            "contact",
+            args.external_id,
+            None,
+        )?;
+        return report_person_assessment(json, Some(&existing), false, true, &assessment);
+    }
+
+    let id = new_id();
+    let tx = conn.transaction()?;
+    tx.execute(
+        "INSERT INTO people (id, full_name, primary_email, notes)
+         VALUES (?1,?2,?3,?4)",
+        params![
+            id,
+            &assessment.normalized_name,
+            &assessment.email,
+            format!(
+                "Imported from untrusted email display name: {}",
+                args.full_name
+            ),
+        ],
+    )?;
+    insert_person_handles(&tx, &id, &emails, &[], source_id.as_deref())?;
+    insert_external_identity(
+        &tx,
+        "person",
+        &id,
+        source_id.as_deref(),
+        "contact",
+        args.external_id,
+        None,
+    )?;
+    tx.commit()?;
+    report_person_assessment(json, Some(&id), true, false, &assessment)
 }
 
 pub struct AddAssetArgs<'a> {
@@ -590,10 +1118,12 @@ pub struct AddInteractionArgs<'a> {
     pub title: Option<&'a str>,
     pub kind: &'a str,
     pub occurred_at: Option<&'a str>,
+    pub source_slug: Option<&'a str>,
     pub external_id: Option<&'a str>,
     pub original_url: Option<&'a str>,
     pub body: String,
     pub links: Vec<LinkRef>,
+    pub raw_participants: Vec<&'a str>,
     pub allow_duplicate: bool,
 }
 
@@ -648,6 +1178,87 @@ fn enrich_duplicate_interaction(
     Ok(())
 }
 
+struct RawParticipant {
+    role: String,
+    handle: Option<String>,
+    normalized_handle: Option<String>,
+    display_name: Option<String>,
+}
+
+fn parse_raw_participant(raw: &str) -> Result<Option<RawParticipant>, CliError> {
+    let Some(value) = normalize_optional(Some(raw)) else {
+        return Ok(None);
+    };
+    let (role, payload) = value
+        .split_once(':')
+        .map(|(role, payload)| (role.trim(), payload.trim()))
+        .unwrap_or(("participant", value.as_str()));
+    let role = normalize_optional(Some(role)).unwrap_or_else(|| "participant".to_string());
+    let payload = normalize_optional(Some(payload)).ok_or_else(|| {
+        CliError::Runtime(format!("--participant '{raw}' is missing a name or handle"))
+    })?;
+
+    let (display_name, handle) =
+        if let (Some(start), Some(end)) = (payload.rfind('<'), payload.rfind('>')) {
+            if start < end {
+                (
+                    normalize_optional(Some(&payload[..start])),
+                    normalize_optional(Some(&payload[start + 1..end])),
+                )
+            } else {
+                (Some(payload.clone()), None)
+            }
+        } else if payload.contains('@') {
+            (None, normalize_optional(Some(&payload)))
+        } else {
+            (Some(payload.clone()), None)
+        };
+
+    let normalized_handle = handle.as_deref().map(|handle| {
+        if handle.contains('@') {
+            handle.to_lowercase()
+        } else {
+            handle.to_string()
+        }
+    });
+    Ok(Some(RawParticipant {
+        role,
+        handle,
+        normalized_handle,
+        display_name,
+    }))
+}
+
+fn insert_raw_participants(
+    conn: &Connection,
+    interaction_id: &str,
+    source_id: Option<&str>,
+    participants: &[&str],
+) -> Result<usize, CliError> {
+    let mut inserted = 0;
+    for raw in participants {
+        let Some(participant) = parse_raw_participant(raw)? else {
+            continue;
+        };
+        let changed = conn.execute(
+            "INSERT OR IGNORE INTO interaction_participants
+             (id, interaction_id, role, handle, normalized_handle, display_name, source_id)
+             VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            params![
+                new_id(),
+                interaction_id,
+                participant.role,
+                participant.handle,
+                participant.normalized_handle,
+                participant.display_name,
+                source_id,
+            ],
+        )?;
+        inserted += changed;
+    }
+    Ok(inserted)
+}
+
 pub fn add_interaction(
     conn: &mut Connection,
     json: bool,
@@ -655,11 +1266,47 @@ pub fn add_interaction(
 ) -> Result<(), CliError> {
     let body = normalize_text(&args.body);
     let hash = content_hash(&body);
+    let source_id = source_id(conn, args.source_slug)?;
+    if let Some(existing) = find_external_identity(
+        conn,
+        "interaction",
+        source_id.as_deref(),
+        "record",
+        args.external_id,
+    )? {
+        if !args.allow_duplicate {
+            let tx = conn.transaction()?;
+            enrich_duplicate_interaction(&tx, &existing, &args)?;
+            insert_links(&tx, "interaction", &existing, &args.links)?;
+            insert_raw_participants(&tx, &existing, source_id.as_deref(), &args.raw_participants)?;
+            insert_external_identity(
+                &tx,
+                "interaction",
+                &existing,
+                source_id.as_deref(),
+                "record",
+                args.external_id,
+                args.original_url,
+            )?;
+            tx.commit()?;
+            return report_record(json, "interaction", &existing, true, 0);
+        }
+    }
     if let Some(existing) = find_duplicate_interaction(conn, &hash, args.external_id)? {
         if !args.allow_duplicate {
             let tx = conn.transaction()?;
             enrich_duplicate_interaction(&tx, &existing, &args)?;
             insert_links(&tx, "interaction", &existing, &args.links)?;
+            insert_raw_participants(&tx, &existing, source_id.as_deref(), &args.raw_participants)?;
+            insert_external_identity(
+                &tx,
+                "interaction",
+                &existing,
+                source_id.as_deref(),
+                "record",
+                args.external_id,
+                args.original_url,
+            )?;
             tx.commit()?;
             return report_record(json, "interaction", &existing, true, 0);
         }
@@ -683,6 +1330,16 @@ pub fn add_interaction(
     )?;
     let count = insert_chunks(&tx, "interaction", &id, &body)?;
     insert_links(&tx, "interaction", &id, &args.links)?;
+    insert_raw_participants(&tx, &id, source_id.as_deref(), &args.raw_participants)?;
+    insert_external_identity(
+        &tx,
+        "interaction",
+        &id,
+        source_id.as_deref(),
+        "record",
+        args.external_id,
+        args.original_url,
+    )?;
     tx.commit()?;
     report_record(json, "interaction", &id, false, count)
 }
@@ -819,6 +1476,32 @@ fn report_person(json: bool, id: &str, duplicate: bool) -> Result<(), CliError> 
             println!("person {id} (duplicate, skipped)");
         } else {
             println!("person {id}");
+        }
+        Ok(())
+    }
+}
+
+fn report_person_assessment(
+    json: bool,
+    id: Option<&str>,
+    created: bool,
+    duplicate: bool,
+    assessment: &PersonImportAssessment,
+) -> Result<(), CliError> {
+    if json {
+        print_json(&json!({
+            "kind": "person",
+            "id": id,
+            "created": created,
+            "isDuplicate": duplicate,
+            "normalizedName": assessment.normalized_name,
+            "reasonCodes": assessment.reason_codes,
+        }))
+    } else {
+        match id {
+            Some(id) if duplicate => println!("person {id} (duplicate, skipped)"),
+            Some(id) => println!("person {id}"),
+            None => println!("person skipped: {}", assessment.reason_codes.join(", ")),
         }
         Ok(())
     }

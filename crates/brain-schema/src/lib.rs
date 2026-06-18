@@ -21,7 +21,7 @@ pub const SUPPORT_DIRNAME: &str = ".local-brain";
 
 /// Bumped whenever a migration is appended below. Asserted against the applied
 /// `user_version` in tests so the constant can never drift from the list.
-pub const LATEST_SCHEMA_VERSION: usize = 5;
+pub const LATEST_SCHEMA_VERSION: usize = 6;
 
 /// The canonical filesystem layout for one Local Brain root directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +54,7 @@ static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
             "../migrations/0004_select_only_relationship_strength.sql"
         )),
         M::up(include_str!("../migrations/0005_assets.sql")),
+        M::up(include_str!("../migrations/0006_import_identity.sql")),
     ])
 });
 
@@ -394,6 +395,12 @@ mod tests {
             "chat_conversations",
             "chat_messages",
             "settings",
+            "sources",
+            "external_identities",
+            "person_emails",
+            "person_phones",
+            "assets",
+            "asset_links",
         ];
         for table in durable {
             let count: i64 = conn
@@ -404,6 +411,31 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(count, 1, "missing durable table: {table}");
+        }
+    }
+
+    #[test]
+    fn seeded_sources_exist() {
+        let conn = open_in_memory().unwrap();
+        for slug in [
+            "manual",
+            "agent",
+            "gmail",
+            "google_people",
+            "google_calendar",
+            "google_meet",
+            "zoom",
+            "file",
+            "ai_extraction",
+        ] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sources WHERE slug = ?1",
+                    [slug],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1, "missing seeded source: {slug}");
         }
     }
 

@@ -36,6 +36,9 @@ operate it through the `brain` CLI — never by touching the database file direc
   when importing contacts or when the user gives you explicit contact details;
   otherwise let extraction discover them from documents/interactions. Link to
   them by id with `--link person:<id>`.
+- **source / external identity** — provider-neutral import metadata. `brain`
+  knows source slugs and external ids, not provider APIs. Upstream tools translate
+  Gmail, Google People, calendars, files, or other systems into generic CLI calls.
 
 When unsure between document and interaction: did it *happen between people at a
 time*? → interaction. Is it *material to read/reference*? → document.
@@ -71,6 +74,20 @@ brain add interaction --kind meeting --title "Northwind kickoff" \
 brain add person --full-name "Maya Chen" --email maya@example.com \
   --phone "+1 555 0100" --json
 
+# Idempotent source-backed contact import:
+brain source ensure --slug gmail --name "Gmail" --json
+brain add person --full-name "Maya Chen" --email maya@example.com \
+  --source google_people --external-id people/c123 --json
+
+# Safe untrusted email sender import. Machine/no-reply senders return id:null.
+brain add person-from-email --full-name "Maya Chen" --email maya@example.com \
+  --source gmail --external-id msg-123 --json
+
+# Email interaction import with unresolved raw participants preserved:
+brain add interaction --kind email --title "Intro" --text-file body.txt \
+  --source gmail --external-id msg-123 \
+  --participant "from:Maya Chen <maya@example.com>" --json
+
 # A binary attachment linked to an interaction:
 brain add asset --file ./invoice.pdf --kind attachment \
   --mime-type application/pdf --link interaction:<id> --json
@@ -90,10 +107,23 @@ Notes:
 - Use `--text-file <path>` (or `--text-file -` for stdin) for long content; `--text`
   for short strings.
 - Identical document/interaction content dedupes automatically (`isDuplicate:true`);
-  people dedupe by primary email, then normalized full name; assets dedupe by content
-  hash and can still be linked to a new record. Pass `--allow-duplicate` only when
-  you truly mean to re-import.
+  source-backed interactions dedupe by `--source` + `--external-id` first; people
+  dedupe by external identity, any known email handle, then normalized full name;
+  assets dedupe by content hash and can still be linked to a new record. Pass
+  `--allow-duplicate` only when you truly mean to re-import.
 - Resolve link ids by `brain search` first.
+
+## Provider-neutral import workflow
+
+External fetchers such as `gws` read upstream systems, then call `brain`:
+
+1. Ensure a stable source slug with `brain source ensure`.
+2. Import likely-human contacts with `brain add person` when the source is trusted,
+   or `brain add person-from-email` for untrusted sender/display-name pairs.
+3. Import readable email bodies as `brain add interaction --kind email`.
+4. Import original attachments with `brain add asset --link interaction:<id>`.
+5. Preserve raw participant handles with `--participant` instead of creating people
+   for every address seen in an email or calendar event.
 
 ## Running a daily automation
 

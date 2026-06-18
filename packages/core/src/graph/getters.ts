@@ -203,6 +203,7 @@ export async function getGraph(): Promise<Graph> {
     }
   }
   for (const row of participants) {
+    if (row.personId === null) continue
     if (inScope(row.interactionId, row.personId)) {
       edges.push({ source: row.interactionId, target: row.personId, kind: 'participant' })
     }

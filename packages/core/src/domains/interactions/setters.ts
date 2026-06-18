@@ -10,8 +10,17 @@ export type NewInteraction = NewRecord<Interactions>
 export type InteractionPatch = RecordPatch<Interactions>
 
 export interface InteractionParticipantInput {
-  personId: string
+  personId?: string
   role?: string
+  handle?: string
+  displayName?: string
+  sourceId?: string
+}
+
+function normalizeHandle(handle: string | undefined): string | undefined {
+  const trimmed = handle?.trim()
+  if (!trimmed) return undefined
+  return trimmed.includes('@') ? trimmed.toLowerCase() : trimmed
 }
 
 /**
@@ -30,8 +39,14 @@ export async function createInteraction(
       db.insertInto('interactionParticipants').values({
         id: newId(),
         interactionId: id,
-        personId: participant.personId,
+        ...(participant.personId !== undefined ? { personId: participant.personId } : {}),
         ...(participant.role !== undefined ? { role: participant.role } : {}),
+        ...(participant.handle !== undefined ? { handle: participant.handle } : {}),
+        ...(normalizeHandle(participant.handle) !== undefined
+          ? { normalizedHandle: normalizeHandle(participant.handle) }
+          : {}),
+        ...(participant.displayName !== undefined ? { displayName: participant.displayName } : {}),
+        ...(participant.sourceId !== undefined ? { sourceId: participant.sourceId } : {}),
       }),
     ),
   ]
@@ -39,7 +54,9 @@ export async function createInteraction(
   // Relationship hints update after a relevant interaction (Plan 05 step 9).
   // Runs after the interaction transaction commits so the recompute sees it.
   for (const participant of participants) {
-    await recomputeRelationshipIntelligence(participant.personId)
+    if (participant.personId !== undefined) {
+      await recomputeRelationshipIntelligence(participant.personId)
+    }
   }
   return id
 }

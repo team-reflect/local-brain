@@ -101,7 +101,9 @@ const BINDINGS: Record<SourceRecordType, Record<LinkEntityType, LinkBinding>> = 
           .select('personId')
           .where('interactionId', '=', interactionId)
           .execute()
-          .then((rows) => rows.map((r) => r.personId)),
+          .then((rows) =>
+            rows.map((r) => r.personId).filter((personId): personId is string => personId !== null),
+          ),
     },
     organization: {
       insert: (interactionId, organizationId) =>

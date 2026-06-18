@@ -52,6 +52,26 @@ Key columns:
 - `updated_at`
 - `archived_at`
 
+`primary_email` and `primary_phone` remain fast display fields. Durable imports store
+multiple handles in `person_emails` and `person_phones`.
+
+### `person_emails` and `person_phones`
+
+Multiple contact handles for a person. Importers use normalized values for dedupe while
+preserving the original display value.
+
+Shared key columns:
+
+- `id`
+- `person_id`
+- display value (`email` or `phone`)
+- normalized value (`normalized_email` or `normalized_phone`)
+- `label`
+- `is_primary`
+- `source_id`
+- `created_at`
+- `updated_at`
+
 ### `organizations`
 
 Companies, teams, schools, clubs, vendors, government bodies, and other groups.
@@ -213,6 +233,35 @@ Suggested `kind` values: `avatar`, `logo`, `image`, `screenshot`, `attachment`,
 `storage_path` is app-relative, for example `assets/pasted-20260618-ab12cd34.png` or
 `assets/objects/ab/abcdef...jpg`. Absolute paths stay in provenance fields only.
 
+### `sources` and `external_identities`
+
+Provider-neutral import identity. `sources` names stable upstream systems such as
+`manual`, `agent`, `gmail`, `google_people`, `google_calendar`, `google_meet`, `zoom`,
+`file`, and `ai_extraction`. `external_identities` maps a source/kind/external id to a
+typed Local Brain record for idempotent sync.
+
+`sources` key columns:
+
+- `id`
+- `slug`
+- `name`
+- `description`
+- `created_at`
+- `updated_at`
+
+`external_identities` key columns:
+
+- `id`
+- `entity_type`
+- `entity_id`
+- `source_id`
+- `kind`
+- `external_id`
+- `url`
+- `metadata_json`
+- `created_at`
+- `updated_at`
+
 ### `asset_links`
 
 Typed links from assets to visible records.
@@ -364,7 +413,8 @@ Settings owns AI providers, local paths, diagnostics, and skill setup flags.
 
 Use explicit typed join tables where they make the UI faster and clearer:
 
-- `interaction_participants`: people in an interaction.
+- `interaction_participants`: people in an interaction plus unresolved raw handles from
+  imports (`person_id` can be null when `handle` or `display_name` is preserved).
 - `interaction_organizations`: organizations involved in an interaction.
 - `interaction_projects`: projects discussed in an interaction.
 - `project_people`: people linked to a project.
