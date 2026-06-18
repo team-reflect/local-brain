@@ -257,15 +257,61 @@ pub struct AddAssetArgs<'a> {
     pub allow_duplicate: bool,
 }
 
-fn find_duplicate_asset(conn: &Connection, hash: &str) -> Result<Option<String>, CliError> {
-    let id = conn
+struct DuplicateAsset {
+    id: String,
+    storage_path: String,
+}
+
+fn find_duplicate_asset(conn: &Connection, hash: &str) -> Result<Option<DuplicateAsset>, CliError> {
+    let asset = conn
         .query_row(
-            "SELECT id FROM assets WHERE content_hash = ?1 AND archived_at IS NULL LIMIT 1",
+            "SELECT id, storage_path FROM assets WHERE content_hash = ?1 AND archived_at IS NULL LIMIT 1",
             params![hash],
-            |row| row.get::<_, String>(0),
+            |row| {
+                Ok(DuplicateAsset {
+                    id: row.get(0)?,
+                    storage_path: row.get(1)?,
+                })
+            },
         )
         .ok();
-    Ok(id)
+    Ok(asset)
+}
+
+fn storage_path_exists(conn: &Connection, storage_path: &str) -> Result<bool, CliError> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM assets WHERE storage_path = ?1",
+        params![storage_path],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+fn asset_destination(
+    assets_path: &Path,
+    storage_path: &str,
+) -> Result<std::path::PathBuf, CliError> {
+    let relative = storage_path.strip_prefix("assets/").ok_or_else(|| {
+        CliError::Runtime(format!(
+            "invalid asset storage path '{storage_path}' (expected assets/...)"
+        ))
+    })?;
+    Ok(assets_path.join(relative))
+}
+
+fn ensure_asset_file(assets_path: &Path, storage_path: &str, bytes: &[u8]) -> Result<(), CliError> {
+    let destination = asset_destination(assets_path, storage_path)?;
+    if let Some(parent) = destination.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            CliError::Runtime(format!("could not create {}: {e}", parent.display()))
+        })?;
+    }
+    if !destination.exists() {
+        std::fs::write(&destination, bytes).map_err(|e| {
+            CliError::Runtime(format!("could not write {}: {e}", destination.display()))
+        })?;
+    }
+    Ok(())
 }
 
 fn record_type(link: &LinkRef) -> &'static str {
@@ -322,8 +368,10 @@ pub fn add_asset(
     let hash = hash_bytes(&bytes);
     if let Some(existing) = find_duplicate_asset(conn, &hash)? {
         if !args.allow_duplicate {
-            let linked = insert_asset_links(conn, &existing, &args.links, args.role, args.caption)?;
-            return report_asset(json, &existing, true, linked);
+            ensure_asset_file(assets_path, &existing.storage_path, &bytes)?;
+            let linked =
+                insert_asset_links(conn, &existing.id, &args.links, args.role, args.caption)?;
+            return report_asset(json, &existing.id, true, linked);
         }
     }
 
@@ -336,23 +384,16 @@ pub fn add_asset(
     });
     let filename = safe_filename(original_filename.as_deref().unwrap_or("asset"));
     let prefix = hash.get(0..2).unwrap_or("00");
-    let stored_name = if args.allow_duplicate {
+    let default_storage_path = format!("assets/objects/{prefix}/{hash}-{filename}");
+    let needs_unique_name =
+        args.allow_duplicate || storage_path_exists(conn, &default_storage_path)?;
+    let stored_name = if needs_unique_name {
         format!("{hash}-{id}-{filename}")
     } else {
         format!("{hash}-{filename}")
     };
     let relative_path = format!("assets/objects/{prefix}/{stored_name}");
-    let destination = assets_path.join("objects").join(prefix).join(stored_name);
-    if let Some(parent) = destination.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            CliError::Runtime(format!("could not create {}: {e}", parent.display()))
-        })?;
-    }
-    if !destination.exists() {
-        std::fs::write(&destination, &bytes).map_err(|e| {
-            CliError::Runtime(format!("could not write {}: {e}", destination.display()))
-        })?;
-    }
+    ensure_asset_file(assets_path, &relative_path, &bytes)?;
 
     let original_path = args
         .file

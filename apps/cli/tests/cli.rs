@@ -310,6 +310,52 @@ fn add_asset_copies_file_and_links_to_interaction() {
     assert_eq!(duplicate["isDuplicate"], true);
     assert_eq!(duplicate["id"], asset["id"]);
     assert_eq!(duplicate["linkCount"], 0);
+
+    std::fs::remove_file(root.join(&storage_path)).unwrap();
+    let restored = run_brain_json(
+        &root,
+        &[
+            "--json",
+            "add",
+            "asset",
+            "--file",
+            source.to_str().unwrap(),
+            "--link",
+            &link,
+        ],
+    );
+    assert_eq!(restored["isDuplicate"], true);
+    assert_eq!(restored["id"], asset["id"]);
+    assert!(root.join(&storage_path).is_file());
+
+    conn.execute(
+        "UPDATE assets SET archived_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+        [asset["id"].as_str().unwrap()],
+    )
+    .unwrap();
+    let reimported = run_brain_json(
+        &root,
+        &[
+            "--json",
+            "add",
+            "asset",
+            "--file",
+            source.to_str().unwrap(),
+            "--link",
+            &link,
+        ],
+    );
+    assert_eq!(reimported["isDuplicate"], false);
+    assert_ne!(reimported["id"], asset["id"]);
+    let reimported_storage_path: String = conn
+        .query_row(
+            "SELECT storage_path FROM assets WHERE id = ?1",
+            [reimported["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_ne!(reimported_storage_path, storage_path);
+    assert!(root.join(reimported_storage_path).is_file());
 }
 
 #[test]
