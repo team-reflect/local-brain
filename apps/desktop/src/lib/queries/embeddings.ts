@@ -66,8 +66,10 @@ export function useSetEmbeddingsEnabled() {
       await setEmbeddingsEnabled(enabled)
       if (enabled) {
         // Re-enabling is an explicit recovery action: clear any sticky backfill
-        // error so the coordinator resumes indexing once the model is ready.
+        // error and daily cap so the coordinator resumes indexing once the
+        // model is ready.
         await setBackfillError(null)
+        await setLastBackfillAttemptDay(null)
         await embedEnsure()
       }
     },

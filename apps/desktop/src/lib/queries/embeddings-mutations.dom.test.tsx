@@ -111,15 +111,22 @@ describe('embedding mutation invalidation', () => {
   })
 
   it('invalidates the status query when enabling fails after persisting state', async () => {
-    // `setEmbeddingsEnabled` + `setBackfillError` commit before `embed_ensure`
+    // `setEmbeddingsEnabled` + recovery markers commit before `embed_ensure`
     // rejects, so a failed enable still changed the DB and must refresh the cache.
+    let persistedDay: string | null | undefined
     setBridge({
-      invoke: (command) => {
+      invoke: (command, args) => {
+        const params = ((args as { params?: unknown[] }).params ?? []) as unknown[]
         switch (command) {
           case 'embed_ensure':
             return Promise.reject(new Error('load failed'))
-          case 'db_execute':
+          case 'db_execute': {
+            const sql = String((args as { sql?: unknown }).sql ?? '')
+            if (sql.includes('settings') && params[0] === 'embeddings.lastBackfillAttemptDay') {
+              persistedDay = JSON.parse(String(params[1])) as string | null
+            }
             return Promise.resolve(1)
+          }
           default:
             return Promise.resolve(null)
         }
@@ -130,6 +137,7 @@ describe('embedding mutation invalidation', () => {
     result.current.mutate(true)
 
     await waitFor(() => expect(result.current.isError).toBe(true))
+    expect(persistedDay).toBeNull()
     expect(invalidate).toHaveBeenCalledWith({ queryKey: EMBEDDINGS_STATUS_KEY })
   })
 })
