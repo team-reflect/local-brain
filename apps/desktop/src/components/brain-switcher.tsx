@@ -14,8 +14,8 @@ const ITEM_CLASS =
  * The top-level brain picker — Local Brain's port of Reflect's graph switcher.
  * Sits in the sidebar footer: the active brain's swatch + name, opening a
  * keyboard-navigable menu to switch brain, create or open another, reveal the
- * file, or jump to brain settings. "Brain" is the workspace container; the word
- * "Graph" stays reserved for the Network visualization.
+ * folder, or jump to brain settings. "Brain" is the workspace container; the
+ * word "Graph" stays reserved for the Network visualization.
  */
 export function BrainSwitcher(): ReactNode {
   const { navigate } = useRouter()
@@ -52,7 +52,7 @@ export function BrainSwitcher(): ReactNode {
     // serializes switches regardless (see brains.rs), but this avoids firing a
     // redundant second open_brain that would just churn the cache.
     if (openBrain.isPending) return
-    if (!brain.isActive) openBrain.mutate(brain.path)
+    if (!brain.isActive) openBrain.mutate(brain.rootPath)
   }
 
   function openDialog(mode: BrainDialogMode): void {
@@ -106,11 +106,11 @@ export function BrainSwitcher(): ReactNode {
           >
             {others.map((brain) => (
               <button
-                key={brain.path}
+                key={brain.rootPath}
                 type="button"
                 role="menuitem"
                 onClick={() => switchTo(brain)}
-                title={brain.path}
+                title={brain.rootPath}
                 className={ITEM_CLASS}
               >
                 <BrainSwatch color={brain.color} className="size-3.5" />
@@ -122,7 +122,7 @@ export function BrainSwitcher(): ReactNode {
                 type="button"
                 role="menuitem"
                 onClick={closeMenu}
-                title={activeBrain.path}
+                title={activeBrain.rootPath}
                 className={cn(ITEM_CLASS, 'cursor-default')}
               >
                 <BrainSwatch color={activeBrain.color} className="size-3.5" />
@@ -147,7 +147,7 @@ export function BrainSwitcher(): ReactNode {
                 role="menuitem"
                 onClick={() => {
                   closeMenu()
-                  revealBrain.mutate(activeBrain.path)
+                  revealBrain.mutate(activeBrain.rootPath)
                 }}
                 className={ITEM_CLASS}
               >

@@ -10,11 +10,10 @@ export type BrainDialogMode = 'create' | 'open'
 
 /**
  * Create a new brain, or open an existing one. The primary affordance is the
- * native OS file dialog (via `@tauri-apps/plugin-dialog`): "Browse…" opens a
- * file picker for an existing brain, or a save dialog for a new one. The path
- * field stays editable as a validated fallback (and to show the chosen path) —
- * Rust validates either way, so a bad path or an existing file surfaces the
- * error rather than failing quietly.
+ * native OS directory dialog (via `@tauri-apps/plugin-dialog`): "Browse…"
+ * picks the folder that contains `brain.sqlite`, `assets/`, and support files.
+ * The path field stays editable as a validated fallback (and to show the chosen
+ * path) — Rust validates either way.
  */
 export function BrainDialog({
   open,
@@ -29,7 +28,7 @@ export function BrainDialog({
 }): ReactNode {
   const createBrain = useCreateBrain()
   const openBrain = useOpenBrain()
-  const [path, setPath] = useState('')
+  const [rootPath, setRootPath] = useState('')
   const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -38,7 +37,7 @@ export function BrainDialog({
   const [openedFor, setOpenedFor] = useState<BrainDialogMode | null>(null)
   if (open && openedFor !== mode) {
     setOpenedFor(mode)
-    setPath('')
+    setRootPath('')
     setName('')
     setError(null)
   }
@@ -58,24 +57,24 @@ export function BrainDialog({
     setError(null)
     try {
       const chosen = isCreate ? await pickBrainToCreate() : await pickBrainToOpen()
-      if (chosen) setPath(chosen)
+      if (chosen) setRootPath(chosen)
     } catch {
-      setError('Could not open the file picker — enter the path manually instead.')
+      setError('Could not open the folder picker — enter the path manually instead.')
     }
   }
 
   async function submit(): Promise<void> {
     setError(null)
-    const target = path.trim()
+    const target = rootPath.trim()
     if (!target) {
-      setError('Enter a path to the brain database file.')
+      setError('Enter a path to the brain folder.')
       return
     }
     try {
       const trimmedName = name.trim()
       const brain = isCreate
         ? await createBrain.mutateAsync(
-            trimmedName ? { path: target, name: trimmedName } : { path: target },
+            trimmedName ? { rootPath: target, name: trimmedName } : { rootPath: target },
           )
         : await openBrain.mutateAsync(target)
       onSwitched?.(brain)
@@ -107,8 +106,8 @@ export function BrainDialog({
           {error ? <Alert variant="error">{error}</Alert> : null}
           <p className="text-xs text-muted-foreground">
             {isCreate
-              ? 'A brain is one SQLite database file. Choose where to create it (the file and its folders are created for you), or type an absolute path that does not exist yet.'
-              : 'Choose an existing brain database file (a .sqlite created by Local Brain), or type its absolute path.'}
+              ? 'Choose the folder for this brain. Local Brain creates brain.sqlite, assets, and support files inside it.'
+              : 'Choose a Local Brain folder. Empty folders are bootstrapped; existing brain folders are opened.'}
           </p>
           {isCreate ? (
             <label className="flex flex-col gap-1">
@@ -122,13 +121,13 @@ export function BrainDialog({
             </label>
           ) : null}
           <label className="flex flex-col gap-1">
-            <span className={sectionLabel}>Database path</span>
+            <span className={sectionLabel}>Brain folder</span>
             <div className="flex items-center gap-2">
               <input
                 ref={inputRef}
-                value={path}
-                onChange={(event) => setPath(event.target.value)}
-                placeholder="/Users/you/brains/work.sqlite"
+                value={rootPath}
+                onChange={(event) => setRootPath(event.target.value)}
+                placeholder="/Users/you/Brains/Work"
                 spellCheck={false}
                 className={`${controlClass} flex-1 font-mono text-xs`}
                 onKeyDown={(event) => {

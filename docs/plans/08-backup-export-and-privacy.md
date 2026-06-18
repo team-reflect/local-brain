@@ -1,6 +1,6 @@
 # Plan 08 - Settings and Privacy Boundaries
 
-**Goal:** Put diagnostics, AI providers, local database visibility, skill setup, and
+**Goal:** Put diagnostics, AI providers, local storage visibility, skill setup, and
 privacy boundaries under Settings.
 
 **Depends on:** Plans 01-07.
@@ -10,15 +10,17 @@ privacy boundaries under Settings.
 ## Scope
 
 **In:** deletion/archive semantics, keychain secrets, diagnostics, external-model
-boundary settings, skill setup, and local database path visibility.
+boundary settings, skill setup, and local storage path visibility.
 
 **Out:** hosted sync, git sync, encrypted cloud backup, app-managed backup/export,
 and row-level sensitivity labels.
 
 ## Key Decisions
 
-- Settings owns AI providers, local database path, diagnostics, and skill setup.
-- App-managed backup/export is deferred; SQLite remains the durable source of truth.
+- Settings owns AI providers, local brain root visibility, diagnostics, and skill setup.
+- App-managed backup/export is deferred; SQLite remains the source of truth for
+  records and asset metadata, while app-managed assets stay under the same brain root
+  as durable bytes.
 - Keychain stores AI provider keys and local secrets.
 - Launch privacy is app-level and model-boundary based.
 - Deletion should be explicit and predictable.
@@ -29,7 +31,7 @@ and row-level sensitivity labels.
 1. Add Settings sections:
    - general
    - AI providers
-   - local database
+   - local brain storage
    - diagnostics
    - agent skill setup
 2. Add deletion/archive rules:
@@ -43,7 +45,7 @@ and row-level sensitivity labels.
    - selected provider/model
    - diagnostics showing whether Ask can run
 5. Add diagnostics:
-   - database path and migration status
+   - brain root, database path, asset directory path, and migration status
    - FTS/vector availability
    - keychain/provider status
    - CLI/skill installation status
@@ -54,7 +56,8 @@ and row-level sensitivity labels.
 - Provider keys are not stored in plain settings rows.
 - Destructive deletion behavior is explicit.
 - Diagnostics explain common failures clearly.
-- Settings exposes the local SQLite path without providing backup/export actions.
+- Settings exposes the brain root, local SQLite path, and asset directory path without
+  providing backup/export actions.
 - No launch code depends on row-level sensitivity labels.
 
 ## Tests or Verification
@@ -67,5 +70,5 @@ and row-level sensitivity labels.
 ## Open Questions
 
 - Backup/export remains future work and should not block launch.
-- Cloud-folder sync should not be recommended for the SQLite database unless/until it
-  has a tested locking and conflict story.
+- Cloud-folder sync should not be recommended for the brain root unless/until SQLite
+  locking, asset conflicts, and recovery have a tested story.

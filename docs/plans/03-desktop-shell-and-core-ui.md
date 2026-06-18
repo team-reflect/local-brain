@@ -9,8 +9,8 @@
 ## Scope
 
 **In:** Tauri app shell, React routes, sidebar, global search entry, Today, Tasks,
-Network (including Graph), Projects, Ask, Settings, shared UI primitives, basic record detail
-pages.
+Network (including Graph), Projects, Ask, Settings, first-run brain folder chooser,
+shared UI primitives, basic record detail pages.
 
 **Out:** full extraction, advanced retrieval, packaging.
 
@@ -26,7 +26,10 @@ pages.
 - Network has Graph, People, and Organizations tabs, with Graph as the default.
 - Documents and interactions are browsed inside related detail pages and through search
   or Ask.
-- Settings owns diagnostics, AI providers, local database path, and skill setup.
+- Settings owns diagnostics, AI providers, local storage paths, and skill setup.
+- Startup follows Reflect Open's graph chooser: choose/open a brain folder, show recents,
+  auto-open the newest recent folder on launch, and surface open failures back on the
+  chooser.
 - Graph is a Picardo-inspired node graph with the user at the center.
 - Use a typed route model and central command/keymap registry, following Reflect Open's
   routing and shortcut pattern.
@@ -35,12 +38,18 @@ pages.
 ## Implementation Steps
 
 1. Create the Tauri window and React router.
-2. Build app layout:
+2. Build the brain chooser/loading gate:
+   - OS folder picker for a brain directory
+   - recent brain list with open and forget actions
+   - loading, choosing, opening, ready, and error states
+   - auto-open newest recent brain on launch
+   - display cloud-folder warnings when the selected root is inside iCloud/Dropbox/Drive
+3. Build app layout:
    - fixed sidebar
    - top search/command field
    - main content region
    - optional right-side detail pane
-3. Define typed routes:
+4. Define typed routes:
    - `{ kind: 'today' }`
    - `{ kind: 'tasks' }`
    - `{ kind: 'network'; tab: 'graph' | 'people' | 'organizations' }`
@@ -53,7 +62,7 @@ pages.
    - `{ kind: 'interaction'; id: string }`
    - `{ kind: 'ask'; conversationId?: string }`
    - `{ kind: 'settings'; section?: string }`
-4. Add URL mappings:
+5. Add URL mappings:
    - `/today`
    - `/tasks`
    - `/network?tab=graph`
@@ -62,12 +71,12 @@ pages.
    - `/projects`
    - `/ask`
    - `/settings`
-5. Add route history:
+6. Add route history:
    - back/forward
    - focus restore
    - selected row/detail restore
    - deep-link-safe record ids
-6. Add a central command/keymap registry:
+7. Add a central command/keymap registry:
    - go to Today
    - open command palette
    - back/forward
@@ -76,14 +85,14 @@ pages.
    - new task
    - run daily report
    - open Graph
-7. Add detail routes or drawers for:
+8. Add detail routes or drawers for:
    - person
    - organization
    - project
    - task
    - document
    - interaction
-8. Build shared components:
+9. Build shared components:
    - sidebar item
    - table/list view
    - filters
@@ -92,8 +101,8 @@ pages.
    - linked-record section
    - citation list
    - settings section
-9. Add shadcn components needed for the MVP and theme them through `globals.css`.
-10. Build Today from real queries:
+10. Add shadcn components needed for the MVP and theme them through `globals.css`.
+11. Build Today from real queries:
    - AI daily brief
    - due tasks
    - scheduled tasks
@@ -101,20 +110,22 @@ pages.
    - relationship follow-ups
    - recent interactions
    - active project updates
-11. Build Tasks with status filters and inline completion.
-12. Build Network tables and detail pages.
-13. Build Projects table/detail pages.
-14. Build the Network Graph tab from typed records and links:
+12. Build Tasks with status filters and inline completion.
+13. Build Network tables and detail pages.
+14. Build Projects table/detail pages.
+15. Build the Network Graph tab from typed records and links:
     - center on the user's own person row
     - show people, organizations, projects, tasks, documents, interactions, and memories
     - open related detail pages from nodes
-15. Build Ask shell with conversation list, chat panel, and citations.
-16. Build Settings sections for AI providers, local database, diagnostics, and skill
+16. Build Ask shell with conversation list, chat panel, and citations.
+17. Build Settings sections for AI providers, local brain storage, diagnostics, and skill
     setup.
 
 ## Acceptance Criteria
 
 - The app opens to Today.
+- A first-run user can choose a brain folder; a returning user auto-opens the newest
+  recent brain or sees the chooser with recoverable errors.
 - Today reads like a generated operating brief, not just a task list.
 - Sidebar matches [UI Direction](../ui-direction.md).
 - Graph renders a user-centered node map from seed data.
@@ -122,6 +133,7 @@ pages.
 - A user can create/edit people, organizations, projects, and tasks.
 - A user can quickly inspect what an automation changed or cited.
 - Detail pages show linked tasks, documents, interactions, and memories where relevant.
+- People and organization detail pages can show linked avatar and logo assets.
 - Ask UI can display cited answers once Plan 06 supplies retrieval.
 - Back/forward and command-palette navigation use the typed route model.
 - Global keyboard shortcuts are registered once and covered by duplicate-binding tests.

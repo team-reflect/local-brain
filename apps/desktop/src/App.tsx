@@ -49,5 +49,5 @@ export function App(): ReactNode {
     return <BrainChooser />
   }
 
-  return <BrainWorkspace key={active.data.path} />
+  return <BrainWorkspace key={active.data.rootPath} />
 }

@@ -5,7 +5,9 @@ base while preserving Local Brain's SQLite-first product model.
 
 ## Storage
 
-- SQLite is durable storage.
+- SQLite is the durable source of truth for records and relationships.
+- Binary asset bytes live as ordinary files under an app-managed `assets/` directory
+  in the same brain root.
 - Rust owns database connections, migrations, transactions, SQLite extension loading,
   keychain access, file-system access, and native packaging concerns.
 - TypeScript owns product policy, orchestration, retrieval, AI context assembly, and UI
@@ -14,18 +16,33 @@ base while preserving Local Brain's SQLite-first product model.
 - Derived indexes can always be rebuilt from durable tables.
 - Markdown export can exist later, but markdown is not the storage format.
 
-A **brain** is one such SQLite database — the top-level workspace the user picks
-and switches between (Reflect calls this a "graph"; Local Brain keeps "graph" for
-the Network visualization, see Product Nouns). The set of known brains is a small
-Rust-owned **brain registry** — its own SQLite database in the app data directory
-(`<app data dir>/registry.sqlite`), kept SQLite-first like the rest of Local
-Brain's durable state and deliberately separate from any switchable brain's
-tables (a brain's own `settings` live inside it and cannot catalogue the others).
-The registry records each brain's path, display name, identity color, and
-timestamps, plus the active brain; Rust owns its WAL-backed writes and the
-connection swap so switching brains is real, not a relaunch. A corrupt registry
-file is moved aside and recreated so the app still starts. `$BRAIN_DB` still pins
-a single brain for the CLI and overrides the registry at startup.
+A **brain** is a user-selected directory, not a user-selected `.sqlite` file. This
+copies Reflect Open's graph-root behavior: the first-run screen asks the user to pick
+or create a folder, Rust bootstraps the expected layout inside it, and later launches
+auto-open the most recently used folder. Reflect calls this root a "graph"; Local
+Brain keeps "graph" for the Network visualization, see Product Nouns.
+
+Default brain root layout:
+
+```text
+Personal Brain/
+  brain.sqlite
+  brain.sqlite-wal
+  brain.sqlite-shm
+  assets/
+  .local-brain/
+    meta.json
+    inbox/
+    rejected/
+```
+
+The set of known brains should mirror Reflect Open's recents behavior: keep a small
+OS-config recents store outside any brain root, newest first, deduped by root path, and
+safe to forget without touching user data. A corrupt recents store should surface a
+diagnostic and never wipe the existing entries by saving an empty list over it. The
+active root and a monotonic generation live in Rust state so overlapping opens or stale
+writes cannot land in the wrong brain. `$BRAIN_ROOT` pins one brain root for the CLI;
+`$BRAIN_DB` can remain an advanced escape hatch for direct database testing.
 
 Durable tables:
 
@@ -36,6 +53,8 @@ Durable tables:
 - tasks
 - interactions
 - documents
+- assets
+- asset_links
 - content_chunks
 - memories
 - memory_links
@@ -65,7 +84,7 @@ The most important transferable patterns are:
   OS-appropriate deletion semantics.
 
 Do not port Reflect Open's markdown-as-truth assumptions. Local Brain's SQLite database
-is durable user data, not a disposable projection.
+and app-managed assets are durable user data, not a disposable projection.
 
 ## Code Organization
 
@@ -165,8 +184,31 @@ Provenance belongs on the owning record:
 
 - documents can store original path, URL, external ID, and content hash.
 - interactions can store original path, URL, external ID, and content hash.
+- assets can store original filename, original path, URL, content hash, MIME type, and
+  dimensions.
 - tasks can link back to originating documents or interactions.
 - memories and chat answers cite exact chunks through evidence references.
+
+## Asset Storage
+
+Follow Reflect Open's attachment mechanics, adapted for SQLite durability:
+
+- keep binary bytes as ordinary files under the selected brain root's app-managed
+  `assets/` directory
+- keep SQLite authoritative for asset identity, metadata, typed links, provenance, and
+  deletion/archive state
+- use app-relative storage paths only; absolute paths are provenance, never durable
+  storage references
+- write assets through Rust primitives with path traversal guards, symlink-aware
+  resolution, temp-file plus rename atomic writes, and content hashing
+- serve local images through Tauri's asset protocol or an equivalent scoped local file
+  bridge
+- treat thumbnails, OCR, descriptions, and embeddings as derived data that can be
+  rebuilt from the original asset and SQLite manifest
+
+For a brain root at `.../Personal Brain/`, the database is
+`.../Personal Brain/brain.sqlite` and the asset root is `.../Personal Brain/assets/`.
+Moving or backing up a brain must include the whole root.
 
 ## File And Import Safety
 
@@ -233,7 +275,7 @@ mono metadata, compact controls, a sunken sidebar, and token-derived graph chrom
 - JSON output shapes should be stable and snapshot-tested.
 - The CLI should share the Rust schema/migration crate with the desktop app.
 - Agents should query before writing.
-- Agents should add documents, interactions, tasks, and memories through the CLI.
+- Agents should add documents, interactions, assets, tasks, and memories through the CLI.
 - The app does not need a top-level automation log view for launch.
 
 ## Settings
@@ -251,7 +293,8 @@ Settings owns:
 Provider keys belong in the OS keychain, not regular settings rows.
 
 Git, sync, backup, and export mechanics should not leak into launch UI. Future sync
-and backup/export flows are possible, but SQLite remains the launch source of truth.
+and backup/export flows are possible, but SQLite remains the source of truth for
+records and asset metadata.
 
 ## Code Layout
 

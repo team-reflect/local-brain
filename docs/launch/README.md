@@ -1,9 +1,10 @@
 # Local Brain — Launch Guide
 
-Local Brain is a private, local-first personal CRM and knowledge base. Everything
-lives in a single SQLite database on your machine; nothing is uploaded. The
-desktop app is for browsing and correction; the `brain` CLI + agent skill are the
-primary way agents (e.g. Codex) read and write your brain.
+Local Brain is a private, local-first personal CRM and knowledge base. Each brain
+lives in a folder on your machine, with SQLite plus assets stored side by side;
+nothing is uploaded. The desktop app is for browsing and correction; the `brain`
+CLI + agent skill are the primary way agents (e.g. Codex) read and write your
+brain.
 
 > Audience: agent-native technical users. Launch target: **macOS desktop**.
 
@@ -17,7 +18,8 @@ primary way agents (e.g. Codex) read and write your brain.
    unidentified developer (alpha builds are **unsigned** — see
    [checklist.md](checklist.md) for the signing plan). Right-click → Open, or
    `xattr -dr com.apple.quarantine "Local Brain.app"`.
-3. The app creates its database on first run and shows a short welcome.
+3. On first launch, choose the folder that should hold this brain. The app
+   creates `brain.sqlite`, `assets/`, and `.local-brain/` inside that folder.
 
 ### Building from source
 
@@ -34,22 +36,30 @@ at `Contents/MacOS/brain`. (DMG packaging needs a GUI session; see
 
 ## Local storage
 
-Each **brain** is one SQLite file — your top-level workspace. A fresh install
-uses a single default brain; you can create or open more and switch between them
-from the brain switcher at the top of the sidebar or under **Settings → Brain**.
-The active brain's path is resolved as:
+Each **brain** is one root folder — your top-level workspace:
 
-1. `--db <path>` (CLI only)
-2. `$BRAIN_DB` (also pins the desktop app to that brain on startup)
-3. the last brain you opened (from the desktop brain registry)
-4. the platform data directory: `~/Library/Application Support/local-brain/brain.sqlite`
+```text
+Personal Brain/
+  brain.sqlite
+  brain.sqlite-wal
+  brain.sqlite-shm
+  assets/
+  .local-brain/
+```
 
-The desktop app and the `brain` CLI resolve the **same** default path, so the CLI
-works whether or not the app is running. The active brain's path is shown in
-**Settings → Brain**, **Settings → Local database**, and **Settings →
-Diagnostics**. Migrations run automatically when a brain is opened and the schema
-is versioned. (Note: the CLI operates on the default/`$BRAIN_DB` brain; choosing a
-non-default brain for the CLI is a documented follow-up.)
+The desktop app opens `$BRAIN_ROOT` when set, otherwise the last brain you opened
+from its registry. If neither exists, it shows the folder chooser. The `brain`
+CLI resolves storage as:
+
+1. `--db <path>` (advanced exact-file override)
+2. `--brain <dir>`
+3. `$BRAIN_DB` (advanced exact-file override)
+4. `$BRAIN_ROOT`
+5. the legacy platform data path for diagnostics/dev workflows
+
+The active brain folder, SQLite path, and assets path are shown in **Settings →
+Brain**, **Settings → Local database**, and **Settings → Diagnostics**.
+Migrations run automatically when a brain is opened and the schema is versioned.
 
 ## Importing your first record
 
@@ -105,7 +115,8 @@ needed to answer are sent, assembled through one checked helper.
 ## Troubleshooting
 
 - **"no brain database" (CLI exit 4):** no database at the resolved path. Run an
-  `brain add …`, open the app once, or pass `--db`.
+  `brain add …` with `--brain <dir>`, open the app and choose a folder, or pass
+  the advanced `--db` override.
 - **Ask says "not configured":** add an AI provider key (Settings → AI providers) or set
   `ANTHROPIC_API_KEY` for the CLI. Check the kill switch isn't off.
 - **`brain ask` returns evidence but no prose:** no model configured — the cited

@@ -10,14 +10,47 @@ use rusqlite::Connection;
 
 use crate::error::CliError;
 
-/// Resolve the database path: an explicit `--db` flag wins; otherwise defer to
-/// the shared `$BRAIN_DB`/platform-data-dir resolution the desktop app uses too.
-pub fn resolve_db_path(flag: Option<&Path>) -> Result<PathBuf, CliError> {
-    if let Some(path) = flag {
-        return Ok(path.to_path_buf());
+#[derive(Debug, Clone)]
+pub struct StoragePaths {
+    pub root_path: Option<PathBuf>,
+    pub database_path: PathBuf,
+    pub assets_path: Option<PathBuf>,
+}
+
+/// Resolve storage paths: `--db` wins as an exact-file override, then `--brain`
+/// / `$BRAIN_ROOT` derive the standard folder layout, then the legacy `$BRAIN_DB`
+/// / app-data fallback remains available for dev and diagnostics.
+pub fn resolve_storage(
+    brain_flag: Option<&Path>,
+    db_flag: Option<&Path>,
+) -> Result<StoragePaths, CliError> {
+    if let Some(path) = db_flag {
+        return Ok(StoragePaths {
+            root_path: None,
+            database_path: path.to_path_buf(),
+            assets_path: None,
+        });
     }
-    brain_schema::resolve_db_path()
-        .ok_or_else(|| CliError::NoDatabase("could not resolve a data directory".to_string()))
+
+    if let Some(root) = brain_flag
+        .map(Path::to_path_buf)
+        .or_else(brain_schema::resolve_brain_root)
+    {
+        let paths = brain_schema::bootstrap_brain_root(&root)?;
+        return Ok(StoragePaths {
+            root_path: Some(paths.root_path),
+            database_path: paths.database_path,
+            assets_path: Some(paths.assets_path),
+        });
+    }
+
+    let database_path = brain_schema::resolve_db_path()
+        .ok_or_else(|| CliError::NoDatabase("could not resolve a data directory".to_string()))?;
+    Ok(StoragePaths {
+        root_path: None,
+        database_path,
+        assets_path: None,
+    })
 }
 
 /// Open + migrate the database at `path`. Creates the file/parent dir if needed.

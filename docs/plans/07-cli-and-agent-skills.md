@@ -10,7 +10,7 @@ querying, and reporting from the user's local brain.
 ## Scope
 
 **In:** `brain` CLI, JSON output, local skill docs, add/search/ask/today/report/graph
-commands, record lookup, database path resolution, sidecar bundling, installation
+commands, record lookup, brain-root/database/asset path resolution, sidecar bundling, installation
 checks.
 
 **Out:** hosted API, plugin marketplace, automatic external app sync.
@@ -23,7 +23,8 @@ checks.
 - CLI writes use the same SQLite schema/migration crate as the desktop app.
 - The CLI opens the SQLite database directly; it does not require the desktop app to be
   running and does not use Tauri IPC.
-- Agents can add documents, interactions, tasks, and memories with direct provenance.
+- Agents can add documents, interactions, assets, tasks, and memories with direct
+  provenance.
 - Agents can search and ask, but cited answers still come from document or interaction
   chunks.
 - stdout carries data only; diagnostics and warnings go to stderr.
@@ -46,11 +47,12 @@ checks.
    - binary name `brain`
    - `clap` command surface
    - shared error-to-exit-code mapping
-2. Add database resolution:
-   - explicit `--db <path>`
-   - `BRAIN_DB` environment variable
-   - configured default path from app settings when available
-   - clear error if no brain database exists
+2. Add brain-root resolution:
+   - explicit `--brain <directory>`
+   - `BRAIN_ROOT` environment variable
+   - newest recent brain root from the OS-config recents store
+   - advanced `--db <path>` / `BRAIN_DB` override for tests and diagnostics
+   - clear error if no brain root or database exists
 3. Add SQLite open behavior:
    - use `crates/brain-schema`
    - check schema version
@@ -64,6 +66,7 @@ checks.
 5. Add write commands:
    - `brain add document --title ... --text-file ...`
    - `brain add interaction --kind meeting --title ... --text-file ...`
+   - `brain add asset --file ... --link person:... --role avatar`
    - `brain add task --title ...`
    - `brain remember --kind fact --claim ... --link person:...`
 6. Add read/query commands:
@@ -93,6 +96,7 @@ checks.
    - when to add a document versus interaction
    - how to cite evidence
    - how to avoid duplicate records
+   - how to add and link binary assets without inlining bytes into SQLite text fields
    - how to query before writing
    - how to run a daily automation
    - how to produce a report and todo list
@@ -108,6 +112,7 @@ checks.
 
 - An agent can add a meeting transcript as an interaction.
 - An agent can add a reference note as a document.
+- An agent can add an avatar, image, or attachment as a linked asset.
 - An agent can add a task linked to a person/project.
 - An agent can ask a cited question from the terminal.
 - An agent can generate a daily report and todo list from the terminal.

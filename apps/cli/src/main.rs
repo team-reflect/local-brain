@@ -31,6 +31,10 @@ use output::{diag, print_json};
     about = "Agent interface to a Local Brain database"
 )]
 struct Cli {
+    /// Path to a brain folder (uses <DIR>/brain.sqlite; overrides $BRAIN_ROOT).
+    #[arg(long, global = true, value_name = "DIR", conflicts_with = "db")]
+    brain: Option<PathBuf>,
+
     /// Path to the brain database (overrides $BRAIN_DB and the default location).
     #[arg(long, global = true, value_name = "PATH")]
     db: Option<PathBuf>,
@@ -223,13 +227,18 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> Result<(), CliError> {
-    let db_path = db::resolve_db_path(cli.db.as_deref())?;
+    let storage = db::resolve_storage(cli.brain.as_deref(), cli.db.as_deref())?;
+    let db_path = storage.database_path.clone();
     let json = cli.json;
 
     match cli.command {
         Command::Path => {
             if json {
-                print_json(&json!({ "dbPath": db_path.display().to_string() }))
+                print_json(&json!({
+                    "brainRoot": storage.root_path.as_ref().map(|path| path.display().to_string()),
+                    "dbPath": db_path.display().to_string(),
+                    "assetsPath": storage.assets_path.as_ref().map(|path| path.display().to_string()),
+                }))
             } else {
                 println!("{}", db_path.display());
                 Ok(())
@@ -241,7 +250,9 @@ fn run(cli: Cli) -> Result<(), CliError> {
             let version = db::schema_version(&conn)?;
             if json {
                 print_json(&json!({
+                    "brainRoot": storage.root_path.as_ref().map(|path| path.display().to_string()),
                     "dbPath": db_path.display().to_string(),
+                    "assetsPath": storage.assets_path.as_ref().map(|path| path.display().to_string()),
                     "exists": exists,
                     "schemaVersion": version,
                 }))
@@ -251,7 +262,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 Ok(())
             }
         }
-        Command::Doctor => doctor(&db_path, json),
+        Command::Doctor => doctor(&storage, json),
 
         Command::Add { what } => {
             let mut conn = db::open(&db_path)?;
@@ -358,7 +369,8 @@ fn run(cli: Cli) -> Result<(), CliError> {
 }
 
 /// `brain doctor` — environment, database, and model-boundary health.
-fn doctor(db_path: &std::path::Path, json: bool) -> Result<(), CliError> {
+fn doctor(storage: &db::StoragePaths, json: bool) -> Result<(), CliError> {
+    let db_path = &storage.database_path;
     let exists = db_path.is_file();
     let (schema_version, ok) = match db::open(db_path) {
         Ok(conn) => (db::schema_version(&conn).unwrap_or(-1), true),
@@ -374,7 +386,9 @@ fn doctor(db_path: &std::path::Path, json: bool) -> Result<(), CliError> {
 
     if json {
         print_json(&json!({
+            "brainRoot": storage.root_path.as_ref().map(|path| path.display().to_string()),
             "dbPath": db_path.display().to_string(),
+            "assetsPath": storage.assets_path.as_ref().map(|path| path.display().to_string()),
             "dbExists": exists,
             "dbOk": ok,
             "schemaVersion": schema_version,

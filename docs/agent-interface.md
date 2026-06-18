@@ -10,9 +10,11 @@ or approved local database access.
 ## Principles
 
 - Query before writing.
-- Write typed records: documents, interactions, tasks, and hidden memories.
+- Write typed records: documents, interactions, assets, tasks, and hidden memories.
 - Use people, organizations, projects, and tasks as the main links.
 - Store readable imported text in SQLite through the CLI.
+- Store binary assets through CLI file import so SQLite can record metadata and typed
+  links while bytes stay in the app-managed `assets/` directory.
 - Preserve provenance directly on documents, interactions, tasks, memories, and
   evidence references.
 - Prefer cited answers over uncited summaries.
@@ -33,6 +35,7 @@ Add records:
 ```bash
 brain add document --title "Kitchen remodel notes" --text-file notes.md
 brain add interaction --kind meeting --title "Call with Maya" --text-file transcript.txt
+brain add asset --file maya.jpg --link person:maya --role avatar
 brain add task --title "Send Maya the revised budget" --project "Kitchen remodel"
 brain remember --kind decision --claim "Maya approved the revised budget range" --link person:maya
 ```
@@ -61,6 +64,13 @@ Use a document for user-readable reference material:
 - receipts
 - long-form reference text
 
+Use an asset for binary supporting material:
+
+- avatars and logos
+- screenshots and images
+- original attachments whose readable text is stored separately
+- source files that should remain inspectable beside the database
+
 Use an interaction for a human exchange:
 
 - meeting transcript
@@ -82,6 +92,14 @@ Before adding a record:
 5. Let extraction create hidden memories unless the agent has an explicit atomic claim
    to store.
 
+When adding an asset:
+
+- Import from a local file path; do not inline base64 in document text.
+- Link it to a typed record with a role such as avatar, logo, attachment, inline_image,
+  screenshot, or source_file.
+- Preserve original filename, original path, URL, MIME type, size, and content hash when
+  available.
+
 When adding a memory:
 
 - Keep it atomic.
@@ -97,6 +115,7 @@ The local skill should teach agents:
 - when to create documents versus interactions,
 - how to query before writing,
 - how to add tasks and memories,
+- how to add and link binary assets,
 - how to run daily update/report/todo workflows,
 - how to query the user-centered graph,
 - how to request JSON output,

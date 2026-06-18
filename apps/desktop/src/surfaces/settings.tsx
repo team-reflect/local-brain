@@ -158,7 +158,7 @@ function BrainSettings(): ReactNode {
 
   function saveName(): void {
     if (brain && nameChanged) {
-      rename.mutate({ path: brain.path, name: nameValue.trim() })
+      rename.mutate({ rootPath: brain.rootPath, name: nameValue.trim() })
       setNameDraft(null)
     }
   }
@@ -167,10 +167,10 @@ function BrainSettings(): ReactNode {
     <Section title="Brain">
       <div className="flex flex-col gap-4 text-sm">
         <p className="text-muted-foreground">
-          A <strong className="font-medium text-foreground">brain</strong> is one local SQLite
-          database — your top-level workspace. Switch between brains from the picker at the top of
-          the sidebar. (The Network <em>Graph</em> is a different thing: a visualization of the
-          records inside this brain.)
+          A <strong className="font-medium text-foreground">brain</strong> is one local folder —
+          your top-level workspace containing the SQLite database, assets, and support files. Switch
+          between brains from the picker at the top of the sidebar. (The Network <em>Graph</em> is a
+          different thing: a visualization of the records inside this brain.)
         </p>
 
         {brain ? (
@@ -209,7 +209,7 @@ function BrainSettings(): ReactNode {
                     aria-label={option.label}
                     aria-pressed={option.id === brain.color}
                     title={option.label}
-                    onClick={() => setColor.mutate({ path: brain.path, color: option.id })}
+                    onClick={() => setColor.mutate({ rootPath: brain.rootPath, color: option.id })}
                     className={cn(
                       'flex size-6 items-center justify-center rounded-md ring-2 ring-offset-1 ring-offset-card transition-colors',
                       option.id === brain.color ? 'ring-ring' : 'ring-transparent hover:ring-border',
@@ -225,16 +225,28 @@ function BrainSettings(): ReactNode {
               </div>
             </BrainField>
 
-            <BrainField label="Location">
+            <BrainField label="Brain folder">
               <div className="flex items-center gap-2">
                 <code className="min-w-0 flex-1 truncate rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs text-card-foreground">
-                  {brain.path}
+                  {brain.rootPath}
                 </code>
-                <Button variant="ghost" onClick={() => reveal.mutate(brain.path)} aria-label="Reveal in file manager">
+                <Button variant="ghost" onClick={() => reveal.mutate(brain.rootPath)} aria-label="Reveal in file manager">
                   <SquareArrowOutUpRight className="size-3.5" aria-hidden />
                   Reveal
                 </Button>
               </div>
+            </BrainField>
+
+            <BrainField label="Database">
+              <code className="min-w-0 flex-1 truncate rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs text-card-foreground">
+                {brain.databasePath}
+              </code>
+            </BrainField>
+
+            <BrainField label="Assets">
+              <code className="min-w-0 flex-1 truncate rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs text-card-foreground">
+                {brain.assetsPath}
+              </code>
             </BrainField>
 
             <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1.5 text-xs">
@@ -262,20 +274,20 @@ function BrainSettings(): ReactNode {
             <ul className="flex flex-col gap-px">
               {others.map((entry: BrainInfo) => (
                 <li
-                  key={entry.path}
+                  key={entry.rootPath}
                   className="flex items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-secondary/60"
                 >
                   <BrainSwatch color={entry.color} className="size-4" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm text-foreground">{entry.name}</span>
-                    <span className="block truncate font-mono text-xs text-muted-foreground">{entry.path}</span>
+                    <span className="block truncate font-mono text-xs text-muted-foreground">{entry.rootPath}</span>
                   </span>
-                  <Button variant="outline" onClick={() => openBrain.mutate(entry.path)}>
+                  <Button variant="outline" onClick={() => openBrain.mutate(entry.rootPath)}>
                     Switch
                   </Button>
                   <Button
                     variant="ghost"
-                    onClick={() => forget.mutate(entry.path)}
+                    onClick={() => forget.mutate(entry.rootPath)}
                     aria-label={`Forget ${entry.name}`}
                   >
                     Forget
@@ -507,7 +519,7 @@ function LocalDatabase(): ReactNode {
     <Section title="Local database">
       <div className="flex flex-col gap-2 text-sm text-muted-foreground">
         <p>
-          Each brain is a single SQLite database on this machine. This is the path of the active
+          Each brain is a folder on this machine. This is the SQLite path inside the active
           brain{active.data ? ` (“${active.data.name}”)` : ''}; manage and switch brains under{' '}
           <strong className="font-medium text-foreground">Settings → Brain</strong>. Migrations run
           automatically when a brain is opened; the schema is versioned in the app.
@@ -516,9 +528,10 @@ function LocalDatabase(): ReactNode {
           {path.data ?? 'resolving…'}
         </div>
         <p className="text-xs">
-          The path is resolved from <code className="font-mono text-foreground">$BRAIN_DB</code> when
-          set, otherwise the platform data directory. The <code className="font-mono text-foreground">brain</code> CLI
-          resolves it identically.
+          The app opens <code className="font-mono text-foreground">$BRAIN_ROOT</code> when set, or
+          the last active brain folder. The <code className="font-mono text-foreground">brain</code>{' '}
+          CLI also accepts <code className="font-mono text-foreground">--brain</code>;{' '}
+          <code className="font-mono text-foreground">--db</code> remains an advanced override.
         </p>
       </div>
     </Section>
