@@ -7,18 +7,57 @@ questions needing Alex.
 
 ## Current State
 
-- **Phase:** 04c — Ingestion UI: an `AddRecordDialog` (document/interaction, paste or
-  folder import, link pickers, load-from-path, duplicate notice) wired to the 04a ingest
-  functions + 04b file readers, plus an Add button and `new.document`/`new.interaction`
-  palette commands. `pnpm check` + Vite build + `cargo check` green, PR open. **Plan 04 is
-  now complete** (04a/04b/04c).
-- **Active branch:** `codex/local-brain-04c-ingestion-ui` (base `…-04b-ingestion-fs`).
+- **Phase:** 05a — Extraction engine: the deterministic half of Plan 05 in
+  `packages/core/src/extraction` — the typed extraction **output contract**
+  (`contracts.ts`), deterministic **pre-processing** (`preprocess.ts`), **merge/upsert
+  matching** (`match.ts`), a transactional **apply** pipeline (`apply.ts` + `apply-store.ts`:
+  resolve refs → records/links/memories/evidence in one `db_batch`, confidence gating, dup
+  avoidance), and a typed **model seam** (`extractor.ts`) wired into the ingest queue but
+  with no extractor registered by default. No model behavior is faked. `pnpm check` (89
+  tests) + Vite build + `cargo check` green, PR open. **Plan 04 complete** (04a/04b/04c);
+  Plan 05 split into 05a (this) + 05b (corrections + relationship intelligence) per DEC-12.
+- **Active branch:** `codex/local-brain-05a-extraction-engine` (base `…-04c-ingestion-ui`).
 - **Mode:** Sequential. This session builds the stack layer by layer; no parallel
   worker sessions are spawned. (Within a layer, read-only research may fan out, but
   commits are made sequentially from this session.)
 - **Blockers:** none at this checkpoint.
 
 ## Log
+
+### 2026-06-17 — Phase 05a: Extraction engine (deterministic half of Plan 05)
+- **Sequencing decision (DEC-12):** Plan 05's only model-dependent step (step 3, "build
+  model extraction") needs the Plan 06 BYOK model boundary; faking it with heuristics was
+  out of bounds. So this layer builds the deterministic engine *around* an explicit typed
+  model seam and defers the model-backed extractor to Plan 06. Plan 05 split into **05a**
+  (this — contracts/preprocessing/matching/apply/seam) and **05b** (correction flows +
+  relationship intelligence). Downstream bases shift to `…-05a-…` then `…-05b-…`.
+- Built `packages/core/src/extraction`:
+  - `contracts.ts` — zod schemas + types for the extraction **output contract** (people,
+    orgs, affiliations, projects, tasks, memories, evidence; entities linked by local
+    `ref`s), `parseExtractionResult`, and `validateExtraction` (ref uniqueness + resolvable,
+    correctly-typed references).
+  - `preprocess.ts` — deterministic `findDates`/`findEmails`/`selectChunks` and
+    `buildExtractionContext` (source chunks + hints + known participants + dedupe
+    candidates) that assembles a model's input without calling a model.
+  - `match.ts` — `normalizeName`/`normalizeEmail`/`normalizeDomain` and
+    `matchPerson`/`matchOrganization`/`matchProject` (exact key first, then normalized name).
+  - `apply.ts` + `apply-store.ts` — `applyExtraction`: resolve each ref to an
+    existing-or-new row (merge/upsert), write new records, link them to the source, create
+    hidden memories with `memory_links`, and attach `evidence_refs` to chunks, all in one
+    `db_batch`. Confidence gating (`minConfidence`) yields suggestions instead of writes;
+    obvious dups skipped; unresolved evidence/links reported. (Split into two files to keep
+    each under the 500-line lint ceiling.)
+  - `extractor.ts` — the typed `Extractor` seam, `runExtraction`, and
+    `installExtractionPipeline` (fire-and-forget ingest-queue handler). No extractor is
+    registered by default, so the pipeline is a safe no-op until Plan 06 supplies a
+    model-backed adapter.
+- **Verification:** `pnpm check` ✓ — typecheck + oxlint (clean, no warnings) + **89 tests**
+  (53 core: 11 match + 5 preprocess + 6 contracts unit tests + 4 new real-SQLite golden
+  apply tests — a meeting transcript creating people/org/project/task and a cited hidden
+  memory with evidence resolved to source chunks; merge/upsert onto an existing person +
+  idempotent re-apply; confidence-gated suggestions; and the extractor seam running only
+  when registered; 4 db; 30 desktop unchanged). `pnpm --filter @local-brain/desktop build`
+  ✓ (2041 modules). `cargo check --workspace` ✓ (no Rust this layer). `git diff --check` ✓.
 
 ### 2026-06-17 — Phase 04c: Ingestion UI (Plan 04 complete)
 - Built `AddRecordDialog`: a Document/Interaction toggle and a Paste/Import-folder mode
@@ -255,17 +294,24 @@ questions needing Alex.
 - Committed (`5c02ab5`), pushed, opened **PR #1** (base `master`).
 
 ### Next
-- **05** (`codex/local-brain-05-extraction`, base `…-04c-ingestion-ui`): memory
-  extraction & linking per `docs/plans/05-memory-extraction.md` — the ingestion extraction
-  seam (`setExtractionHandler`, 04a) is ready to receive a handler.
-- Eleven PRs open and awaiting review: **#1** (supervisor), **#2** (foundation), **#3**
+- **05b** (`codex/local-brain-05b-corrections`, base `…-05a-extraction-engine`): the
+  remaining Plan 05 steps — correction flows (step 8: unlink/edit/archive a memory or link,
+  fix a citation, from the affected detail page) and relationship-intelligence recompute
+  (step 9: last-interaction date, reconnect suggestions, relationship strength, important
+  dates) derived from interactions/tasks. Both are deterministic; they build on 05a's apply
+  engine + correction primitives.
+- **06** (`codex/local-brain-06-search-ai`, base `…-05b-corrections`): search/retrieval/Ask
+  **plus the model-backed `Extractor`** that feeds 05a's seam through the checked BYOK model
+  boundary (and golden tests over live model output).
+- Twelve PRs open and awaiting review: **#1** (supervisor), **#2** (foundation), **#3**
   (schema), **#4** (db package), **#5** (Rust IPC bridge), **#6** (core actions + seed),
   **#7** (03a desktop shell), **#8** (03b desktop shell II), **#9** (04a ingestion core),
-  **#10** (04b Rust file-read primitives), **#11** (04c ingestion UI — `pnpm check` + Vite
-  build + cargo check green). Plans 02 (DB layer), 03 (desktop shell), and 04 (ingestion)
-  are complete. A full end-to-end run of the assembled app (`pnpm tauri dev`/`build`) is
-  still pending and is required before the app can be called done. When #1 merges to
-  `master`, rebase the stack and retarget bases upward.
+  **#10** (04b Rust file-read primitives), **#11** (04c ingestion UI), **#12** (05a
+  extraction engine — `pnpm check` + Vite build + cargo check green). Plans 02 (DB layer),
+  03 (desktop shell), and 04 (ingestion) are complete; Plan 05 is in progress (05a done).
+  A full end-to-end run of the assembled app (`pnpm tauri dev`/`build`) is still pending and
+  is required before the app can be called done. When #1 merges to `master`, rebase the
+  stack and retarget bases upward.
 
 ## Verification ledger
 

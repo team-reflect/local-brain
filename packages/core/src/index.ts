@@ -170,6 +170,60 @@ export {
   type ExtractionHandler,
 } from './ingest/extraction-queue'
 
+// Extraction (model output contracts + deterministic merge/apply pipeline)
+export {
+  MEMORY_KINDS,
+  parseExtractionResult,
+  validateExtraction,
+  extractionResultSchema,
+  type MemoryKind,
+  type ExtractionResult,
+  type ExtractionResultInput,
+  type ExtractedPerson,
+  type ExtractedOrganization,
+  type ExtractedAffiliation,
+  type ExtractedProject,
+  type ExtractedTask,
+  type ExtractedMemory,
+  type ExtractedEvidence,
+  type MemorySubject,
+} from './extraction/contracts'
+export {
+  normalizeName,
+  normalizeEmail,
+  normalizeDomain,
+  matchPerson,
+  matchOrganization,
+  matchProject,
+  type PersonCandidate,
+  type OrganizationCandidate,
+  type ProjectCandidate,
+} from './extraction/match'
+export {
+  findDates,
+  findEmails,
+  selectChunks,
+  buildExtractionContext,
+  type ExtractionContext,
+  type ContextChunk,
+  type DateHint,
+  type SourceRecordType,
+} from './extraction/preprocess'
+export {
+  applyExtraction,
+  type ApplyOptions,
+  type ApplySource,
+  type ApplySummary,
+  type Suggestion,
+} from './extraction/apply'
+export {
+  setExtractor,
+  getExtractor,
+  runExtraction,
+  installExtractionPipeline,
+  type Extractor,
+} from './extraction/extractor'
+
 // Knowledge graph
 export {
   getGraph,
