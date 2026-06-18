@@ -27,7 +27,8 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 | pnpm | 11.5.2 ✓ |
 | gh | 2.87.3, authed as `maccman` (ssh) ✓ |
 | remote | `git@github.com:maccman/local-brain.git` ✓ |
-| cargo / rustc / rustup | **NOT installed** — Rust crates can be authored but not built/tested in this environment. See [decisions.md](decisions.md) D1. |
+| cargo / rustc | 1.96.0, installed via Homebrew on 2026-06-17 ✓ |
+| rustup | not installed; Homebrew system toolchain is sufficient for local gates |
 | gh stack extension | not installed — using ordinary stacked PRs |
 
 ## Stack Layers
@@ -35,7 +36,7 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 | # | Plan | Branch | Base | Status | PR |
 | --- | --- | --- | --- | --- | --- |
 | 00 | Supervisor / build tracking | `codex/local-brain-00-supervisor` | `origin/master` | open | [#1](https://github.com/maccman/local-brain/pull/1) |
-| 01 | Foundation & toolchain | `codex/local-brain-01-foundation` | `…-00-supervisor` | pending | — |
+| 01 | Foundation & toolchain | `codex/local-brain-01-foundation` | `…-00-supervisor` | open | [#2](https://github.com/maccman/local-brain/pull/2) |
 | 02a | SQLite schema crate (Rust migrations) | `codex/local-brain-02a-schema` | `…-01-foundation` | pending | — |
 | 02b | DB package (Kysely + IPC dialect) | `codex/local-brain-02b-db` | `…-02a-schema` | pending | — |
 | 02c | Core DB actions + IPC commands + seed | `codex/local-brain-02c-core-db` | `…-02b-db` | pending | — |
@@ -65,9 +66,13 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
   (`apps/desktop/src-tauri`, `apps/cli`, `crates/brain-schema`), typed IPC `call()`
   wrapper with zod + casing normalization, baseline scripts
   (`typecheck`/`lint`/`test`/`check`/`dev`/`tauri`), `.gitignore`.
-- **Verification:** `pnpm install`; `pnpm check`; `cargo check --workspace`
-  (**deferred** — no cargo here); `git status --short` shows only intentional files.
-- **Caveats:** Rust crates compile-checked only once a cargo toolchain is available.
+- **Verification:** `pnpm install` ✓; `pnpm check` ✓ (typecheck + oxlint + 6 vitest
+  tests pass); migration SQL applies under `sqlite3` ✓; `node --check` on the sidecar
+  script ✓; `cargo fmt --all -- --check` ✓; `cargo check --workspace` ✓;
+  `cargo test --workspace` ✓.
+- **Caveats:** App icon is a generated placeholder so Tauri can compile; final icon
+  polish remains a Plan 09 packaging task. Sidecar bundle wiring is deferred to Plans
+  07/09.
 
 ### 02a — SQLite schema crate
 - **Scope (Plan 02, steps 1–7):** `crates/brain-schema` — SQL migrations for all durable
@@ -98,3 +103,4 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 ## Open / Updated PR URLs
 
 - PR #1 — Build 00 supervisor docs — https://github.com/maccman/local-brain/pull/1 (base `master`, open)
+- PR #2 — Build 01 foundation scaffold — https://github.com/maccman/local-brain/pull/2 (base `…-00-supervisor`, open)

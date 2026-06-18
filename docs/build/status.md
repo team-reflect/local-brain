@@ -7,15 +7,45 @@ questions needing Alex.
 
 ## Current State
 
-- **Phase:** 00 — supervisor scaffold.
-- **Active branch:** `codex/local-brain-00-supervisor` (base `origin/master` @ `f3616d3`).
+- **Phase:** 01 — foundation scaffold (built, TS gates green, opening PR).
+- **Active branch:** `codex/local-brain-01-foundation` (base `…-00-supervisor`).
 - **Mode:** Sequential. This session builds the stack layer by layer; no parallel
   worker sessions are spawned. (Within a layer, read-only research may fan out, but
   commits are made sequentially from this session.)
-- **Blockers:** Rust toolchain absent — see [decisions.md](decisions.md) D1. Not blocking
-  authoring; blocks `cargo` verification.
+- **Blockers:** none. The Rust toolchain (`cargo`/`rustc` 1.96.0) is installed; D1 is
+  resolved.
 
 ## Log
+
+### 2026-06-17 — Phase 01: foundation scaffold
+- Extracted Reflect Open's exact config patterns via a 5-way parallel read
+  (root workspace, Tauri/Rust shell, Vite/Tailwind frontend, Kysely-IPC bridge,
+  CLI sidecar) and adapted them to Local Brain naming (`@local-brain/*`, `brain`
+  CLI, `brain-schema` crate, `local_brain_lib`).
+- Built the monorepo: pnpm + Turborepo workspace, shared strict `tsconfig.base`,
+  oxlint config, root Cargo workspace, `.gitignore`, root README.
+- `packages/core`: `AppError` contract, IPC bridge abstraction, typed `call()`
+  zod boundary, `app_version` binding + 3 vitest tests.
+- `packages/db`: read-only Kysely `IpcDialect`, `createDb`/`json` helpers,
+  placeholder `schema_meta` Database type + 3 vitest tests (camelCase→snake_case
+  compile, transaction refusal, non-array guard).
+- `packages/skills`: shell + skill manifest type.
+- `apps/desktop`: React 19 + Vite + Tailwind v4 frontend, warm-paper design
+  tokens in `globals.css`, `cn()`, Tanstack Query client, Tauri bridge install,
+  Kysely runner over `db_query`, an App that exercises the typed IPC path.
+- `apps/desktop/src-tauri`: Tauri 2 shell, `AppError` enum (camelCase tagged),
+  `app_version` command, capabilities, `tauri.conf.json`.
+- `apps/cli`: `brain` CLI (clap, `--json`, `status`/`path`, DB-path resolution,
+  open/migrate via shared schema crate, typed exit codes).
+- `crates/brain-schema`: migration runner, `open_and_migrate`, WAL/FK/busy-timeout
+  pragmas, `0001_init.sql` (`schema_meta`), version constant + 5 tests.
+- `apps/desktop/scripts/build-sidecar.mjs`: stages the `brain` sidecar.
+- **Verification:** `pnpm install` ✓; `pnpm check` ✓ (4 packages: typecheck +
+  oxlint + 6 tests); migration SQL applies under `sqlite3` ✓; `node --check` on
+  the sidecar script ✓; tree clean (only intentional files). Rust gates ✓ after
+  installing `cargo`/`rustc` 1.96.0 and adding the placeholder Tauri icon set
+  required by `tauri::generate_context!()`: `cargo fmt --all -- --check` ✓;
+  `cargo check --workspace` ✓; `cargo test --workspace` ✓.
 
 ### 2026-06-17 — Phase 00 start
 - Verified environment: clean tree at `f3616d3`; node v25.8.0; pnpm 11.5.2; gh 2.87.3

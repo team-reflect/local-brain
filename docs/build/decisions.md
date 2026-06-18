@@ -6,18 +6,19 @@ record.
 
 ## Needs Alex
 
+None at this checkpoint.
+
+## Resolved
+
 ### D1 — Rust toolchain not installed in build environment
-- **Status:** OPEN — needs Alex (or environment fix).
-- **Impact:** `cargo`, `rustc`, and `rustup` are not on PATH. The Rust crates
-  (`crates/brain-schema`, `apps/desktop/src-tauri`, `apps/cli`) and Plan 02 migrations
-  can be **authored** but cannot be `cargo check`/`cargo test`/`cargo fmt` verified in
-  this session, and `pnpm tauri dev/build` cannot run.
-- **Mitigation:** Author Rust code to spec, keep it isolated so TS layers stay verifiable
-  with `pnpm check`, and mark every Rust verification step as `deferred (no cargo)` in
-  the manifest. CI must run the Cargo checks.
-- **Ask:** Either install a Rust toolchain (`rustup` + stable) in this environment, or
-  confirm that CI / a follow-up session will run the Cargo gates. Until then, Rust layers
-  ship as "authored, not locally built."
+- **Status:** RESOLVED on 2026-06-17.
+- **Impact:** Initial Plan 00/01 authoring could not run `cargo check`, `cargo test`,
+  or `cargo fmt` because `cargo`, `rustc`, and `rustup` were not on PATH.
+- **Resolution:** Installed the Homebrew Rust toolchain (`cargo 1.96.0`, `rustc
+  1.96.0`) and re-ran the Rust gates locally. The foundation Tauri shell needed a
+  placeholder icon set for `tauri::generate_context!()`; after adding it,
+  `cargo fmt --all -- --check`, `cargo check --workspace`, and `cargo test --workspace`
+  all pass.
 
 ## Decisions (no action needed)
 
