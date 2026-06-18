@@ -46,17 +46,33 @@ pub fn content_hash(text: &str) -> String {
     hex
 }
 
-/// Hard-split a paragraph longer than `max_chars` on char boundaries.
+/// Hard-split a paragraph longer than `max_chars` (in UTF-16 code units) into
+/// whole-char pieces, each within budget. Packing by UTF-16 units — not Unicode
+/// scalars — keeps boundaries aligned with the TS `chunkText`, which measures
+/// with `String.length`.
 fn split_oversized(paragraph: &str, max_chars: usize) -> Vec<String> {
-    let chars: Vec<char> = paragraph.chars().collect();
-    chars
-        .chunks(max_chars)
-        .map(|piece| piece.iter().collect())
-        .collect()
+    let mut pieces: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut units = 0usize;
+    for ch in paragraph.chars() {
+        let width = ch.len_utf16();
+        if units + width > max_chars && !current.is_empty() {
+            pieces.push(std::mem::take(&mut current));
+            units = 0;
+        }
+        current.push(ch);
+        units += width;
+    }
+    if !current.is_empty() {
+        pieces.push(current);
+    }
+    pieces
 }
 
+/// Length in UTF-16 code units, mirroring JavaScript's `String.length` so chunk
+/// sizing matches the TS port byte-for-byte for the same normalized text.
 fn char_len(s: &str) -> usize {
-    s.chars().count()
+    s.chars().map(char::len_utf16).sum()
 }
 
 /// Split normalized text into ordered chunk strings. Mirrors `chunkText`
@@ -131,5 +147,22 @@ mod tests {
         let pieces = chunk_text_with(&big, 1000);
         assert_eq!(pieces.len(), 3);
         assert_eq!(char_len(&pieces[0]), 1000);
+    }
+
+    #[test]
+    fn packs_by_utf16_units_like_js_string_length() {
+        // "😀" is one Unicode scalar but two UTF-16 code units, like JS counts it.
+        // 600 of them is 1200 units, so the 1000 cap must hard-split (a scalar
+        // count of 600 would have wrongly fit in a single chunk).
+        let emoji = "😀".repeat(600);
+        let pieces = chunk_text_with(&emoji, 1000);
+        assert!(
+            pieces.len() >= 2,
+            "expected a hard split, got {}",
+            pieces.len()
+        );
+        for piece in &pieces {
+            assert!(char_len(piece) <= 1000);
+        }
     }
 }

@@ -8,7 +8,7 @@
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 
-use super::{now_iso, to_match_query};
+use super::{now_iso, to_like_pattern, to_match_query};
 use crate::error::CliError;
 use crate::id::new_id;
 use crate::model;
@@ -75,34 +75,38 @@ pub fn retrieve_chunks(
 pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Result<(), CliError> {
     let mut hits: Vec<Value> = Vec::new();
 
-    if let Some(mq) = to_match_query(query, false) {
-        for (table, fts, kind) in [
-            ("documents", "documents_fts", "document"),
-            ("interactions", "interactions_fts", "interaction"),
-        ] {
-            let sql = format!(
-                "SELECT t.id, t.title, snippet({fts}, 1, '[', ']', '…', 10), bm25({fts}, 10.0, 1.0)
-                 FROM {fts} JOIN {table} t ON t.rowid = {fts}.rowid
-                 WHERE {fts} MATCH ?1 AND t.archived_at IS NULL
-                 ORDER BY bm25({fts}, 10.0, 1.0) LIMIT ?2"
-            );
-            let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt.query_map(params![mq, limit as i64], |row| {
-                Ok(json!({
-                    "kind": kind,
-                    "id": row.get::<_, String>(0)?,
-                    "title": row.get::<_, Option<String>>(1)?.unwrap_or_else(|| "(untitled)".into()),
-                    "snippet": row.get::<_, String>(2)?,
-                    "score": lexical_score(row.get::<_, f64>(3)?),
-                }))
-            })?;
-            for row in rows {
-                hits.push(row?);
-            }
+    // Mirror core `globalSearch`: a query with no searchable tokens is "no query",
+    // not a request for everything. Returning early stops a wildcard-only input
+    // (e.g. "%") from collapsing into a `%%` LIKE that matches every record.
+    let (Some(mq), Some(like)) = (to_match_query(query, false), to_like_pattern(query)) else {
+        return emit_search(json, query, &hits);
+    };
+
+    for (table, fts, kind) in [
+        ("documents", "documents_fts", "document"),
+        ("interactions", "interactions_fts", "interaction"),
+    ] {
+        let sql = format!(
+            "SELECT t.id, t.title, snippet({fts}, 1, '[', ']', '…', 10), bm25({fts}, 10.0, 1.0)
+             FROM {fts} JOIN {table} t ON t.rowid = {fts}.rowid
+             WHERE {fts} MATCH ?1 AND t.archived_at IS NULL
+             ORDER BY bm25({fts}, 10.0, 1.0) LIMIT ?2"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params![mq, limit as i64], |row| {
+            Ok(json!({
+                "kind": kind,
+                "id": row.get::<_, String>(0)?,
+                "title": row.get::<_, Option<String>>(1)?.unwrap_or_else(|| "(untitled)".into()),
+                "snippet": row.get::<_, String>(2)?,
+                "score": lexical_score(row.get::<_, f64>(3)?),
+            }))
+        })?;
+        for row in rows {
+            hits.push(row?);
         }
     }
 
-    let like = format!("%{}%", query.replace(['\\', '%', '_'], ""));
     for (table, name_col, kind) in [
         ("people", "full_name", "person"),
         ("organizations", "name", "organization"),
@@ -110,7 +114,7 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
         ("tasks", "title", "task"),
     ] {
         let sql = format!(
-            "SELECT id, {name_col} FROM {table} WHERE archived_at IS NULL AND {name_col} LIKE ?1 LIMIT ?2"
+            "SELECT id, {name_col} FROM {table} WHERE archived_at IS NULL AND {name_col} LIKE ?1 ESCAPE '\\' LIMIT ?2"
         );
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params![like, limit as i64], |row| {
@@ -127,22 +131,35 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
         }
     }
 
+    // Merge all kinds, rank by score, and apply one final cap — like the app's
+    // `globalSearch`, instead of returning up to `limit` rows per source table.
+    hits.sort_by(|a, b| {
+        let sb = b["score"].as_f64().unwrap_or(0.0);
+        let sa = a["score"].as_f64().unwrap_or(0.0);
+        sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    hits.truncate(limit);
+
+    emit_search(json, query, &hits)
+}
+
+/// Render `brain search` hits as a JSON data array or a compact human table.
+fn emit_search(json: bool, query: &str, hits: &[Value]) -> Result<(), CliError> {
     if json {
-        print_json(&json!({ "query": query, "results": hits }))
-    } else {
-        if hits.is_empty() {
-            println!("(no matches)");
-        }
-        for hit in &hits {
-            println!(
-                "{:>12}  {}  {}",
-                hit["kind"].as_str().unwrap_or(""),
-                hit["id"].as_str().unwrap_or(""),
-                hit["title"].as_str().unwrap_or("")
-            );
-        }
-        Ok(())
+        return print_json(&json!({ "query": query, "results": hits }));
     }
+    if hits.is_empty() {
+        println!("(no matches)");
+    }
+    for hit in hits {
+        println!(
+            "{:>12}  {}  {}",
+            hit["kind"].as_str().unwrap_or(""),
+            hit["id"].as_str().unwrap_or(""),
+            hit["title"].as_str().unwrap_or("")
+        );
+    }
+    Ok(())
 }
 
 /// `brain ask` — grounded question answering. Always returns the cited evidence;

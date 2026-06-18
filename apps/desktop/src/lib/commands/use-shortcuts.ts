@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { eventMatchesBinding } from './keys'
+import { blockingModalOpen } from './modal-guard'
 import { listCommands } from './registry'
 import type { CommandContext } from './types'
 
@@ -12,6 +13,9 @@ import type { CommandContext } from './types'
 export function useAppShortcuts(context: CommandContext): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
+      // A blocking modal (e.g. first-run onboarding) owns the screen: suppress
+      // every global shortcut, including ⌘K, while it is open.
+      if (blockingModalOpen()) return
       const target = event.target as HTMLElement | null
       const typing =
         target !== null &&

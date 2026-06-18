@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { Database, KeyRound, Terminal, Sparkles } from 'lucide-react'
 import {
   useCompleteFirstRun,
@@ -6,6 +6,7 @@ import {
   useFirstRun,
   useModelStatus,
 } from '../lib/queries'
+import { pushBlockingModal } from '../lib/commands/modal-guard'
 import { useRouter } from '../routing/router'
 
 /**
@@ -20,16 +21,67 @@ export function FirstRun(): ReactNode {
   const dbPath = useDatabasePath()
   const model = useModelStatus()
   const { navigate } = useRouter()
+  const dialogRef = useRef<HTMLDivElement>(null)
 
   // Only show once we know it hasn't been completed (avoid a flash while loading).
-  if (firstRun.data !== false) return null
+  const shown = firstRun.data === false
+
+  // While shown, this overlay blocks the app: suppress global shortcuts and keep
+  // keyboard focus inside the dialog so background controls cannot be reached.
+  useEffect(() => {
+    if (!shown) return
+    return pushBlockingModal()
+  }, [shown])
+
+  useEffect(() => {
+    if (!shown) return
+    const node = dialogRef.current
+    if (!node) return
+    const focusable = (): HTMLElement[] =>
+      Array.from(
+        node.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((el) => !el.hasAttribute('disabled'))
+    focusable()[0]?.focus()
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Tab') return
+      const items = focusable()
+      if (items.length === 0) return
+      const first = items[0]!
+      const last = items[items.length - 1]!
+      const active = document.activeElement
+      if (!node.contains(active)) {
+        event.preventDefault()
+        first.focus()
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    node.addEventListener('keydown', onKeyDown)
+    return () => node.removeEventListener('keydown', onKeyDown)
+  }, [shown])
+
+  if (!shown) return null
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6">
-      <div className="w-[36rem] max-w-[92vw] rounded-xl border border-border bg-card p-6 shadow-xl">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="first-run-title"
+        className="w-[36rem] max-w-[92vw] rounded-xl border border-border bg-card p-6 shadow-xl"
+      >
         <div className="mb-3 flex items-center gap-2">
           <Sparkles className="size-5 text-primary" />
-          <h2 className="font-serif text-xl text-foreground">Welcome to Local Brain</h2>
+          <h2 id="first-run-title" className="font-serif text-xl text-foreground">
+            Welcome to Local Brain
+          </h2>
         </div>
         <p className="mb-4 text-sm text-muted-foreground">
           A private, local-first personal CRM and knowledge base. Everything stays in one SQLite
@@ -52,7 +104,11 @@ export function FirstRun(): ReactNode {
               <span className="font-medium text-foreground">Bring your own model (optional)</span>
               <span className="mt-0.5 block text-muted-foreground">
                 Ask and extraction stay off until you add a provider key.{' '}
-                {model.data?.canRun ? 'A model is configured.' : 'No model is configured yet.'}
+                {model.data?.configured
+                  ? model.data.canRun
+                    ? 'A model is configured.'
+                    : 'A model is configured (external calls are turned off in Settings).'
+                  : 'No model is configured yet.'}
               </span>
             </span>
           </li>

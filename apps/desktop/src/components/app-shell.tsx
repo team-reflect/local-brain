@@ -141,7 +141,7 @@ export function AppShell(): ReactNode {
             <span>Search</span>
             <kbd className={keycapClass}>⌘K</kbd>
           </button>
-          <Button size="sm" onClick={() => openAdd('document')} aria-label="Add a record">
+          <Button size="sm" variant="primary" onClick={() => openAdd('document')} aria-label="Add a record">
             <Plus className="size-3.5" />
             Add
           </Button>

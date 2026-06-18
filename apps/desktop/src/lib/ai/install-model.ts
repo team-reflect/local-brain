@@ -17,28 +17,35 @@ import {
  * The model-backed extractor is registered regardless; it is a safe no-op until
  * a provider exists. Call after the Tauri bridge is installed.
  */
-export async function installModel(): Promise<void> {
-  installExtractionPipeline(createModelExtractor())
-
-  let key: string | undefined = import.meta.env.VITE_ANTHROPIC_API_KEY
-  if (!key) {
-    try {
-      key = (await keychainGet('anthropic')) ?? undefined
-    } catch {
-      // The keychain (or Tauri bridge) may be unavailable in dev/browser; degrade.
-    }
-  }
-  if (key && key.trim().length > 0) {
-    setModelProvider(createAnthropicProvider({ apiKey: key.trim() }))
+/**
+ * Resolve the active provider key with one precedence shared by startup and live
+ * refresh: the `VITE_ANTHROPIC_API_KEY` dev escape hatch wins, then the OS
+ * keychain. If the keychain (or Tauri bridge) is unavailable we still fall back
+ * to the env override rather than dropping it, so the two entry points always
+ * register the same provider for the same inputs.
+ */
+async function resolveProviderKey(): Promise<string | undefined> {
+  const envKey = import.meta.env.VITE_ANTHROPIC_API_KEY
+  if (envKey && envKey.trim().length > 0) return envKey
+  try {
+    return (await keychainGet('anthropic')) ?? undefined
+  } catch {
+    // The keychain (or Tauri bridge) may be unavailable in dev/browser; degrade.
+    return envKey
   }
 }
 
-/** Re-read the key from the keychain and (de)register the provider live. */
+/** (De)register the Anthropic provider from a resolved key. */
+function applyProviderKey(key: string | undefined): void {
+  setModelProvider(key && key.trim() ? createAnthropicProvider({ apiKey: key.trim() }) : null)
+}
+
+export async function installModel(): Promise<void> {
+  installExtractionPipeline(createModelExtractor())
+  applyProviderKey(await resolveProviderKey())
+}
+
+/** Re-read the key (same precedence as startup) and (de)register the provider live. */
 export async function refreshModelProvider(): Promise<void> {
-  try {
-    const key = (await keychainGet('anthropic')) ?? import.meta.env.VITE_ANTHROPIC_API_KEY
-    setModelProvider(key && key.trim() ? createAnthropicProvider({ apiKey: key.trim() }) : null)
-  } catch {
-    setModelProvider(null)
-  }
+  applyProviderKey(await resolveProviderKey())
 }

@@ -92,6 +92,7 @@ async function persistAssistantTurn(
 }
 
 const CLOSED_BOUNDARY_PREFIX = 'I can’t answer yet —'
+const PROVIDER_ERROR_PREFIX = 'I couldn’t complete that —'
 
 function toCitation(chunk: RetrievedChunk, base: Citation): AskCitation {
   return { ...base, chunkText: chunk.text, snippet: chunk.snippet }
@@ -119,7 +120,18 @@ export async function ask(question: string, options: AskOptions = {}): Promise<A
 
   const provider = getModelProvider()
   // getModelStatus already proved a provider is present and available.
-  const completion = await provider!.generate(assembled.request)
+  let completion
+  try {
+    completion = await provider!.generate(assembled.request)
+  } catch (error) {
+    // A provider failure (network, auth, rate limit) must not leave the user turn
+    // orphaned with no reply: persist an honest assistant turn and degrade, the
+    // same way a closed boundary does, so the thread reads as complete.
+    const detail = error instanceof Error ? error.message : String(error)
+    const content = `${PROVIDER_ERROR_PREFIX} the model request failed (${detail}).`
+    const messageId = await persistAssistantTurn(conversationId, content, null, [])
+    return { conversationId, messageId, answer: content, answered: false, model: null, citations: [], status }
+  }
   const answer = completion.text.trim()
 
   // Persist evidence only for sources the answer actually cited.
