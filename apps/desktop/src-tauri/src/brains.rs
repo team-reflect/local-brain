@@ -244,23 +244,51 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<BrainRecord> {
 /// Insert (or refresh) the record for `path` and mark it active, in one atomic
 /// upsert. A provided non-empty `name` overwrites the stored name; otherwise the
 /// existing name (or a derived default for a new brain) is kept.
+///
+/// The path is [`normalize`]d into the catalogue key (and the active pointer) so
+/// the same brain reached by different spellings — a `$BRAIN_DB` pin, a stored
+/// candidate path vs the startup `canonicalize` of it — always hits one row
+/// instead of inserting a duplicate. A path whose file can't be canonicalized
+/// falls back to its raw string, matching the metadata commands' [`normalize`].
 fn mark_opened(conn: &Connection, path: &str, name: Option<&str>) -> AppResult<()> {
+    let key = normalize(path);
     let now = now_ms() as i64;
     let provided = name
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .map(str::to_string);
     let name_provided = provided.is_some();
-    let name_value = provided.unwrap_or_else(|| derive_name(Path::new(path)));
+    let name_value = provided.unwrap_or_else(|| derive_name(Path::new(&key)));
     conn.execute(
         "INSERT INTO brains (path, name, color, created_ms, last_opened_ms)
          VALUES (?1, ?2, ?3, ?4, ?4)
          ON CONFLICT(path) DO UPDATE SET
              last_opened_ms = excluded.last_opened_ms,
              name = CASE WHEN ?5 THEN excluded.name ELSE brains.name END",
-        params![path, name_value, DEFAULT_COLOR, now, name_provided],
+        params![key, name_value, DEFAULT_COLOR, now, name_provided],
     )?;
-    set_active_path(conn, path)
+    set_active_path(conn, &key)
+}
+
+/// Ensure a catalogue row exists for the live active brain so a metadata edit
+/// (rename / color) can target it. The active brain can be valid yet
+/// *uncatalogued* — [`active_info`] synthesizes a record when startup
+/// [`register_active`] failed (its error is ignored in `lib.rs`) or for a
+/// `$BRAIN_DB` pin that was never persisted — and Settings still offers rename
+/// and color for it. Without a row those `UPDATE`s match nothing and return "not
+/// found". This materializes a default row keyed on the active path if missing;
+/// an existing row (its name/color/timestamps) and the active pointer are left
+/// untouched, and a persistence failure surfaces before any edit lands.
+fn ensure_catalogued(conn: &Connection, key: &str) -> AppResult<()> {
+    let now = now_ms() as i64;
+    let name = derive_name(Path::new(key));
+    conn.execute(
+        "INSERT INTO brains (path, name, color, created_ms, last_opened_ms)
+         VALUES (?1, ?2, ?3, ?4, ?4)
+         ON CONFLICT(path) DO NOTHING",
+        params![key, name, DEFAULT_COLOR, now],
+    )?;
+    Ok(())
 }
 
 /// Catalogued brains as [`BrainInfo`], newest-opened first, active flag set.
@@ -507,6 +535,42 @@ pub fn create_brain(
     switch_to(&db, &brains, conn, &canonical, name.as_deref())
 }
 
+/// Apply a single-column metadata edit (rename / color) to a catalogued brain.
+///
+/// `update` must be an `UPDATE brains SET <col> = ?2 WHERE path = ?1` statement
+/// and `value` its `?2`. The brain is keyed on [`normalize`]d `raw_path`. If that
+/// key is the *live* active brain (per [`DbState`]) the row is materialized first
+/// via [`ensure_catalogued`], so edits to a synthesized/uncatalogued active brain
+/// land instead of failing "not found". Any other uncatalogued path is still
+/// rejected. A persistence failure (read-only registry) surfaces before the edit,
+/// so the observable state stays exactly as it was.
+fn edit_metadata(
+    db: &DbState,
+    brains: &BrainState,
+    raw_path: &str,
+    update: &str,
+    value: &str,
+) -> AppResult<BrainInfo> {
+    let key = normalize(raw_path);
+    let live_active = db
+        .active_path()
+        .ok()
+        .map(|path| normalize(&path.display().to_string()));
+    {
+        let conn = brains.lock()?;
+        if live_active.as_deref() == Some(key.as_str()) {
+            ensure_catalogued(&conn, &key)?;
+        }
+        let affected = conn.execute(update, params![key, value])?;
+        if affected == 0 {
+            return Err(AppError::not_found(format!(
+                "no brain registered at {raw_path}"
+            )));
+        }
+    }
+    brains.active_info(db)
+}
+
 /// Rename a brain in the catalogue.
 #[tauri::command]
 pub fn rename_brain(
@@ -519,20 +583,13 @@ pub fn rename_brain(
     if trimmed.is_empty() {
         return Err(AppError::parse("a brain name cannot be empty"));
     }
-    let key = normalize(&path);
-    {
-        let conn = brains.lock()?;
-        let affected = conn.execute(
-            "UPDATE brains SET name = ?2 WHERE path = ?1",
-            params![key, trimmed],
-        )?;
-        if affected == 0 {
-            return Err(AppError::not_found(format!(
-                "no brain registered at {path}"
-            )));
-        }
-    }
-    brains.active_info(&db)
+    edit_metadata(
+        &db,
+        &brains,
+        &path,
+        "UPDATE brains SET name = ?2 WHERE path = ?1",
+        trimmed,
+    )
 }
 
 /// Set a brain's identity color.
@@ -544,20 +601,13 @@ pub fn set_brain_color(
     color: String,
 ) -> AppResult<BrainInfo> {
     require_color(&color)?;
-    let key = normalize(&path);
-    {
-        let conn = brains.lock()?;
-        let affected = conn.execute(
-            "UPDATE brains SET color = ?2 WHERE path = ?1",
-            params![key, color],
-        )?;
-        if affected == 0 {
-            return Err(AppError::not_found(format!(
-                "no brain registered at {path}"
-            )));
-        }
-    }
-    brains.active_info(&db)
+    edit_metadata(
+        &db,
+        &brains,
+        &path,
+        "UPDATE brains SET color = ?2 WHERE path = ?1",
+        &color,
+    )
 }
 
 /// Drop a brain from the catalogue (does not delete the database file). The
@@ -927,5 +977,125 @@ mod tests {
         let record = find(&conn, "/x/brain.sqlite").unwrap().unwrap();
         assert_eq!(record.name, "Original");
         assert_eq!(record.color, "teal");
+    }
+
+    const RENAME_SQL: &str = "UPDATE brains SET name = ?2 WHERE path = ?1";
+    const COLOR_SQL: &str = "UPDATE brains SET color = ?2 WHERE path = ?1";
+
+    /// A live DB open on a freshly migrated brain at `path`, with its canonical
+    /// path (so `active_path()` matches the registry's normalized key).
+    fn live_db(path: &Path) -> (DbState, String) {
+        let conn = brain_schema::open_and_migrate(path).unwrap();
+        let canonical = path.canonicalize().unwrap();
+        let key = canonical.display().to_string();
+        (DbState::new(conn, canonical), key)
+    }
+
+    #[test]
+    fn mark_opened_dedupes_path_spellings() {
+        // Bug 2 regression: the catalogue must key on the canonical path, so the
+        // same brain reached by different spellings (a stored candidate path vs
+        // the startup `canonicalize` of it) updates one row instead of listing
+        // the brain twice.
+        let dir = tempdir().unwrap();
+        let nested = dir.path().join("Work");
+        std::fs::create_dir_all(&nested).unwrap();
+        let path = nested.join("brain.sqlite");
+        std::fs::write(&path, b"db").unwrap();
+
+        let brains = memory_state();
+        let conn = brains.lock().unwrap();
+
+        let canonical = path.canonicalize().unwrap().display().to_string();
+        // A non-canonical spelling of the same file ("…/Work/./brain.sqlite").
+        let dotted = nested.join(".").join("brain.sqlite").display().to_string();
+        assert_ne!(canonical, dotted, "the spellings must actually differ");
+
+        mark_opened(&conn, &canonical, Some("First")).unwrap();
+        mark_opened(&conn, &dotted, None).unwrap();
+
+        let records = all_records(&conn).unwrap();
+        assert_eq!(records.len(), 1, "the same brain must not list twice");
+        assert_eq!(records[0].path, canonical);
+        // The active pointer normalizes too, so it names the single row.
+        assert_eq!(active_path(&conn).unwrap().unwrap(), canonical);
+    }
+
+    #[test]
+    fn edit_materializes_uncatalogued_active_brain() {
+        // Bug 1 regression: the active brain can be valid yet uncatalogued — a
+        // synthesized record when startup `register_active` failed or a
+        // `$BRAIN_DB` pin was never persisted. Settings still offers rename and
+        // color, so those edits must materialize the row and land, not 404.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("Work").join("brain.sqlite");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let (db, key) = live_db(&path);
+
+        // An empty registry: the live active brain has no catalogue row.
+        let brains = memory_state();
+        {
+            let conn = brains.lock().unwrap();
+            assert!(find(&conn, &key).unwrap().is_none());
+        }
+
+        // Rename then recolor the active brain through the command path.
+        let renamed = edit_metadata(&db, &brains, &key, RENAME_SQL, "Renamed").unwrap();
+        assert_eq!(renamed.name, "Renamed");
+        assert!(renamed.is_active);
+        let recolored = edit_metadata(&db, &brains, &key, COLOR_SQL, "teal").unwrap();
+        assert_eq!(recolored.color, "teal");
+        assert_eq!(recolored.name, "Renamed", "the rename is preserved");
+
+        // Exactly one row now exists, carrying both edits.
+        let conn = brains.lock().unwrap();
+        let records = all_records(&conn).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].name, "Renamed");
+        assert_eq!(records[0].color, "teal");
+    }
+
+    #[test]
+    fn edit_rejects_unknown_non_active_path() {
+        // A path that is neither catalogued nor the live active brain is still
+        // rejected — only the active brain gets materialized on demand.
+        let dir = tempdir().unwrap();
+        let active = dir.path().join("active.sqlite");
+        let (db, _) = live_db(&active);
+        let brains = memory_state();
+
+        let result = edit_metadata(
+            &db,
+            &brains,
+            "/nonexistent/other.sqlite",
+            RENAME_SQL,
+            "Nope",
+        );
+        assert!(result.is_err(), "an unknown non-active path must 404");
+
+        // ...and no row was conjured for it.
+        let conn = brains.lock().unwrap();
+        assert!(all_records(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn edit_on_readonly_registry_creates_no_row() {
+        // Persistence/failure invariant: if materializing the active brain's row
+        // fails (read-only registry), the edit errors and nothing is catalogued —
+        // the observable state stays exactly as it was.
+        let dir = tempdir().unwrap();
+        let active = dir.path().join("active.sqlite");
+        let (db, key) = live_db(&active);
+        let brains = read_only_state();
+
+        let result = edit_metadata(&db, &brains, &key, RENAME_SQL, "X");
+        assert!(result.is_err());
+
+        let conn = brains.lock().unwrap();
+        conn.execute_batch("PRAGMA query_only = OFF;").unwrap();
+        assert!(
+            all_records(&conn).unwrap().is_empty(),
+            "a failed edit must not catalogue the brain"
+        );
     }
 }

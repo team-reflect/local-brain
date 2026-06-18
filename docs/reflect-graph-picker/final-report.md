@@ -198,6 +198,35 @@ green.
   desktop-lib Rust tests), `pnpm check` (48 desktop tests), and the desktop build are
   all green.
 
+### Follow-up Bugbot findings (comments on head `cec2308`)
+
+- **High — Uncatalogued brain rename fails.** `rename_brain` / `set_brain_color`
+  (`apps/desktop/src-tauri/src/brains.rs`) only ran `UPDATE brains … WHERE path = ?`
+  and returned "not found" when no row matched. But the active brain can be valid yet
+  *uncatalogued*: `active_info` synthesizes a record when startup `register_active`
+  failed (ignored with `let _ =` in `lib.rs`) or for a `$BRAIN_DB` pin that was never
+  persisted. So Settings happily offered rename/color for the open brain while those
+  commands rejected it. Fixed by routing both commands through a shared
+  `edit_metadata` helper: when the edit targets the *live* active brain (compared via
+  `DbState::active_path`, both sides `normalize`d) it first materializes a default
+  catalogue row with `ensure_catalogued` (`INSERT … ON CONFLICT DO NOTHING` — an
+  existing row's name/color/timestamps and the active pointer are left untouched),
+  then applies the edit. Any *non-active* uncatalogued path is still rejected, and a
+  persistence failure (read-only registry) surfaces before the edit lands, so the
+  observable state stays exactly as it was. New Rust tests
+  `edit_materializes_uncatalogued_active_brain`, `edit_rejects_unknown_non_active_path`,
+  and `edit_on_readonly_registry_creates_no_row`.
+- **Medium — Duplicate brain registry paths.** `mark_opened` keyed the catalogue
+  upsert (and the active pointer) on the exact path string handed in, so the same
+  brain reached by two spellings — a stored candidate path vs the startup
+  `canonicalize` of it, a `$BRAIN_DB` pin vs its canonical form — could insert a
+  second row and list the brain twice. `mark_opened` now `normalize`s the path
+  (canonicalize-or-fallback, the same helper the metadata commands already used) into
+  both the catalogue key and the recorded `active_path`, so every registry upsert and
+  active write converges on the canonical key and a brain can't appear twice. New Rust
+  test `mark_opened_dedupes_path_spellings`. `cargo test -p local-brain-desktop`
+  (25 tests) and `cargo clippy` are green.
+
 ## Caveats / deferred (honest scope)
 
 - **Path field as fallback.** The native OS dialog is the primary affordance; the

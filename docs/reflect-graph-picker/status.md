@@ -120,6 +120,35 @@ One new Bugbot finding (comment `3437049057`) on commit `11c81ff`, resolved:
 `cargo fmt`/`clippy`/`check`/`test` (21 desktop-lib tests), `pnpm check` (48 desktop
 tests), and the desktop build are all green.
 
+## Bugbot review fixes (2026-06-18, head ad147c6 · comments on cec2308)
+
+Two new Bugbot findings on commit `cec2308`, both resolved in `brains.rs`:
+
+1. **High — Uncatalogued brain rename fails.** `rename_brain` / `set_brain_color`
+   only ran `UPDATE brains … WHERE path = ?` and 404'd when no row matched. But the
+   active brain can be valid yet *uncatalogued* — `active_info` synthesizes a record
+   when startup `register_active` failed (ignored with `let _ =` in `lib.rs`) or for
+   a `$BRAIN_DB` pin that was never persisted — so Settings offered rename/color for
+   a brain the commands then reported "not found". Fixed with a shared `edit_metadata`
+   helper: when the edit targets the *live* active brain (per `DbState::active_path`)
+   it first materializes a default catalogue row via `ensure_catalogued`
+   (`INSERT … ON CONFLICT DO NOTHING`, leaving any existing row/timestamps and the
+   active pointer untouched), then applies the edit. Non-active uncatalogued paths
+   are still rejected, and a persistence failure (read-only registry) surfaces before
+   anything lands, so observable state is unchanged.
+2. **Medium — Duplicate brain registry paths.** `mark_opened` keyed the catalogue on
+   the exact path string passed in, so the same brain reached by different spellings
+   (a stored candidate path vs the startup `canonicalize` of it, a `$BRAIN_DB` pin)
+   could insert a second row and list the brain twice. `mark_opened` now `normalize`s
+   the path into the catalogue key *and* the active pointer (canonicalize-or-fallback,
+   matching the metadata commands), so every registry upsert/active write converges on
+   the canonical key.
+
+New Rust tests: `edit_materializes_uncatalogued_active_brain`,
+`edit_rejects_unknown_non_active_path`, `edit_on_readonly_registry_creates_no_row`,
+and `mark_opened_dedupes_path_spellings`. `cargo test -p local-brain-desktop`
+(25 tests) and `cargo clippy` are green.
+
 ## Progress
 
 - [x] Read AGENTS.md, docs, supervisor skill; mapped Local Brain + both Reflect refs.
