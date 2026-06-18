@@ -89,7 +89,7 @@ export function GraphSurface({ showHeader = true }: { showHeader?: boolean } = {
               </span>
             ))}
           </div>
-          <div className="overflow-hidden rounded-md border border-border bg-card">
+          <div className="overflow-hidden">
             <svg
               viewBox={`0 0 ${layout.width} ${layout.height}`}
               className="h-auto w-full"
