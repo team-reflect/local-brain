@@ -7,10 +7,10 @@ and `final-report.md` for the verification summary.
 
 1. `git fetch origin --prune` — branch confirmed based on current `origin/master`
    (`3137d12`); no rebase needed.
-2. Enumerated all PRs: 21 total, all closed (merged or closed-unmerged), 0 open.
-3. Pulled issue comments, review comments, and reviews for #1–#21.
+2. Enumerated all PRs: 22 total, all closed (merged or closed-unmerged), 0 open.
+3. Pulled issue comments, review comments, and reviews for #1–#22.
 4. Comments concentrate in #15–#21 (all Cursor Bugbot); #2/#3 carry only author
-   verification notes; #1, #4–#14 have none.
+   verification notes; #1, #4–#14, and #22 have none.
 5. Each finding verified by reading the file **on current `master`** and comparing
    against the core/app reference implementation, then fixed if real.
 
@@ -40,7 +40,7 @@ and `final-report.md` for the verification summary.
 
 ## Outcome
 
-- 21 closed PRs audited.
+- 22 closed PRs audited.
 - 28 comment/review items collected (2 author issue comments, 19 substantive
   Bugbot review comments, 7 Bugbot review summaries).
 - 16 distinct technical findings; **13 fixed**, 1 deferred (real/minor), 1 not

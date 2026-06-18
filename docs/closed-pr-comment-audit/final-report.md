@@ -2,14 +2,14 @@
 
 ## Summary
 
-Audited every closed pull request in `maccman/local-brain` (#1–#21) and every
+Audited every closed pull request in `maccman/local-brain` (#1–#22) and every
 comment/review on them, comparing each Cursor Bugbot finding against current
 `master` (`3137d12`). Of 16 distinct technical findings, **13 were real on
 `master` and are fixed here**; 1 is deferred (real but minor, needs a schema
 change), 1 is not applicable (the file never reached `master`), and 1 is a false
 positive (the flagged behaviour is the intended, safer design).
 
-- Closed PRs audited: **21** (all PRs; none open)
+- Closed PRs audited: **22** (all PRs; none open; #22 had no comments/reviews)
 - Comment/review items triaged: **28** (2 author issue comments, 19 Bugbot review
   comments, 7 Bugbot review summaries)
 - Distinct technical findings: **16** → **13 fixed**, 1 deferred, 1 N/A, 1 by design

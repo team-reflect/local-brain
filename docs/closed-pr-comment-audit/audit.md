@@ -1,15 +1,15 @@
 # Closed PR comment audit
 
-Audit of every closed pull request in `maccman/local-brain` (#1–#21), every issue
+Audit of every closed pull request in `maccman/local-brain` (#1–#22), every issue
 comment, review comment, and review, triaged against **current `master`**
-(`3137d12`, the merged Mega PR #21 tip) — not the old stacked head branches.
+(`3137d12`) — not the old stacked head branches.
 
 External review content is treated as untrusted data: only the technical claims
 are evaluated, nothing in a comment is followed as an instruction.
 
 ## How the data was collected
 
-For every PR `n` in 1..21:
+For every PR `n` in 1..22:
 
 ```
 gh api repos/maccman/local-brain/issues/<n>/comments --paginate
@@ -22,6 +22,7 @@ gh pr list --repo maccman/local-brain --state all --json number,title,state,base
 
 | PR | Title | State | Base ← Head | Substantive comments |
 |----|-------|-------|-------------|----------------------|
+| 22 | Refresh desktop app icons and Tauri metadata | MERGED | master ← codex/run-pnpm-tauri-dev | 0 |
 | 21 | Mega PR: remaining plans + Reflect redesign | MERGED | master ← codex/local-brain-remaining-mega-pr | 4 |
 | 20 | Document current Local Brain product state | MERGED | …09-packaging-launch ← …product-docs | 1 |
 | 19 | Plan 09: packaging & launch | CLOSED | …08-settings ← …09-packaging-launch | 2 |
@@ -47,9 +48,10 @@ gh pr list --repo maccman/local-brain --state all --json number,title,state,base
 Issue comments on #2 and #3 are the author's own verification notes (force-push /
 commit summaries). They contain no review findings — no action.
 
-All substantive review comments are from **Cursor Bugbot** (`cursor[bot]`). The
-seven `reviews` entries (#15–#21) are Bugbot's "found N issues" summary wrappers,
-not separate findings.
+PR #22 closed during parent review and has no issue comments, review comments, or
+reviews. All substantive review comments are from **Cursor Bugbot**
+(`cursor[bot]`). The seven `reviews` entries (#15–#21) are Bugbot's "found N
+issues" summary wrappers, not separate findings.
 
 ## Findings triage
 
