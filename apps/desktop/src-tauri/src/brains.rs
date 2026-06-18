@@ -530,14 +530,12 @@ impl BrainState {
 ///
 /// Two invariants combine here:
 ///
-/// 1. **Ordering.** The durable registry update ([`BrainState::register_active`])
-///    must commit *before* the live [`DbState`] connection is swapped. If
-///    persistence fails we return that error without swapping, so the open
-///    connection — and the registry's recorded active brain — both stay on the
-///    previous brain, leaving nothing for the frontend to fall out of sync with.
-///    Swapping first (the old ordering) could leave the SQLite connection
-///    pointing at the newly opened brain while the command reports failure and
-///    the UI keeps showing — and reading/writing through — the old one.
+/// 1. **Ordering.** The live DB lock is acquired first; only then does the
+///    durable registry update ([`BrainState::register_active`]) commit, and the
+///    live [`DbState`] connection is swapped immediately after. If the DB lock is
+///    poisoned, the registry is not advanced. If registry persistence fails, the
+///    live DB is not swapped. That keeps the registry's active brain and the live
+///    connection together across both failure directions.
 /// 2. **Atomicity against other switches.** The persist and the swap take
 ///    separate locks, so we hold the switch mutex
 ///    ([`BrainState::switch_guard`]) across both. Without it, two overlapping
@@ -554,11 +552,7 @@ fn switch_to(
     // One switch at a time: persist + swap is a single critical section so
     // overlapping switches can't interleave the two stores onto different brains.
     let _switch = brains.switch_guard()?;
-    // Durable first: persist the new active brain to the registry database.
-    brains.register_active(canonical, name)?;
-    // Only now point the live connection at it — this cannot fail except on a
-    // poisoned lock, which already implies a crashed thread.
-    db.swap(conn, canonical)?;
+    db.swap_after(conn, canonical, || brains.register_active(canonical, name))?;
     brains.active_info(db)
 }
 
@@ -1211,6 +1205,37 @@ mod tests {
 
         // ...and the live connection still points at the old brain.
         assert_eq!(db.active_path().unwrap(), old);
+    }
+
+    #[test]
+    fn switch_does_not_advance_registry_when_live_db_lock_fails() {
+        // Follow-up regression: the opposite failure direction matters too. If
+        // the live DB lock is already poisoned, the switch must fail before
+        // committing `registry_meta`, otherwise next launch can reopen a brain
+        // the app never actually switched to in this session.
+        let dir = tempdir().unwrap();
+        let old = dir.path().join("old.sqlite");
+        let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old);
+
+        let new = dir.path().join("new.sqlite");
+        let new_conn = brain_schema::open_and_migrate(&new).unwrap();
+        let canonical = new.canonicalize().unwrap();
+
+        let brains = memory_state();
+        db.poison_for_test();
+
+        let result = switch_to(&db, &brains, new_conn, &canonical, None);
+        assert!(result.is_err());
+
+        let conn = brains.lock().unwrap();
+        assert!(
+            active_path(&conn).unwrap().is_none(),
+            "registry active_path must not advance when the live DB lock fails"
+        );
+        assert!(
+            all_records(&conn).unwrap().is_empty(),
+            "failed switch must not catalogue the target brain"
+        );
     }
 
     #[test]

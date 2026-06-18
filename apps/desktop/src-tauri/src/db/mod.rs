@@ -60,14 +60,27 @@ impl DbState {
         brain_schema::schema_version(&guard.conn).map_err(AppError::from)
     }
 
-    /// Replace the open connection with one for `path`. The caller has already
-    /// opened and migrated `conn`, so a failed open never reaches here and the
-    /// previously active brain stays intact on error.
-    pub fn swap(&self, conn: Connection, path: &Path) -> AppResult<()> {
+    /// Run `before_swap` while holding the active database lock, then replace
+    /// the open connection. This lets callers that must coordinate another
+    /// durable store fail before mutating that store when the DB lock itself is
+    /// unavailable.
+    pub fn swap_after<F>(&self, conn: Connection, path: &Path, before_swap: F) -> AppResult<()>
+    where
+        F: FnOnce() -> AppResult<()>,
+    {
         let mut guard = self.lock()?;
+        before_swap()?;
         guard.conn = conn;
         guard.path = path.to_path_buf();
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub fn poison_for_test(&self) {
+        let _ = std::panic::catch_unwind(|| {
+            let _guard = self.active.lock().unwrap();
+            panic!("poison database lock for test");
+        });
     }
 }
 
@@ -158,7 +171,11 @@ mod tests {
 
         // After switching, the second brain is empty and the path updates.
         state
-            .swap(brain_schema::open_and_migrate(&second).unwrap(), &second)
+            .swap_after(
+                brain_schema::open_and_migrate(&second).unwrap(),
+                &second,
+                || Ok(()),
+            )
             .unwrap();
         assert_eq!(state.active_path().unwrap(), second);
         let guard = state.lock().unwrap();

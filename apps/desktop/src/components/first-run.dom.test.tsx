@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import { FirstRun } from './first-run'
 import { installFakeBridge, renderWithProviders } from '../test/utils'
 
@@ -36,7 +36,9 @@ describe('FirstRun onboarding', () => {
     installFakeBridge({ queryRows: [] })
     renderWithProviders(<FirstRun />)
     // Give the query a tick; the overlay must not appear.
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
     expect(screen.queryByText('Welcome to Local Brain')).toBeNull()
   })
 
@@ -54,7 +56,9 @@ describe('FirstRun onboarding', () => {
     // Switch to a different brain: remount against a fresh DB with no row.
     installFakeBridge({ queryRows: [] })
     renderWithProviders(<FirstRun />)
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
     expect(screen.queryByText('Welcome to Local Brain')).toBeNull()
   })
 })

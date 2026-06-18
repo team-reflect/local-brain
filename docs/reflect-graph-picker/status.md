@@ -257,6 +257,25 @@ hidden, and (c) dismissing it on one brain keeps it hidden after remounting agai
 different brain's DB. `pnpm check` + desktop build green. No Rust changed (cargo gates
 skipped).
 
+## Follow-up: registry must not advance when live DB swap cannot run (2026-06-18)
+
+One further Bugbot finding on PR #26's current head (bd706c0), resolved in
+`apps/desktop/src-tauri/src/db/mod.rs` and `apps/desktop/src-tauri/src/brains.rs`:
+
+1. **Medium — Registry advances when swap fails.** `switch_to` persisted the new active
+   brain to the registry before calling `DbState::swap`. If the live DB lock was
+   poisoned, the command failed after `registry_meta` had advanced, so the current
+   session stayed on the old brain while the next launch could reopen the new one.
+   `DbState` now exposes `swap_after`, which acquires the live DB lock first, runs the
+   registry commit while that lock is held, and only then swaps the connection/path.
+   This preserves the earlier persist-before-swap guarantee for registry failures while
+   also preventing registry advancement when the live DB lock itself is unavailable.
+
+New regression test (`brains::tests::switch_does_not_advance_registry_when_live_db_lock_fails`):
+poisons the live DB lock before switching and asserts the registry records no active path
+or target-brain row. Rust-focused verification green; full PR gates were rerun before
+pushing this follow-up.
+
 ## Progress
 
 - [x] Read AGENTS.md, docs, supervisor skill; mapped Local Brain + both Reflect refs.
