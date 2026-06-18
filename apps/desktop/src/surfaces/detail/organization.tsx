@@ -3,11 +3,12 @@ import { DetailFields } from '../../components/detail-fields'
 import { EmptyState } from '../../components/empty-state'
 import { LinkedRecords } from '../../components/linked-records'
 import { PageHead } from '../../components/page-head'
-import { useOrganization, useOrganizationLinks } from '../../lib/queries'
+import { useOrganization, useOrganizationLinks, useUnlinkFrom } from '../../lib/queries'
 
 export function OrganizationDetail({ id }: { id: string }): ReactNode {
   const organization = useOrganization(id)
   const links = useOrganizationLinks(id)
+  const onUnlink = useUnlinkFrom({ kind: 'organization', id })
 
   if (organization.isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>
   if (!organization.data) return <EmptyState title="Organization not found" />
@@ -26,11 +27,11 @@ export function OrganizationDetail({ id }: { id: string }): ReactNode {
       {o.summary ? <p className="text-sm text-foreground">{o.summary}</p> : null}
       {links.data ? (
         <>
-          <LinkedRecords title="People" records={links.data.people} />
-          <LinkedRecords title="Projects" records={links.data.projects} />
-          <LinkedRecords title="Documents" records={links.data.documents} />
-          <LinkedRecords title="Interactions" records={links.data.interactions} />
-          <LinkedRecords title="Tasks" records={links.data.tasks} />
+          <LinkedRecords title="People" records={links.data.people} onUnlink={onUnlink} />
+          <LinkedRecords title="Projects" records={links.data.projects} onUnlink={onUnlink} />
+          <LinkedRecords title="Documents" records={links.data.documents} onUnlink={onUnlink} />
+          <LinkedRecords title="Interactions" records={links.data.interactions} onUnlink={onUnlink} />
+          <LinkedRecords title="Tasks" records={links.data.tasks} onUnlink={onUnlink} />
         </>
       ) : null}
     </div>

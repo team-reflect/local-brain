@@ -5,6 +5,7 @@ import { newId } from '../db/id'
 import { chunkText, normalizeText } from './chunk'
 import { contentHash } from './hash'
 import { markForExtraction } from './extraction-queue'
+import { recomputeRelationshipIntelligence } from '../domains/relationships/recompute'
 
 /**
  * Ingestion: turn pasted/imported text into a `document` or `interaction` with
@@ -136,6 +137,10 @@ export async function ingestInteraction(input: IngestInteractionInput): Promise<
   ]
   await batch(statements)
   markForExtraction('interaction', id)
+  // A new interaction refreshes its participants' relationship hints (step 9).
+  for (const personId of input.links?.people ?? []) {
+    await recomputeRelationshipIntelligence(personId)
+  }
   return { id, isDuplicate: Boolean(dup), chunkCount: chunks.count }
 }
 

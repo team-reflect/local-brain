@@ -96,6 +96,32 @@ None at this checkpoint.
   and the boundary it must satisfy is a typed, validated contract, not a stub pretending to
   be a model. Downstream bases shift to `…-05a-extraction-engine` then `…-05b-corrections`.
 
+### DEC-13 — Relationship intelligence is derived; strength is recompute-owned; important dates deferred
+- **What it derives (Plan 05b step 9).** `recomputeRelationshipIntelligence(personId)` is a
+  deterministic projection over a person's interactions and shared tasks — no model. It owns
+  three `people` columns:
+  - `last_interaction_at` = the most recent dated, non-archived interaction (null if none).
+  - `next_reconnect_at` = `last_interaction_at + reconnect_interval_days` (null if either is
+    missing). `reconnect_interval_days` itself is a **user-set cadence input** and is never
+    overwritten.
+  - `relationship_strength` = a transparent 1–5 score (frequency + recency + shared open
+    tasks; see `strength.ts`). It is written **only when there is a signal** (≥1 recent
+    interaction or open task), so a manually set strength survives for a person we have no
+    data on — recompute never clobbers a value it cannot derive.
+- **When it runs.** Incrementally after a relevant interaction is created
+  (`createInteraction`, `ingestInteraction`, and `applyExtraction` on an interaction source
+  refresh the affected participants), and in bulk via `recomputeAllRelationships()` (used on
+  first-run seeding and as a manual refresh). Reconnect suggestions are then a fast read of
+  the derived `next_reconnect_at` column (`listReconnectSuggestions`), no scoring at read time.
+- **Important dates are deferred.** The schema has an `important_dates_json` column but no
+  field (birthday, anniversary, calendar event) that supplies dates to derive — calendar
+  sync is explicitly out of Plan 05's scope. So recompute **does not touch**
+  `important_dates_json`; it stays user-owned until a data source exists (a later plan).
+  Plan 05 step 9 allows this ("important dates *where supported by existing schema/data*").
+- **Why honest.** Everything written is a pure summary of data the user already has; nothing
+  is invented. The one place a value would otherwise be fabricated (important dates, or a
+  strength for a contact with no data) is deliberately left alone.
+
 ### DEC-11 — Ingestion file selection via path field, not a native picker (04c)
 - The `AddRecordDialog` takes a typed file/folder **path** rather than opening the native
   OS picker. Rationale: the native picker needs the Tauri dialog plugin (Rust plugin +

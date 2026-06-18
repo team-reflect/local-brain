@@ -109,6 +109,13 @@ export {
   type Memory,
   type ListMemoriesOptions,
 } from './domains/memories/getters'
+export {
+  updateMemory,
+  archiveMemory,
+  unlinkMemoryFromRecord,
+  linkMemoryToRecord,
+  type MemoryPatch,
+} from './domains/memories/setters'
 
 // Linked records (the typed join-table neighborhood of a record)
 export { type LinkedRecord, type RecordKind } from './domains/relations/types'
@@ -126,6 +133,7 @@ export {
   type DocumentLinks,
   type InteractionLinks,
 } from './domains/relations/getters'
+export { unlinkRecords, type LinkRef, type LinkableKind } from './domains/relations/setters'
 
 // Citations / evidence
 export {
@@ -134,6 +142,31 @@ export {
   type Citation,
   type CitingRecord,
 } from './domains/citations/getters'
+export {
+  updateEvidenceRef,
+  removeEvidenceRef,
+  type EvidencePatch,
+} from './domains/citations/setters'
+
+// Relationship intelligence (derived follow-up hints from interactions/tasks)
+export {
+  recomputeRelationshipIntelligence,
+  recomputeAllRelationships,
+  type RecomputeOptions,
+} from './domains/relationships/recompute'
+export {
+  listReconnectSuggestions,
+  type ReconnectSuggestion,
+  type ReconnectOptions,
+} from './domains/relationships/getters'
+export {
+  relationshipStrength,
+  nextReconnectAt,
+  addDays,
+  daysBetween,
+  STRENGTH_WINDOW_DAYS,
+  type RelationshipSignals,
+} from './domains/relationships/strength'
 
 // Chat (Ask)
 export {

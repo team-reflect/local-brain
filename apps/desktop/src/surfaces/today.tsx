@@ -3,7 +3,13 @@ import { PageHead } from '../components/page-head'
 import { Section } from '../components/section'
 import { EmptyState } from '../components/empty-state'
 import { useRouter } from '../routing/router'
-import { useInteractions, useProjects, useSelf, useTasks } from '../lib/queries'
+import {
+  useInteractions,
+  useProjects,
+  useReconnectSuggestions,
+  useSelf,
+  useTasks,
+} from '../lib/queries'
 
 /** The Today brief: a generated-operating-brief shell over real queries. */
 export function TodaySurface(): ReactNode {
@@ -12,6 +18,7 @@ export function TodaySurface(): ReactNode {
   const openTasks = useTasks({ status: 'open', limit: 6 })
   const interactions = useInteractions(5)
   const projects = useProjects()
+  const reconnects = useReconnectSuggestions(5)
 
   const name = self.data?.preferredName ?? self.data?.fullName ?? 'there'
 
@@ -54,6 +61,29 @@ export function TodaySurface(): ReactNode {
           <EmptyState title="No open tasks" hint="Enjoy the calm." />
         )}
       </Section>
+
+      {reconnects.data && reconnects.data.length > 0 ? (
+        <Section title="Reconnect">
+          <ul className="flex flex-col gap-1">
+            {reconnects.data.map((person) => (
+              <li key={person.id}>
+                <button
+                  type="button"
+                  onClick={() => navigate({ kind: 'person', id: person.id })}
+                  className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-secondary/60"
+                >
+                  <span className="text-foreground">{person.fullName}</span>
+                  <span className="font-mono text-[11px] text-muted-foreground">
+                    {person.lastInteractionAt
+                      ? `last seen ${person.lastInteractionAt.slice(0, 10)}`
+                      : 'never connected'}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
 
       <Section title="Recent interactions">
         {interactions.data && interactions.data.length > 0 ? (

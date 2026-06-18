@@ -7,22 +7,64 @@ questions needing Alex.
 
 ## Current State
 
-- **Phase:** 05a — Extraction engine: the deterministic half of Plan 05 in
-  `packages/core/src/extraction` — the typed extraction **output contract**
-  (`contracts.ts`), deterministic **pre-processing** (`preprocess.ts`), **merge/upsert
-  matching** (`match.ts`), a transactional **apply** pipeline (`apply.ts` + `apply-store.ts`:
-  resolve refs → records/links/memories/evidence in one `db_batch`, confidence gating, dup
-  avoidance), and a typed **model seam** (`extractor.ts`) wired into the ingest queue but
-  with no extractor registered by default. No model behavior is faked. `pnpm check` (89
-  tests) + Vite build + `cargo check` green, PR open. **Plan 04 complete** (04a/04b/04c);
-  Plan 05 split into 05a (this) + 05b (corrections + relationship intelligence) per DEC-12.
-- **Active branch:** `codex/local-brain-05a-extraction-engine` (base `…-04c-ingestion-ui`).
+- **Phase:** 05b — Extraction corrections + relationship intelligence: the deterministic
+  second half of Plan 05 (steps 8–9), which **completes Plan 05**. Correction setters in
+  `packages/core` (memories: `updateMemory`/`archiveMemory`/`unlink|linkMemoryToRecord`;
+  typed links: one undirected `unlinkRecords` over a 15-relation registry; evidence:
+  `updateEvidenceRef`/`removeEvidenceRef`) plus relationship-intelligence recompute
+  (`relationships/`: pure `strength.ts`, `recompute.ts` deriving last-interaction/reconnect/
+  strength from interactions+tasks, `listReconnectSuggestions`). Recompute runs after a
+  relevant interaction (create/ingest/apply) and on first-run seed. The shared detail-page
+  components gained in-place Unlink/Archive/Remove affordances; Today gained a **Reconnect**
+  section. No model behavior; all derivation is a deterministic projection (DEC-13).
+  `pnpm check` (109 tests) + Vite build green, PR open. **Plan 05 complete** (05a + 05b);
+  Plan 06 registers the model-backed extractor through the BYOK boundary.
+- **Active branch:** `codex/local-brain-05b-corrections` (base `…-05a-extraction-engine`).
 - **Mode:** Sequential. This session builds the stack layer by layer; no parallel
   worker sessions are spawned. (Within a layer, read-only research may fan out, but
   commits are made sequentially from this session.)
 - **Blockers:** none at this checkpoint.
 
 ## Log
+
+### 2026-06-17 — Phase 05b: Extraction corrections + relationship intelligence (Plan 05 complete)
+- Built the deterministic second half of Plan 05 (steps 8–9). **No model**; everything is a
+  projection or a typed correction over the canonical SQLite store.
+- **Correction setters (`packages/core`):**
+  - memories: `updateMemory`, `archiveMemory` (soft-delete), `unlinkMemoryFromRecord` /
+    `linkMemoryToRecord`.
+  - typed record links: `unlinkRecords(a, b)` — one **undirected, order-independent** setter
+    over a 15-relation registry (every join surfaced on the detail pages, plus the two
+    non-join cases: person↔org `affiliations` and project↔task `tasks.project_id`). Each maps
+    to a single delete/clearing update, so the write is inherently atomic.
+  - evidence: `updateEvidenceRef` (repoint chunk / fix span / edit note), `removeEvidenceRef`.
+- **Relationship intelligence (`packages/core/src/domains/relationships`):**
+  - `strength.ts` — pure date math (`daysBetween`/`addDays`) + a transparent 1–5
+    `relationshipStrength` (frequency + recency + shared open tasks), returning `null` when
+    there is no signal so manual values survive.
+  - `recompute.ts` — `recomputeRelationshipIntelligence` derives `last_interaction_at`,
+    `next_reconnect_at`, and `relationship_strength` from interactions/tasks;
+    `recomputeAllRelationships` for bulk/first-run. Wired to run after a relevant interaction
+    (`createInteraction`, `ingestInteraction`, and `applyExtraction` on an interaction source).
+  - `getters.ts` — `listReconnectSuggestions` reads the derived `next_reconnect_at` column.
+  - **DEC-13:** strength is recompute-owned (written only with a signal); `reconnect_interval_days`
+    stays a user input; `important_dates_json` is **not** derived (no schema field supplies
+    dates) — left for a later data source, as Plan 05 step 9 permits.
+- **UI (`apps/desktop`):** shared `LinkedRecords` / `MemoryList` / `CitationList` gained
+  Unlink / Archive / Remove affordances, wired through all six detail pages (incl. interaction
+  participants); person detail shows the derived "Reconnect by"; Today gained a **Reconnect**
+  section. New hooks `useUnlinkFrom`/`useUnlinkRecord`/`useArchiveMemory`/`useUnlinkMemory`/
+  `useRemoveEvidenceRef`/`useReconnectSuggestions` invalidate broadly; `useEnsureSeed`
+  recomputes after first-run seed. The seed's kickoff interaction date was moved earlier so
+  the demo shows a real overdue reconnect.
+- **Verification:** `pnpm check` ✓ — typecheck + oxlint (clean) + **109 tests** (72 core:
+  +7 `strength` unit tests, +10 real-SQLite corrections/recompute round-trips — unlink an
+  affiliation / a task↔project / a document link, edit+unlink+archive a memory, fix+remove a
+  citation, derive last-interaction/reconnect/strength, count shared open tasks, preserve a
+  no-signal manual strength, ordered reconnect suggestions, and the not-due/no-cadence case;
+  4 db; 33 desktop: +2 correction-affordance render tests, +1 Today reconnect render test).
+  `pnpm --filter @local-brain/desktop build` ✓ (2057 modules). No Rust this layer. `git diff
+  --check` ✓.
 
 ### 2026-06-17 — Phase 05a: Extraction engine (deterministic half of Plan 05)
 - **Sequencing decision (DEC-12):** Plan 05's only model-dependent step (step 3, "build
@@ -299,21 +341,17 @@ questions needing Alex.
 - Committed (`5c02ab5`), pushed, opened **PR #1** (base `master`).
 
 ### Next
-- **05b** (`codex/local-brain-05b-corrections`, base `…-05a-extraction-engine`): the
-  remaining Plan 05 steps — correction flows (step 8: unlink/edit/archive a memory or link,
-  fix a citation, from the affected detail page) and relationship-intelligence recompute
-  (step 9: last-interaction date, reconnect suggestions, relationship strength, important
-  dates) derived from interactions/tasks. Both are deterministic; they build on 05a's apply
-  engine + correction primitives.
 - **06** (`codex/local-brain-06-search-ai`, base `…-05b-corrections`): search/retrieval/Ask
   **plus the model-backed `Extractor`** that feeds 05a's seam through the checked BYOK model
-  boundary (and golden tests over live model output).
-- Twelve PRs open and awaiting review: **#1** (supervisor), **#2** (foundation), **#3**
+  boundary (and golden tests over live model output). Plan 06 can also wire enrichment of
+  matched people/orgs (deferred from 05a) through the same boundary.
+- Thirteen PRs open and awaiting review: **#1** (supervisor), **#2** (foundation), **#3**
   (schema), **#4** (db package), **#5** (Rust IPC bridge), **#6** (core actions + seed),
   **#7** (03a desktop shell), **#8** (03b desktop shell II), **#9** (04a ingestion core),
   **#10** (04b Rust file-read primitives), **#11** (04c ingestion UI), **#12** (05a
-  extraction engine — `pnpm check` + Vite build + cargo check green). Plans 02 (DB layer),
-  03 (desktop shell), and 04 (ingestion) are complete; Plan 05 is in progress (05a done).
+  extraction engine), **#13** (05b corrections + relationship intelligence — `pnpm check` +
+  Vite build green). Plans 02 (DB layer), 03 (desktop shell), 04 (ingestion), and **05
+  (memory extraction & correction)** are complete; Plan 06 is next.
   A full end-to-end run of the assembled app (`pnpm tauri dev`/`build`) is still pending and
   is required before the app can be called done. When #1 merges to `master`, rebase the
   stack and retarget bases upward.

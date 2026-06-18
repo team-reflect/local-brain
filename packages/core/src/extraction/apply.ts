@@ -2,6 +2,7 @@ import type { Compilable } from 'kysely'
 import { db } from '../db/client'
 import { batch } from '../db/commands'
 import { newId } from '../db/id'
+import { recomputeRelationshipIntelligence } from '../domains/relationships/recompute'
 import { type ExtractionResult, validateExtraction } from './contracts'
 import {
   loadOrganizationCandidates,
@@ -450,6 +451,16 @@ export async function applyExtraction(
 
   if (statements.length > 0) {
     await batch(statements)
+  }
+
+  // Linking people to an interaction is a "relevant interaction" — refresh their
+  // relationship hints (Plan 05 step 9) after the apply transaction commits.
+  if (source.recordType === 'interaction') {
+    for (const entity of resolved.values()) {
+      if (entity.type === 'person') {
+        await recomputeRelationshipIntelligence(entity.id)
+      }
+    }
   }
   return summary
 }

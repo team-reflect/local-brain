@@ -122,7 +122,7 @@ export async function seedDemoData(): Promise<SeedResult> {
       kind: 'meeting',
       title: 'Northwind kickoff',
       bodyText: 'Discussed scope and timeline with Alex.',
-      occurredAt: '2026-06-10T17:00:00.000Z',
+      occurredAt: '2026-04-10T17:00:00.000Z',
     }),
     db.insertInto('interactionParticipants').values({
       id: participantId,
