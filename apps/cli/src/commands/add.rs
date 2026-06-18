@@ -489,8 +489,10 @@ pub fn add_asset(
     if let Some(existing) = find_duplicate_asset(conn, &hash)? {
         if !args.allow_duplicate {
             ensure_asset_file(assets_path, &existing.storage_path, &bytes)?;
+            let tx = conn.transaction()?;
             let linked =
-                insert_asset_links(conn, &existing.id, &args.links, args.role, args.caption)?;
+                insert_asset_links(&tx, &existing.id, &args.links, args.role, args.caption)?;
+            tx.commit()?;
             return report_asset(json, &existing.id, true, linked);
         }
     }
@@ -540,7 +542,11 @@ pub fn add_asset(
     let linked = insert_asset_links(&tx, &id, &args.links, args.role, args.caption)?;
     tx.commit()?;
     if let Err(err) = ensure_asset_file(assets_path, &relative_path, &bytes) {
-        let _ = conn.execute("DELETE FROM assets WHERE id = ?1", params![id]);
+        if let Err(cleanup_err) = conn.execute("DELETE FROM assets WHERE id = ?1", params![&id]) {
+            return Err(CliError::Runtime(format!(
+                "{err}; additionally could not remove asset manifest {id}: {cleanup_err}"
+            )));
+        }
         return Err(err);
     }
     report_asset(json, &id, false, linked)
