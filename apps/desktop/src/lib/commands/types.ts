@@ -1,5 +1,4 @@
 import type { Route } from '../../routing/route'
-import type { AddRecordType } from '../../components/add-record-dialog'
 
 /** What a command can do to the app when it runs. */
 export interface CommandContext {
@@ -7,8 +6,6 @@ export interface CommandContext {
   back: () => void
   forward: () => void
   openPalette: () => void
-  /** Open the add-record dialog for a document or interaction. */
-  openAdd: (type: AddRecordType) => void
 }
 
 /**

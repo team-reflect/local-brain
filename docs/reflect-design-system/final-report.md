@@ -50,8 +50,8 @@ Key decisions:
    (`controlClass`, `keycapClass`, label/meta helpers). No `components/ui/` shadcn
    generation was needed; lucide-react was already present.
 5. **App shell.** 260px sunken sidebar with an indigo brand mark, a quiet ⌘K search field,
-   compact nav rows (active = grey wash + indigo icon), and a pinned "Add record" action.
-   Topbar reduced to back/forward + a quiet Search trigger + the single indigo Add button.
+   compact nav rows (active = grey wash + indigo icon), and the Settings gear pinned at
+   the bottom. Topbar reduced to a quiet Search trigger.
 6. **Scope discipline.** Updated `docs/design-system.md` and `docs/ui-direction.md` to the
    Reflect direction and fixed the one contradicting line in
    `docs/plans/architecture-conventions.md`. Historical `docs/plans/*` and vision docs that
@@ -75,8 +75,6 @@ Shell & components:
   quiet group labels, rounded result rows.
 - `components/page-head.tsx`, `section.tsx`, `data-list.tsx`, `empty-state.tsx`,
   `citation-list.tsx` — quiet labels, rounded-lg frames, sans titles.
-- `components/add-record-dialog.tsx` — Reflect modal, Button primitive, shared input class.
-
 Surfaces & detail:
 
 - `surfaces/today.tsx`, `tasks.tsx`, `network.tsx`, `projects.tsx`, `ask.tsx`,
