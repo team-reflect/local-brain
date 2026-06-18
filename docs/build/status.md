@@ -60,8 +60,9 @@ questions needing Alex.
   back as suggestions rather than written partial); and the extractor seam running only
   when registered; 4 db; 30 desktop unchanged). `pnpm --filter @local-brain/desktop build`
   ✓ (2051 modules). `cargo check --workspace` ✓ (no Rust this layer). `git diff --check` ✓.
-  (oxlint emits one non-fatal `max-lines` warning: the catch-all integration test file
-  crossed 500 lines as apply coverage grew; check still passes.)
+  Lint is clean — no warnings. (The real-SQLite apply tests live in their own focused
+  `extraction.test.mjs` sibling, sharing the in-memory bridge via `sqlite-harness.mjs`, so
+  the integration test file stays under the 500-line ceiling.)
 
 ### 2026-06-17 — Phase 04c: Ingestion UI (Plan 04 complete)
 - Built `AddRecordDialog`: a Document/Interaction toggle and a Paste/Import-folder mode
