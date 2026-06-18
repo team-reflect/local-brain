@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "sidecar": "node scripts/build-sidecar.mjs",
+    "icons": "node scripts/generate-icons.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "tauri": "tauri"
