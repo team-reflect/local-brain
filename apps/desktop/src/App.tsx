@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { AppShell } from './components/app-shell'
 import { BrainChooser } from './components/brain-chooser'
+import { EmbeddingsSync } from './components/embeddings-sync'
 import { Loading } from './components/loading'
 import { useActiveBrain, useEnsureSeed } from './lib/queries'
 import { RouterProvider } from './routing/router'
@@ -9,11 +10,14 @@ import { RouterProvider } from './routing/router'
  * The workspace for one open brain: seed demo data on first run, then mount the
  * typed router and the desktop shell. Keyed by the active brain path in
  * {@link App} so switching brains starts a fresh router history and clean state.
+ * `EmbeddingsSync` is a headless coordinator that keeps semantic-search vectors
+ * current when the feature is enabled.
  */
 function BrainWorkspace(): ReactNode {
   useEnsureSeed()
   return (
     <RouterProvider>
+      <EmbeddingsSync />
       <AppShell />
     </RouterProvider>
   )

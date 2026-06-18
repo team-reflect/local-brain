@@ -618,7 +618,16 @@ pub fn create_brain(
     path: String,
     name: Option<String>,
 ) -> AppResult<BrainInfo> {
-    let target = Path::new(&path);
+    create_brain_impl(&db, &brains, &path, name.as_deref())
+}
+
+fn create_brain_impl(
+    db: &DbState,
+    brains: &BrainState,
+    path: &str,
+    name: Option<&str>,
+) -> AppResult<BrainInfo> {
+    let target = Path::new(path);
     if !target.is_absolute() {
         return Err(AppError::parse(format!(
             "a new brain needs an absolute path: {path}"
@@ -633,7 +642,31 @@ pub fn create_brain(
     let canonical = target
         .canonicalize()
         .unwrap_or_else(|_| target.to_path_buf());
-    switch_to(&db, &brains, conn, &canonical, name.as_deref())
+    // `open_and_migrate` just created the database file (we verified it didn't
+    // exist above). If the switch fails — a poisoned DB lock or a registry
+    // persist error — the previous brain stays active, so the file we created
+    // is orphaned and uncatalogued. `switch_to` has already dropped `conn` on
+    // that path, so the file is closed and safe to remove; clean it up to keep
+    // the create all-or-nothing.
+    match switch_to(db, brains, conn, &canonical, name) {
+        Ok(info) => Ok(info),
+        Err(err) => {
+            remove_brain_file(target);
+            Err(err)
+        }
+    }
+}
+
+/// Best-effort delete of a freshly-created brain database and its WAL/SHM
+/// sidecars after a failed [`create_brain`]. Errors are ignored: leaving a
+/// stray file is preferable to masking the original switch failure.
+fn remove_brain_file(target: &Path) {
+    let _ = std::fs::remove_file(target);
+    for suffix in ["-wal", "-shm"] {
+        let mut sidecar = target.as_os_str().to_os_string();
+        sidecar.push(suffix);
+        let _ = std::fs::remove_file(PathBuf::from(sidecar));
+    }
 }
 
 /// Apply a single-column metadata edit (rename / color) to a catalogued brain.
@@ -1578,6 +1611,62 @@ mod tests {
             forget_brain_impl(&db, &brains, "/some/other.sqlite").is_err(),
             "forget on a non-durable registry must fail"
         );
+    }
+
+    #[test]
+    fn create_brain_removes_the_file_when_the_switch_fails() {
+        // Bugbot Medium regression: create_brain runs open_and_migrate (which
+        // creates the database file on disk) before switch_to. If the switch
+        // fails afterward, the previous brain stays active but the new file is
+        // left orphaned and uncatalogued. create_brain must delete it so the
+        // create is all-or-nothing.
+        let dir = tempdir().unwrap();
+        let old = dir.path().join("old.sqlite");
+        let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old.clone());
+
+        let new = dir.path().join("Work").join("brain.sqlite");
+        std::fs::create_dir_all(new.parent().unwrap()).unwrap();
+        // A non-durable registry makes the registry persist inside switch_to fail.
+        let brains = non_durable_state();
+
+        let result = create_brain_impl(&db, &brains, &new.display().to_string(), Some("Work"));
+        assert!(result.is_err(), "create must fail when the switch fails");
+        // open_and_migrate created the file before the switch failed; the
+        // cleanup must have removed it again.
+        assert!(
+            !new.exists(),
+            "the orphaned brain file must be removed on switch failure"
+        );
+        // WAL/SHM sidecars must not survive either.
+        for suffix in ["-wal", "-shm"] {
+            let mut sidecar = new.as_os_str().to_os_string();
+            sidecar.push(suffix);
+            assert!(
+                !Path::new(&sidecar).exists(),
+                "the {suffix} sidecar must be removed on switch failure"
+            );
+        }
+        // The live DB stays on the previous brain.
+        assert_eq!(db.active_path().unwrap(), old);
+    }
+
+    #[test]
+    fn create_brain_keeps_the_file_on_success() {
+        // The cleanup must not regress the happy path: a successful create
+        // leaves the new database in place and makes it active.
+        let dir = tempdir().unwrap();
+        let old = dir.path().join("old.sqlite");
+        let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old);
+
+        let new = dir.path().join("Work").join("brain.sqlite");
+        std::fs::create_dir_all(new.parent().unwrap()).unwrap();
+        let brains = memory_state(); // durable
+
+        let info = create_brain_impl(&db, &brains, &new.display().to_string(), Some("Work")).unwrap();
+        assert!(info.is_active);
+        assert!(new.exists(), "the new brain file must survive a successful create");
+        let canonical = new.canonicalize().unwrap();
+        assert_eq!(db.active_path().unwrap(), canonical);
     }
 
     #[test]

@@ -276,6 +276,46 @@ poisons the live DB lock before switching and asserts the registry records no ac
 or target-brain row. Rust-focused verification green; full PR gates were rerun before
 pushing this follow-up.
 
+## Bugbot review fix + master reconciliation (2026-06-18, head 5f74a1b)
+
+One new Bugbot finding (comment `3437537699`) on PR #26's current head, resolved in
+`apps/desktop/src-tauri/src/brains.rs`, plus a merge of `origin/master` after PR #27
+(local semantic search) advanced master:
+
+1. **Medium — Create leaves brain file on switch fail.** `create_brain` ran
+   `open_and_migrate` (which creates the database file on disk) *before* `switch_to`.
+   If the switch then failed — a poisoned live-DB lock or a registry persist error —
+   the command returned an error while the previous brain stayed active, leaving the
+   freshly created file orphaned and uncatalogued on disk. Extracted a testable
+   `create_brain_impl` that, on switch failure, deletes the file it just created (and
+   its `-wal`/`-shm` sidecars) via `remove_brain_file`. `switch_to` has already dropped
+   the connection on the failure path, so the file is closed and safe to remove; the
+   create is now all-or-nothing. New Rust tests
+   `create_brain_removes_the_file_when_the_switch_fails` (non-durable registry forces
+   the persist to fail; asserts the file and sidecars are gone and the live DB stays on
+   the previous brain) and `create_brain_keeps_the_file_on_success` (happy path leaves
+   the file and makes it active).
+
+**Master reconciliation.** GitHub reported PR #26 conflicting after `origin/master`
+advanced with PR #27. Merged `origin/master` (`98f6015`) into the branch and resolved
+six conflicts, preserving both feature sets:
+- `db/mod.rs` — kept the brain-picker methods (`active_path`/`schema_version`/
+  `swap_after`/`poison_for_test`) **and** PR #27's `with_connection_mut`, adapting the
+  latter to this branch's `Active { conn, path }` lock shape (`guard.conn.transaction()`).
+- `lib.rs` — registered the dialog plugin + `DbState::new(conn, canonical)` + `brains`
+  state **and** `EmbedState` + the `embed::*` commands.
+- `App.tsx` — kept `BrainWorkspace` keyed by active brain path **and** mounted
+  `EmbeddingsSync` inside it.
+- `settings.tsx` — merged both hook import sets and kept `active`/`brains`/`embeddings`
+  in Diagnostics.
+- `packages/core/src/index.ts` — kept both the `brains` and `embeddings` export blocks.
+- `Cargo.lock` — kept `rfd` (picker) alongside `rgb`/`ring` (embeddings) in order.
+
+Verification: `git diff --check` clean; `cargo test --lib` (48 tests, incl. the two new
+create-brain tests) green; `pnpm typecheck` (4 packages) green; `pnpm test` (72 desktop
+tests + core) green; `pnpm lint` clean (one pre-existing `max-lines` warning on
+`settings.tsx`, now larger because both features land in it — not introduced by this fix).
+
 ## Progress
 
 - [x] Read AGENTS.md, docs, supervisor skill; mapped Local Brain + both Reflect refs.

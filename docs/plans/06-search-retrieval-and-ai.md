@@ -71,13 +71,14 @@ settings.
    - recency
    - explicit links to active projects/tasks
    - selected current view context
-6. Add optional embedding generation for chunks:
-   - sentence-aware chunking in `packages/core`
-   - `fastembed` runtime in Rust
-   - model downloaded on demand
-   - vectors stored in `sqlite-vec`
-   - chunk hashes skip unchanged work
-   - failure means semantic unavailable, not app failure
+6. Embedding generation for chunks (shipped — see `docs/reflect-embeddings/`):
+   - paragraph-aware chunking in `packages/core` (`ingest/chunk.ts`); vectors are a
+     rebuildable projection over the durable `content_chunks` table
+   - `fastembed` runtime in Rust (`all-MiniLM-L6-v2`, 384-dim), desktop only
+   - model downloaded on demand into app data (never bundled), progress polled
+   - vectors stored in `sqlite-vec` (`chunk_embeddings` + `chunk_vectors` vec0, cosine)
+   - chunk text hashes skip unchanged work; a model change re-embeds
+   - failure means semantic unavailable, not app failure (lexical fallback)
 7. Add retrieval API for Ask and agent workflows:
    - question
    - selected filters/context
@@ -138,6 +139,10 @@ settings.
 
 ## Open Questions
 
-- The first embedding backend remains open until packaging is tested.
+- The embedding backend is `fastembed` + `sqlite-vec` (see `docs/reflect-embeddings/`).
+  Bundling/notarizing the ONNX runtime and the on-demand model download still need a
+  packaging pass (Plan 09); the runtime degrades to lexical if unavailable.
+- Semantic search is desktop-only for now — the `brain` CLI's search/ask stay lexical
+  (no embedding runtime in the CLI binary).
 - Graph data filters by node type, date range, project, and relationship strength are
   optional follow-up.

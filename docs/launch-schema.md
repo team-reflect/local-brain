@@ -394,7 +394,9 @@ Each join table should include:
 - FTS5 tables over `documents.body_text`, `interactions.body_text`,
   `content_chunks.text`, task titles/descriptions, people names, organization names,
   and project names.
-- Vector index over `content_chunks`.
+- Vector index over `content_chunks` (`chunk_embeddings` + the `chunk_vectors` vec0
+  virtual table; sqlite-vec, 384-dim cosine). Derived and rebuildable; vectors are
+  generated on demand by the desktop `fastembed` runtime. See `docs/reflect-embeddings/`.
 - Optional denormalized search view that unions visible records for global search.
 - Derived graph view centered on the `people.is_self` row, with nodes for typed records
   and edges from affiliations, join tables, task origins, memory links, evidence refs,

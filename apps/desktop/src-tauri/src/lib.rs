@@ -1,6 +1,7 @@
 mod brains;
 mod commands;
 mod db;
+mod embed;
 mod error;
 mod fs;
 mod keychain;
@@ -35,6 +36,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(db::DbState::new(conn, canonical))
         .manage(brains)
+        .manage(embed::EmbedState::default())
         .invoke_handler(tauri::generate_handler![
             commands::app_version,
             commands::database_path,
@@ -49,6 +51,12 @@ pub fn run() {
             brains::set_brain_color,
             brains::forget_brain,
             brains::reveal_brain,
+            embed::embed_status,
+            embed::embed_ensure,
+            embed::embed_texts,
+            embed::embed_apply,
+            embed::embed_delete,
+            embed::embed_clear,
             fs::read_text_file,
             fs::read_text_folder,
             keychain::keychain_set,

@@ -75,6 +75,21 @@ impl DbState {
         Ok(())
     }
 
+    /// Run `f` against the durable connection inside one transaction, committing
+    /// on `Ok` and rolling back on `Err`. Used by the embedding write commands,
+    /// which need `last_insert_rowid` coupling that the generic `db_batch` path
+    /// can't express.
+    pub fn with_connection_mut<T>(
+        &self,
+        f: impl FnOnce(&Connection) -> AppResult<T>,
+    ) -> AppResult<T> {
+        let mut guard = self.lock()?;
+        let tx = guard.conn.transaction()?;
+        let result = f(&tx)?;
+        tx.commit()?;
+        Ok(result)
+    }
+
     #[cfg(test)]
     pub fn poison_for_test(&self) {
         let _ = std::panic::catch_unwind(|| {

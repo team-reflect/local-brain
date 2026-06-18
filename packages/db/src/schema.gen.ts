@@ -48,6 +48,14 @@ export interface ChatMessages {
   createdAt: Generated<string>
 }
 
+export interface ChunkEmbeddings {
+  id: number
+  chunkId: string
+  contentHash: string
+  modelId: string
+  createdAt: Generated<string>
+}
+
 export interface ContentChunks {
   id: string
   recordType: string
@@ -351,6 +359,7 @@ export interface Database {
   affiliations: Affiliations
   chatConversations: ChatConversations
   chatMessages: ChatMessages
+  chunkEmbeddings: ChunkEmbeddings
   contentChunks: ContentChunks
   documentInteractions: DocumentInteractions
   documentOrganizations: DocumentOrganizations

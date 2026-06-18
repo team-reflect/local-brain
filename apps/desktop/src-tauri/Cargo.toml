@@ -20,6 +20,12 @@ serde_json = { workspace = true }
 brain-schema = { workspace = true }
 rusqlite = { workspace = true }
 sha2 = { workspace = true }
+# Local embedding runtime (Reflect-embeddings port): fastembed (ONNX) in-process,
+# off the UI thread. Semantic search is desktop-only; the model is downloaded on
+# demand into app data, never bundled. hf-hub pre-fetches the model files with
+# byte-level progress (fastembed downloads silently inside `try_new`).
+fastembed = "5"
+hf-hub = { version = "0.5.0", default-features = false, features = ["ureq", "native-tls"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
