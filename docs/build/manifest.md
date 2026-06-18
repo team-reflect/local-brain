@@ -15,9 +15,10 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 - Each PR is based on the branch immediately below it in the stack (not on `master`),
   so review can proceed layer by layer. When a lower PR merges to `master`, rebase the
   ones above it and retarget their base to `master`.
-- Plan 02 (DB layer) is split into three stacked PRs (`02a`, `02b`, `02c`) per the
-  supervisor brief, because schema + Kysely bridge + core actions is too large for one
-  reviewable PR.
+- Plan 02 (DB layer) is split into four stacked PRs (`02a` schema crate, `02b` Kysely
+  codegen, `02c` Rust IPC bridge, `02d` core actions + seed) per the supervisor brief's
+  allowance to split the DB layer. `02c` was split off from `02d` so the Rust bridge
+  (one language, cargo-verified) reviews separately from the TypeScript domain layer.
 
 ## Environment
 
@@ -39,8 +40,9 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 | 01 | Foundation & toolchain | `codex/local-brain-01-foundation` | `…-00-supervisor` | open | [#2](https://github.com/maccman/local-brain/pull/2) |
 | 02a | SQLite schema crate (Rust migrations) | `codex/local-brain-02a-schema` | `…-01-foundation` | open | [#3](https://github.com/maccman/local-brain/pull/3) |
 | 02b | DB package (Kysely + IPC dialect) | `codex/local-brain-02b-db` | `…-02a-schema` | open | [#4](https://github.com/maccman/local-brain/pull/4) |
-| 02c | Core DB actions + IPC commands + seed | `codex/local-brain-02c-core-db` | `…-02b-db` | pending | — |
-| 03 | Desktop shell & core UI | `codex/local-brain-03-desktop-shell` | `…-02c-core-db` | pending | — |
+| 02c | Rust IPC DB bridge (db_query/execute/batch) | `codex/local-brain-02c-bridge` | `…-02b-db` | open | [#5](https://github.com/maccman/local-brain/pull/5) |
+| 02d | Core DB actions + seed data | `codex/local-brain-02d-core-db` | `…-02c-bridge` | pending | — |
+| 03 | Desktop shell & core UI | `codex/local-brain-03-desktop-shell` | `…-02d-core-db` | pending | — |
 | 04 | Record ingestion | `codex/local-brain-04-ingestion` | `…-03-desktop-shell` | pending | — |
 | 05 | Memory extraction & linking | `codex/local-brain-05-extraction` | `…-04-ingestion` | pending | — |
 | 06 | Search, retrieval & AI | `codex/local-brain-06-search-ai` | `…-05-extraction` | pending | — |
@@ -99,11 +101,28 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
   vitest tests, incl. a generated-product-column camelCase→snake_case test); drift
   check fails on a stale `schema.gen.ts` (exit 1) and passes when current (exit 0).
 
-### 02c — Core DB actions + IPC + seed
-- **Scope (Plan 02, steps 9–13):** `packages/core` domain actions
-  (`people|projects|tasks|documents|interactions` getters/setters), Rust IPC commands
-  (`db_query`/`db_execute`/`db_batch`), transaction-scoped multi-table writes, seed data.
-- **Verification:** `pnpm check`; IPC query/execute/batch integration tests; rollback tests.
+### 02c — Rust IPC DB bridge
+- **Scope (Plan 02, step 12):** `apps/desktop/src-tauri/src/db` — a managed `DbState`
+  holding the single durable connection behind a mutex; `db_query` (read-only,
+  rejects any non-`readonly()` statement), `db_execute` (single write), and `db_batch`
+  (every statement in one transaction, rolls back on failure); JSON↔SQLite param/row
+  conversion (arrays/objects round-trip as JSON text); `From<rusqlite::Error>` /
+  `From<SchemaError>` for `AppError`. `lib.rs` opens + migrates the DB at startup
+  (path resolved like the CLI: `$BRAIN_DB` → platform data dir) and registers the
+  commands. Frontend still only wires `db_query`; the write commands are consumed by
+  core in 02d.
+- **Verification:** `cargo fmt --all -- --check` ✓; `cargo check --workspace` ✓;
+  `cargo test --workspace` ✓ — 6 desktop bridge tests (execute+query round-trip,
+  read-path write rejection, NULL→json null, JSON param round-trip, atomic batch
+  commit, batch rollback on FK violation) + 9 brain-schema tests; `pnpm check` ✓.
+
+### 02d — Core DB actions + seed
+- **Scope (Plan 02, steps 9–13):** `packages/core` shared Kysely client over the
+  bridge, typed `dbQuery`/`dbExecute`/`dbBatch` bindings, ULID id generation, domain
+  getters/setters (`people|projects|tasks|documents|interactions`), transaction-scoped
+  multi-table writes via `db_batch`, and seed/demo data.
+- **Verification:** `pnpm check`; getter/setter unit tests against a fake bridge;
+  multi-table write + rollback tests.
 
 ### 03–09
 - Scope mirrors `docs/plans/03..09`. Detail is filled in as each layer starts; see the
@@ -118,3 +137,4 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 - PR #2 — Build 01 foundation scaffold — https://github.com/maccman/local-brain/pull/2 (base `…-00-supervisor`, open)
 - PR #3 — Build 02a launch schema — https://github.com/maccman/local-brain/pull/3 (base `…-01-foundation`, open)
 - PR #4 — Build 02b db package (Kysely codegen + drift check) — https://github.com/maccman/local-brain/pull/4 (base `…-02a-schema`, open)
+- PR #5 — Build 02c Rust IPC DB bridge — https://github.com/maccman/local-brain/pull/5 (base `…-02b-db`, open)
