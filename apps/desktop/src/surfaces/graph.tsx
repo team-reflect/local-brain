@@ -1,6 +1,7 @@
 import { useMemo, type ReactNode } from 'react'
 import type { GraphNodeKind } from '@local-brain/core'
 import { EmptyState } from '../components/empty-state'
+import { Loading } from '../components/loading'
 import { PageHead } from '../components/page-head'
 import { useGraph } from '../lib/queries'
 import { layoutGraph, type PositionedNode } from './graph-layout'
@@ -69,7 +70,7 @@ export function GraphSurface({ showHeader = true }: { showHeader?: boolean } = {
     <div className="mx-auto flex max-w-5xl flex-col gap-4">
       {showHeader ? <PageHead eyebrow="Graph" title="Graph" /> : null}
       {graph.isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <Loading />
       ) : !layout || layout.nodes.length === 0 ? (
         <EmptyState
           title="Nothing to graph yet"

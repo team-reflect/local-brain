@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
+import { sectionLabel } from '../lib/ui'
 import { cn } from '../lib/utils'
 import { EmptyState } from './empty-state'
+import { Loading } from './loading'
 
 export interface Column<T> {
   key: string
@@ -28,7 +30,7 @@ export function DataList<T>({
   isLoading,
 }: DataListProps<T>): ReactNode {
   if (isLoading) {
-    return <p className="px-1 py-6 text-sm text-muted-foreground">Loading…</p>
+    return <Loading className="px-1 py-6" />
   }
   if (rows.length === 0) {
     return empty ?? <EmptyState title="Nothing here yet" />
@@ -42,10 +44,7 @@ export function DataList<T>({
             {columns.map((column) => (
               <th
                 key={column.key}
-                className={cn(
-                  'px-3 py-2 text-[11px] font-medium tracking-wide text-muted-foreground',
-                  column.className,
-                )}
+                className={cn('px-3 py-2', sectionLabel, column.className)}
               >
                 {column.header}
               </th>

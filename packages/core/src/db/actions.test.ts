@@ -1,43 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import {
-  createInteraction,
-  createPerson,
-  completeTask,
-  listPeople,
-  setBridge,
-} from '../index'
-
-interface Captured {
-  command: string
-  args: Record<string, unknown>
-}
-
-/** Install a bridge that records calls and returns canned responses. */
-function capture(rows: unknown[] = []): Captured[] {
-  const calls: Captured[] = []
-  setBridge({
-    invoke: (command, args) => {
-      calls.push({ command, args })
-      switch (command) {
-        case 'db_query':
-          return Promise.resolve(rows)
-        case 'db_execute':
-          return Promise.resolve(1)
-        case 'db_batch':
-          return Promise.resolve((args['statements'] as unknown[]).map(() => 1))
-        default:
-          return Promise.resolve(null)
-      }
-    },
-  })
-  return calls
-}
+import { createInteraction, createPerson, completeTask, listPeople } from '../index'
+import { captureDbBridge, type CapturedCall } from '../test/bridge'
 
 describe('domain actions', () => {
-  let calls: Captured[]
+  let calls: CapturedCall[]
 
   beforeEach(() => {
-    calls = capture()
+    calls = captureDbBridge()
   })
 
   it('createPerson inserts into people with a generated 26-char id', async () => {
@@ -51,7 +20,7 @@ describe('domain actions', () => {
   })
 
   it('listPeople hides archived rows and maps snake_case columns to camelCase', async () => {
-    calls = capture([{ id: 'p1', full_name: 'Ada', is_self: 0 }])
+    calls = captureDbBridge([{ id: 'p1', full_name: 'Ada', is_self: 0 }])
     const people = await listPeople()
     expect(people[0]?.fullName).toBe('Ada')
     const sql = String(calls[0]?.args['sql'])

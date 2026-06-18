@@ -1,12 +1,12 @@
-import type { Insertable, Updateable } from 'kysely'
 import type { Organizations } from '@local-brain/db'
 import { db } from '../../db/client'
 import { execute } from '../../db/commands'
 import { newId } from '../../db/id'
+import type { NewRecord, RecordPatch } from '../../db/records'
 import { nowIso } from '../../db/time'
 
-export type NewOrganization = Omit<Insertable<Organizations>, 'id' | 'createdAt' | 'updatedAt'>
-export type OrganizationPatch = Omit<Updateable<Organizations>, 'id' | 'createdAt'>
+export type NewOrganization = NewRecord<Organizations>
+export type OrganizationPatch = RecordPatch<Organizations>
 
 /** Create an organization and return its generated id. */
 export async function createOrganization(input: NewOrganization): Promise<string> {

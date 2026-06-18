@@ -1,13 +1,13 @@
-import type { Insertable, Updateable } from 'kysely'
 import type { Interactions } from '@local-brain/db'
 import { db } from '../../db/client'
 import { batch, execute } from '../../db/commands'
 import { newId } from '../../db/id'
+import type { NewRecord, RecordPatch } from '../../db/records'
 import { nowIso } from '../../db/time'
 import { recomputeRelationshipIntelligence } from '../relationships/recompute'
 
-export type NewInteraction = Omit<Insertable<Interactions>, 'id' | 'createdAt' | 'updatedAt'>
-export type InteractionPatch = Omit<Updateable<Interactions>, 'id' | 'createdAt'>
+export type NewInteraction = NewRecord<Interactions>
+export type InteractionPatch = RecordPatch<Interactions>
 
 export interface InteractionParticipantInput {
   personId: string

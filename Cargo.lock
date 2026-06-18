@@ -342,7 +342,6 @@ version = "0.1.0"
 dependencies = [
  "brain-schema",
  "clap",
- "dirs",
  "rusqlite",
  "serde",
  "serde_json",
@@ -354,6 +353,7 @@ dependencies = [
 name = "brain-schema"
 version = "0.1.0"
 dependencies = [
+ "dirs",
  "rusqlite",
  "rusqlite_migration",
  "tempfile",
@@ -2082,7 +2082,6 @@ name = "local-brain-desktop"
 version = "0.1.0"
 dependencies = [
  "brain-schema",
- "dirs",
  "rusqlite",
  "serde",
  "serde_json",

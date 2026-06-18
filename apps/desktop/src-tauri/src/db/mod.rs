@@ -38,7 +38,6 @@ impl DbState {
             .lock()
             .map_err(|_| AppError::io("the database lock was poisoned by an earlier panic"))
     }
-
 }
 
 /// One statement in a [`db_batch`] request: compiled SQL plus its JSON params.
@@ -236,5 +235,4 @@ mod tests {
         let rows = run_query(&conn, "SELECT count(*) AS n FROM people", &[]).unwrap();
         assert_eq!(rows[0]["n"], json!(0), "the first insert must not persist");
     }
-
 }

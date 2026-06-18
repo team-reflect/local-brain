@@ -1,3 +1,5 @@
+import type { RecordKind } from '@local-brain/core'
+
 /**
  * The typed route model. Routes are a discriminated union (Reflect Open's
  * pattern); every surface and detail page is one `kind`. Routes serialize to a
@@ -20,6 +22,31 @@ export type Route =
   | { kind: 'settings'; section?: string }
 
 export const HOME_ROUTE: Route = { kind: 'today' }
+
+/**
+ * The detail route for a typed record, or `null` when the kind has no detail
+ * page (memories are surfaced inline, never on their own route). One exhaustive
+ * mapping shared by linked-record lists and citation sources, so a new
+ * {@link RecordKind} forces this switch to be updated.
+ */
+export function routeForRecord(kind: RecordKind, id: string): Route | null {
+  switch (kind) {
+    case 'person':
+      return { kind: 'person', id }
+    case 'organization':
+      return { kind: 'organization', id }
+    case 'project':
+      return { kind: 'project', id }
+    case 'task':
+      return { kind: 'task', id }
+    case 'document':
+      return { kind: 'document', id }
+    case 'interaction':
+      return { kind: 'interaction', id }
+    case 'memory':
+      return null
+  }
+}
 
 /** Structural equality, so the router can skip no-op navigations. */
 export function routesEqual(a: Route, b: Route): boolean {

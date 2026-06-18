@@ -1,12 +1,12 @@
-import type { Insertable, Updateable } from 'kysely'
 import type { Projects } from '@local-brain/db'
 import { db } from '../../db/client'
 import { execute } from '../../db/commands'
 import { newId } from '../../db/id'
+import type { NewRecord, RecordPatch } from '../../db/records'
 import { nowIso } from '../../db/time'
 
-export type NewProject = Omit<Insertable<Projects>, 'id' | 'createdAt' | 'updatedAt'>
-export type ProjectPatch = Omit<Updateable<Projects>, 'id' | 'createdAt'>
+export type NewProject = NewRecord<Projects>
+export type ProjectPatch = RecordPatch<Projects>
 
 export async function createProject(input: NewProject): Promise<string> {
   const id = newId()

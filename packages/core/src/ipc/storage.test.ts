@@ -1,35 +1,29 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { setBridge } from './bridge'
+import { describe, expect, it } from 'vitest'
 import {
   databasePath,
   keychainGet,
   keychainSet,
 } from './storage'
-
-/** Capture the command + args each binding sends, and return a canned response. */
-function capture(response: unknown) {
-  const invoke = vi.fn(async () => response)
-  setBridge({ invoke })
-  return invoke
-}
-
-afterEach(() => vi.restoreAllMocks())
+import { captureBridge } from '../test/bridge'
 
 describe('storage IPC bindings', () => {
   it('keychain bindings round-trip an account and a nullable secret', async () => {
-    const setInvoke = capture(null)
+    const setCalls = captureBridge(null)
     await keychainSet('anthropic', 'sk-test')
-    expect(setInvoke).toHaveBeenCalledWith('keychain_set', { account: 'anthropic', secret: 'sk-test' })
+    expect(setCalls[0]).toEqual({
+      command: 'keychain_set',
+      args: { account: 'anthropic', secret: 'sk-test' },
+    })
 
-    capture('sk-stored')
+    captureBridge('sk-stored')
     expect(await keychainGet('anthropic')).toBe('sk-stored')
 
-    capture(null)
+    captureBridge(null)
     expect(await keychainGet('missing')).toBeNull()
   })
 
   it('databasePath validates a string response', async () => {
-    capture('/data/local-brain/brain.sqlite')
+    captureBridge('/data/local-brain/brain.sqlite')
     expect(await databasePath()).toBe('/data/local-brain/brain.sqlite')
   })
 })

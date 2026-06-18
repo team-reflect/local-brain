@@ -8,17 +8,11 @@ use std::path::PathBuf;
 
 pub use error::{AppError, AppResult};
 
-/// Resolve the durable database path the same way the `brain` CLI does, so the
-/// desktop writer and the CLI reader always agree: `$BRAIN_DB`, then the
-/// platform data directory.
+/// Resolve the durable database path via the shared `brain-schema` helper, so the
+/// desktop writer and the CLI reader always agree: `$BRAIN_DB`, then the platform
+/// data directory.
 pub(crate) fn resolve_db_path() -> PathBuf {
-    if let Some(env) = std::env::var_os("BRAIN_DB") {
-        if !env.is_empty() {
-            return PathBuf::from(env);
-        }
-    }
-    let base = dirs::data_dir().expect("could not resolve a platform data directory");
-    base.join("local-brain").join("brain.sqlite")
+    brain_schema::resolve_db_path().expect("could not resolve a platform data directory")
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
