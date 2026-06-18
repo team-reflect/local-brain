@@ -78,12 +78,12 @@ Network visualization.
 | Check | Result |
 | --- | --- |
 | `git diff --check` | clean |
-| `pnpm check` (typecheck + lint + test) | pass — 45 desktop tests / 15 files (incl. new `brain-dialog.dom.test`), core + db green |
+| `pnpm check` (typecheck + lint + test) | pass — 48 desktop tests / 16 files, core + db green |
 | `pnpm --filter @local-brain/desktop build` | pass (built `dist/`) |
 | `pnpm --filter @local-brain/desktop sidecar` | built (required before Rust checks) |
 | `cargo fmt --all -- --check` | clean |
-| `cargo check --workspace` | pass (now also compiles `tauri-plugin-dialog`) |
-| `cargo test --workspace` | pass (16 desktop-lib + 9 schema + 17 CLI tests) |
+| `cargo check --workspace` | pass |
+| `cargo test --workspace` | pass (33 desktop-lib + 9 schema + 17 CLI tests, incl. the new atomic-rollback and forget-no-op regressions) |
 
 ## Follow-up correction (2026-06-18)
 
