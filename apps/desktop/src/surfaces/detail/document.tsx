@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import type { Citation } from '@local-brain/core'
 import { CitationList } from '../../components/citation-list'
 import { DetailFields } from '../../components/detail-fields'
-import { EmptyState } from '../../components/empty-state'
+import { DetailPage } from '../../components/detail-page'
 import { LinkedRecords } from '../../components/linked-records'
 import { PageHead } from '../../components/page-head'
 import { Section } from '../../components/section'
@@ -21,10 +21,6 @@ export function DocumentDetail({ id }: { id: string }): ReactNode {
   const onUnlink = useUnlinkFrom({ kind: 'document', id })
   const removeEvidence = useRemoveEvidenceRef()
 
-  if (document.isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>
-  if (!document.data) return <EmptyState title="Document not found" />
-
-  const d = document.data
   // Reuse the citation list to show what this document has been cited as evidence for.
   const citedFor: Citation[] = (evidence.data ?? []).map((row) => ({
     id: row.id,
@@ -36,33 +32,37 @@ export function DocumentDetail({ id }: { id: string }): ReactNode {
   }))
 
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-5">
-      <PageHead eyebrow="Document" title={d.title ?? 'Untitled document'} />
-      <DetailFields
-        fields={[
-          { label: 'Kind', value: d.kind ?? '—' },
-          { label: 'Authored', value: d.authoredAt?.slice(0, 10) ?? '—' },
-          { label: 'Source', value: d.originalUrl ?? d.originalPath ?? '—' },
-        ]}
-      />
-      {d.bodyText ? (
-        <Section title="Body">
-          <p className="whitespace-pre-wrap text-sm text-foreground">{d.bodyText}</p>
-        </Section>
-      ) : null}
-      {links.data ? (
+    <DetailPage query={document} notFoundTitle="Document not found">
+      {(d) => (
         <>
-          <LinkedRecords title="People" records={links.data.people} onUnlink={onUnlink} />
-          <LinkedRecords title="Projects" records={links.data.projects} onUnlink={onUnlink} />
-          <LinkedRecords title="Interactions" records={links.data.interactions} onUnlink={onUnlink} />
-          <LinkedRecords title="Tasks" records={links.data.tasks} onUnlink={onUnlink} />
+          <PageHead eyebrow="Document" title={d.title ?? 'Untitled document'} />
+          <DetailFields
+            fields={[
+              { label: 'Kind', value: d.kind ?? '—' },
+              { label: 'Authored', value: d.authoredAt?.slice(0, 10) ?? '—' },
+              { label: 'Source', value: d.originalUrl ?? d.originalPath ?? '—' },
+            ]}
+          />
+          {d.bodyText ? (
+            <Section title="Body">
+              <p className="whitespace-pre-wrap text-sm text-foreground">{d.bodyText}</p>
+            </Section>
+          ) : null}
+          {links.data ? (
+            <>
+              <LinkedRecords title="People" records={links.data.people} onUnlink={onUnlink} />
+              <LinkedRecords title="Projects" records={links.data.projects} onUnlink={onUnlink} />
+              <LinkedRecords title="Interactions" records={links.data.interactions} onUnlink={onUnlink} />
+              <LinkedRecords title="Tasks" records={links.data.tasks} onUnlink={onUnlink} />
+            </>
+          ) : null}
+          <CitationList
+            title="Cited as evidence for"
+            citations={citedFor}
+            onRemove={(citation) => removeEvidence.mutate(citation.id)}
+          />
         </>
-      ) : null}
-      <CitationList
-        title="Cited as evidence for"
-        citations={citedFor}
-        onRemove={(citation) => removeEvidence.mutate(citation.id)}
-      />
-    </div>
+      )}
+    </DetailPage>
   )
 }

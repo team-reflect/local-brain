@@ -10,20 +10,14 @@ use rusqlite::Connection;
 
 use crate::error::CliError;
 
-/// Resolve the database path: `--db` flag, then `$BRAIN_DB`, then the platform
-/// data directory (`<data>/local-brain/brain.sqlite`).
+/// Resolve the database path: an explicit `--db` flag wins; otherwise defer to
+/// the shared `$BRAIN_DB`/platform-data-dir resolution the desktop app uses too.
 pub fn resolve_db_path(flag: Option<&Path>) -> Result<PathBuf, CliError> {
     if let Some(path) = flag {
         return Ok(path.to_path_buf());
     }
-    if let Some(env) = std::env::var_os("BRAIN_DB") {
-        if !env.is_empty() {
-            return Ok(PathBuf::from(env));
-        }
-    }
-    let base = dirs::data_dir()
-        .ok_or_else(|| CliError::NoDatabase("could not resolve a data directory".to_string()))?;
-    Ok(base.join("local-brain").join("brain.sqlite"))
+    brain_schema::resolve_db_path()
+        .ok_or_else(|| CliError::NoDatabase("could not resolve a data directory".to_string()))
 }
 
 /// Open + migrate the database at `path`. Creates the file/parent dir if needed.
@@ -50,7 +44,7 @@ pub fn open_existing(path: &Path) -> Result<Connection, CliError> {
     open(path)
 }
 
-/// The live schema version (`PRAGMA user_version`).
+/// The live schema version (`PRAGMA user_version`), via the shared helper.
 pub fn schema_version(conn: &Connection) -> Result<i64, CliError> {
-    Ok(conn.query_row("PRAGMA user_version", [], |row| row.get(0))?)
+    Ok(brain_schema::schema_version(conn)?)
 }

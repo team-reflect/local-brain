@@ -2,6 +2,7 @@ import type { Compilable } from 'kysely'
 import { db } from '../db/client'
 import { batch } from '../db/commands'
 import { newId } from '../db/id'
+import { type LinkEntityType, sourceLinkInsert } from '../extraction/source-links'
 import { chunkText, normalizeText } from './chunk'
 import { contentHash } from './hash'
 import { markForExtraction } from './extraction-queue'
@@ -105,7 +106,7 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
       contentHash: hash,
     }),
     ...chunks.statements,
-    ...documentLinkStatements(id, input.links),
+    ...linkStatements('document', id, input.links),
   ]
   await batch(statements)
   markForExtraction('document', id)
@@ -133,7 +134,7 @@ export async function ingestInteraction(input: IngestInteractionInput): Promise<
       contentHash: hash,
     }),
     ...chunks.statements,
-    ...interactionLinkStatements(id, input.links),
+    ...linkStatements('interaction', id, input.links),
   ]
   await batch(statements)
   markForExtraction('interaction', id)
@@ -154,48 +155,29 @@ async function prepare(
   return { body, hash, dup }
 }
 
-function documentLinkStatements(documentId: string, links: IngestLinks = {}): Compilable[] {
-  const statements: Compilable[] = []
-  for (const personId of links.people ?? []) {
-    statements.push(db.insertInto('documentPeople').values({ id: newId(), documentId, personId }))
-  }
-  for (const organizationId of links.organizations ?? []) {
-    statements.push(
-      db.insertInto('documentOrganizations').values({ id: newId(), documentId, organizationId }),
-    )
-  }
-  for (const projectId of links.projects ?? []) {
-    statements.push(db.insertInto('projectDocuments').values({ id: newId(), projectId, documentId }))
-  }
-  for (const taskId of links.tasks ?? []) {
-    statements.push(db.insertInto('taskDocuments').values({ id: newId(), taskId, documentId }))
-  }
-  return statements
-}
+/** Map the plural {@link IngestLinks} keys to the shared entity-type names. */
+const LINK_KEYS: ReadonlyArray<readonly [LinkEntityType, keyof IngestLinks]> = [
+  ['person', 'people'],
+  ['organization', 'organizations'],
+  ['project', 'projects'],
+  ['task', 'tasks'],
+]
 
-function interactionLinkStatements(interactionId: string, links: IngestLinks = {}): Compilable[] {
+/**
+ * Join-row inserts linking a source record to the user-picked entities, built
+ * through the shared {@link sourceLinkInsert} topology so ingestion and the
+ * extraction merge write identical rows.
+ */
+function linkStatements(
+  recordType: 'document' | 'interaction',
+  recordId: string,
+  links: IngestLinks = {},
+): Compilable[] {
   const statements: Compilable[] = []
-  for (const personId of links.people ?? []) {
-    statements.push(
-      db.insertInto('interactionParticipants').values({ id: newId(), interactionId, personId }),
-    )
-  }
-  for (const organizationId of links.organizations ?? []) {
-    statements.push(
-      db
-        .insertInto('interactionOrganizations')
-        .values({ id: newId(), interactionId, organizationId }),
-    )
-  }
-  for (const projectId of links.projects ?? []) {
-    statements.push(
-      db.insertInto('projectInteractions').values({ id: newId(), projectId, interactionId }),
-    )
-  }
-  for (const taskId of links.tasks ?? []) {
-    statements.push(
-      db.insertInto('taskInteractions').values({ id: newId(), taskId, interactionId }),
-    )
+  for (const [entityType, key] of LINK_KEYS) {
+    for (const entityId of links[key] ?? []) {
+      statements.push(sourceLinkInsert(recordType, recordId, entityType, entityId))
+    }
   }
   return statements
 }

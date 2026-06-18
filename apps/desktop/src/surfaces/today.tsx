@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { PageHead } from '../components/page-head'
 import { Section } from '../components/section'
 import { EmptyState } from '../components/empty-state'
+import { sectionLabel } from '../lib/ui'
 import { useRouter } from '../routing/router'
 import {
   useInteractions,
@@ -27,7 +28,7 @@ export function TodaySurface(): ReactNode {
       <PageHead eyebrow={todayLabel()} title={`Good to see you, ${name}`} />
 
       <div className="rounded-lg border border-border bg-card px-4 py-3.5">
-        <p className="text-[11px] font-medium tracking-wide text-muted-foreground">Daily brief</p>
+        <p className={sectionLabel}>Daily brief</p>
         <p className="mt-1.5 text-sm text-foreground">
           Your AI daily brief lands here once retrieval is wired up (Plan 06). For now,
           Today reads your open tasks, recent interactions, and active projects straight

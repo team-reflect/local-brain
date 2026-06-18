@@ -1,12 +1,12 @@
-import type { Insertable, Updateable } from 'kysely'
 import type { Tasks } from '@local-brain/db'
 import { db } from '../../db/client'
 import { execute } from '../../db/commands'
 import { newId } from '../../db/id'
+import type { NewRecord, RecordPatch } from '../../db/records'
 import { nowIso } from '../../db/time'
 
-export type NewTask = Omit<Insertable<Tasks>, 'id' | 'createdAt' | 'updatedAt'>
-export type TaskPatch = Omit<Updateable<Tasks>, 'id' | 'createdAt'>
+export type NewTask = NewRecord<Tasks>
+export type TaskPatch = RecordPatch<Tasks>
 
 export async function createTask(input: NewTask): Promise<string> {
   const id = newId()

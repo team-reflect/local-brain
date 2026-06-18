@@ -1,125 +1,30 @@
-import type { Compilable } from 'kysely'
 import { db } from '../db/client'
-import { newId } from '../db/id'
-import type { SourceRecordType } from './preprocess'
+import type { LinkEntityType, LinkSource } from './source-links'
 
 /**
  * Store-facing helpers for {@link applyExtraction}: the pre-apply reads it needs
- * to merge deterministically (existing source links, source chunks, prior
- * affiliations/tasks/memory claims) and the one statement builder that links a
- * resolved entity back to its source record. Kept separate from the apply
- * orchestration so each file stays focused and readable.
+ * to merge deterministically (source chunks, prior affiliations/tasks/memory
+ * claims). The source-record ↔ entity join topology (loading existing links and
+ * building the link inserts) lives in {@link ./source-links}, shared with
+ * ingestion; this file re-exports it so apply callers have one import.
  */
 
-export interface ApplySource {
-  recordType: SourceRecordType
-  recordId: string
-}
+export {
+  loadSourceLinks,
+  sourceLinkStatement,
+  type SourceLinks,
+  type LinkEntityType,
+} from './source-links'
 
-export type EntityType = 'person' | 'organization' | 'project' | 'task'
+/** The source record an extraction result is being applied to. */
+export type ApplySource = LinkSource
+
+/** A typed entity the model resolved to an existing-or-new row. */
+export type EntityType = LinkEntityType
 
 export interface Resolved {
   type: EntityType
   id: string
-}
-
-export interface SourceLinks {
-  people: Set<string>
-  organizations: Set<string>
-  projects: Set<string>
-  tasks: Set<string>
-}
-
-/** Load the ids already linked to the source record, so we never re-insert a pair. */
-export async function loadSourceLinks(source: ApplySource): Promise<SourceLinks> {
-  if (source.recordType === 'document') {
-    const [people, organizations, projects, tasks] = await Promise.all([
-      db.selectFrom('documentPeople').select('personId').where('documentId', '=', source.recordId).execute(),
-      db
-        .selectFrom('documentOrganizations')
-        .select('organizationId')
-        .where('documentId', '=', source.recordId)
-        .execute(),
-      db.selectFrom('projectDocuments').select('projectId').where('documentId', '=', source.recordId).execute(),
-      db.selectFrom('taskDocuments').select('taskId').where('documentId', '=', source.recordId).execute(),
-    ])
-    return {
-      people: new Set(people.map((r) => r.personId)),
-      organizations: new Set(organizations.map((r) => r.organizationId)),
-      projects: new Set(projects.map((r) => r.projectId)),
-      tasks: new Set(tasks.map((r) => r.taskId)),
-    }
-  }
-  const [people, organizations, projects, tasks] = await Promise.all([
-    db
-      .selectFrom('interactionParticipants')
-      .select('personId')
-      .where('interactionId', '=', source.recordId)
-      .execute(),
-    db
-      .selectFrom('interactionOrganizations')
-      .select('organizationId')
-      .where('interactionId', '=', source.recordId)
-      .execute(),
-    db
-      .selectFrom('projectInteractions')
-      .select('projectId')
-      .where('interactionId', '=', source.recordId)
-      .execute(),
-    db.selectFrom('taskInteractions').select('taskId').where('interactionId', '=', source.recordId).execute(),
-  ])
-  return {
-    people: new Set(people.map((r) => r.personId)),
-    organizations: new Set(organizations.map((r) => r.organizationId)),
-    projects: new Set(projects.map((r) => r.projectId)),
-    tasks: new Set(tasks.map((r) => r.taskId)),
-  }
-}
-
-/**
- * Statement linking the given entity to the source record, or null if it is
- * already linked. Mutates `existing` so duplicates within one apply collapse too.
- */
-export function sourceLinkStatement(
-  source: ApplySource,
-  entity: Resolved,
-  existing: SourceLinks,
-): Compilable | null {
-  const recordId = source.recordId
-  if (entity.type === 'person') {
-    if (existing.people.has(entity.id)) return null
-    existing.people.add(entity.id)
-    return source.recordType === 'document'
-      ? db.insertInto('documentPeople').values({ id: newId(), documentId: recordId, personId: entity.id })
-      : db
-          .insertInto('interactionParticipants')
-          .values({ id: newId(), interactionId: recordId, personId: entity.id })
-  }
-  if (entity.type === 'organization') {
-    if (existing.organizations.has(entity.id)) return null
-    existing.organizations.add(entity.id)
-    return source.recordType === 'document'
-      ? db
-          .insertInto('documentOrganizations')
-          .values({ id: newId(), documentId: recordId, organizationId: entity.id })
-      : db
-          .insertInto('interactionOrganizations')
-          .values({ id: newId(), interactionId: recordId, organizationId: entity.id })
-  }
-  if (entity.type === 'project') {
-    if (existing.projects.has(entity.id)) return null
-    existing.projects.add(entity.id)
-    return source.recordType === 'document'
-      ? db.insertInto('projectDocuments').values({ id: newId(), projectId: entity.id, documentId: recordId })
-      : db
-          .insertInto('projectInteractions')
-          .values({ id: newId(), projectId: entity.id, interactionId: recordId })
-  }
-  if (existing.tasks.has(entity.id)) return null
-  existing.tasks.add(entity.id)
-  return source.recordType === 'document'
-    ? db.insertInto('taskDocuments').values({ id: newId(), taskId: entity.id, documentId: recordId })
-    : db.insertInto('taskInteractions').values({ id: newId(), taskId: entity.id, interactionId: recordId })
 }
 
 /** Map a source record's chunk indexes to chunk ids, for resolving evidence refs. */

@@ -6,7 +6,8 @@ import {
   isAppError,
 } from '@local-brain/core'
 import { cn } from '../lib/utils'
-import { controlClass } from '../lib/ui'
+import { controlClass, sectionLabel } from '../lib/ui'
+import { Alert } from './alert'
 import { Button } from './button'
 import {
   useIngestDocument,
@@ -219,14 +220,14 @@ export function AddRecordDialog({
 
         <div className="flex-1 overflow-y-auto px-4 py-3">
           {error ? (
-            <p className="mb-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            <Alert variant="error" className="mb-2">
               {error}
-            </p>
+            </Alert>
           ) : null}
           {notice ? (
-            <p className="mb-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-xs text-foreground">
+            <Alert variant="info" className="mb-2">
               {notice}
-            </p>
+            </Alert>
           ) : null}
 
           {mode === 'compose' ? (
@@ -313,7 +314,7 @@ const inputClass = controlClass
 function Field({ label, children }: { label: string; children: ReactNode }): ReactNode {
   return (
     <label className="flex flex-col gap-1">
-      <span className="text-[11px] font-medium tracking-wide text-muted-foreground">{label}</span>
+      <span className={sectionLabel}>{label}</span>
       {children}
     </label>
   )
@@ -418,7 +419,7 @@ function LinkGroup({
 }): ReactNode {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-[11px] font-medium tracking-wide text-muted-foreground">{label}</span>
+      <span className={sectionLabel}>{label}</span>
       <div className="max-h-28 overflow-y-auto">
         {items.length === 0 ? (
           <p className="text-xs text-muted-foreground">None yet.</p>

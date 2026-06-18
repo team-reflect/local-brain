@@ -1,14 +1,8 @@
 import type { ReactNode } from 'react'
 import type { Citation } from '@local-brain/core'
-import type { Route } from '../routing/route'
+import { routeForRecord } from '../routing/route'
 import { useRouter } from '../routing/router'
 import { Section } from './section'
-
-function sourceRoute(sourceType: string, sourceId: string): Route | null {
-  if (sourceType === 'document') return { kind: 'document', id: sourceId }
-  if (sourceType === 'interaction') return { kind: 'interaction', id: sourceId }
-  return null
-}
 
 /**
  * A citation list: the evidence (quoted chunks of documents/interactions) that
@@ -32,7 +26,12 @@ export function CitationList({
     <Section title={title}>
       <ul className="flex flex-col gap-2">
         {citations.map((citation) => {
-          const route = sourceRoute(citation.sourceType, citation.sourceId)
+          // Citation sources are always documents or interactions; anything else
+          // has no detail route.
+          const route =
+            citation.sourceType === 'document' || citation.sourceType === 'interaction'
+              ? routeForRecord(citation.sourceType, citation.sourceId)
+              : null
           return (
             <li
               key={citation.id}

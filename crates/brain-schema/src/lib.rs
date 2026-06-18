@@ -6,7 +6,7 @@
 //! database is durable user data. Only derived tables (content chunks, FTS,
 //! vectors) are rebuildable; the product tables are the source of truth.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -89,6 +89,24 @@ pub fn open_in_memory() -> Result<Connection, SchemaError> {
         .map_err(|err| SchemaError::Pragma(err.to_string()))?;
     migrate(&mut conn)?;
     Ok(conn)
+}
+
+/// The durable database path the desktop app and the `brain` CLI must agree on:
+/// `$BRAIN_DB` if set, else `<platform data dir>/local-brain/brain.sqlite`.
+/// Returns `None` only when `$BRAIN_DB` is unset and no data directory resolves.
+pub fn resolve_db_path() -> Option<PathBuf> {
+    if let Some(env) = std::env::var_os("BRAIN_DB") {
+        if !env.is_empty() {
+            return Some(PathBuf::from(env));
+        }
+    }
+    Some(dirs::data_dir()?.join("local-brain").join("brain.sqlite"))
+}
+
+/// The applied schema version (`PRAGMA user_version`), comparable against
+/// [`LATEST_SCHEMA_VERSION`].
+pub fn schema_version(conn: &Connection) -> rusqlite::Result<i64> {
+    conn.query_row("PRAGMA user_version", [], |row| row.get(0))
 }
 
 #[cfg(test)]
