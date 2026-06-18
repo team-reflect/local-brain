@@ -4,6 +4,7 @@ import { appVersion } from '@local-brain/core'
 import { PageHead } from '../components/page-head'
 import { Section } from '../components/section'
 import { cn } from '../lib/utils'
+import { useModelStatus } from '../lib/queries'
 import { useRouter } from '../routing/router'
 
 interface SettingsSection {
@@ -15,7 +16,7 @@ interface SettingsSection {
 
 const SECTIONS: readonly SettingsSection[] = [
   { key: 'general', label: 'General' },
-  { key: 'model-keys', label: 'Model keys', plan: 'Plan 06' },
+  { key: 'model-keys', label: 'Model keys' },
   { key: 'database', label: 'Local database' },
   { key: 'backup', label: 'Backup & export', plan: 'Plan 08' },
   { key: 'skills', label: 'Skills', plan: 'Plan 07' },
@@ -63,15 +64,7 @@ export function SettingsSurface({ section }: { section: string | undefined }): R
 function SectionBody({ section }: { section: string }): ReactNode {
   switch (section) {
     case 'model-keys':
-      return (
-        <Section title="Model keys">
-          <p className="text-sm text-muted-foreground">
-            API keys for the models that power Ask and extraction. Keys are stored locally and
-            never leave your machine. The key vault and provider selection ship with the AI layer
-            in Plan 06.
-          </p>
-        </Section>
-      )
+      return <ModelBoundary />
     case 'database':
       return (
         <Section title="Local database">
@@ -120,18 +113,73 @@ function SectionBody({ section }: { section: string }): ReactNode {
   }
 }
 
+function ModelBoundary(): ReactNode {
+  const status = useModelStatus()
+  const data = status.data
+  return (
+    <Section title="Model keys">
+      <div className="flex flex-col gap-3 text-sm">
+        <p className="text-muted-foreground">
+          Ask and model-backed extraction call your own provider key (BYOK). Keys are read from the
+          OS keychain and never stored in app settings or sent anywhere but the provider you choose.
+        </p>
+        <div className="rounded-md border border-border bg-card px-4 py-3">
+          {data ? (
+            <dl className="grid grid-cols-[8rem_1fr] gap-x-3 gap-y-1.5 text-xs">
+              <dt className="text-muted-foreground">External calls</dt>
+              <dd className="font-mono text-foreground">{data.enabled ? 'enabled' : 'disabled'}</dd>
+              <dt className="text-muted-foreground">Provider</dt>
+              <dd className="font-mono text-foreground">{data.providerId ?? '—'}</dd>
+              <dt className="text-muted-foreground">Model</dt>
+              <dd className="font-mono text-foreground">{data.model ?? '—'}</dd>
+              <dt className="text-muted-foreground">Status</dt>
+              <dd
+                className={cn(
+                  'font-mono',
+                  data.canRun ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400',
+                )}
+              >
+                {data.canRun ? 'ready' : 'not ready'}
+              </dd>
+              <dt className="text-muted-foreground">Detail</dt>
+              <dd className="text-foreground">{data.reason}</dd>
+            </dl>
+          ) : (
+            <span className="text-muted-foreground">Checking model status…</span>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Provider key management (keychain) and the enable/disable toggle ship with Settings &amp;
+          privacy in Plan 08.
+        </p>
+      </div>
+    </Section>
+  )
+}
+
 function Diagnostics(): ReactNode {
   const info = useQuery({ queryKey: ['app-version'], queryFn: appVersion })
+  const model = useModelStatus()
   return (
     <Section title="Diagnostics">
-      <div className="rounded-md border border-border bg-card px-4 py-3 font-mono text-xs text-card-foreground">
-        {info.data ? (
-          <span>
-            {info.data.name} v{info.data.version} · {info.data.platform}
-          </span>
-        ) : (
-          <span className="text-muted-foreground">Loading app info…</span>
-        )}
+      <div className="flex flex-col gap-2">
+        <div className="rounded-md border border-border bg-card px-4 py-3 font-mono text-xs text-card-foreground">
+          {info.data ? (
+            <span>
+              {info.data.name} v{info.data.version} · {info.data.platform}
+            </span>
+          ) : (
+            <span className="text-muted-foreground">Loading app info…</span>
+          )}
+        </div>
+        <div className="rounded-md border border-border bg-card px-4 py-3 font-mono text-xs text-card-foreground">
+          <span className="text-muted-foreground">model: </span>
+          {model.data ? (model.data.canRun ? 'ready' : `unavailable (${model.data.reason})`) : '…'}
+        </div>
+        <div className="rounded-md border border-border bg-card px-4 py-3 font-mono text-xs text-card-foreground">
+          <span className="text-muted-foreground">lexical search: </span>FTS5 (available)
+          <span className="text-muted-foreground"> · semantic: </span>off (lexical fallback)
+        </div>
       </div>
     </Section>
   )

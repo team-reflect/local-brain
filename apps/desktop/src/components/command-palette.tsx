@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { listCommands } from '../lib/commands/registry'
 import type { CommandContext } from '../lib/commands/types'
-import { useQuickSearch } from '../lib/queries'
+import { useGlobalSearch } from '../lib/queries'
 import { routeForLinkedRecord } from './linked-records'
 
 interface PaletteItem {
@@ -36,7 +36,7 @@ export function CommandPalette({
 }): ReactNode {
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState(0)
-  const search = useQuickSearch(open ? query : '')
+  const search = useGlobalSearch(open ? query : '')
 
   useEffect(() => {
     if (open) {
@@ -71,12 +71,12 @@ export function CommandPalette({
   }, [query, context, onClose])
 
   const recordItems = useMemo<PaletteItem[]>(() => {
-    return (search.data ?? []).map((record) => {
-      const route = routeForLinkedRecord(record)
+    return (search.data ?? []).map((hit) => {
+      const route = routeForLinkedRecord({ kind: hit.kind, id: hit.id, title: hit.title, subtitle: hit.subtitle })
       return {
-        key: `record:${record.kind}:${record.id}`,
-        label: record.title,
-        hint: KIND_LABEL[record.kind] ?? record.kind,
+        key: `record:${hit.kind}:${hit.id}`,
+        label: hit.title,
+        hint: KIND_LABEL[hit.kind] ?? hit.kind,
         run: () => {
           onClose()
           if (route) context.navigate(route)

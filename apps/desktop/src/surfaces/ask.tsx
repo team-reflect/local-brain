@@ -1,56 +1,56 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
-import { Plus } from 'lucide-react'
+import { Plus, FileText, MessagesSquare, ExternalLink } from 'lucide-react'
 import { PageHead } from '../components/page-head'
 import { cn } from '../lib/utils'
 import {
-  useAddMessage,
+  useAsk,
+  useCitationsForSubject,
   useConversations,
-  useCreateConversation,
   useMessages,
+  useModelStatus,
 } from '../lib/queries'
 import { useRouter } from '../routing/router'
+import type { Route } from '../routing/route'
 
 /**
- * The placeholder the assistant returns until Plan 06 wires retrieval. It is
- * persisted so a conversation reads as a real thread; the cited-answer panel
- * fills in once retrieval supplies grounded responses.
+ * The Ask surface (Plan 06). Sending a question runs the cited-answer pipeline:
+ * retrieve grounding chunks, call the model through the checked boundary, and
+ * persist the answer plus one citation per cited source. When the model boundary
+ * is closed the assistant turn is an honest "not configured" message instead.
  */
-const PLACEHOLDER_ANSWER =
-  'I can’t answer yet — retrieval and cited answers are wired up in Plan 06. Your messages are saved here so the conversation is ready when it lands.'
-
-/** The Ask shell: a conversation list, a chat panel, and a citations footer. */
-export function AskSurface({
-  conversationId,
-}: {
-  conversationId: string | undefined
-}): ReactNode {
+export function AskSurface({ conversationId }: { conversationId: string | undefined }): ReactNode {
   const { navigate } = useRouter()
   const conversations = useConversations()
   const messages = useMessages(conversationId)
-  const createConversation = useCreateConversation()
-  const addMessage = useAddMessage()
+  const modelStatus = useModelStatus()
+  const askMutation = useAsk()
   const [draft, setDraft] = useState('')
 
-  const pending = createConversation.isPending || addMessage.isPending
+  const pending = askMutation.isPending
 
   async function onSubmit(event: FormEvent): Promise<void> {
     event.preventDefault()
     const text = draft.trim()
     if (!text || pending) return
     setDraft('')
-
-    let id = conversationId
-    if (!id) {
-      id = await createConversation.mutateAsync(text.length > 60 ? `${text.slice(0, 59)}…` : text)
-      navigate({ kind: 'ask', conversationId: id })
-    }
-    await addMessage.mutateAsync({ conversationId: id, role: 'user', content: text })
-    await addMessage.mutateAsync({ conversationId: id, role: 'assistant', content: PLACEHOLDER_ANSWER })
+    const result = await askMutation.mutateAsync({
+      question: text,
+      ...(conversationId ? { conversationId } : {}),
+    })
+    if (!conversationId) navigate({ kind: 'ask', conversationId: result.conversationId })
   }
+
+  const status = modelStatus.data
+  const messageList = messages.data ?? []
 
   return (
     <div className="mx-auto flex h-full max-w-5xl flex-col gap-4">
       <PageHead eyebrow="Ask" title="Ask" />
+      {status && !status.canRun ? (
+        <p className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+          {status.reason}
+        </p>
+      ) : null}
       <div className="flex min-h-0 flex-1 gap-4">
         <aside className="flex w-56 shrink-0 flex-col gap-2">
           <button
@@ -85,27 +85,29 @@ export function AskSurface({
           <div className="flex-1 overflow-y-auto">
             {!conversationId ? (
               <p className="px-1 py-6 text-sm text-muted-foreground">
-                Ask a question about your brain. Answers stay grounded in your records — citations
-                arrive with retrieval in Plan 06.
+                Ask a question about your brain. Answers stay grounded in your records, with citations
+                that open the exact document or interaction.
               </p>
-            ) : (messages.data ?? []).length === 0 ? (
+            ) : messageList.length === 0 ? (
               <p className="px-1 py-6 text-sm text-muted-foreground">No messages yet.</p>
             ) : (
               <ul className="flex flex-col gap-3 py-1">
-                {(messages.data ?? []).map((message) => (
+                {messageList.map((message) => (
                   <li
                     key={message.id}
                     className={cn(
                       'max-w-[80%] rounded-md px-3 py-2 text-sm',
                       message.role === 'user'
                         ? 'self-end bg-primary/10 text-foreground'
-                        : 'self-start border border-border bg-card text-foreground',
+                        : 'w-full max-w-full self-start border border-border bg-card text-foreground',
                     )}
                   >
                     <p className="mb-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
                       {message.role}
+                      {message.model ? ` · ${message.model}` : ''}
                     </p>
                     <p className="whitespace-pre-wrap">{message.content}</p>
+                    {message.role === 'assistant' ? <Citations messageId={message.id} /> : null}
                   </li>
                 ))}
               </ul>
@@ -124,11 +126,54 @@ export function AskSurface({
               disabled={pending || draft.trim().length === 0}
               className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-40"
             >
-              Send
+              {pending ? 'Thinking…' : 'Send'}
             </button>
           </form>
         </section>
       </div>
+    </div>
+  )
+}
+
+/** The citation list under an assistant answer; each opens its source record. */
+function Citations({ messageId }: { messageId: string }): ReactNode {
+  const { navigate } = useRouter()
+  const citations = useCitationsForSubject('chat_message', messageId)
+  const rows = citations.data ?? []
+  if (rows.length === 0) return null
+
+  return (
+    <div className="mt-2 border-t border-border/60 pt-2">
+      <p className="mb-1 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">Sources</p>
+      <ol className="flex flex-col gap-1">
+        {rows.map((citation, index) => {
+          const route: Route =
+            citation.sourceType === 'interaction'
+              ? { kind: 'interaction', id: citation.sourceId }
+              : { kind: 'document', id: citation.sourceId }
+          return (
+            <li key={citation.id}>
+              <button
+                type="button"
+                onClick={() => navigate(route)}
+                className="group flex w-full items-start gap-1.5 rounded px-1 py-0.5 text-left text-xs text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+              >
+                <span className="font-mono text-[10px] text-muted-foreground">[{index + 1}]</span>
+                {citation.sourceType === 'interaction' ? (
+                  <MessagesSquare className="mt-0.5 size-3 shrink-0" />
+                ) : (
+                  <FileText className="mt-0.5 size-3 shrink-0" />
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="font-medium text-foreground">{citation.sourceTitle ?? 'Source'}</span>
+                  <span className="line-clamp-2 text-muted-foreground">{citation.quote}</span>
+                </span>
+                <ExternalLink className="mt-0.5 size-3 shrink-0 opacity-0 group-hover:opacity-100" />
+              </button>
+            </li>
+          )
+        })}
+      </ol>
     </div>
   )
 }

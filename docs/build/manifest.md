@@ -49,10 +49,10 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 | 04c | Ingestion UI (paste/import flows, folder import, Add actions) | `codex/local-brain-04c-ingestion-ui` | `…-04b-ingestion-fs` | open | [#11](https://github.com/maccman/local-brain/pull/11) |
 | 05a | Extraction engine (contracts, preprocessing, merge/apply, model seam) | `codex/local-brain-05a-extraction-engine` | `…-04c-ingestion-ui` | open | [#12](https://github.com/maccman/local-brain/pull/12) |
 | 05b | Extraction corrections + relationship intelligence (UI/setters) | `codex/local-brain-05b-corrections` | `…-05a-extraction-engine` | open | [#14](https://github.com/maccman/local-brain/pull/14) |
-| 06 | Search, retrieval & AI (incl. the model-backed extractor) | `codex/local-brain-06-search-ai` | `…-05b-corrections` | pending | — |
+| 06 | Search, retrieval & AI (incl. the model-backed extractor) | `codex/local-brain-06-search-ai` | `…-05b-corrections` | open | [#15](https://github.com/maccman/local-brain/pull/15) |
 | 07 | CLI & agent skills | `codex/local-brain-07-cli-skills` | `…-06-search-ai` | pending | — |
-| 08 | Settings, backup, export & privacy | `codex/local-brain-08-settings` | `…-07-cli-skills` | pending | — |
-| 09 | Packaging & launch | `codex/local-brain-09-packaging` | `…-08-settings` | pending | — |
+| 08 | Settings, backup, export & privacy | `codex/local-brain-08-settings-backup-privacy` | `…-07-cli-skills` | pending | — |
+| 09 | Packaging & launch | `codex/local-brain-09-packaging-launch` | `…-08-settings-backup-privacy` | pending | — |
 
 Status legend: `pending` → not started · `in progress` → branch exists, work underway ·
 `open` → PR opened · `merged` · `blocked` (see status.md).
@@ -313,9 +313,42 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
   Recompute is per-person sequential (fine at personal-CRM scale). A full assembled
   `pnpm tauri dev`/`build` launch remains pending (no GUI session this layer).
 
-### 06–09
-- Scope mirrors `docs/plans/06..09`: 06 = search/retrieval/Ask **and the model-backed
-  extractor** that feeds 05a's seam; 07 = `brain` CLI + skills (sidecar via
+### 06 — Search, retrieval & AI
+- **Scope (Plan 06):** `packages/core` —
+  - `retrieval/` — the one shared `retrieve()` contract over FTS5 `content_chunks`
+    (bm25 + `snippet()`, OR-recall query sanitization, recency + link-boost re-rank,
+    `mode: lexical|semantic|hybrid` that degrades to lexical with `semanticAvailable:false`);
+    `globalSearch()` across the six record types (FTS for documents/interactions,
+    name LIKE for people/orgs/projects/tasks); pure, unit-tested `match-query`/`ranking`.
+  - `domains/settings/` — typed key/value store backing the model boundary (and Plans 08+).
+  - `ai/` — the BYOK model boundary: a runtime `ModelProvider` seam, `getModelStatus()`
+    (provider-available **and** enabled), the single typed `assembleAnswerContext` helper +
+    `citedSubset`, the cited `ask()` pipeline (persists evidence_refs per cited source on the
+    assistant chat message), the model-backed `createModelExtractor()` feeding the 05a seam,
+    and a concrete `createAnthropicProvider`.
+  - `reports/` — agent endpoints: `getDailyBrief` (bucketed tasks + recent interactions +
+    reconnects), `planDay`, `getWaitingItems`, `getChangesSince`.
+  - **Desktop:** Ask rewritten to the real cited pipeline (answer + source list that opens the
+    owning document/interaction; honest closed-boundary banner); the command palette upgraded
+    to FTS `globalSearch`; Settings → Model shows the live boundary status; Diagnostics shows
+    model + lexical/semantic availability; `installModel()` registers the provider (dev env
+    key) + the extractor at startup.
+- **Decision:** DEC-14 (provider seam now; key source per host later — desktop keychain in
+  Plan 08, CLI env in Plan 07; degrades cleanly with no key).
+- **Verification:** `pnpm check` ✓ — typecheck + oxlint + **144 tests** (111 core: +8
+  match-query, +6 ranking, +4 context, +5 extractor-json, +4 anthropic, +10 real-SQLite Plan-06
+  round-trips — FTS retrieve/degrade, global search, cited Ask + persisted evidence_refs,
+  kill-switch, model-backed extractor, daily brief/plan-day/changes; 4 db; 33 desktop incl. a
+  new Ask closed-boundary render test). `pnpm --filter @local-brain/desktop build` ✓ (2075
+  modules). `cargo fmt --all -- --check` ✓; `cargo check --workspace` ✓; `cargo test
+  --workspace` ✓ (18 Rust tests, unchanged). `git diff --check` ✓.
+- **Caveats:** embeddings/semantic search are an additive follow-up (lexical-only today, clean
+  degradation); a stock desktop build answers only when a provider key is supplied (keychain
+  wiring is Plan 08); the `brain ask`/`search` CLI path reimplements the same retrieval SQL in
+  Rust in Plan 07. A full assembled `pnpm tauri dev/build` launch remains pending.
+
+### 07–09
+- Scope mirrors `docs/plans/07..09`: 07 = `brain` CLI + skills (sidecar via
   `bundle.externalBin`); 08 = settings/backup/export; 09 = macOS packaging, first-run,
   signing checklist.
 
@@ -334,3 +367,4 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 - PR #11 — Build 04c ingestion UI (paste/import dialog, folder import, Add actions) — https://github.com/maccman/local-brain/pull/11 (base `…-04b-ingestion-fs`, open)
 - PR #12 — Build 05a extraction engine (contracts, preprocessing, merge/apply, model seam) — https://github.com/maccman/local-brain/pull/12 (base `…-04c-ingestion-ui`, open)
 - PR #14 — Build 05b extraction corrections + relationship intelligence — https://github.com/maccman/local-brain/pull/14 (base `…-05a-extraction-engine`, open)
+- PR #15 — Build 06 search, retrieval & AI (FTS5 retrieve, cited Ask, model boundary, model-backed extractor, report endpoints) — https://github.com/maccman/local-brain/pull/15 (base `…-05b-corrections`, open)

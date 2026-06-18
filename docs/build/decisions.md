@@ -22,6 +22,26 @@ None at this checkpoint.
 
 ## Decisions (no action needed)
 
+### DEC-14 — Plan 06 model boundary: provider seam now; key source per host later
+- **What.** Plan 06 builds the full BYOK model boundary — a runtime-registered
+  `ModelProvider` seam, a checked `getModelStatus()` gate (provider available *and* the
+  external-calls setting enabled), the single typed `assembleAnswerContext` helper through
+  which all external context passes, the cited `ask()` pipeline (persists one `evidence_refs`
+  row per cited source against the assistant `chat_message`), and the model-backed
+  `Extractor` that feeds the 05a seam. A concrete `createAnthropicProvider` (fetch-based,
+  injectable) is included.
+- **Key source is host-specific and deferred to the owning plan.** The provider *key* never
+  lives in a settings row (architecture rule: keys belong in the keychain). The desktop reads
+  an optional `VITE_ANTHROPIC_API_KEY` build-time env as a dev/demo escape hatch and otherwise
+  degrades cleanly; the keychain read + enable/disable toggle land in **Plan 08**. The CLI
+  registers a provider from an env var in **Plan 07**. So in a stock Plan 06 desktop build
+  with no key, Ask shows an honest "not configured" reason and the extractor is a safe no-op —
+  exactly the clean-degradation contract the brief requires. The boundary itself is fully
+  exercised with a mock provider in real-SQLite integration tests (no live key needed).
+- **Why honest.** Nothing fakes a model with heuristics. The deterministic retrieval (FTS5)
+  and the apply pipeline are real and tested; the model is a typed, validated seam, and the
+  one place an answer could be fabricated (no provider) is a hard, visible gate.
+
 ### DEC-1 — Stacked PRs via explicit base branches
 - `gh stack` is unavailable. Using ordinary PRs, each based on the branch below it in the
   stack, with the relationship recorded in `manifest.md`. Rebase + retarget to `master`
