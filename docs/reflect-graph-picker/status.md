@@ -234,6 +234,29 @@ pending/healthy cases behave. Verified the test fails against the old gate and p
 against the fix. `pnpm check` + desktop build green. No Rust changed (cargo gates
 skipped).
 
+## Follow-up: first-run once per install, not per brain (2026-06-18)
+
+One further Bugbot finding on PR #26's current head (58f0ebe), resolved in
+`apps/desktop/src/lib/queries/settings.ts`:
+
+1. **Medium — First-run repeats per brain.** Onboarding completion was stored as a
+   `firstRun.completed` row in the active brain's SQLite `settings` table. But
+   switching or creating a brain remounts the workspace keyed by path against a
+   *different* DB, so a new/other brain had no completed row and the welcome modal
+   reappeared after the user had already dismissed it — contrary to once-per-install
+   behavior. `useFirstRun`/`useCompleteFirstRun` now read/write the flag from
+   `localStorage`, which is scoped to the desktop webview origin (the install/profile)
+   and shared across every brain DB. Reads/writes are wrapped so a locked-down or
+   unavailable store fails safe (onboarding simply reappears) rather than throwing.
+   `getSetting`/`setSetting` are no longer imported here.
+
+New/adjusted regression tests (`apps/desktop/src/components/first-run.dom.test.tsx`):
+back `localStorage` with an in-memory stub (jsdom's opaque origin has none), and assert
+(a) a fresh install shows the welcome, (b) an install-scoped completed flag keeps it
+hidden, and (c) dismissing it on one brain keeps it hidden after remounting against a
+different brain's DB. `pnpm check` + desktop build green. No Rust changed (cargo gates
+skipped).
+
 ## Progress
 
 - [x] Read AGENTS.md, docs, supervisor skill; mapped Local Brain + both Reflect refs.
