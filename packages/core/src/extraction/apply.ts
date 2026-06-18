@@ -273,6 +273,25 @@ export async function applyExtraction(
       })
       continue
     }
+    // A task depending on a gated/unresolved entity (its project, people, or
+    // organizations) would land partial — with a missing project or dropped
+    // links. Hold the whole task back as a suggestion rather than inventing an
+    // incomplete one. Refs are validated to exist in the result, so any ref
+    // missing from `resolved` was suppressed below the confidence threshold.
+    const taskDeps = [
+      ...(task.projectRef != null ? [task.projectRef] : []),
+      ...task.personRefs,
+      ...task.organizationRefs,
+    ]
+    if (taskDeps.some((dep) => !resolved.has(dep))) {
+      summary.suggestions.push({
+        kind: 'task',
+        ref: task.ref,
+        label: task.title,
+        confidence: task.confidence ?? null,
+      })
+      continue
+    }
     const projectId =
       task.projectRef != null ? (resolved.get(task.projectRef)?.id ?? null) : null
 
@@ -343,6 +362,19 @@ export async function applyExtraction(
   const existingClaims = await loadMemoryClaims()
   for (const memory of result.memories) {
     if (!accepts(memory.confidence)) {
+      summary.suggestions.push({
+        kind: 'memory',
+        ref: memory.ref ?? null,
+        label: memory.claim,
+        confidence: memory.confidence ?? null,
+      })
+      continue
+    }
+    // A memory whose subject was gated/unresolved would land without its intended
+    // subject — an incomplete fact about no one. Hold it back as a suggestion.
+    // Subject refs are validated to exist in the result, so any subject missing
+    // from `resolved` was suppressed below the confidence threshold.
+    if (memory.subjects.some((subject) => !resolved.has(subject.ref))) {
       summary.suggestions.push({
         kind: 'memory',
         ref: memory.ref ?? null,

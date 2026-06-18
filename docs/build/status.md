@@ -51,13 +51,17 @@ questions needing Alex.
     `installExtractionPipeline` (fire-and-forget ingest-queue handler). No extractor is
     registered by default, so the pipeline is a safe no-op until Plan 06 supplies a
     model-backed adapter.
-- **Verification:** `pnpm check` ✓ — typecheck + oxlint (clean, no warnings) + **89 tests**
-  (53 core: 11 match + 5 preprocess + 6 contracts unit tests + 4 new real-SQLite golden
+- **Verification:** `pnpm check` ✓ — typecheck + oxlint + **91 tests**
+  (55 core: 11 match + 5 preprocess + 6 contracts unit tests + 6 real-SQLite golden
   apply tests — a meeting transcript creating people/org/project/task and a cited hidden
   memory with evidence resolved to source chunks; merge/upsert onto an existing person +
-  idempotent re-apply; confidence-gated suggestions; and the extractor seam running only
+  idempotent re-apply; confidence-gated suggestions; **dependent gating** (a task whose
+  person/project ref was gated out, and a memory whose subject ref was gated out, are held
+  back as suggestions rather than written partial); and the extractor seam running only
   when registered; 4 db; 30 desktop unchanged). `pnpm --filter @local-brain/desktop build`
-  ✓ (2041 modules). `cargo check --workspace` ✓ (no Rust this layer). `git diff --check` ✓.
+  ✓ (2051 modules). `cargo check --workspace` ✓ (no Rust this layer). `git diff --check` ✓.
+  (oxlint emits one non-fatal `max-lines` warning: the catch-all integration test file
+  crossed 500 lines as apply coverage grew; check still passes.)
 
 ### 2026-06-17 — Phase 04c: Ingestion UI (Plan 04 complete)
 - Built `AddRecordDialog`: a Document/Interaction toggle and a Paste/Import-folder mode

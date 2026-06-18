@@ -429,7 +429,8 @@ describe('05a extraction apply (real SQLite golden round-trip)', () => {
     const doc = await ingestDocument({ title: 'Tipsheet', bodyText: 'Rumored hire.' })
     const result = parseExtractionResult({
       people: [{ ref: 'p_low', fullName: 'Maybe Person', confidence: 0.2 }],
-      memories: [{ claim: 'A confident fact.', confidence: 0.95, subjects: [{ ref: 'p_low' }] }],
+      // A confident, subject-less memory: nothing it depends on was gated.
+      memories: [{ claim: 'A confident fact.', confidence: 0.95 }],
     })
     const summary = await applyExtraction({ recordType: 'document', recordId: doc.id }, result, {
       minConfidence: 0.6,
@@ -438,10 +439,56 @@ describe('05a extraction apply (real SQLite golden round-trip)', () => {
     expect(summary.suggestions.map((s) => s.label)).toContain('Maybe Person')
     expect(summary.people.created).toBe(0)
     expect(await listPeople()).toHaveLength(0)
-    // The confident memory still lands; its link to the suppressed person is dropped.
+    // The confident memory still lands; it doesn't depend on the gated person.
     expect(summary.memories.created).toBe(1)
     expect(await listMemories()).toHaveLength(1)
     expect(await listMemoriesForRecord('document', doc.id)).toHaveLength(1)
+  })
+
+  it('holds a task back when a referenced person or project was gated out', async () => {
+    const doc = await ingestDocument({ title: 'Tipsheet', bodyText: 'Rumored task.' })
+    // High confidence itself, but every dependency is below threshold.
+    const result = parseExtractionResult({
+      people: [{ ref: 'p_low', fullName: 'Maybe Owner', confidence: 0.2 }],
+      projects: [{ ref: 'pr_low', name: 'Maybe Project', confidence: 0.2 }],
+      tasks: [
+        { ref: 't_dep', title: 'Do the rumored thing', confidence: 0.95,
+          projectRef: 'pr_low', personRefs: ['p_low'], evidence: [{ chunkIndex: 0 }] },
+      ],
+    })
+    const summary = await applyExtraction({ recordType: 'document', recordId: doc.id }, result, {
+      minConfidence: 0.6,
+    })
+
+    // The gated person/project become suggestions, and so does the dependent task
+    // rather than landing without its owner/project (or any partial evidence).
+    expect(summary.suggestions.map((s) => s.label).sort()).toEqual([
+      'Do the rumored thing', 'Maybe Owner', 'Maybe Project',
+    ])
+    expect(summary.tasks.created).toBe(0)
+    expect(await listTasks()).toHaveLength(0)
+    expect(summary.evidence.created).toBe(0)
+  })
+
+  it('holds a memory back when its subject was gated out', async () => {
+    const doc = await ingestDocument({ title: 'Tipsheet', bodyText: 'Rumored fact.' })
+    // High confidence claim, but its only subject was gated out.
+    const result = parseExtractionResult({
+      people: [{ ref: 'p_low', fullName: 'Maybe Person', confidence: 0.2 }],
+      memories: [
+        { claim: 'A fact about a maybe person.', confidence: 0.95, subjects: [{ ref: 'p_low' }] },
+      ],
+    })
+    const summary = await applyExtraction({ recordType: 'document', recordId: doc.id }, result, {
+      minConfidence: 0.6,
+    })
+
+    expect(summary.suggestions.map((s) => s.label).sort()).toEqual([
+      'A fact about a maybe person.', 'Maybe Person',
+    ])
+    expect(summary.memories.created).toBe(0)
+    expect(await listMemories()).toHaveLength(0)
+    expect(await listMemoriesForRecord('document', doc.id)).toHaveLength(0)
   })
 
   it('runs the pipeline through the extractor seam only when one is registered', async () => {
