@@ -28,7 +28,7 @@ describe('RouteContent', () => {
 
   it('renders Settings with the general section selected by default', () => {
     renderWithProviders(<RouteContent route={{ kind: 'settings' }} />)
-    expect(screen.getByRole('heading', { name: 'Settings' })).toBeDefined()
+    expect(screen.getByRole('heading', { name: 'General' })).toBeDefined()
     expect(screen.getByText(/private, local-first personal CRM/)).toBeDefined()
   })
 

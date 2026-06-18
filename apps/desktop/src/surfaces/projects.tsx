@@ -3,7 +3,6 @@ import type { Project } from '@local-brain/core'
 import { StatusBadge } from '../components/badge'
 import { DataList, type Column } from '../components/data-list'
 import { EmptyState } from '../components/empty-state'
-import { PageHead } from '../components/page-head'
 import { useProjects } from '../lib/queries'
 import { useRouter } from '../routing/router'
 
@@ -37,7 +36,6 @@ export function ProjectsSurface(): ReactNode {
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-4">
-      <PageHead eyebrow="Projects" title="Projects" />
       <DataList
         rows={projects.data ?? []}
         columns={columns}

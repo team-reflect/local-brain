@@ -16,7 +16,8 @@ describe('SettingsSurface (Plan 08)', () => {
     expect(screen.queryByText('Backup & export')).toBeNull()
     expect(screen.queryByText('Create backup')).toBeNull()
     expect(screen.queryByText('Export JSON')).toBeNull()
-    expect(screen.getByRole('heading', { name: 'Settings' })).toBeDefined()
+    expect(screen.queryByRole('heading', { name: 'Settings' })).toBeNull()
+    expect(screen.getByRole('heading', { name: 'General' })).toBeDefined()
   })
 
   it('renders the model-keys boundary with a key input and live status', async () => {

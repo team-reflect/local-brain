@@ -5,7 +5,6 @@ import { Check, FolderOpen, Plus, SquareArrowOutUpRight } from 'lucide-react'
 import { BrainDialog, type BrainDialogMode } from '../components/brain-dialog'
 import { BrainSwatch } from '../components/brain-swatch'
 import { Button } from '../components/button'
-import { PageHead } from '../components/page-head'
 import { Section } from '../components/section'
 import { BRAIN_COLOR_OPTIONS } from '../lib/brain-colors'
 import { cn } from '../lib/utils'
@@ -70,10 +69,10 @@ export function SettingsSurface({ section }: { section: string | undefined }): R
   }, [section])
 
   return (
-    <div className="mx-auto grid max-w-5xl grid-cols-[11rem_minmax(0,1fr)] gap-x-8 gap-y-5 pb-10">
-      <div className="col-span-full">
-        <PageHead eyebrow="Settings" title="Settings" />
-      </div>
+    <div
+      aria-label="Settings"
+      className="mx-auto grid max-w-5xl grid-cols-[11rem_minmax(0,1fr)] gap-x-8 gap-y-5 pb-10"
+    >
       <nav className="sticky top-0 flex h-fit flex-col gap-0.5 self-start border-l border-border py-1">
         {SECTIONS.map((s) => (
           <button
