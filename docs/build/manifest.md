@@ -42,8 +42,9 @@ changes state. See also [status.md](status.md) and [decisions.md](decisions.md).
 | 02b | DB package (Kysely + IPC dialect) | `codex/local-brain-02b-db` | `…-02a-schema` | open | [#4](https://github.com/maccman/local-brain/pull/4) |
 | 02c | Rust IPC DB bridge (db_query/execute/batch) | `codex/local-brain-02c-bridge` | `…-02b-db` | open | [#5](https://github.com/maccman/local-brain/pull/5) |
 | 02d | Core DB actions + seed data | `codex/local-brain-02d-core-db` | `…-02c-bridge` | open | [#6](https://github.com/maccman/local-brain/pull/6) |
-| 03 | Desktop shell & core UI | `codex/local-brain-03-desktop-shell` | `…-02d-core-db` | pending | — |
-| 04 | Record ingestion | `codex/local-brain-04-ingestion` | `…-03-desktop-shell` | pending | — |
+| 03a | Desktop shell: routing, commands, core surfaces | `codex/local-brain-03-desktop-shell` | `…-02d-core-db` | open | [#7](https://github.com/maccman/local-brain/pull/7) |
+| 03b | Desktop shell: Graph, Ask, full Settings, detail richness, palette | `codex/local-brain-03b-desktop-shell-ii` | `…-03-desktop-shell` | pending | — |
+| 04 | Record ingestion | `codex/local-brain-04-ingestion` | `…-03b-desktop-shell-ii` | pending | — |
 | 05 | Memory extraction & linking | `codex/local-brain-05-extraction` | `…-04-ingestion` | pending | — |
 | 06 | Search, retrieval & AI | `codex/local-brain-06-search-ai` | `…-05-extraction` | pending | — |
 | 07 | CLI & agent skills | `codex/local-brain-07-cli-skills` | `…-06-search-ai` | pending | — |
@@ -130,12 +131,33 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
   migrations, mirroring the Rust bridge's JSON conversion) that drives create→read→
   complete→archive across domains, the seed, and a batch rollback on an invalid FK.
 
-### 03–09
-- Scope mirrors `docs/plans/03..09`. Detail is filled in as each layer starts; see the
-  plan docs for deliverables, and `status.md` for live progress. 03 = desktop shell &
-  seven surfaces; 04 = ingestion; 05 = extraction; 06 = search/retrieval/Ask;
-  07 = `brain` CLI + skills (sidecar via `bundle.externalBin`); 08 = settings/backup/
-  export; 09 = macOS packaging, first-run, signing checklist.
+### 03a — Desktop shell: routing, commands, core surfaces
+- **Scope (Plan 03, steps 1–13 core):** typed `Route` discriminated union with
+  URL serialize/parse (`routing/route.ts`); in-memory history router with back/forward
+  synced to `window.history` (`routing/router.tsx`); central command/keymap registry +
+  global shortcuts + a minimal command palette (`lib/commands/*`); the app shell
+  (collapsible sidebar, top command bar, route switch); shared primitives (page head,
+  dense data list, section, detail fields, empty state); and the data-backed surfaces
+  **Today, Tasks (status filter + inline complete/archive), Network→People, Projects**
+  plus **person/project/task/document/interaction** detail pages — all wired to the
+  `@local-brain/core` getters/setters via TanStack Query, with seed-on-first-run.
+  Graph, Ask, Settings, and the Organizations tab/detail are placeholders.
+- **Verification:** `pnpm check` ✓ (typecheck + oxlint + 11 desktop tests: route
+  serialize/parse round-trip for every route kind, and the command registry +
+  **duplicate-keybinding** guard); `pnpm --filter @local-brain/desktop build` ✓ (Vite
+  bundles 2025 modules); `cargo check --workspace` ✓.
+
+### 03b — Desktop shell II (pending)
+- **Scope:** the user-centered Graph surface, the Ask chat shell (cited answers wired in
+  Plan 06), full Settings sections, organization getters + Network Organizations
+  tab/detail, richer detail pages (linked tasks/documents/interactions/memories +
+  citation lists), and a cmdk-based palette with record search. Component render tests
+  once `jsdom`/testing-library are added.
+
+### 04–09
+- Scope mirrors `docs/plans/04..09`: 04 = ingestion; 05 = extraction; 06 =
+  search/retrieval/Ask; 07 = `brain` CLI + skills (sidecar via `bundle.externalBin`);
+  08 = settings/backup/export; 09 = macOS packaging, first-run, signing checklist.
 
 ## Open / Updated PR URLs
 
@@ -145,3 +167,4 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 - PR #4 — Build 02b db package (Kysely codegen + drift check) — https://github.com/maccman/local-brain/pull/4 (base `…-02a-schema`, open)
 - PR #5 — Build 02c Rust IPC DB bridge — https://github.com/maccman/local-brain/pull/5 (base `…-02b-db`, open)
 - PR #6 — Build 02d core DB actions + seed — https://github.com/maccman/local-brain/pull/6 (base `…-02c-bridge`, open)
+- PR #7 — Build 03a desktop shell (routing, commands, core surfaces) — https://github.com/maccman/local-brain/pull/7 (base `…-02d-core-db`, open)

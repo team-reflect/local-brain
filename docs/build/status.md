@@ -7,10 +7,9 @@ questions needing Alex.
 
 ## Current State
 
-- **Phase:** 02d — Core DB actions + seed (domain getters/setters + seed data,
-  `pnpm check` green incl. a real-SQLite round-trip test, PR open). Completes the
-  Plan 02 DB layer.
-- **Active branch:** `codex/local-brain-02d-core-db` (base `…-02c-bridge`).
+- **Phase:** 03a — Desktop shell (typed routing + command registry + core surfaces,
+  `pnpm check` + Vite build + `cargo check` green, PR open).
+- **Active branch:** `codex/local-brain-03-desktop-shell` (base `…-02d-core-db`).
 - **Mode:** Sequential. This session builds the stack layer by layer; no parallel
   worker sessions are spawned. (Within a layer, read-only research may fan out, but
   commits are made sequentially from this session.)
@@ -30,6 +29,28 @@ questions needing Alex.
   `cargo check --workspace` ✓, `cargo test --workspace` ✓ (5 brain-schema tests);
   **#3** the same plus 9 brain-schema tests. Pushed (#2 fast-forward, #3
   force-with-lease) and left explanatory PR comments.
+
+### 2026-06-17 — Phase 03a: Desktop shell (routing, commands, core surfaces)
+- Split Plan 03 into **03a** (this PR — the shell skeleton + data-backed core surfaces)
+  and **03b** (Graph, Ask, full Settings, org browsing, richer detail, cmdk palette);
+  recorded as DEC-5. Subsequent layer bases shifted to `…-03b-…`.
+- Built the typed routing layer: a discriminated-union `Route` with URL serialize/parse
+  (`routing/route.ts`) and an in-memory history router with back/forward synced to
+  `window.history` (`routing/router.tsx`). Added a central command/keymap registry with
+  a duplicate-id guard, `Mod-…` keybinding parsing/matching, global shortcuts, and a
+  minimal command palette (`lib/commands/*`).
+- Built the app shell (collapsible sidebar over the seven sections, a top command bar
+  with back/forward + ⌘K, and the route switch) and shared primitives (page head, dense
+  data list, section, detail fields, empty state). Wired the **Today, Tasks (status
+  filter + inline complete/archive), Network→People, and Projects** surfaces plus
+  **person/project/task/document/interaction** detail pages to the `@local-brain/core`
+  getters/setters through TanStack Query, with seed-on-first-run. Graph, Ask, Settings,
+  and Organizations are placeholders for 03b.
+- **Verification:** `pnpm check` ✓ — typecheck + oxlint + 11 desktop tests (route
+  serialize/parse round-trips for every route kind; command registry + the
+  duplicate-keybinding guard the plan calls for). `pnpm --filter @local-brain/desktop
+  build` ✓ (Vite bundles 2025 modules). `cargo check --workspace` ✓. `git diff --check`
+  ✓.
 
 ### 2026-06-17 — Phase 02d: Core DB actions + seed (Plan 02 complete)
 - Built the TypeScript domain layer in `packages/core`: a shared Kysely client over
@@ -153,17 +174,18 @@ questions needing Alex.
 - Committed (`5c02ab5`), pushed, opened **PR #1** (base `master`).
 
 ### Next
-- **03** (`codex/local-brain-03-desktop-shell`, base `…-02d-core-db`): the desktop
-  app shell and core UI surfaces — sidebar/routes, the seven surfaces from
-  docs/plans/03, TanStack Query hooks over the core getters/setters, and the warm-paper
-  design system. Verifiable with `pnpm check` (+ a manual `pnpm tauri dev` smoke once a
-  surface renders real data).
-- Six PRs open and awaiting review: **#1** (supervisor), **#2** (foundation, all gates
-  green), **#3** (schema, sqlite3 + cargo verified), **#4** (db package, `pnpm check`
-  green), **#5** (Rust IPC bridge, cargo-verified), **#6** (core actions + seed,
-  `pnpm check` green incl. a real-SQLite round-trip). The full Plan 02 DB layer
-  (02a–02d) is now built and verified. When #1 merges to `master`, rebase the stack and
-  retarget bases upward.
+- **03b** (`codex/local-brain-03b-desktop-shell-ii`, base `…-03-desktop-shell`): the
+  user-centered Graph, the Ask chat shell, full Settings sections, organization getters
+  + Network Organizations tab/detail, richer linked-record detail sections + citation
+  lists, and a cmdk palette with record search; add `jsdom`/testing-library for
+  component render tests. Then **04** (ingestion) onward.
+- Seven PRs open and awaiting review: **#1** (supervisor), **#2** (foundation),
+  **#3** (schema), **#4** (db package), **#5** (Rust IPC bridge), **#6** (core actions
+  + seed), **#7** (03a desktop shell — `pnpm check` + Vite build + cargo check green).
+  Plan 02 (DB layer) is complete; Plan 03 is underway (03a done, 03b next). A full
+  end-to-end run of the assembled app (`pnpm tauri dev`/`build`) is still pending and is
+  required before the app can be called done. When #1 merges to `master`, rebase the
+  stack and retarget bases upward.
 
 ## Verification ledger
 
