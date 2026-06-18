@@ -208,7 +208,16 @@ export async function retrieve(query: string, options: RetrieveOptions = {}): Pr
           }
         }
         const lexical = await lexicalHits(query, { limit: candidateLimit, recordType, boost, now })
-        return { query, mode, semanticAvailable: true, chunks: fuseRanked([lexical, semantic], limit) }
+        // Lexical hits already carry the explicit-link boost (via `combineScore`),
+        // but the raw vector hits don't — apply the same boost so an in-context
+        // semantic-only record ranks up *before* RRF fuses the two lists.
+        const boostedSemantic = boostSemantic(semantic, boost)
+        return {
+          query,
+          mode,
+          semanticAvailable: true,
+          chunks: fuseRanked([lexical, boostedSemantic], limit),
+        }
       }
     }
   } catch {

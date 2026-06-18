@@ -89,6 +89,40 @@ Branch: `codex/local-brain-reflect-embeddings` · Base: `master` @ 58c801f
   Prior Rust verification still holds — `cargo fmt`/`check`/`test --workspace` (50 tests)
   and the ignored `embeds_and_ranks_by_meaning` e2e all passed in the first review pass.
 
+## Bugbot fixes (fourth review pass on PR #27, head e83bbc1)
+- ✅ **Medium — Disable does not abort backfill.** The incremental backfill's `isStale`
+  callback captured the `status` snapshot from the render that started the run, so disabling
+  semantic search mid-pass never aborted it — `enabled` stayed `true` to the closure and the
+  pass ran to completion. `EmbeddingsSync` now reads the LIVE `enabled` flag from the query
+  cache (`queryClient.getQueryData(EMBEDDINGS_STATUS_KEY)`) inside `isStale`, so a disable
+  observed between batches aborts the pass. Test: `embeddings-sync.dom.test.tsx` ("aborts an
+  in-flight backfill when semantic search is disabled mid-pass" — 40 pending chunks, disable
+  after the first batch, exactly one batch embeds).
+- ✅ **Medium — Hybrid skips context-link boost.** Semantic mode applied `boostRecordIds`
+  via `boostSemantic`, but hybrid fused the *raw* vector hits with lexical results, so a
+  semantic-only neighbour in the active context missed the explicit-link boost documented on
+  `RetrieveOptions`. `retrieve()` now applies `boostSemantic` to the vector hits before RRF
+  fusion, matching the lexical side (whose boost rides in `combineScore`). Test added in
+  `retrieve.modes.test.ts` (a farther but boosted semantic-only record outranks the closer
+  unboosted one).
+- ✅ **Medium — Load can wedge Loading state.** After `spawn_blocking` finished, the terminal
+  `Ready`/`Failed` write went through `lock_state(&state)?`; a poisoned lock would error there
+  and leave the runtime in `Loading` forever (later `embed_ensure` calls return early on
+  `Loading` and never retry). `lock_state` now recovers a poisoned mutex (`into_inner`) rather
+  than erroring — the guarded value is a small status enum a panic can't corrupt — so the
+  terminal transition always lands. Test: `embed/mod.rs` (`load_state` mod) poisons the mutex
+  mid-`Loading` and asserts the terminal write still reaches `Failed`.
+
+## Verification results (fourth review pass, Rust touched)
+- `git diff --check` — clean
+- `pnpm check` — pass (lint + typecheck + 143 core + 48 desktop tests + schema-drift)
+- `pnpm --filter @local-brain/desktop build` — pass
+- `pnpm --filter @local-brain/desktop sidecar` — built the staged `brain` CLI sidecar
+- `cargo fmt --all -- --check` — clean
+- `cargo check --workspace` — pass
+- `cargo test --workspace` — pass (46 tests, incl. the new `load_state` recovery test)
+- `cargo clippy --workspace --all-targets` — clean
+
 ## Caveats
 - Bundling/notarizing the ONNX runtime and the on-demand ~90MB model download still need a
   packaging pass (Plan 09). The runtime degrades to lexical if unavailable, so nothing

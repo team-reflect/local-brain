@@ -1,6 +1,11 @@
 import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { backfillEmbeddings, embedEnsure, setBackfillError } from '@local-brain/core'
+import {
+  backfillEmbeddings,
+  type EmbeddingsStatus,
+  embedEnsure,
+  setBackfillError,
+} from '@local-brain/core'
 import { EMBEDDINGS_STATUS_KEY, useEmbeddingsStatus } from '../lib/queries'
 import { errorMessage } from '../lib/utils'
 
@@ -49,7 +54,14 @@ export function EmbeddingsSync(): null {
       !backfilling.current
     ) {
       backfilling.current = true
-      void backfillEmbeddings({ isStale: () => status.data?.enabled === false })
+      void backfillEmbeddings({
+        // Observe the LIVE enabled flag from the query cache, not the render
+        // snapshot that kicked off this run: disabling semantic search mid-pass
+        // must abort the backfill between batches. A captured `status.data` would
+        // keep reporting the stale `enabled: true` and let the pass run to the end.
+        isStale: () =>
+          queryClient.getQueryData<EmbeddingsStatus>(EMBEDDINGS_STATUS_KEY)?.enabled === false,
+      })
         // A clean run (completed or cooperatively aborted on disable) clears any
         // stale marker; a throw is persisted so the status/UI stops pretending
         // indexing is progressing and the poll/retry loop above halts.

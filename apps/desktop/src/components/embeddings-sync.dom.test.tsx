@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { type EmbedStatus, setBridge } from '@local-brain/core'
 import { act, render, waitFor } from '@testing-library/react'
 import { EmbeddingsSync } from './embeddings-sync'
+import { EMBEDDINGS_STATUS_KEY } from '../lib/queries'
 
 /**
  * Auto-load policy (Bugbot #27 follow-up): `EmbeddingsSync` brings the runtime up
@@ -135,5 +136,74 @@ describe('EmbeddingsSync', () => {
     const attempts = bridge.commands.filter((c) => c === 'embed_texts').length
     await act(() => new Promise((resolve) => setTimeout(resolve, 100)))
     expect(bridge.commands.filter((c) => c === 'embed_texts').length).toBe(attempts)
+  })
+
+  it('aborts an in-flight backfill when semantic search is disabled mid-pass', async () => {
+    // Disabling semantic search must abort the incremental backfill between
+    // batches, not just on the next render. The coordinator observes the LIVE
+    // enabled flag from the query cache, so flipping the cache mid-run aborts the
+    // pass — a captured render snapshot would let it run to completion.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+    const embedTextBatches: number[] = []
+    let enabled = true
+    // 40 pending chunks => two batches (EMBED_BATCH = 32, then 8).
+    const pending = Array.from({ length: 40 }, (_, i) => ({
+      chunkId: `c${i}`,
+      text: `chunk ${i}`,
+      storedHash: null,
+    }))
+
+    setBridge({
+      invoke: (command, args) => {
+        const params = ((args as { params?: unknown[] }).params ?? []) as unknown[]
+        switch (command) {
+          case 'embed_status':
+          case 'embed_ensure':
+            return Promise.resolve({ status: 'ready', model: 'all-MiniLM-L6-v2' })
+          case 'embed_texts': {
+            const texts = (args as { texts: string[] }).texts
+            embedTextBatches.push(texts.length)
+            // The first batch is now embedding; disable semantic search so the
+            // NEXT between-batch `isStale` check aborts. Flip both the live cache
+            // (drives `isStale`) and the bridge setting (so the post-abort refetch
+            // keeps it disabled and the coordinator doesn't restart the pass).
+            enabled = false
+            client.setQueryData(EMBEDDINGS_STATUS_KEY, (old) =>
+              old ? { ...(old as object), enabled: false } : old,
+            )
+            return Promise.resolve(texts.map(() => [0.1, 0.2, 0.3]))
+          }
+          case 'db_query': {
+            const sql = String((args as { sql?: unknown }).sql ?? '')
+            if (sql.includes('settings')) {
+              const key = params[0]
+              if (key === 'embeddings.enabled') {
+                return Promise.resolve([{ valueJson: JSON.stringify(enabled) }])
+              }
+              return Promise.resolve([]) // no sticky backfill error
+            }
+            if (/count/i.test(sql)) return Promise.resolve([{ count: pending.length }])
+            if (sql.includes('is null')) return Promise.resolve([]) // no orphans to prune
+            return Promise.resolve(pending) // pending chunks for the backfill
+          }
+          case 'db_execute':
+            return Promise.resolve(1)
+          default:
+            return Promise.resolve(null)
+        }
+      },
+    })
+
+    render(
+      <QueryClientProvider client={client}>
+        <EmbeddingsSync />
+      </QueryClientProvider>,
+    )
+
+    // The first batch embeds, then the disable aborts before the second batch.
+    await waitFor(() => expect(embedTextBatches.length).toBeGreaterThan(0))
+    await act(() => new Promise((resolve) => setTimeout(resolve, 100)))
+    // Exactly one batch ran: the remaining pending chunks were never embedded.
+    expect(embedTextBatches).toEqual([32])
   })
 })

@@ -112,6 +112,42 @@ describe('retrieve modes', () => {
     expect(ids[0]).toBe('shared')
   })
 
+  it('applies the explicit-link boost to semantic hits before hybrid fusion', async () => {
+    // A bridge with no lexical matches and two semantic-only neighbours: 'a' is
+    // the closer vector, 'b' is farther but lives in the active context.
+    function installBoostBridge() {
+      setBridge({
+        invoke: (command, args) => {
+          if (command === 'embed_status') return Promise.resolve({ status: 'ready', model: 'all-MiniLM-L6-v2' })
+          if (command === 'embed_texts') return Promise.resolve([[0.1, 0.2, 0.3]])
+          if (command === 'db_query') {
+            const sql = String((args as { sql: string }).sql)
+            if (sql.includes('settings')) return Promise.resolve([{ valueJson: 'true' }])
+            if (sql.includes('chunk_vectors')) {
+              return Promise.resolve([semanticRow('a', 0.3), semanticRow('b', 0.4)])
+            }
+            return Promise.resolve([]) // no lexical matches: semantic-only hits
+          }
+          return Promise.resolve(null)
+        },
+      })
+    }
+
+    installBoostBridge()
+    const unboosted = await retrieve('quarterly planning', { mode: 'hybrid' })
+    // Without a context boost the closer neighbour 'a' ranks first.
+    expect(unboosted.chunks.map((c) => c.chunkId)).toEqual(['a', 'b'])
+
+    installBoostBridge()
+    const boosted = await retrieve('quarterly planning', {
+      mode: 'hybrid',
+      boostRecordIds: ['r-b'],
+    })
+    // The explicit context-link boost lifts the farther 'b' above 'a' BEFORE RRF
+    // fuses the lists — proving the boost reaches semantic-only vector hits.
+    expect(boosted.chunks[0]?.chunkId).toBe('b')
+  })
+
   it('semantic mode returns only vector hits and reports availability', async () => {
     installBridge({ status: 'ready' })
     const result = await retrieve('quarterly planning', { mode: 'semantic' })

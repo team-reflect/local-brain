@@ -139,6 +139,27 @@ vec0 cosine-KNN ordering, and a real end-to-end model + KNN test (ranks by meani
 - Re-verified (TypeScript-only pass; no `src-tauri`/crate edits, so Rust checks not re-run):
   `git diff --check` clean, `pnpm check` (142 core + 47 desktop), desktop build pass.
 
+## Post-review fixes — fourth pass (Cursor Bugbot on PR #27, head e83bbc1)
+- **Medium — Disable does not abort backfill:** the backfill's `isStale` callback closed over
+  the `status` snapshot from the render that started the run, so disabling semantic search
+  mid-pass left `enabled` reading `true` and the pass ran to the end. `EmbeddingsSync` now
+  reads the live `enabled` flag from the query cache inside `isStale`, so a disable observed
+  between batches aborts the pass. New abort-on-disable case in `embeddings-sync.dom.test.tsx`.
+- **Medium — Hybrid skips context-link boost:** hybrid fused the raw vector hits with lexical
+  results, so a semantic-only record in the active context missed the explicit-link boost that
+  `boostRecordIds` documents. `retrieve()` now runs `boostSemantic` over the vector hits before
+  RRF fusion (matching the lexical side). New boosted-semantic-outranks case in
+  `retrieve.modes.test.ts`.
+- **Medium — Load can wedge Loading state:** `embed_ensure`'s terminal `Ready`/`Failed` write
+  could error on a poisoned `lock_state` and leave the runtime stuck in `Loading` (later
+  ensures return early and never retry). `lock_state` now recovers a poisoned mutex via
+  `into_inner` — the guarded value is a small status enum — so the terminal transition always
+  lands. New `load_state` recovery test in `embed/mod.rs`.
+- Re-verified (Rust touched this pass): `git diff --check` clean, `pnpm check` (143 core + 48
+  desktop), desktop build, `pnpm --filter @local-brain/desktop sidecar`, `cargo fmt --check`,
+  `cargo check --workspace`, `cargo test --workspace` (46 tests), `cargo clippy --workspace
+  --all-targets` clean.
+
 ## Repo state
 - Branch: `codex/local-brain-reflect-embeddings`
 - PR: https://github.com/maccman/local-brain/pull/27 (base `master`)

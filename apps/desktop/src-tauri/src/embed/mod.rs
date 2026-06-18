@@ -91,13 +91,20 @@ enum Runtime {
 #[derive(Default)]
 pub struct EmbedState(Mutex<Runtime>);
 
-fn lock_state<'a>(
-    state: &'a State<'a, EmbedState>,
-) -> AppResult<std::sync::MutexGuard<'a, Runtime>> {
-    state
+/// Lock the runtime state, recovering from a poisoned mutex rather than erroring.
+///
+/// The guarded value is a small status enum, not data a panic could leave half-
+/// written, so taking the inner guard is safe. Recovery is what keeps the load
+/// robust: `embed_ensure`'s terminal `Ready`/`Failed` write goes through this, so
+/// a poisoned lock (an earlier panic while holding it) can never abort that write
+/// and wedge the runtime in `Loading` — later `embed_ensure` calls return early
+/// on `Loading`, so a wedge would disable semantic search permanently. Returns an
+/// `AppResult` purely to keep call sites uniform; it no longer fails.
+fn lock_state(state: &EmbedState) -> AppResult<std::sync::MutexGuard<'_, Runtime>> {
+    Ok(state
         .0
         .lock()
-        .map_err(|_| AppError::io("embed state lock poisoned by an earlier panic"))
+        .unwrap_or_else(|poisoned| poisoned.into_inner()))
 }
 
 fn status_of(runtime: &Runtime) -> EmbedStatus {
@@ -389,6 +396,54 @@ mod cache_dir {
         assert_eq!(
             resolve_cache_dir(Some("/custom/hf".to_string()), default),
             PathBuf::from("/custom/hf")
+        );
+    }
+}
+
+#[cfg(test)]
+mod load_state {
+    //! The load state transition must be robust (Bugbot "Load can wedge Loading
+    //! state"): `embed_ensure` flips the runtime to `Loading`, runs the blocking
+    //! load, then writes the terminal `Ready`/`Failed`. If that final write could
+    //! fail on a poisoned lock, the runtime would stay `Loading` forever and every
+    //! later `embed_ensure` would return early without retrying. `lock_state`
+    //! recovers a poisoned mutex, so the terminal write always lands.
+
+    use super::{lock_state, ByteProgress, EmbedState, Runtime};
+    use std::sync::Arc;
+
+    #[test]
+    fn lock_recovers_from_a_poisoned_mutex_so_loading_cannot_wedge() {
+        let state = Arc::new(EmbedState::default());
+
+        // Drive the runtime into `Loading`, exactly as `embed_ensure` does before
+        // the blocking model load.
+        {
+            let mut runtime = lock_state(&state).unwrap();
+            *runtime = Runtime::Loading {
+                progress: Some(ByteProgress {
+                    downloaded: 1,
+                    total: 2,
+                }),
+            };
+        }
+
+        // A panic while holding the lock poisons the mutex (e.g. a progress write
+        // or load step panicked mid-flight).
+        let poisoner = Arc::clone(&state);
+        let _ = std::thread::spawn(move || {
+            let _guard = poisoner.0.lock().unwrap();
+            panic!("poison the embed state mutex");
+        })
+        .join();
+
+        // The terminal transition must still land instead of erroring out and
+        // leaving the runtime stuck in `Loading`.
+        let mut runtime = lock_state(&state).expect("a poisoned lock must recover, not error");
+        *runtime = Runtime::Failed("load failed".to_string());
+        assert!(
+            matches!(&*runtime, Runtime::Failed(message) if message == "load failed"),
+            "the runtime must reach a terminal state after a poisoned lock",
         );
     }
 }
