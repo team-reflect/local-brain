@@ -21,7 +21,7 @@ pub const SUPPORT_DIRNAME: &str = ".local-brain";
 
 /// Bumped whenever a migration is appended below. Asserted against the applied
 /// `user_version` in tests so the constant can never drift from the list.
-pub const LATEST_SCHEMA_VERSION: usize = 3;
+pub const LATEST_SCHEMA_VERSION: usize = 4;
 
 /// The canonical filesystem layout for one Local Brain root directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +50,9 @@ static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
         M::up(include_str!("../migrations/0001_init.sql")),
         M::up(include_str!("../migrations/0002_launch_schema.sql")),
         M::up(include_str!("../migrations/0003_embeddings.sql")),
+        M::up(include_str!(
+            "../migrations/0004_select_only_relationship_strength.sql"
+        )),
     ])
 });
 
@@ -432,8 +435,11 @@ mod tests {
             [],
         )
         .unwrap();
-        conn.execute("INSERT INTO tasks (id, title) VALUES ('t1', 'Follow up')", [])
-            .unwrap();
+        conn.execute(
+            "INSERT INTO tasks (id, title) VALUES ('t1', 'Follow up')",
+            [],
+        )
+        .unwrap();
         conn.execute(
             "INSERT INTO task_people (id, task_id, person_id) VALUES ('tp1', 't1', 'p1')",
             [],
@@ -453,7 +459,44 @@ mod tests {
             "UPDATE relationship_strengths SET relationship_strength = 5 WHERE person_id = 'p1'",
             [],
         );
-        assert!(update.is_err(), "relationship_strengths must stay select-only");
+        assert!(
+            update.is_err(),
+            "relationship_strengths must stay select-only"
+        );
+    }
+
+    #[test]
+    fn v3_database_migrates_strength_to_select_only_view() {
+        register_sqlite_vec().unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        MIGRATIONS.to_version(&mut conn, 3).unwrap();
+
+        conn.execute(
+            "INSERT INTO people (id, full_name, relationship_strength) VALUES ('p1', 'Ada Lovelace', 5)",
+            [],
+        )
+        .unwrap();
+
+        MIGRATIONS.to_latest(&mut conn).unwrap();
+
+        let people_column_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('people') WHERE name = 'relationship_strength'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(people_column_count, 0);
+
+        let strength: Option<i64> = conn
+            .query_row(
+                "SELECT relationship_strength FROM relationship_strengths WHERE person_id = 'p1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(strength, None);
     }
 
     #[test]

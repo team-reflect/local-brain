@@ -252,6 +252,20 @@ describe('05b relationship intelligence recompute (real SQLite)', () => {
     expect(suggestions[0].overdueDays).toBeGreaterThan(suggestions[1].overdueDays)
   })
 
+  it('computes reconnect strength using the same asOf as overdue filtering', async () => {
+    const personId = await createPerson({ fullName: 'Boundary Contact', reconnectIntervalDays: 7 })
+    await createInteraction({ kind: 'call', title: 'recent enough', occurredAt: '2026-05-10T00:00:00.000Z' }, [
+      { personId },
+    ])
+    await recomputeAllRelationships({ asOf: '2026-06-01T00:00:00.000Z' })
+
+    const suggestions = await listReconnectSuggestions({ asOf: '2026-06-01T00:00:00.000Z' })
+    expect(suggestions).toHaveLength(1)
+    // As of 2026-06-01 the interaction was 22 days old: 1 interaction + 3 recency
+    // points = score 4 -> bucket 3. This should not drift with SQLite's current now.
+    expect(suggestions[0].relationshipStrength).toBe(3)
+  })
+
   it('does not suggest people who are not yet due or have no cadence', async () => {
     await createPerson({ fullName: 'No Cadence' })
     const future = await createPerson({ fullName: 'Recently Seen', reconnectIntervalDays: 90 })

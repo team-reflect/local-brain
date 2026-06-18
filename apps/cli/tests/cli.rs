@@ -6,6 +6,7 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
+use brain_schema::LATEST_SCHEMA_VERSION;
 use serde_json::Value;
 use tempfile::TempDir;
 
@@ -74,7 +75,7 @@ fn status_reports_schema_version() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
     let status = run_json(&db, &["--json", "status"]);
-    assert_eq!(status["schemaVersion"], 3);
+    assert_eq!(status["schemaVersion"], LATEST_SCHEMA_VERSION);
 }
 
 #[test]
