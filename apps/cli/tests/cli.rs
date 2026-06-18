@@ -46,7 +46,7 @@ fn status_reports_schema_version() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
     let status = run_json(&db, &["--json", "status"]);
-    assert_eq!(status["schemaVersion"], 2);
+    assert_eq!(status["schemaVersion"], 3);
 }
 
 #[test]

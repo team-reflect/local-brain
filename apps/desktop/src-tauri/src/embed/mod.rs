@@ -338,3 +338,71 @@ pub fn embed_delete(db: State<DbState>, chunk_ids: Vec<String>) -> AppResult<usi
 pub fn embed_clear(db: State<DbState>) -> AppResult<usize> {
     db.with_connection_mut(write::clear)
 }
+
+#[cfg(test)]
+mod e2e {
+    //! End-to-end validation of the real native path: the actual fastembed model
+    //! produces 384-dim vectors, `apply_chunks` stores them, and a real vec0
+    //! cosine-KNN ranks a query by *meaning*. Ignored by default because it
+    //! downloads ~90MB on first run; exercise with:
+    //!   cargo test -p local-brain-desktop -- --ignored embeds_and_ranks_by_meaning
+
+    use super::write::{apply_chunks, EmbeddedChunk};
+    use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+
+    fn vector_json(v: &[f32]) -> String {
+        let parts: Vec<String> = v.iter().map(|x| x.to_string()).collect();
+        format!("[{}]", parts.join(","))
+    }
+
+    #[test]
+    #[ignore = "downloads ~90MB model; run with --ignored and network access"]
+    fn embeds_and_ranks_by_meaning() {
+        let mut model =
+            TextEmbedding::try_new(InitOptions::new(EmbeddingModel::AllMiniLML6V2)).unwrap();
+        let docs = vec![
+            "Quarterly revenue grew on strong enterprise software sales.".to_string(),
+            "My cat likes to nap in the afternoon sun by the window.".to_string(),
+        ];
+        let vectors = model.embed(docs, None).unwrap();
+        assert_eq!(
+            vectors[0].len(),
+            384,
+            "fastembed must produce 384-dim vectors"
+        );
+
+        let conn = brain_schema::open_in_memory().unwrap();
+        let chunks: Vec<EmbeddedChunk> = vectors
+            .iter()
+            .enumerate()
+            .map(|(i, vector)| EmbeddedChunk {
+                chunk_id: format!("c{i}"),
+                content_hash: format!("h{i}"),
+                model_id: super::MODEL_ID.to_string(),
+                vector: vector.clone(),
+            })
+            .collect();
+        apply_chunks(&conn, &chunks).unwrap();
+
+        // A finance-flavoured query should rank the revenue chunk first.
+        let query = model
+            .embed(
+                vec!["How did our company sales perform last quarter?".to_string()],
+                None,
+            )
+            .unwrap();
+        let nearest: String = conn
+            .query_row(
+                "SELECT ce.chunk_id FROM chunk_vectors v \
+                 JOIN chunk_embeddings ce ON ce.id = v.rowid \
+                 WHERE v.embedding MATCH ?1 AND k = 2 ORDER BY v.distance LIMIT 1",
+                rusqlite::params![vector_json(&query[0])],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            nearest, "c0",
+            "semantic KNN should surface the revenue chunk"
+        );
+    }
+}

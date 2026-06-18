@@ -6,12 +6,16 @@ import { Section } from '../components/section'
 import { cn } from '../lib/utils'
 import {
   useDatabasePath,
+  useEmbeddingsStatus,
   useKeychainHas,
   useModelSettings,
   useModelStatus,
+  useRebuildEmbeddings,
+  useSetEmbeddingsEnabled,
   useSetModelEnabled,
   useSetProviderKey,
 } from '../lib/queries'
+import type { EmbeddingsStatus } from '@local-brain/core'
 import { useRouter } from '../routing/router'
 
 interface SettingsSection {
@@ -24,6 +28,7 @@ interface SettingsSection {
 const SECTIONS: readonly SettingsSection[] = [
   { key: 'general', label: 'General' },
   { key: 'model-keys', label: 'Model keys' },
+  { key: 'search', label: 'Semantic search' },
   { key: 'database', label: 'Local database' },
   { key: 'skills', label: 'Skills' },
   { key: 'diagnostics', label: 'Diagnostics' },
@@ -88,6 +93,8 @@ function SectionBody({ section }: { section: string }): ReactNode {
   switch (section) {
     case 'model-keys':
       return <ModelBoundary />
+    case 'search':
+      return <SemanticSearch />
     case 'database':
       return <LocalDatabase />
     case 'skills':
@@ -227,6 +234,146 @@ function ModelBoundary(): ReactNode {
   )
 }
 
+function megabytes(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** One-line semantic-search summary, shared by the section and Diagnostics. */
+function describeSemantic(status: EmbeddingsStatus | undefined): string {
+  if (!status) return '…'
+  if (!status.enabled) return 'off (lexical fallback)'
+  switch (status.runtime.status) {
+    case 'failed':
+      return `error: ${status.runtime.message}`
+    case 'loading':
+      return 'downloading model…'
+    case 'uninitialized':
+      return 'preparing…'
+    case 'ready':
+      return status.pending > 0
+        ? `indexing — ${status.indexed}/${status.totalChunks} chunks`
+        : `on — ${status.indexed} chunks indexed`
+  }
+}
+
+function SemanticSearch(): ReactNode {
+  const query = useEmbeddingsStatus()
+  const setEnabled = useSetEmbeddingsEnabled()
+  const rebuild = useRebuildEmbeddings()
+  const status = query.data
+  const runtime = status?.runtime
+  const busy = setEnabled.isPending || rebuild.isPending
+
+  const indexedPct =
+    status && status.totalChunks > 0 ? Math.round((status.indexed / status.totalChunks) * 100) : 0
+  const downloadPct =
+    runtime?.status === 'loading' && runtime.progress && runtime.progress.total > 0
+      ? Math.round((runtime.progress.downloaded / runtime.progress.total) * 100)
+      : null
+
+  return (
+    <Section title="Semantic search">
+      <div className="flex flex-col gap-3 text-sm">
+        <p className="text-muted-foreground">
+          Semantic search finds documents and interactions by meaning, not just keywords. Vectors
+          are computed on this machine with a local model (all-MiniLM-L6-v2) and stored alongside
+          your data — nothing is sent to a provider. It is an additive layer: keyword search keeps
+          working regardless.
+        </p>
+
+        {status && !status.enabled ? (
+          <div>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setEnabled.mutate(true)}
+              className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-40"
+            >
+              Enable semantic search
+            </button>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Turning this on downloads the model (~90 MB) once, then indexes your existing records.
+            </p>
+          </div>
+        ) : null}
+
+        {status?.enabled && runtime?.status === 'loading' ? (
+          <div className="flex flex-col gap-1.5">
+            <div className="text-xs text-muted-foreground">
+              {runtime.progress
+                ? `Downloading the model — ${megabytes(runtime.progress.downloaded)} of ${megabytes(runtime.progress.total)}`
+                : 'Preparing the model…'}
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+              <div
+                className={cn('h-full rounded-full bg-primary transition-[width]', downloadPct === null && 'w-1/3 animate-pulse')}
+                style={downloadPct === null ? undefined : { width: `${downloadPct}%` }}
+              />
+            </div>
+          </div>
+        ) : null}
+
+        {status?.enabled && runtime?.status === 'failed' ? (
+          <div className="rounded-md border border-destructive/40 bg-destructive/5 px-4 py-3 text-xs text-destructive">
+            Couldn’t load the embedding model: {runtime.message}
+          </div>
+        ) : null}
+
+        {status?.enabled && (runtime?.status === 'ready' || runtime?.status === 'uninitialized') ? (
+          <div className="rounded-md border border-border bg-card px-4 py-3">
+            <dl className="grid grid-cols-[8rem_1fr] gap-x-3 gap-y-1.5 text-xs">
+              <dt className="text-muted-foreground">Status</dt>
+              <dd
+                className={cn(
+                  'font-mono',
+                  status.ready
+                    ? 'text-emerald-600 dark:text-emerald-400'
+                    : 'text-blue-600 dark:text-blue-400',
+                )}
+              >
+                {status.ready ? 'ready' : status.pending > 0 ? 'indexing' : 'preparing'}
+              </dd>
+              <dt className="text-muted-foreground">Model</dt>
+              <dd className="font-mono text-foreground">{status.modelId}</dd>
+              <dt className="text-muted-foreground">Indexed</dt>
+              <dd className="font-mono text-foreground">
+                {status.indexed} / {status.totalChunks} chunks ({indexedPct}%)
+              </dd>
+              {status.pending > 0 ? (
+                <>
+                  <dt className="text-muted-foreground">Pending</dt>
+                  <dd className="font-mono text-foreground">{status.pending} to embed</dd>
+                </>
+              ) : null}
+            </dl>
+          </div>
+        ) : null}
+
+        {status?.enabled ? (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => rebuild.mutate()}
+              className="rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-secondary/60 disabled:opacity-40"
+            >
+              {rebuild.isPending ? 'Rebuilding…' : 'Rebuild index'}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setEnabled.mutate(false)}
+              className="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-secondary/60 disabled:opacity-40"
+            >
+              Disable
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </Section>
+  )
+}
+
 function LocalDatabase(): ReactNode {
   const path = useDatabasePath()
   return (
@@ -254,13 +401,14 @@ function Diagnostics(): ReactNode {
   const model = useModelStatus()
   const path = useDatabasePath()
   const hasKey = useKeychainHas('anthropic')
+  const embeddings = useEmbeddingsStatus()
 
   const lines: [string, string][] = [
     ['app', info.data ? `${info.data.name} v${info.data.version} · ${info.data.platform}` : '…'],
     ['database', path.data ?? '…'],
     ['migrations', 'applied at startup (schema versioned)'],
     ['lexical search', 'FTS5 (available)'],
-    ['semantic search', 'off (lexical fallback)'],
+    ['semantic search', describeSemantic(embeddings.data)],
     ['keychain', hasKey.data === undefined ? '…' : hasKey.data ? 'anthropic key stored' : 'no provider key'],
     ['model', model.data ? (model.data.canRun ? 'ready' : `unavailable (${model.data.reason})`) : '…'],
     ['CLI / skill', 'brain sidecar bundled · skills/brain/SKILL.md'],

@@ -1,0 +1,47 @@
+import { useEffect, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { backfillEmbeddings, embedEnsure } from '@local-brain/core'
+import { EMBEDDINGS_STATUS_KEY, useEmbeddingsStatus } from '../lib/queries'
+
+/**
+ * Headless coordinator for semantic search (Reflect-embeddings port). Mounted
+ * once at the app root; renders nothing. When the feature is enabled it loads
+ * the model (downloading on first use) and runs an incremental backfill so new
+ * documents/interactions — including those the `brain` CLI wrote while the app
+ * was closed — get embedded. Backfill is hash-skip cheap, so re-runs are fine.
+ */
+export function EmbeddingsSync(): null {
+  const status = useEmbeddingsStatus()
+  const queryClient = useQueryClient()
+  const ensuring = useRef(false)
+  const backfilling = useRef(false)
+
+  const data = status.data
+
+  useEffect(() => {
+    if (!data || !data.enabled) return
+
+    // 1. Bring the runtime up (idempotent; the command coalesces concurrent calls).
+    if ((data.runtime.status === 'uninitialized' || data.runtime.status === 'failed') && !ensuring.current) {
+      ensuring.current = true
+      void embedEnsure().finally(() => {
+        ensuring.current = false
+        void queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY })
+      })
+      return
+    }
+
+    // 2. Once ready, embed whatever is still pending.
+    if (data.runtime.status === 'ready' && data.pending > 0 && !backfilling.current) {
+      backfilling.current = true
+      void backfillEmbeddings({ isStale: () => status.data?.enabled === false })
+        .catch(() => undefined)
+        .finally(() => {
+          backfilling.current = false
+          void queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY })
+        })
+    }
+  }, [data, queryClient, status.data])
+
+  return null
+}

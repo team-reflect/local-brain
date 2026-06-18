@@ -48,3 +48,7 @@ apps/desktop/src-tauri/gen/schemas/
 # Claude Code session artifacts (shared hooks in settings.json stay tracked)
 .claude/*
 !.claude/settings.json
+
+# fastembed default model cache (e2e test; model is downloaded on demand)
+.fastembed_cache/
+**/.fastembed_cache/
