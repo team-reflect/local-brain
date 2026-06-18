@@ -31,7 +31,7 @@ WITH signals AS (
   LEFT JOIN interactions ON interactions.id = interaction_participants.interaction_id
   LEFT JOIN task_people ON task_people.person_id = people.id
   LEFT JOIN tasks ON tasks.id = task_people.task_id
-  WHERE people.is_self = 0 AND people.archived_at IS NULL
+  WHERE people.is_self = 0
   GROUP BY people.id, people.reconnect_interval_days
 ),
 scores AS (

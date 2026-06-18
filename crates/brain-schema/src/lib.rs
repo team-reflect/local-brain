@@ -455,6 +455,20 @@ mod tests {
             .unwrap();
         assert_eq!(strength, 1);
 
+        conn.execute(
+            "UPDATE people SET archived_at = '2026-06-01T00:00:00.000Z' WHERE id = 'p1'",
+            [],
+        )
+        .unwrap();
+        let archived_strength: i64 = conn
+            .query_row(
+                "SELECT relationship_strength FROM relationship_strengths WHERE person_id = 'p1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(archived_strength, 1);
+
         let update = conn.execute(
             "UPDATE relationship_strengths SET relationship_strength = 5 WHERE person_id = 'p1'",
             [],
