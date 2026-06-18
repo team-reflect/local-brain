@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { type IpcBridge, setBridge } from './bridge'
+import { setBridge } from './bridge'
 import { call } from './invoke'
-
-function bridgeReturning(value: unknown): IpcBridge {
-  return { invoke: () => Promise.resolve(value) }
-}
+import { bridgeReturning } from '../test/bridge'
 
 describe('call', () => {
   it('returns the validated payload', async () => {

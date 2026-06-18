@@ -1,5 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { setBridge } from './bridge'
+import { describe, expect, it } from 'vitest'
 import {
   backupDatabase,
   databasePath,
@@ -7,45 +6,43 @@ import {
   keychainSet,
   writeFileAtomic,
 } from './storage'
-
-/** Capture the command + args each binding sends, and return a canned response. */
-function capture(response: unknown) {
-  const invoke = vi.fn(async () => response)
-  setBridge({ invoke })
-  return invoke
-}
-
-afterEach(() => vi.restoreAllMocks())
+import { captureBridge } from '../test/bridge'
 
 describe('storage IPC bindings', () => {
   it('backupDatabase forwards the destination and validates the response', async () => {
-    const invoke = capture({ path: '/tmp/b.sqlite', schemaVersion: 2, sizeBytes: 4096 })
+    const calls = captureBridge({ path: '/tmp/b.sqlite', schemaVersion: 2, sizeBytes: 4096 })
     const info = await backupDatabase('/tmp/b.sqlite')
-    expect(invoke).toHaveBeenCalledWith('backup_database', { dest: '/tmp/b.sqlite' })
+    expect(calls[0]).toEqual({ command: 'backup_database', args: { dest: '/tmp/b.sqlite' } })
     expect(info).toEqual({ path: '/tmp/b.sqlite', schemaVersion: 2, sizeBytes: 4096 })
   })
 
   it('writeFileAtomic forwards dest + contents and returns the byte count', async () => {
-    const invoke = capture(11)
+    const calls = captureBridge(11)
     const n = await writeFileAtomic('/tmp/x.json', '{"ok":true}')
-    expect(invoke).toHaveBeenCalledWith('write_file_atomic', { dest: '/tmp/x.json', contents: '{"ok":true}' })
+    expect(calls[0]).toEqual({
+      command: 'write_file_atomic',
+      args: { dest: '/tmp/x.json', contents: '{"ok":true}' },
+    })
     expect(n).toBe(11)
   })
 
   it('keychain bindings round-trip an account and a nullable secret', async () => {
-    const setInvoke = capture(null)
+    const setCalls = captureBridge(null)
     await keychainSet('anthropic', 'sk-test')
-    expect(setInvoke).toHaveBeenCalledWith('keychain_set', { account: 'anthropic', secret: 'sk-test' })
+    expect(setCalls[0]).toEqual({
+      command: 'keychain_set',
+      args: { account: 'anthropic', secret: 'sk-test' },
+    })
 
-    capture('sk-stored')
+    captureBridge('sk-stored')
     expect(await keychainGet('anthropic')).toBe('sk-stored')
 
-    capture(null)
+    captureBridge(null)
     expect(await keychainGet('missing')).toBeNull()
   })
 
   it('databasePath validates a string response', async () => {
-    capture('/data/local-brain/brain.sqlite')
+    captureBridge('/data/local-brain/brain.sqlite')
     expect(await databasePath()).toBe('/data/local-brain/brain.sqlite')
   })
 })
