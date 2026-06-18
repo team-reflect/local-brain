@@ -17,7 +17,7 @@ describe('RouteContent', () => {
   })
 
   it('renders the graph empty state when there are no records', async () => {
-    renderWithProviders(<RouteContent route={{ kind: 'graph' }} />)
+    renderWithProviders(<RouteContent route={{ kind: 'network', tab: 'graph' }} />)
     expect(await screen.findByText('Nothing to graph yet')).toBeDefined()
   })
 

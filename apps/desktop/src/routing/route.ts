@@ -10,7 +10,7 @@ import type { RecordKind } from '@local-brain/core'
 export type Route =
   | { kind: 'today' }
   | { kind: 'tasks' }
-  | { kind: 'network'; tab: 'people' | 'organizations' }
+  | { kind: 'network'; tab: 'graph' | 'people' | 'organizations' }
   | { kind: 'person'; id: string }
   | { kind: 'organization'; id: string }
   | { kind: 'projects' }
@@ -18,7 +18,6 @@ export type Route =
   | { kind: 'task'; id: string }
   | { kind: 'document'; id: string }
   | { kind: 'interaction'; id: string }
-  | { kind: 'graph' }
   | { kind: 'ask'; conversationId?: string }
   | { kind: 'settings'; section?: string }
 
@@ -94,8 +93,6 @@ export function routeToPath(route: Route): string {
       return `/documents/${encodeURIComponent(route.id)}`
     case 'interaction':
       return `/interactions/${encodeURIComponent(route.id)}`
-    case 'graph':
-      return '/graph'
     case 'ask':
       return route.conversationId
         ? `/ask?conversation=${encodeURIComponent(route.conversationId)}`
@@ -120,7 +117,8 @@ export function routeFromPath(pathWithQuery: string): Route {
       return id ? { kind: 'task', id: decodeURIComponent(id) } : { kind: 'tasks' }
     case 'network': {
       const tab = query.get('tab')
-      return { kind: 'network', tab: tab === 'organizations' ? 'organizations' : 'people' }
+      if (tab === 'people' || tab === 'organizations') return { kind: 'network', tab }
+      return { kind: 'network', tab: 'graph' }
     }
     case 'people':
       return id ? { kind: 'person', id: decodeURIComponent(id) } : { kind: 'network', tab: 'people' }
@@ -135,7 +133,7 @@ export function routeFromPath(pathWithQuery: string): Route {
     case 'interactions':
       return id ? { kind: 'interaction', id: decodeURIComponent(id) } : { kind: 'today' }
     case 'graph':
-      return { kind: 'graph' }
+      return { kind: 'network', tab: 'graph' }
     case 'ask': {
       const conversationId = query.get('conversation')
       return conversationId ? { kind: 'ask', conversationId } : { kind: 'ask' }
@@ -167,8 +165,6 @@ export function sectionForRoute(route: Route): string {
     case 'document':
     case 'interaction':
       return 'today'
-    case 'graph':
-      return 'graph'
     case 'ask':
       return 'ask'
     case 'settings':

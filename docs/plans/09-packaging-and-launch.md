@@ -80,7 +80,6 @@ update-path decision.
    - local storage
    - importing first document or interaction
    - using with Codex
-   - backup/export
    - model boundaries
    - troubleshooting
 11. Run full smoke checklist against a clean macOS account or clean user-data directory.
@@ -89,12 +88,11 @@ update-path decision.
 
 - A technical user can install and launch the app.
 - The app creates a local SQLite brain and imports a document or interaction.
-- The user can browse Today, Tasks, Network, Projects, and Graph.
+- The user can browse Today, Tasks, Network Graph/People/Organizations, and Projects.
 - The user can search/ask with citations.
 - The user can use the `brain` CLI from a terminal.
 - The user can install/use the Codex skill.
 - A Codex daily automation can update records and produce a daily report/todo list.
-- The user can create a backup/export from Settings.
 - Diagnostics report common setup failures clearly.
 - Packaged app includes a runnable `brain` sidecar.
 - Release checklist covers accessibility, performance, model-boundary review, and native
@@ -109,7 +107,7 @@ update-path decision.
 - Run accessibility smoke pass.
 - Run performance smoke pass against seed-large data.
 - Manual launch script: first run, install skill, import document, import interaction,
-  extract, graph, ask, CLI search, daily report, todo list, backup.
+  extract, graph, ask, CLI search, daily report, todo list.
 
 ## Open Questions
 

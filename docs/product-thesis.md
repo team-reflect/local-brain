@@ -54,7 +54,7 @@ answer citation.
 - **Memories:** hidden atomic claims extracted from records: facts, preferences,
   decisions, commitments, instructions, risks, and ideas.
 - **Ask:** AI chat over the local brain with cited answers.
-- **Settings:** model keys, local paths, backup/export, diagnostics, and skill setup.
+- **Settings:** model keys, local paths, diagnostics, and skill setup.
 
 ## User Experience
 
@@ -71,12 +71,12 @@ Top-level navigation:
 - Tasks
 - Network
 - Projects
-- Graph
 - Ask
 - Settings
 
 Documents and interactions are first-class data, but not top-level navigation. They
 appear inside detail pages and through search or Ask.
+The graph is the default Network tab, alongside People and Organizations.
 
 ## Technical Bet
 

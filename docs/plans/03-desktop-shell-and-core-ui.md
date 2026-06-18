@@ -9,7 +9,7 @@
 ## Scope
 
 **In:** Tauri app shell, React routes, sidebar, global search entry, Today, Tasks,
-Network, Projects, Graph, Ask, Settings, shared UI primitives, basic record detail
+Network (including Graph), Projects, Ask, Settings, shared UI primitives, basic record detail
 pages.
 
 **Out:** full extraction, advanced retrieval, packaging.
@@ -22,11 +22,11 @@ pages.
   correction, inspection, and demo.
 - Shared UI should use shadcn components themed through `globals.css`, following
   [Design System](../design-system.md).
-- Sidebar sections are Today, Tasks, Network, Projects, Graph, Ask, and Settings.
-- Network has People and Organizations tabs.
+- Sidebar sections are Today, Tasks, Network, Projects, Ask, and Settings.
+- Network has Graph, People, and Organizations tabs, with Graph as the default.
 - Documents and interactions are browsed inside related detail pages and through search
   or Ask.
-- Settings owns backup, export, diagnostics, model keys, and skill setup.
+- Settings owns diagnostics, model keys, local database path, and skill setup.
 - Graph is a Picardo-inspired node graph with the user at the center.
 - Use a typed route model and central command/keymap registry, following Reflect Open's
   routing and shortcut pattern.
@@ -43,7 +43,7 @@ pages.
 3. Define typed routes:
    - `{ kind: 'today' }`
    - `{ kind: 'tasks' }`
-   - `{ kind: 'network'; tab: 'people' | 'organizations' }`
+   - `{ kind: 'network'; tab: 'graph' | 'people' | 'organizations' }`
    - `{ kind: 'person'; id: string }`
    - `{ kind: 'organization'; id: string }`
    - `{ kind: 'projects' }`
@@ -51,16 +51,15 @@ pages.
    - `{ kind: 'task'; id: string }`
    - `{ kind: 'document'; id: string }`
    - `{ kind: 'interaction'; id: string }`
-   - `{ kind: 'graph' }`
    - `{ kind: 'ask'; conversationId?: string }`
    - `{ kind: 'settings'; section?: string }`
 4. Add URL mappings:
    - `/today`
    - `/tasks`
+   - `/network?tab=graph`
    - `/network?tab=people`
    - `/network?tab=organizations`
    - `/projects`
-   - `/graph`
    - `/ask`
    - `/settings`
 5. Add route history:
@@ -105,13 +104,13 @@ pages.
 11. Build Tasks with status filters and inline completion.
 12. Build Network tables and detail pages.
 13. Build Projects table/detail pages.
-14. Build Graph from typed records and links:
+14. Build the Network Graph tab from typed records and links:
     - center on the user's own person row
     - show people, organizations, projects, tasks, documents, interactions, and memories
     - open related detail pages from nodes
 15. Build Ask shell with conversation list, chat panel, and citations.
-16. Build Settings sections for model keys, local database, backup/export,
-    diagnostics, and skill setup.
+16. Build Settings sections for model keys, local database, diagnostics, and skill
+    setup.
 
 ## Acceptance Criteria
 

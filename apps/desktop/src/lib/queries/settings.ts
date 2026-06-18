@@ -1,12 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  assembleExport,
-  createBackup,
   databasePath,
-  defaultBackupPath,
-  defaultExportPath,
-  exportCounts,
-  exportToFile,
   getModelSettings,
   getSetting,
   hardDeleteRecord,
@@ -20,9 +14,8 @@ import {
 } from '@local-brain/core'
 
 /**
- * Settings surface hooks (Plan 08/09): storage path, the model boundary,
- * backup/export, the keychain-backed provider key, first-run onboarding, and the
- * destructive hard-delete.
+ * Settings surface hooks (Plan 08/09): storage path, the model boundary, the
+ * keychain-backed provider key, first-run onboarding, and hard-delete.
  */
 
 export function useDatabasePath() {
@@ -35,10 +28,6 @@ export function useModelSettings() {
 
 export function useKeychainHas(account: string) {
   return useQuery({ queryKey: ['keychain-has', account], queryFn: () => keychainHas(account) })
-}
-
-export function useExportSummary() {
-  return useQuery({ queryKey: ['export-summary'], queryFn: () => assembleExport().then(exportCounts) })
 }
 
 export function useSetModelEnabled() {
@@ -67,24 +56,6 @@ export function useSetProviderKey() {
       void queryClient.invalidateQueries({ queryKey: ['model-status'] })
       void queryClient.invalidateQueries({ queryKey: ['model-settings'] })
     },
-  })
-}
-
-export function useCreateBackup() {
-  return useMutation({ mutationFn: (dest: string) => createBackup(dest) })
-}
-
-export function useExportJson() {
-  return useMutation({ mutationFn: (dest: string) => exportToFile(dest) })
-}
-
-export function useDefaultPaths(stamp: string) {
-  return useQuery({
-    queryKey: ['default-paths', stamp],
-    queryFn: async () => ({
-      backup: await defaultBackupPath(stamp),
-      export: await defaultExportPath(stamp),
-    }),
   })
 }
 

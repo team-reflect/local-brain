@@ -3,17 +3,20 @@ import type { Organization, Person } from '@local-brain/core'
 import { Badge } from '../components/badge'
 import { DataList, type Column } from '../components/data-list'
 import { EmptyState } from '../components/empty-state'
-import { PageHead } from '../components/page-head'
 import { cn } from '../lib/utils'
 import { useOrganizations, usePeople } from '../lib/queries'
 import { useRouter } from '../routing/router'
+import { GraphSurface } from './graph'
 
 const TABS = [
+  { key: 'graph', label: 'Graph' },
   { key: 'people', label: 'People' },
   { key: 'organizations', label: 'Organizations' },
 ] as const
 
-export function NetworkSurface({ tab }: { tab: 'people' | 'organizations' }): ReactNode {
+type NetworkTab = (typeof TABS)[number]['key']
+
+export function NetworkSurface({ tab }: { tab: NetworkTab }): ReactNode {
   const { navigate } = useRouter()
   const people = usePeople()
   const organizations = useOrganizations()
@@ -75,49 +78,48 @@ export function NetworkSurface({ tab }: { tab: 'people' | 'organizations' }): Re
   ]
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-4">
-      <PageHead
-        eyebrow="Network"
-        title="Network"
-        actions={
-          <div className="flex items-center gap-1">
-            {TABS.map((option) => (
-              <button
-                key={option.key}
-                type="button"
-                onClick={() => navigate({ kind: 'network', tab: option.key })}
-                className={cn(
-                  'rounded-md px-2 py-1 text-xs font-medium transition-colors',
-                  tab === option.key
-                    ? 'bg-secondary text-foreground'
-                    : 'text-muted-foreground hover:bg-secondary/60',
-                )}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        }
-      />
-      {tab === 'people' ? (
-        <DataList
-          rows={people.data ?? []}
-          columns={columns}
-          rowKey={(person) => person.id}
-          isLoading={people.isLoading}
-          onRowClick={(person) => navigate({ kind: 'person', id: person.id })}
-          empty={<EmptyState title="No people yet" />}
-        />
-      ) : (
-        <DataList
-          rows={organizations.data ?? []}
-          columns={orgColumns}
-          rowKey={(org) => org.id}
-          isLoading={organizations.isLoading}
-          onRowClick={(org) => navigate({ kind: 'organization', id: org.id })}
-          empty={<EmptyState title="No organizations yet" />}
-        />
-      )}
+    <div className="mx-auto grid max-w-6xl grid-cols-[10rem_minmax(0,1fr)] gap-6">
+      <nav className="flex h-fit flex-col gap-0.5 border-l border-border py-1">
+        {TABS.map((option) => (
+          <button
+            key={option.key}
+            type="button"
+            onClick={() => navigate({ kind: 'network', tab: option.key })}
+            aria-current={tab === option.key ? 'page' : undefined}
+            className={cn(
+              'rounded-r-md border-l-2 px-3 py-1.5 text-left text-sm font-medium transition-colors',
+              tab === option.key
+                ? '-ml-px border-primary text-foreground'
+                : '-ml-px border-transparent text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {option.label}
+          </button>
+        ))}
+      </nav>
+      <div className="min-w-0">
+        {tab === 'graph' ? (
+          <GraphSurface showHeader={false} />
+        ) : tab === 'people' ? (
+          <DataList
+            rows={people.data ?? []}
+            columns={columns}
+            rowKey={(person) => person.id}
+            isLoading={people.isLoading}
+            onRowClick={(person) => navigate({ kind: 'person', id: person.id })}
+            empty={<EmptyState title="No people yet" />}
+          />
+        ) : (
+          <DataList
+            rows={organizations.data ?? []}
+            columns={orgColumns}
+            rowKey={(org) => org.id}
+            isLoading={organizations.isLoading}
+            onRowClick={(org) => navigate({ kind: 'organization', id: org.id })}
+            empty={<EmptyState title="No organizations yet" />}
+          />
+        )}
+      </div>
     </div>
   )
 }

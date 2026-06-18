@@ -3,7 +3,6 @@ mod db;
 mod error;
 mod fs;
 mod keychain;
-mod storage;
 
 use std::path::PathBuf;
 
@@ -32,8 +31,6 @@ pub fn run() {
             db::db_batch,
             fs::read_text_file,
             fs::read_text_folder,
-            storage::backup_database,
-            storage::write_file_atomic,
             keychain::keychain_set,
             keychain::keychain_get,
             keychain::keychain_has,

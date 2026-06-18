@@ -11,10 +11,12 @@ describe('SettingsSurface (Plan 08)', () => {
     installFakeBridge({ queryRows: [] })
   })
 
-  it('renders the backup & export actions', async () => {
+  it('does not expose backup & export settings', () => {
     renderWithProviders(<SettingsSurface section="backup" />)
-    await waitFor(() => expect(screen.getByText('Create backup')).toBeDefined())
-    expect(screen.getByText('Export JSON')).toBeDefined()
+    expect(screen.queryByText('Backup & export')).toBeNull()
+    expect(screen.queryByText('Create backup')).toBeNull()
+    expect(screen.queryByText('Export JSON')).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Settings' })).toBeDefined()
   })
 
   it('renders the model-keys boundary with a key input and live status', async () => {

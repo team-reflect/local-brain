@@ -2,7 +2,7 @@ import { db } from '../../db/client'
 
 /**
  * The `settings` table is a typed key/value store: `value_json` holds a JSON
- * document per key. Product policy (model boundary, storage path, backup state)
+ * document per key. Product policy (model boundary, storage path)
  * reads/writes through these helpers and the typed accessors in `model.ts`.
  * Provider *secrets* never live here — those belong in the OS keychain (Plan 08).
  */

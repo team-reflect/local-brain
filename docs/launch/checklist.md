@@ -24,14 +24,13 @@ Run against a clean user-data directory (e.g. `BRAIN_DB=$(mktemp -d)/brain.sqlit
 - [ ] Import a document and an interaction (paste + file path).
 - [ ] Extraction: with a model key set, a meeting yields people/org/task/memory;
       without, capture still works (extraction no-ops).
-- [ ] Browse Today, Tasks, Network (People/Orgs), Projects, Graph.
+- [ ] Browse Today, Tasks, Network (Graph/People/Orgs), Projects, and Ask.
 - [ ] Search (⌘K) finds records by name and full text.
 - [ ] Ask returns a cited answer (model configured) or cited evidence (not).
 - [ ] Citations open the exact document/interaction.
 - [ ] `brain` CLI works with the app closed: `add`, `search`, `ask`, `today`,
       `report daily`, `tasks plan-day`, `relationships followups`, `graph`, `show`.
 - [ ] A Codex daily automation updates records and produces a report + todo list.
-- [ ] Settings → Backup creates a restorable copy; Export writes JSON.
 - [ ] `brain doctor` / Settings → Diagnostics report setup clearly.
 
 ## Accessibility gate
@@ -64,7 +63,7 @@ stay off the UI thread when added.
 ## Privacy / model-boundary review
 
 - [x] Provider keys are keychain-only (desktop) / env-only (CLI); never in
-      settings rows or the JSON export.
+      settings rows.
 - [x] No hosted Local Brain service in the core path; SQLite is the only store.
 - [x] External model calls gated by a present key **and** an enable kill switch;
       both surfaced in Settings → Model and Diagnostics.

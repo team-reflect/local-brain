@@ -38,40 +38,6 @@ impl DbState {
             .lock()
             .map_err(|_| AppError::io("the database lock was poisoned by an earlier panic"))
     }
-
-    /// Make a consistent snapshot of the live database at `dest`, atomically.
-    ///
-    /// `VACUUM INTO` writes a fresh, fully-consistent copy (no WAL sidecar) even
-    /// while the app holds the connection. We vacuum into a temp file, verify it
-    /// opens and passes an integrity check, then rename it over `dest` — so a
-    /// crash mid-backup can never leave a corrupt partial file at `dest`.
-    /// Returns the backup's schema version.
-    pub fn backup_to(&self, dest: &std::path::Path) -> AppResult<i64> {
-        let conn = self.lock()?;
-        let tmp = dest.with_extension("backup-tmp");
-        let _ = std::fs::remove_file(&tmp);
-        let tmp_str = tmp
-            .to_str()
-            .ok_or_else(|| AppError::io("backup path is not valid UTF-8"))?;
-        // VACUUM INTO takes a string literal target; quote-escape the path.
-        conn.execute_batch(&format!("VACUUM INTO '{}'", tmp_str.replace('\'', "''")))?;
-        drop(conn);
-
-        // Verify the snapshot opens and is structurally sound before publishing it.
-        let verify = Connection::open(&tmp)?;
-        let integrity: String = verify.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
-        if integrity != "ok" {
-            let _ = std::fs::remove_file(&tmp);
-            return Err(AppError::io(format!(
-                "backup failed integrity check: {integrity}"
-            )));
-        }
-        let version: i64 = verify.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-        drop(verify);
-
-        std::fs::rename(&tmp, dest)?;
-        Ok(version)
-    }
 }
 
 /// One statement in a [`db_batch`] request: compiled SQL plus its JSON params.
@@ -268,35 +234,5 @@ mod tests {
 
         let rows = run_query(&conn, "SELECT count(*) AS n FROM people", &[]).unwrap();
         assert_eq!(rows[0]["n"], json!(0), "the first insert must not persist");
-    }
-
-    #[test]
-    fn backup_writes_a_consistent_restorable_copy() {
-        let conn = db();
-        insert_person(&conn, "p1", "Ada Lovelace").unwrap();
-        let state = DbState::new(conn);
-
-        let dir = std::env::temp_dir().join(format!("lb-backup-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let dest = dir.join("brain-backup.sqlite");
-
-        let version = state.backup_to(&dest).unwrap();
-        assert_eq!(version as usize, brain_schema::LATEST_SCHEMA_VERSION);
-        assert!(dest.is_file(), "backup file should exist");
-        // No temp file left behind.
-        assert!(!dest.with_extension("backup-tmp").exists());
-
-        // The backup opens and contains the seeded row.
-        let restored = Connection::open(&dest).unwrap();
-        let name: String = restored
-            .query_row("SELECT full_name FROM people WHERE id = 'p1'", [], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        assert_eq!(name, "Ada Lovelace");
-
-        // A second backup over the same destination succeeds (atomic replace).
-        state.backup_to(&dest).unwrap();
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

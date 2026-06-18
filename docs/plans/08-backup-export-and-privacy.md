@@ -1,7 +1,7 @@
-# Plan 08 - Settings, Backup, Export, and Privacy Boundaries
+# Plan 08 - Settings and Privacy Boundaries
 
-**Goal:** Put storage controls, backup/export, diagnostics, model keys, and skill setup
-under Settings.
+**Goal:** Put diagnostics, model keys, local database visibility, skill setup, and
+privacy boundaries under Settings.
 
 **Depends on:** Plans 01-07.
 
@@ -9,70 +9,40 @@ under Settings.
 
 ## Scope
 
-**In:** SQLite backup, JSON export, deletion/archive semantics, keychain secrets,
-diagnostics, external-model boundary settings, skill setup.
+**In:** deletion/archive semantics, keychain secrets, diagnostics, external-model
+boundary settings, skill setup, and local database path visibility.
 
-**Out:** hosted sync, git sync, encrypted cloud backup, row-level sensitivity labels.
+**Out:** hosted sync, git sync, encrypted cloud backup, app-managed backup/export,
+and row-level sensitivity labels.
 
 ## Key Decisions
 
-- Settings owns backup and export.
-- SQLite backup is the first portability story.
-- JSON export is the first inspectable interchange format.
+- Settings owns model keys, local database path, diagnostics, and skill setup.
+- App-managed backup/export is deferred; SQLite remains the durable source of truth.
 - Keychain stores provider keys and local secrets.
 - Launch privacy is app-level and model-boundary based.
 - Deletion should be explicit and predictable.
-- Backup/export should use product states rather than storage jargon.
 - Future git sync is deferred; do not design launch UI around Git.
 
 ## Implementation Steps
 
 1. Add Settings sections:
-   - storage location
+   - general
    - model keys
-   - backup/export
+   - local database
    - diagnostics
    - agent skill setup
-2. Add SQLite backup:
-   - choose destination
-   - create consistent backup
-   - verify backup can open
-   - write atomically to avoid corrupt partial backups
-   - include app/schema version metadata
-3. Add JSON export:
-   - people
-   - organizations
-   - affiliations
-   - projects
-   - tasks
-   - interactions
-   - documents
-   - memories
-   - tags
-   - chat metadata
-   - evidence refs and links
-   - schema/export version
-4. Add deletion/archive rules:
+2. Add deletion/archive rules:
    - archive visible records by default
    - hard delete only behind confirmation
    - cascade or detach links predictably
    - rebuild derived search/chunk data after destructive operations
-5. Add checkpoint rules:
-   - create a SQLite backup before broad destructive operations where practical
-   - create a checkpoint before high-risk AI or agent write batches
-   - expose restore instructions in diagnostics
-6. Add keychain integration for provider keys.
-7. Add model boundary settings:
+3. Add keychain integration for provider keys.
+4. Add model boundary settings:
    - external model calls enabled/disabled
    - selected provider/model
    - diagnostics showing whether Ask can run
-8. Add backup/export states:
-   - Backed up
-   - Exporting
-   - Offline
-   - Needs review
-   - Backup failed
-9. Add diagnostics:
+5. Add diagnostics:
    - database path and migration status
    - FTS/vector availability
    - keychain/provider status
@@ -81,27 +51,21 @@ diagnostics, external-model boundary settings, skill setup.
 
 ## Acceptance Criteria
 
-- A user can create a restorable SQLite backup from Settings.
-- A user can export JSON from Settings.
-- Backup/export writes are atomic and versioned.
 - Provider keys are not stored in plain settings rows.
 - Destructive deletion behavior is explicit.
-- High-risk write batches have a checkpoint story.
 - Diagnostics explain common failures clearly.
+- Settings exposes the local SQLite path without providing backup/export actions.
 - No launch code depends on row-level sensitivity labels.
 
 ## Tests or Verification
 
-- Backup/restore integration test.
-- JSON export snapshot test.
 - Keychain mock test.
 - Deletion/archive cascade tests.
-- Atomic backup failure test.
-- Restore-from-backup smoke test.
-- Manual Settings smoke test.
+- Settings smoke test.
+- Diagnostics smoke test.
 
 ## Open Questions
 
-- Future git sync is deferred and should not block the launch backup/export story.
+- Backup/export remains future work and should not block launch.
 - Cloud-folder sync should not be recommended for the SQLite database unless/until it
   has a tested locking and conflict story.

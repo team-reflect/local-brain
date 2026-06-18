@@ -81,19 +81,6 @@ brain doctor --json     # health: schema version, model, curl
 configured (`ANTHROPIC_API_KEY`) it also synthesizes a cited answer. Either way,
 the answer is grounded in your documents and interactions.
 
-## Backup & export
-
-In **Settings → Backup & export**:
-
-- **Create backup** — a consistent, restorable copy of the SQLite database,
-  written atomically and integrity-checked.
-- **Export JSON** — a versioned, inspectable dump of your records.
-
-Neither includes provider keys. To **restore**, replace the database file (path
-in Settings → Local database) with a backup and reopen the app; derived search
-indexes rebuild from the durable records. Keep backups out of cloud-synced
-folders unless that folder has a tested SQLite locking story.
-
 ## Model boundaries (BYOK)
 
 Local Brain bundles no model. Ask and model-backed extraction call **your own**

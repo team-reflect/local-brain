@@ -29,7 +29,7 @@ describe('CommandPalette', () => {
     expect(screen.queryByText('Go to Today')).toBeNull()
 
     fireEvent.keyDown(input, { key: 'Enter' })
-    expect(ctx.navigate).toHaveBeenCalledWith({ kind: 'graph' })
+    expect(ctx.navigate).toHaveBeenCalledWith({ kind: 'network', tab: 'graph' })
   })
 
   it('moves the selection with the arrow keys', () => {

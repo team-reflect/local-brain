@@ -306,8 +306,7 @@ Key columns:
 - `value_json`
 - `updated_at`
 
-Settings owns model keys, local paths, backup/export preferences, diagnostics, and
-skill setup flags.
+Settings owns model keys, local paths, diagnostics, and skill setup flags.
 
 ## Join Tables
 

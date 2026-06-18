@@ -40,5 +40,3 @@ interactions as first-class records, hidden atomic memories, and cited Ask.
 
 1. Do we sign/notarize the first macOS build?
 2. Should the CLI install into the user's PATH automatically or show a copyable command?
-3. What is the first backup format users should trust: SQLite copy, JSON export, or
-   both?

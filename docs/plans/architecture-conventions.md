@@ -111,9 +111,8 @@ locations:
 
 - Today
 - Tasks
-- Network tab and detail records
+- Network tabs and detail records
 - Projects and project detail
-- Graph
 - Ask conversations
 - Settings sections
 
@@ -150,11 +149,11 @@ Provenance belongs on the owning record:
 
 ## File And Import Safety
 
-Even though SQLite is durable, file import/export still uses Rust native primitives:
+Even though SQLite is durable, file import should still use Rust native primitives:
 
 - path traversal guards for every user-provided path
-- canonicalize paths before reading or writing
-- atomic writes for exported backups and generated files
+- canonicalize paths before reading
+- atomic writes for generated files
 - OS trash or explicit archive semantics before hard deletion
 - content hashes for duplicate detection and idempotency
 - stderr/diagnostic separation for CLI file operations
@@ -184,12 +183,12 @@ The sidebar is:
 - Tasks
 - Network
 - Projects
-- Graph
 - Ask
 - Settings
 
-Network contains People and Organizations. Documents and interactions appear in detail
-pages and search results, not as top-level navigation.
+Network contains Graph, People, and Organizations. Graph is the default Network tab.
+Documents and interactions appear in detail pages and search results, not as top-level
+navigation.
 
 Graph is a derived visualization centered on the user's own `people` row. It should
 use typed records and link tables as its input, not a separate generic graph-node
@@ -220,23 +219,14 @@ Settings owns:
 
 - model keys
 - storage path
-- backup/export
 - diagnostics
 - CLI and skill setup
 - external-model boundary configuration
 
 Provider keys belong in the OS keychain, not regular settings rows.
 
-Backup/export states should use product language:
-
-- Backed up
-- Exporting
-- Offline
-- Needs review
-- Backup failed
-
-Git or sync mechanics should not leak into launch UI. Future git sync is possible, but
-SQLite backup plus JSON export remain the launch portability story.
+Git, sync, backup, and export mechanics should not leak into launch UI. Future sync
+and backup/export flows are possible, but SQLite remains the launch source of truth.
 
 ## Code Layout
 

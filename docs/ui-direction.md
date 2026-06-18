@@ -24,7 +24,6 @@ Sidebar:
 | Tasks                |  Current view                 |
 | Network              |                               |
 | Projects             |                               |
-| Graph                |                               |
 | Ask                  |                               |
 | Settings             |                               |
 +----------------------+-------------------------------+
@@ -35,11 +34,10 @@ Top-level sections:
 - **Today:** AI daily brief with agenda, due tasks, waiting items, relationship
   follow-ups, recent changes, and suggested next actions.
 - **Tasks:** all open, waiting, scheduled, and completed tasks.
-- **Network:** people and organizations, with tabs for each.
+- **Network:** graph, people, and organizations, with Graph as the default tab.
 - **Projects:** active, waiting, paused, done, and archived projects.
-- **Graph:** node graph of the user's brain, centered on the user.
 - **Ask:** AI chat over the local brain with citations.
-- **Settings:** model keys, local storage, backup/export, diagnostics, and skill setup.
+- **Settings:** model keys, local database path, diagnostics, and skill setup.
 
 Document and interaction records are browsed inside Network, Project, and Task detail
 pages, and found through global search or Ask.
@@ -66,6 +64,11 @@ Tasks
     - evidence
 
 Network
+  - Graph tab
+    - user-centered graph
+    - people, organizations, projects, tasks, documents, interactions, and memories
+    - optional filters by node type, time, strength, and project
+    - click a node to open the related detail page
   - People tab
     - people table
     - person detail
@@ -93,13 +96,6 @@ Projects
     - interactions
     - documents
     - remembered decisions and risks
-
-Graph
-  - user-centered graph
-  - people, organizations, projects, tasks, documents, interactions, and memories
-  - optional filters by node type, time, strength, and project
-  - click a node to open the related detail page
-
 Ask
   - chat
   - citations
@@ -108,7 +104,6 @@ Ask
 Settings
   - model keys
   - local database path
-  - backup and export
   - diagnostics
   - agent skill setup
 ```
