@@ -7,9 +7,10 @@ questions needing Alex.
 
 ## Current State
 
-- **Phase:** 02c — Rust IPC DB bridge (`db_query`/`db_execute`/`db_batch`,
-  cargo-verified, PR open).
-- **Active branch:** `codex/local-brain-02c-bridge` (base `…-02b-db`).
+- **Phase:** 02d — Core DB actions + seed (domain getters/setters + seed data,
+  `pnpm check` green incl. a real-SQLite round-trip test, PR open). Completes the
+  Plan 02 DB layer.
+- **Active branch:** `codex/local-brain-02d-core-db` (base `…-02c-bridge`).
 - **Mode:** Sequential. This session builds the stack layer by layer; no parallel
   worker sessions are spawned. (Within a layer, read-only research may fan out, but
   commits are made sequentially from this session.)
@@ -29,6 +30,24 @@ questions needing Alex.
   `cargo check --workspace` ✓, `cargo test --workspace` ✓ (5 brain-schema tests);
   **#3** the same plus 9 brain-schema tests. Pushed (#2 fast-forward, #3
   force-with-lease) and left explanatory PR comments.
+
+### 2026-06-17 — Phase 02d: Core DB actions + seed (Plan 02 complete)
+- Built the TypeScript domain layer in `packages/core`: a shared Kysely client over
+  the bridge (`db/client.ts`); `execute`/`batch` write bindings that `.compile()` a
+  Kysely insert/update and send the SQL to `db_execute`/`db_batch` so Rust owns the
+  transaction (`db/commands.ts`); ULID id generation (`db/id.ts`); and getters/setters
+  for people, projects, tasks, documents, interactions. `createInteraction` writes the
+  interaction and its participant links in a single `batch` (multi-table, atomic).
+- Added `seedDemoData()`: an idempotent, single-transaction insert of a coherent demo
+  dataset — self + two people, an organization + affiliation, a project, two tasks, a
+  meeting with a participant, a document + derived content chunk, a memory linked to a
+  person, an evidence citation into that chunk, and a tag.
+- **Verification:** `pnpm check` ✓ — typecheck + oxlint + 11 core tests. Two layers of
+  testing: a typechecked capturing-bridge unit test (asserts each action compiles the
+  right SQL/params) and a `node:sqlite`-backed integration test (`.test.mjs`) that runs
+  the real getters/setters and seed against the actual migrations — create→read→
+  complete→archive across domains, idempotent seed, and an atomic batch rollback when a
+  participant FK is invalid. No native deps (built-in `node:sqlite`).
 
 ### 2026-06-17 — Phase 02c: Rust IPC DB bridge
 - Split the original Plan-02c (Rust IPC + core actions + seed) into **02c** (the Rust
@@ -134,14 +153,17 @@ questions needing Alex.
 - Committed (`5c02ab5`), pushed, opened **PR #1** (base `master`).
 
 ### Next
-- **02d** (`packages/core` + seed): a shared Kysely client over the bridge, typed
-  `dbQuery`/`dbExecute`/`dbBatch` bindings, ULID id generation, domain getters/setters
-  (people, projects, tasks, documents, interactions), transaction-scoped multi-table
-  writes via `db_batch`, and seed/demo data. Verifiable with `pnpm check`.
-- Five PRs open and awaiting review: **#1** (supervisor), **#2** (foundation, all
-  gates green), **#3** (schema, sqlite3 + cargo verified), **#4** (db package,
-  `pnpm check` green), **#5** (Rust IPC bridge, cargo-verified). When #1 merges to
-  `master`, rebase the stack and retarget bases upward.
+- **03** (`codex/local-brain-03-desktop-shell`, base `…-02d-core-db`): the desktop
+  app shell and core UI surfaces — sidebar/routes, the seven surfaces from
+  docs/plans/03, TanStack Query hooks over the core getters/setters, and the warm-paper
+  design system. Verifiable with `pnpm check` (+ a manual `pnpm tauri dev` smoke once a
+  surface renders real data).
+- Six PRs open and awaiting review: **#1** (supervisor), **#2** (foundation, all gates
+  green), **#3** (schema, sqlite3 + cargo verified), **#4** (db package, `pnpm check`
+  green), **#5** (Rust IPC bridge, cargo-verified), **#6** (core actions + seed,
+  `pnpm check` green incl. a real-SQLite round-trip). The full Plan 02 DB layer
+  (02a–02d) is now built and verified. When #1 merges to `master`, rebase the stack and
+  retarget bases upward.
 
 ## Verification ledger
 
