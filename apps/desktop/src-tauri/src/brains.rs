@@ -180,10 +180,30 @@ fn ensure_schema(conn: &Connection) -> AppResult<()> {
          CREATE TABLE IF NOT EXISTS registry_meta (\
              key TEXT PRIMARY KEY,\
              value TEXT NOT NULL\
-         );\
-         DELETE FROM brains WHERE lower(path) LIKE '%.sqlite';\
-         DELETE FROM registry_meta WHERE key = 'active_path' AND lower(value) LIKE '%.sqlite';",
+         );",
     )?;
+    Ok(())
+}
+
+/// Best-effort pre-launch cleanup for old registry rows that pointed directly
+/// at SQLite files. Only paths that actually resolve to files are removed, so a
+/// valid folder whose name happens to end in `.sqlite` stays registered.
+fn remove_legacy_file_rows(conn: &Connection) -> AppResult<()> {
+    let records = all_records(conn)?;
+    let mut stale = Vec::new();
+    for record in records {
+        if Path::new(&record.root_path).is_file() {
+            stale.push(record.root_path);
+        }
+    }
+
+    let active = active_path(conn)?.filter(|path| Path::new(path).is_file());
+    for path in stale {
+        conn.execute("DELETE FROM brains WHERE path = ?1", [path])?;
+    }
+    if active.is_some() {
+        conn.execute("DELETE FROM registry_meta WHERE key = 'active_path'", [])?;
+    }
     Ok(())
 }
 
@@ -196,6 +216,7 @@ fn open_registry(path: &Path) -> AppResult<Connection> {
     let conn = Connection::open(path)?;
     conn.busy_timeout(Duration::from_millis(5000))?;
     ensure_schema(&conn)?;
+    remove_legacy_file_rows(&conn)?;
     Ok(conn)
 }
 
@@ -426,7 +447,7 @@ impl BrainState {
     /// spelling of the same file still resolves to the registry.
     ///
     /// [`active_candidate`]: BrainState::active_candidate
-    fn is_registry(&self, candidate: &Path) -> bool {
+    pub(crate) fn is_registry(&self, candidate: &Path) -> bool {
         let resolved = candidate.canonicalize();
         let candidate = resolved.as_deref().unwrap_or(candidate);
         if self.registry_path == candidate {
@@ -517,6 +538,21 @@ impl BrainState {
     }
 }
 
+pub(crate) fn open_root_for_brain(
+    brains: &BrainState,
+    root: &Path,
+) -> AppResult<(brain_schema::BrainPaths, Connection)> {
+    let paths = brain_schema::bootstrap_brain_root(root)?;
+    if brains.is_registry(&paths.database_path) {
+        return Err(AppError::parse(format!(
+            "{} is Local Brain's internal brain registry, not a brain database",
+            paths.database_path.display()
+        )));
+    }
+    let conn = brain_schema::open_and_migrate(&paths.database_path)?;
+    Ok((paths, conn))
+}
+
 /// Switch the live database to an already-opened, migrated brain.
 ///
 /// Two invariants combine here:
@@ -592,14 +628,7 @@ fn open_brain_impl(db: &DbState, brains: &BrainState, root_path: &str) -> AppRes
     if root.exists() && !root.is_dir() {
         return Err(AppError::parse(format!("not a brain folder: {root_path}")));
     }
-    let (paths, conn) = brain_schema::open_brain_root(root)?;
-    // Never open the app's own registry as a brain database.
-    if brains.is_registry(&paths.database_path) {
-        return Err(AppError::parse(format!(
-            "{} is Local Brain's internal brain registry, not a brain database",
-            paths.database_path.display()
-        )));
-    }
+    let (paths, conn) = open_root_for_brain(brains, root)?;
     switch_to(db, brains, conn, paths, None)
 }
 
@@ -631,7 +660,7 @@ fn create_brain_impl(
             "a file already exists at {root_path} — choose a folder instead"
         )));
     }
-    let (paths, conn) = brain_schema::open_brain_root(target)?;
+    let (paths, conn) = open_root_for_brain(brains, target)?;
     switch_to(db, brains, conn, paths, name)
 }
 
@@ -867,6 +896,54 @@ mod tests {
         assert_eq!(records[0].name, "Work");
         assert_eq!(records[0].color, DEFAULT_COLOR);
         assert!(records[0].created_ms > 0);
+    }
+
+    #[test]
+    fn registry_cleanup_preserves_folder_roots_ending_in_sqlite() {
+        let dir = tempdir().unwrap();
+        let registry_path = dir.path().join("registry.sqlite");
+        let root = dir.path().join("Work.sqlite");
+        std::fs::create_dir_all(&root).unwrap();
+        let canonical = root.canonicalize().unwrap().display().to_string();
+
+        {
+            let conn = open_registry(&registry_path).unwrap();
+            mark_opened(&conn, &canonical, Some("Work")).unwrap();
+        }
+
+        let reopened = open_registry(&registry_path).unwrap();
+        assert!(
+            find(&reopened, &canonical).unwrap().is_some(),
+            "a brain root folder ending in .sqlite is valid and must remain catalogued"
+        );
+        assert_eq!(
+            active_path(&reopened).unwrap().as_deref(),
+            Some(canonical.as_str())
+        );
+    }
+
+    #[test]
+    fn registry_cleanup_removes_existing_legacy_file_rows_only() {
+        let dir = tempdir().unwrap();
+        let registry_path = dir.path().join("registry.sqlite");
+        let legacy_file = dir.path().join("legacy.sqlite");
+        std::fs::write(&legacy_file, b"not a registry brain root").unwrap();
+        let legacy_key = legacy_file.display().to_string();
+
+        {
+            let conn = open_registry(&registry_path).unwrap();
+            mark_opened(&conn, &legacy_key, Some("Legacy")).unwrap();
+        }
+
+        let reopened = open_registry(&registry_path).unwrap();
+        assert!(
+            find(&reopened, &legacy_key).unwrap().is_none(),
+            "actual file-style legacy brain rows should be reset"
+        );
+        assert!(
+            active_path(&reopened).unwrap().is_none(),
+            "an active pointer to a legacy file row should be cleared"
+        );
     }
 
     #[test]
@@ -1505,6 +1582,39 @@ mod tests {
         // The registry was not catalogued or migrated as a brain.
         let conn = brains.lock().unwrap();
         assert!(all_records(&conn).unwrap().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_root_rejects_registry_symlink_before_migration() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempdir().unwrap();
+        let registry_path = dir.path().join("registry.sqlite");
+        let brains = file_state(&registry_path);
+
+        let root = dir.path().join("Tricky");
+        std::fs::create_dir_all(&root).unwrap();
+        symlink(&registry_path, root.join("brain.sqlite")).unwrap();
+
+        let result = open_root_for_brain(&brains, &root);
+        assert!(
+            result.is_err(),
+            "a brain.sqlite symlink to registry.sqlite must be rejected"
+        );
+
+        let conn = open_registry(&registry_path).unwrap();
+        let migrated_as_brain: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_meta'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            migrated_as_brain, 0,
+            "the registry must not be migrated before the guard fires"
+        );
     }
 
     #[test]

@@ -15,7 +15,7 @@ pub fn run() {
     // chooser drive the first open, matching Reflect Open's startup lifecycle.
     let brains = brains::BrainState::load();
     let db_state = if let Some(active_root) = brains.active_root_candidate() {
-        match brain_schema::open_brain_root(&active_root) {
+        match brains::open_root_for_brain(&brains, &active_root) {
             Ok((paths, conn)) => {
                 let _ = brains.register_active(&paths.root_path, None);
                 db::DbState::new(conn, paths)
