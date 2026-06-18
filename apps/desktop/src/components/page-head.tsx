@@ -12,15 +12,15 @@ export function PageHead({
 }): ReactNode {
   return (
     <header className="flex items-end justify-between gap-4 border-b border-border pb-3">
-      <div>
+      <div className="min-w-0">
         {eyebrow ? (
-          <p className="font-mono text-[11px] uppercase tracking-wide text-muted-foreground">
-            {eyebrow}
-          </p>
+          <p className="text-[11px] font-medium tracking-wide text-muted-foreground">{eyebrow}</p>
         ) : null}
-        <h1 className="mt-0.5 font-serif text-xl text-foreground">{title}</h1>
+        <h1 className="mt-1 truncate text-xl font-semibold tracking-tight text-foreground">
+          {title}
+        </h1>
       </div>
-      {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
+      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
     </header>
   )
 }

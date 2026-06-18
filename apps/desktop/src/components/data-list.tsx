@@ -18,7 +18,7 @@ interface DataListProps<T> {
   isLoading?: boolean
 }
 
-/** A dense, calm table for list surfaces (Picardo-inspired). */
+/** A dense, calm table for list surfaces (Reflect design system). */
 export function DataList<T>({
   rows,
   columns,
@@ -35,15 +35,15 @@ export function DataList<T>({
   }
 
   return (
-    <div className="overflow-hidden rounded-md border border-border">
+    <div className="overflow-hidden rounded-lg border border-border">
       <table className="w-full border-collapse text-sm">
         <thead>
-          <tr className="border-b border-border bg-secondary/50 text-left">
+          <tr className="border-b border-border bg-secondary/40 text-left">
             {columns.map((column) => (
               <th
                 key={column.key}
                 className={cn(
-                  'px-3 py-2 font-mono text-[11px] font-medium uppercase tracking-wide text-muted-foreground',
+                  'px-3 py-2 text-[11px] font-medium tracking-wide text-muted-foreground',
                   column.className,
                 )}
               >
@@ -59,11 +59,11 @@ export function DataList<T>({
               onClick={onRowClick ? () => onRowClick(row) : undefined}
               className={cn(
                 'border-b border-border/60 last:border-b-0',
-                onRowClick ? 'cursor-pointer hover:bg-secondary/40' : undefined,
+                onRowClick ? 'cursor-pointer transition-colors hover:bg-secondary/50' : undefined,
               )}
             >
               {columns.map((column) => (
-                <td key={column.key} className={cn('px-3 py-2 align-top', column.className)}>
+                <td key={column.key} className={cn('px-3 py-2 align-middle', column.className)}>
                   {column.render(row)}
                 </td>
               ))}

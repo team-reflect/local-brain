@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { appVersion } from '@local-brain/core'
+import { Badge } from '../components/badge'
 import { PageHead } from '../components/page-head'
 import { Section } from '../components/section'
 import { cn } from '../lib/utils'
@@ -39,16 +40,14 @@ export function SettingsSurface({ section }: { section: string | undefined }): R
               type="button"
               onClick={() => navigate({ kind: 'settings', section: s.key })}
               className={cn(
-                'flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors',
+                'flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm font-medium transition-colors',
                 s.key === active
                   ? 'bg-secondary text-foreground'
                   : 'text-muted-foreground hover:bg-secondary/60',
               )}
             >
               {s.label}
-              {s.plan ? (
-                <span className="font-mono text-[9px] uppercase text-muted-foreground">soon</span>
-              ) : null}
+              {s.plan ? <Badge tone="neutral">Soon</Badge> : null}
             </button>
           ))}
         </nav>
@@ -124,7 +123,7 @@ function Diagnostics(): ReactNode {
   const info = useQuery({ queryKey: ['app-version'], queryFn: appVersion })
   return (
     <Section title="Diagnostics">
-      <div className="rounded-md border border-border bg-card px-4 py-3 font-mono text-xs text-card-foreground">
+      <div className="rounded-lg border border-border bg-card px-4 py-3 font-mono text-xs text-card-foreground">
         {info.data ? (
           <span>
             {info.data.name} v{info.data.version} · {info.data.platform}

@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import type { Task } from '@local-brain/core'
+import { StatusBadge } from '../components/badge'
 import { DataList, type Column } from '../components/data-list'
 import { EmptyState } from '../components/empty-state'
 import { PageHead } from '../components/page-head'
@@ -28,6 +29,7 @@ export function TasksSurface(): ReactNode {
           onClick={(event) => event.stopPropagation()}
           onChange={() => complete.mutate(task.id)}
           aria-label={`Complete ${task.title}`}
+          className="size-3.5 accent-[hsl(var(--primary))]"
         />
       ),
     },
@@ -44,9 +46,7 @@ export function TasksSurface(): ReactNode {
       key: 'status',
       header: 'Status',
       className: 'w-28',
-      render: (task) => (
-        <span className="font-mono text-[11px] text-muted-foreground">{task.status}</span>
-      ),
+      render: (task) => <StatusBadge status={task.status} />,
     },
     {
       key: 'due',
@@ -91,7 +91,7 @@ export function TasksSurface(): ReactNode {
                 type="button"
                 onClick={() => setFilter(option)}
                 className={cn(
-                  'rounded px-2 py-1 text-xs capitalize transition-colors',
+                  'rounded-md px-2 py-1 text-xs font-medium capitalize transition-colors',
                   filter === option
                     ? 'bg-secondary text-foreground'
                     : 'text-muted-foreground hover:bg-secondary/60',

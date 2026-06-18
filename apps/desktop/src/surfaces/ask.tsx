@@ -1,7 +1,9 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { Plus } from 'lucide-react'
+import { Button } from '../components/button'
 import { PageHead } from '../components/page-head'
 import { cn } from '../lib/utils'
+import { controlClass } from '../lib/ui'
 import {
   useAddMessage,
   useConversations,
@@ -53,14 +55,10 @@ export function AskSurface({
       <PageHead eyebrow="Ask" title="Ask" />
       <div className="flex min-h-0 flex-1 gap-4">
         <aside className="flex w-56 shrink-0 flex-col gap-2">
-          <button
-            type="button"
-            onClick={() => navigate({ kind: 'ask' })}
-            className="flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-left text-sm text-foreground hover:bg-secondary/60"
-          >
+          <Button variant="outline" onClick={() => navigate({ kind: 'ask' })} className="justify-start">
             <Plus className="size-3.5" />
             New conversation
-          </button>
+          </Button>
           <ul className="flex flex-col gap-0.5 overflow-y-auto">
             {(conversations.data ?? []).map((conversation) => (
               <li key={conversation.id}>
@@ -96,13 +94,13 @@ export function AskSurface({
                   <li
                     key={message.id}
                     className={cn(
-                      'max-w-[80%] rounded-md px-3 py-2 text-sm',
+                      'max-w-[80%] rounded-lg px-3 py-2 text-sm',
                       message.role === 'user'
-                        ? 'self-end bg-primary/10 text-foreground'
+                        ? 'self-end bg-accent text-foreground'
                         : 'self-start border border-border bg-card text-foreground',
                     )}
                   >
-                    <p className="mb-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+                    <p className="mb-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                       {message.role}
                     </p>
                     <p className="whitespace-pre-wrap">{message.content}</p>
@@ -117,15 +115,11 @@ export function AskSurface({
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               placeholder="Ask anything…"
-              className="flex-1 rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:border-primary/50"
+              className={cn(controlClass, 'flex-1')}
             />
-            <button
-              type="submit"
-              disabled={pending || draft.trim().length === 0}
-              className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-40"
-            >
+            <Button type="submit" variant="primary" disabled={pending || draft.trim().length === 0}>
               Send
-            </button>
+            </Button>
           </form>
         </section>
       </div>

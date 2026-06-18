@@ -6,6 +6,8 @@ import {
   isAppError,
 } from '@local-brain/core'
 import { cn } from '../lib/utils'
+import { controlClass } from '../lib/ui'
+import { Button } from './button'
 import {
   useIngestDocument,
   useIngestInteraction,
@@ -180,11 +182,11 @@ export function AddRecordDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 pt-[8vh]"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-foreground/25 pt-[8vh] backdrop-blur-[1px]"
       onClick={onClose}
     >
       <div
-        className="flex max-h-[84vh] w-[40rem] max-w-[92vw] flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-lg"
+        className="flex max-h-[84vh] w-[40rem] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-[0_8px_28px_rgba(2,6,23,0.16)]"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
@@ -209,7 +211,7 @@ export function AddRecordDialog({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="ml-auto rounded p-1 text-muted-foreground hover:bg-secondary"
+            className="ml-auto rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
           >
             ×
           </button>
@@ -279,31 +281,26 @@ export function AddRecordDialog({
                   className={inputClass}
                 />
               </Field>
-              <button
-                type="button"
+              <Button
+                variant="primary"
                 disabled={busy}
                 onClick={() => void importFolder()}
-                className="self-start rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-40"
+                className="self-start"
               >
                 Scan &amp; import
-              </button>
+              </Button>
             </div>
           )}
         </div>
 
         {mode === 'compose' ? (
           <div className="flex items-center justify-end gap-2 border-t border-border px-4 py-2.5">
-            <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-secondary">
+            <Button variant="ghost" onClick={onClose}>
               Cancel
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void save()}
-              className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-40"
-            >
+            </Button>
+            <Button variant="primary" disabled={busy} onClick={() => void save()}>
               Save {type}
-            </button>
+            </Button>
           </div>
         ) : null}
       </div>
@@ -311,13 +308,12 @@ export function AddRecordDialog({
   )
 }
 
-const inputClass =
-  'w-full rounded-md border border-border bg-card px-2.5 py-1.5 text-sm outline-none focus:border-primary/50'
+const inputClass = controlClass
 
 function Field({ label, children }: { label: string; children: ReactNode }): ReactNode {
   return (
     <label className="flex flex-col gap-1">
-      <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">{label}</span>
+      <span className="text-[11px] font-medium tracking-wide text-muted-foreground">{label}</span>
       {children}
     </label>
   )
@@ -340,8 +336,10 @@ function Segmented({
           type="button"
           onClick={() => onChange(option.key)}
           className={cn(
-            'rounded px-2 py-1 text-xs transition-colors',
-            value === option.key ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-secondary/60',
+            'rounded-md px-2 py-1 text-xs font-medium transition-colors',
+            value === option.key
+              ? 'bg-secondary text-foreground'
+              : 'text-muted-foreground hover:bg-secondary/60',
           )}
         >
           {option.label}
@@ -363,14 +361,14 @@ function PathLoader({ onLoad }: { onLoad: (path: string) => void | Promise<void>
           className={inputClass}
         />
       </Field>
-      <button
-        type="button"
+      <Button
+        variant="outline"
         onClick={() => void onLoad(path)}
         disabled={path.trim().length === 0}
-        className="mb-px rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-secondary/60 disabled:opacity-40"
+        className="mb-px"
       >
         Load
-      </button>
+      </Button>
     </div>
   )
 }
@@ -420,7 +418,7 @@ function LinkGroup({
 }): ReactNode {
   return (
     <div className="flex flex-col gap-1">
-      <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">{label}</span>
+      <span className="text-[11px] font-medium tracking-wide text-muted-foreground">{label}</span>
       <div className="max-h-28 overflow-y-auto">
         {items.length === 0 ? (
           <p className="text-xs text-muted-foreground">None yet.</p>

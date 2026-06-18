@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { Project } from '@local-brain/core'
+import { StatusBadge } from '../components/badge'
 import { DataList, type Column } from '../components/data-list'
 import { EmptyState } from '../components/empty-state'
 import { PageHead } from '../components/page-head'
@@ -20,9 +21,7 @@ export function ProjectsSurface(): ReactNode {
       key: 'status',
       header: 'Status',
       className: 'w-28',
-      render: (project) => (
-        <span className="font-mono text-[11px] text-muted-foreground">{project.status}</span>
-      ),
+      render: (project) => <StatusBadge status={project.status} />,
     },
     {
       key: 'target',

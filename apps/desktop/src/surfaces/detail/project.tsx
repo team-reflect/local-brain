@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { StatusBadge } from '../../components/badge'
 import { DetailFields } from '../../components/detail-fields'
 import { EmptyState } from '../../components/empty-state'
 import { LinkedRecords } from '../../components/linked-records'
@@ -19,7 +20,7 @@ export function ProjectDetail({ id }: { id: string }): ReactNode {
       <PageHead eyebrow="Project" title={p.name} />
       <DetailFields
         fields={[
-          { label: 'Status', value: p.status },
+          { label: 'Status', value: <StatusBadge status={p.status} /> },
           { label: 'Kind', value: p.kind ?? '—' },
           { label: 'Started', value: p.startedOn ?? '—' },
           { label: 'Target', value: p.targetDate ?? '—' },

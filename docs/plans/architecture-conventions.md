@@ -195,10 +195,10 @@ Graph is a derived visualization centered on the user's own `people` row. It sho
 use typed records and link tables as its input, not a separate generic graph-node
 storage model.
 
-Use shadcn/ui for reusable primitives and theme it through `globals.css`. The visual
-direction is defined in [Design System](../design-system.md): warm paper tokens, dense
-tables, serif headings/prose, mono metadata, compact controls, and Picardo-style graph
-chrome.
+Theme reusable primitives through `globals.css`. The visual direction is defined in
+[Design System](../design-system.md): the Reflect Open / Reflect Local design system —
+cool-grey tokens with a single indigo accent, dense tables, Inter typography (no serif),
+mono metadata, compact controls, a sunken sidebar, and token-derived graph chrome.
 
 ## Agent Access
 
