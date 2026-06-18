@@ -7,6 +7,21 @@ questions needing Alex.
 
 ## Current State
 
+- **Phase:** 09 — Packaging & launch (**complete, PR #18 open**). **All Plans 00–09 are now
+  built and open as a stacked set of PRs (#1–#18, minus the consolidation PR #13).** Plan 09 ran the
+  strongest available packaging smoke: `pnpm tauri build` compiled and produced
+  `Local Brain.app` with the `brain` sidecar embedded and runnable (`brain 0.1.0`); only the `.dmg`
+  step is GUI-blocked (documented). Added a one-time first-run welcome flow, a keyboard focus ring +
+  reduced-motion accessibility pass, and the launch docs (`docs/launch/README.md` + `checklist.md`).
+  **161 JS tests**, **36 Rust tests**, desktop build, all green. **Build complete.**
+- **Active branch:** `codex/local-brain-09-packaging-launch` (base `…-08-settings-backup-privacy`).
+- **Blockers:** none. Remaining for public release (documented, not blocking the alpha): DMG
+  bundling + signing/notarization on a developer workstation, a manual VoiceOver pass, on-device
+  performance measurement. The GUI app was not launched headless (no window server); the compile +
+  bundle + embedded-sidecar run is the smoke.
+
+### Prior phase (08)
+
 - **Phase:** 08 — Settings, backup, export & privacy (**complete, PR #17 open**). SQLite backup
   (`VACUUM INTO` → integrity check → atomic rename), JSON export (versioned, atomic), provider keys
   in the macOS keychain (the desktop registers the model provider from it at startup, completing
@@ -74,6 +89,26 @@ questions needing Alex.
 - **Blockers:** none at this checkpoint.
 
 ## Log
+
+### 2026-06-17 — Phase 09: Packaging & launch (Plan 09 complete — build complete)
+- **Packaging smoke (strongest available on this host):** `pnpm tauri build` compiled the release
+  app and produced `target/release/bundle/macos/Local Brain.app` with the **`brain` sidecar embedded**
+  at `Contents/MacOS/brain` (verified: runs `brain 0.1.0`), bundle id `app.localbrain.desktop`
+  v0.1.0. The `.dmg` step failed because `bundle_dmg.sh` drives Finder via AppleScript and needs a
+  GUI/login session — documented; the `.app` + embedded sidecar is the runnable artifact.
+- **First-run flow:** `components/first-run.tsx` — a one-time welcome overlay (gated by a
+  `firstRun.completed` settings flag) confirming the data location, the honest model-boundary status,
+  and how to start; wired into `AppShell`.
+- **Accessibility:** `globals.css` gains a keyboard-only `:focus-visible` ring on all interactive
+  elements and a `prefers-reduced-motion` block.
+- **Launch docs:** `docs/launch/README.md` (install, local storage, importing, Codex, backup/export,
+  model boundaries, troubleshooting) and `docs/launch/checklist.md` (packaging status table,
+  first-run smoke checklist, accessibility/performance/privacy gates, signing/notarization checklist,
+  update-path decision).
+- **Verification:** `pnpm tauri build` → `.app` + runnable embedded sidecar ✓ (`.dmg` GUI-blocked,
+  documented). `pnpm check` ✓ — **161 JS tests** (119 core; 4 db; 38 desktop incl. +2 first-run
+  render tests). `pnpm --filter @local-brain/desktop build` ✓. `cargo fmt --all -- --check` ✓;
+  `cargo check --workspace` ✓; `cargo test --workspace` ✓ (36 tests). `git diff --check` ✓.
 
 ### 2026-06-17 — Phase 08: Settings, backup, export & privacy (Plan 08 complete)
 - **Rust (`src-tauri`):** `DbState::backup_to` (consistent `VACUUM INTO` snapshot → integrity check

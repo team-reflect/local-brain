@@ -134,4 +134,26 @@
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
   }
+
+  /* Accessibility (Plan 09): a visible, consistent keyboard focus ring on every
+     interactive element. Mouse clicks don't trigger :focus-visible, so this is
+     keyboard-only and never noisy for pointer users. */
+  :focus-visible {
+    outline: 2px solid hsl(var(--primary));
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  /* Respect the OS "reduce motion" setting: drop animations/transitions and
+     smooth scrolling for users who ask for it. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
