@@ -140,6 +140,36 @@ green.
   holding the new brain synchronously, before any refetch (the assertion fails
   under the old invalidate-only behaviour).
 
+### Follow-up Bugbot findings (head `11c81ff` → this commit)
+
+- **High — Stale cache after brain switch.** `useApplyBrainSwitch`
+  (`apps/desktop/src/lib/queries/brains.ts`) seeded `active-brain` and then called
+  `invalidateQueries()`, but invalidation only marks queries stale and keeps
+  serving the previous brain's cached rows until background refetches finish —
+  while Rust has already repointed the connection at the new brain. The UI could
+  therefore render old-brain tasks/people (ids that may collide with the new
+  brain's) against the new database. Fixed by seeding `active-brain`, then
+  **removing every brain-scoped query** (`removeQueries` with a predicate that
+  preserves only the brain-picker queries: the just-seeded `active-brain` and the
+  cross-brain `brains` catalogue) so the remounted workspace has no stale cache and
+  fetches each surface fresh; the catalogue is then invalidated to refresh its
+  active flag / order. New DOM test in `brains.dom.test.tsx` asserts brain-scoped
+  caches (`tasks`, `people`) are removed on switch while picker state survives.
+- **Medium — List marks wrong active brain.** `list_brains` / `infos`
+  (`apps/desktop/src-tauri/src/brains.rs`) derived `isActive` and `schemaVersion`
+  from the registry's recorded `active_path`, which can be stale (e.g. a startup
+  `register_active` ignored with `let _ =` in `lib.rs`, or otherwise stale
+  metadata), so the list could flag the wrong brain active and attach a schema
+  version to a brain that is not open. `infos` now takes the **live `DbState` open
+  path** and derives active-ness and the schema version from it (`list_brains` and
+  `forget_brain` pass `db.active_path()`; `forget_brain` also uses the live path
+  for its can't-forget-the-active-brain guard). New Rust test
+  `infos_derives_active_from_live_db_not_stale_registry` proves that with the
+  registry pointing at A while the live DB is open on B, only B is flagged active
+  (with the schema version) — never A. `cargo fmt`/`clippy`/`check`/`test`,
+  `pnpm check`, and the desktop build are all green (20 desktop-lib Rust tests,
+  48 desktop tests).
+
 ## Caveats / deferred (honest scope)
 
 - **Path field as fallback.** The native OS dialog is the primary affordance; the

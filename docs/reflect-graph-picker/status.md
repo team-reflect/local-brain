@@ -61,6 +61,38 @@ New regression test (`lib/queries/brains.dom.test.tsx`): a switchable bridge pro
 both open and create seed `active-brain` with the new brain synchronously, before
 any invalidation refetch. `pnpm check` + desktop build green.
 
+## Bugbot review fixes (2026-06-18, head 11c81ff)
+
+Two Bugbot findings on commit `0370453`, both resolved:
+
+1. **High — Stale cache after brain switch** (`apps/desktop/src/lib/queries/brains.ts`).
+   After `openBrain`/`createBrain`, Rust repoints `DbState` at the new brain, but
+   `onSuccess` only seeded `active-brain` and called `invalidateQueries()` —
+   which marks queries stale yet keeps serving previous-brain cached rows until
+   background refetches finish, so old-brain tasks/people (with ids that could
+   collide with the new brain's) could render while reads/writes hit the new DB.
+   `useApplyBrainSwitch` now seeds `active-brain`, then **removes every
+   brain-scoped query** (`removeQueries` with a predicate that preserves only the
+   brain-picker queries — the seeded `active-brain` and the cross-brain `brains`
+   catalogue) so the remounted workspace has no stale cache to fall back on and
+   fetches each surface fresh; the catalogue is then invalidated to refresh the
+   active flag / order. New DOM test asserts brain-scoped caches (`tasks`,
+   `people`) are removed on switch while the picker state is preserved.
+2. **Medium — List marks wrong active brain** (`apps/desktop/src-tauri/src/brains.rs`).
+   `list_brains`/`infos` set `isActive` (and attached `schemaVersion`) from the
+   registry's recorded `active_path`, which can be stale if startup
+   `register_active` failed (ignored with `let _ =` in `lib.rs`). `infos` now
+   derives active-ness and the schema version from the **live `DbState` open
+   path** (`list_brains` and `forget_brain` pass `db.active_path()`), so a stale
+   registry pointer can never flag the wrong brain or attach a schema version to a
+   brain that is not open. New Rust test
+   `infos_derives_active_from_live_db_not_stale_registry` proves a registry
+   pointing at A while the live DB is open on B flags only B active.
+
+New tests: `brains.dom.test.tsx` (stale brain-scoped caches removed on switch),
+`brains.rs::infos_derives_active_from_live_db_not_stale_registry`. Full suite
+(`pnpm check`, desktop build, `cargo fmt`/`clippy`/`check`/`test`) green.
+
 ## Progress
 
 - [x] Read AGENTS.md, docs, supervisor skill; mapped Local Brain + both Reflect refs.

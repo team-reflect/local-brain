@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { renderHook } from '@testing-library/react'
 import { installFakeBridge } from '../../test/utils'
-import { ACTIVE_BRAIN_KEY, useCreateBrain, useOpenBrain } from './brains'
+import { ACTIVE_BRAIN_KEY, BRAINS_KEY, useCreateBrain, useOpenBrain } from './brains'
 
 const ACTIVE = {
   path: '/data/brain.sqlite',
@@ -77,5 +77,27 @@ describe('brain switch cache seeding', () => {
     await result.current.mutateAsync({ path: WORK.path, name: WORK.name })
 
     expect(client.getQueryData(ACTIVE_BRAIN_KEY)).toEqual(WORK)
+  })
+
+  it('removes stale brain-scoped caches on switch but keeps brain-picker state', async () => {
+    installSwitchableBridge()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+    client.setQueryData(ACTIVE_BRAIN_KEY, ACTIVE)
+    // The cross-brain catalogue is brain-independent and must survive the switch.
+    client.setQueryData(BRAINS_KEY, [ACTIVE])
+    // Brain-scoped caches the previous brain populated — old-brain rows that must
+    // not be rendered under the new brain (ids could even collide).
+    client.setQueryData(['tasks'], [{ id: 'old-task', title: 'Old brain task' }])
+    client.setQueryData(['people', 'p1'], { id: 'p1', name: 'Old brain person' })
+
+    const { result } = renderHook(() => useOpenBrain(), { wrapper: withClient(client) })
+    await result.current.mutateAsync(WORK.path)
+
+    // Every brain-scoped cache is gone, so the remounted workspace fetches fresh.
+    expect(client.getQueryData(['tasks'])).toBeUndefined()
+    expect(client.getQueryData(['people', 'p1'])).toBeUndefined()
+    // Brain-picker state is preserved: active-brain seeded, catalogue still there.
+    expect(client.getQueryData(ACTIVE_BRAIN_KEY)).toEqual(WORK)
+    expect(client.getQueryData(BRAINS_KEY)).toEqual([ACTIVE])
   })
 })

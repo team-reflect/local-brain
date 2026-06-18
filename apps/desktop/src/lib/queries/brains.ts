@@ -14,15 +14,28 @@ import {
 
 /**
  * Hooks for the top-level brain picker. Switching the active brain (open/create)
- * swaps the Rust connection, so we seed `active-brain` with the returned info and
- * then invalidate the entire query cache to refetch every surface against the
- * newly active brain; the shell also remounts (keyed by the active brain path)
- * for a clean history. Metadata-only edits (rename, color) just refresh the brain
- * lists.
+ * swaps the Rust connection, so we seed `active-brain` with the returned info,
+ * then *remove* every brain-scoped query (preserving the brain-picker queries)
+ * so no stale old-brain rows can be served against the new database; the shell
+ * also remounts (keyed by the active brain path) for a clean history, fetching
+ * each surface fresh. Metadata-only edits (rename, color) just refresh the brain
+ * lists. See {@link useApplyBrainSwitch} for the full rationale.
  */
 
 export const BRAINS_KEY = ['brains'] as const
 export const ACTIVE_BRAIN_KEY = ['active-brain'] as const
+
+/**
+ * Brain-picker queries that are *not* scoped to the contents of a single brain:
+ * the cross-brain catalogue ({@link BRAINS_KEY}) and the active-brain pointer
+ * ({@link ACTIVE_BRAIN_KEY}). Everything else (tasks, people, projects, …) reads
+ * rows out of the open brain's database and must be dropped on a switch so stale
+ * old-brain rows can never be rendered under the new brain.
+ */
+function isBrainPickerQuery(queryKey: readonly unknown[]): boolean {
+  const root = queryKey[0]
+  return root === BRAINS_KEY[0] || root === ACTIVE_BRAIN_KEY[0]
+}
 
 export function useBrains() {
   return useQuery({ queryKey: BRAINS_KEY, queryFn: listBrains })
@@ -33,18 +46,27 @@ export function useActiveBrain() {
 }
 
 /**
- * Apply a brain switch to the cache. We seed `active-brain` with the freshly
- * returned info *before* invalidating, so {@link App} immediately re-keys its
- * workspace on the new path; only then do we invalidate everything else to
- * refetch every surface against the now-active brain. Seeding first closes the
- * window where other invalidated queries return the new brain's data while the
- * workspace is still mounted under the previous path.
+ * Apply a brain switch to the cache. The Rust side has already repointed the
+ * live connection at the new brain, so any brain-scoped cache we still hold is
+ * now stale — and `invalidateQueries()` alone only marks queries stale and keeps
+ * serving the cached old-brain rows until background refetches finish, so the UI
+ * can render old-brain tasks/people (with ids that may collide with the new
+ * brain's) while reads and writes already hit the new database.
+ *
+ * So we (1) seed `active-brain` with the freshly returned info, which makes
+ * {@link App} re-key its workspace on the new path immediately, then (2)
+ * *remove* every brain-scoped query so the remounted tree has no cache to fall
+ * back on and must fetch each surface fresh against the now-active brain. We
+ * deliberately preserve the brain-picker queries — `active-brain` (just seeded)
+ * and the cross-brain `brains` catalogue — and only refresh the catalogue so the
+ * switcher reflects the new active flag / last-opened order without flickering.
  */
 function useApplyBrainSwitch() {
   const queryClient = useQueryClient()
   return (brain: BrainInfo) => {
     queryClient.setQueryData(ACTIVE_BRAIN_KEY, brain)
-    void queryClient.invalidateQueries()
+    queryClient.removeQueries({ predicate: (query) => !isBrainPickerQuery(query.queryKey) })
+    void queryClient.invalidateQueries({ queryKey: BRAINS_KEY })
   }
 }
 

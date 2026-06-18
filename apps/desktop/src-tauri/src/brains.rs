@@ -253,13 +253,27 @@ fn mark_opened(conn: &Connection, path: &str, name: Option<&str>) -> AppResult<(
 }
 
 /// Catalogued brains as [`BrainInfo`], newest-opened first, active flag set.
-fn infos(conn: &Connection, active_schema_version: Option<i64>) -> AppResult<Vec<BrainInfo>> {
-    let active = active_path(conn)?.unwrap_or_default();
+///
+/// Active-ness and the schema version come from `live_active` — the path the live
+/// [`DbState`] connection is actually open on — *not* the registry's recorded
+/// `active_path`. The two can disagree (a startup `register_active` that failed,
+/// or otherwise stale registry metadata), and the live connection is the source
+/// of truth for which brain reads and writes hit; deriving from it means the list
+/// can never flag the wrong brain active or attach a schema version to a brain
+/// that is not open.
+fn infos(
+    conn: &Connection,
+    live_active: Option<&Path>,
+    active_schema_version: Option<i64>,
+) -> AppResult<Vec<BrainInfo>> {
+    let active = live_active
+        .map(|path| path.display().to_string())
+        .unwrap_or_default();
     let records = all_records(conn)?;
     Ok(records
         .into_iter()
         .map(|record| {
-            let is_active = record.path == active;
+            let is_active = !active.is_empty() && record.path == active;
             BrainInfo {
                 path: record.path,
                 name: record.name,
@@ -394,9 +408,12 @@ pub fn list_brains(
     db: State<'_, DbState>,
     brains: State<'_, BrainState>,
 ) -> AppResult<Vec<BrainInfo>> {
+    // Derive the active flag from the live connection, not the registry pointer,
+    // so a stale `active_path` can't mark the wrong brain active (see [`infos`]).
+    let live_active = db.active_path().ok();
     let schema_version = db.schema_version().ok();
     let conn = brains.lock()?;
-    infos(&conn, schema_version)
+    infos(&conn, live_active.as_deref(), schema_version)
 }
 
 /// The currently open brain.
@@ -508,16 +525,26 @@ pub fn set_brain_color(
 /// Drop a brain from the catalogue (does not delete the database file). The
 /// active brain cannot be forgotten.
 #[tauri::command]
-pub fn forget_brain(brains: State<'_, BrainState>, path: String) -> AppResult<Vec<BrainInfo>> {
+pub fn forget_brain(
+    db: State<'_, DbState>,
+    brains: State<'_, BrainState>,
+    path: String,
+) -> AppResult<Vec<BrainInfo>> {
     let key = normalize(&path);
-    let conn = brains.lock()?;
-    if active_path(&conn)?.as_deref() == Some(key.as_str()) {
+    // Guard against forgetting the *live* active brain (the one reads/writes hit),
+    // and derive the returned list's active flag from it too, so a stale registry
+    // pointer can neither block a valid forget nor mislabel the survivors.
+    let live_active = db.active_path().ok();
+    let live_active_str = live_active.as_ref().map(|path| path.display().to_string());
+    if live_active_str.as_deref() == Some(key.as_str()) {
         return Err(AppError::parse(
             "cannot forget the active brain — switch to another brain first",
         ));
     }
+    let schema_version = db.schema_version().ok();
+    let conn = brains.lock()?;
     conn.execute("DELETE FROM brains WHERE path = ?1", [&key])?;
-    infos(&conn, None)
+    infos(&conn, live_active.as_deref(), schema_version)
 }
 
 /// Reveal a brain's database file in the OS file manager (best effort).
@@ -629,10 +656,52 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].path, "/b/brain.sqlite");
 
-        // infos() marks the active brain and orders newest-opened first.
-        let infos = infos(&conn, Some(2)).unwrap();
+        // infos() marks the live active brain and orders newest-opened first.
+        let infos = infos(&conn, Some(Path::new("/b/brain.sqlite")), Some(2)).unwrap();
         assert!(infos[0].is_active);
         assert_eq!(infos[0].schema_version, Some(2));
+    }
+
+    #[test]
+    fn infos_derives_active_from_live_db_not_stale_registry() {
+        // Bug regression: list_brains must mark active-ness from the live DbState
+        // open path, not the registry's recorded active_path. If a startup
+        // `register_active` failed (ignored with `let _ =` in lib.rs) the registry
+        // pointer can be stale — here it points at A while the live connection is
+        // open on B. The list must flag B active (with the schema version) and A
+        // inactive, never the reverse.
+        let brains = memory_state();
+        let conn = brains.lock().unwrap();
+        mark_opened(&conn, "/a/brain.sqlite", Some("A")).unwrap(); // registry active = A
+        mark_opened(&conn, "/b/brain.sqlite", Some("B")).unwrap(); // registry active = B
+        set_active_path(&conn, "/a/brain.sqlite").unwrap(); // ...but force it stale to A
+        assert_eq!(active_path(&conn).unwrap().unwrap(), "/a/brain.sqlite");
+
+        // The live connection is actually open on B.
+        let live = infos(&conn, Some(Path::new("/b/brain.sqlite")), Some(7)).unwrap();
+        let by_path = |path: &str| live.iter().find(|info| info.path == path).unwrap();
+
+        let b = by_path("/b/brain.sqlite");
+        assert!(b.is_active, "the live brain (B) must be active");
+        assert_eq!(b.schema_version, Some(7), "schema version attaches to B");
+
+        let a = by_path("/a/brain.sqlite");
+        assert!(
+            !a.is_active,
+            "the stale registry pointer (A) must not be active"
+        );
+        assert_eq!(
+            a.schema_version, None,
+            "no schema version on a non-open brain"
+        );
+
+        // Exactly one brain is active.
+        assert_eq!(live.iter().filter(|info| info.is_active).count(), 1);
+
+        // With no live brain open, nothing is flagged active (not even the
+        // registry's recorded active_path).
+        let none = infos(&conn, None, None).unwrap();
+        assert!(none.iter().all(|info| !info.is_active));
     }
 
     #[test]
