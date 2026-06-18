@@ -1,5 +1,6 @@
 import { db } from '../db/client'
 import type { LinkedRecord, RecordKind } from '../domains/relations/types'
+import { toLikePattern } from '../retrieval/match-query'
 
 /**
  * A lightweight, navigational quick-search for the command palette: case-
@@ -15,9 +16,10 @@ function link(kind: RecordKind, id: string, title: string | null, subtitle: stri
 }
 
 export async function quickSearch(query: string, perKind = PER_KIND): Promise<LinkedRecord[]> {
-  const needle = query.trim()
-  if (!needle) return []
-  const like = `%${needle}%`
+  // Share the LIKE-pattern builder with global search so both escape `%`/`_`
+  // wildcards in user input identically.
+  const like = toLikePattern(query)
+  if (!like) return []
 
   const [people, organizations, projects, tasks, documents, interactions] = await Promise.all([
     db

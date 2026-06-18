@@ -1,7 +1,7 @@
 import { sql } from 'kysely'
 import { db } from '../db/client'
 import type { RecordKind } from '../domains/relations/types'
-import { recencyScore } from './ranking'
+import { combineScore, lexicalScore, recencyScore } from './ranking'
 import { toLikePattern, toMatchQuery } from './match-query'
 
 /**
@@ -58,10 +58,12 @@ function wants(kinds: readonly RecordKind[] | undefined, kind: RecordKind): bool
   return !kinds || kinds.includes(kind)
 }
 
-/** Map a name (LIKE) hit to a flat lexical score; exact-ish short names rank higher. */
-function nameScore(): number {
-  return 0.6
-}
+/**
+ * Flat score for a name/title (LIKE) hit. Name hits have no bm25 or recency to
+ * blend, so they sit at a fixed mid-rank: above weak full-text matches, below
+ * strong ones. Tune here if name hits should out- or under-rank text matches.
+ */
+const NAME_HIT_SCORE = 0.6
 
 export async function globalSearch(query: string, options: SearchOptions = {}): Promise<SearchHit[]> {
   const perKind = options.perKind ?? DEFAULT_PER_KIND
@@ -171,8 +173,9 @@ export async function globalSearch(query: string, options: SearchOptions = {}): 
 }
 
 function ftsHit(kind: RecordKind, row: FtsRecordRow, now: Date): SearchHit {
-  const magnitude = Math.max(0, -Number(row.bm25))
-  const lexical = magnitude / (magnitude + 4)
+  // Same lexical + recency blend as grounded retrieval (see ranking.ts), minus
+  // the link boost — global search has no "current context" to boost against.
+  const lexical = lexicalScore(Number(row.bm25))
   const recency = recencyScore(row.recordDate, now)
   return {
     kind,
@@ -180,7 +183,7 @@ function ftsHit(kind: RecordKind, row: FtsRecordRow, now: Date): SearchHit {
     title: row.title ?? '(untitled)',
     subtitle: row.subtitle,
     snippet: row.snippet,
-    score: lexical * 0.7 + recency * 0.3,
+    score: combineScore({ lexical, recency }),
   }
 }
 
@@ -191,6 +194,6 @@ function nameHit(kind: RecordKind, row: NameRow): SearchHit {
     title: row.title ?? '(untitled)',
     subtitle: row.subtitle,
     snippet: null,
-    score: nameScore(),
+    score: NAME_HIT_SCORE,
   }
 }
