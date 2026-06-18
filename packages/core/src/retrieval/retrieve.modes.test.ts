@@ -76,6 +76,30 @@ function installBridge(options: BridgeOptions = {}) {
   return commands
 }
 
+/**
+ * A ready runtime whose vector KNN finds no neighbour within the cutoff (sparse
+ * or empty vector index), while lexical FTS still has hits. Used to prove that a
+ * ready-but-contributing-nothing runtime degrades to lexical instead of claiming
+ * `semanticAvailable: true` with empty/unhelpful chunks.
+ */
+function installEmptyKnnBridge() {
+  setBridge({
+    invoke: (command, args) => {
+      if (command === 'embed_status') {
+        return Promise.resolve({ status: 'ready', model: 'all-MiniLM-L6-v2' })
+      }
+      if (command === 'embed_texts') return Promise.resolve([[0.1, 0.2, 0.3]])
+      if (command === 'db_query') {
+        const sql = String((args as { sql: string }).sql)
+        if (sql.includes('settings')) return Promise.resolve([{ valueJson: 'true' }])
+        if (sql.includes('chunk_vectors')) return Promise.resolve([]) // KNN: no neighbours
+        return Promise.resolve([lexicalRow('l1', -4)])
+      }
+      return Promise.resolve(null)
+    },
+  })
+}
+
 describe('retrieve modes', () => {
   afterEach(() => setBridge({ invoke: () => Promise.reject(new Error('no bridge')) }))
 
@@ -180,6 +204,25 @@ describe('retrieve modes', () => {
     expect(result.semanticAvailable).toBe(false)
     expect(commands).not.toContain('embed_status')
     expect(commands).not.toContain('embed_texts')
+  })
+
+  it('hybrid degrades to lexical when KNN yields no neighbours within cutoff', async () => {
+    // The runtime is ready and the query embeds, but the vector index returns no
+    // neighbour. Semantic contributed nothing, so `semanticAvailable` must be
+    // false and the lexical hits must still stand (no empty result).
+    installEmptyKnnBridge()
+    const result = await retrieve('quarterly planning', { mode: 'hybrid' })
+    expect(result.semanticAvailable).toBe(false)
+    expect(result.chunks.map((c) => c.chunkId)).toContain('l1')
+  })
+
+  it('semantic mode falls back to lexical when KNN yields no neighbours', async () => {
+    // A ready runtime that contributes nothing must not return empty while lexical
+    // hits exist, nor claim semantic availability — mirroring the unavailable path.
+    installEmptyKnnBridge()
+    const result = await retrieve('quarterly planning', { mode: 'semantic' })
+    expect(result.semanticAvailable).toBe(false)
+    expect(result.chunks.map((c) => c.chunkId)).toContain('l1')
   })
 
   it('semantic mode returns no results for a whitespace-only query', async () => {

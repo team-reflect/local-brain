@@ -199,24 +199,33 @@ export async function retrieve(query: string, options: RetrieveOptions = {}): Pr
           limit: mode === 'hybrid' ? candidateLimit : limit,
           recordType,
         })
-        if (mode === 'semantic') {
+        // A `ready` runtime can still contribute nothing: KNN may find no neighbour
+        // within the distance cutoff (sparse/empty vector index, or a query whose
+        // nearest vectors are all too far). `semanticAvailable` means "a semantic
+        // backend actually contributed", so an empty KNN result must NOT claim it.
+        // Fall through to the lexical-only path below (same as an unavailable
+        // runtime) so `semantic` mode never returns empty while lexical hits exist,
+        // and `hybrid` reports availability that matches the fused contribution.
+        if (semantic.length > 0) {
+          if (mode === 'semantic') {
+            return {
+              query,
+              mode,
+              semanticAvailable: true,
+              chunks: boostSemantic(semantic, boost).slice(0, limit),
+            }
+          }
+          const lexical = await lexicalHits(query, { limit: candidateLimit, recordType, boost, now })
+          // Lexical hits already carry the explicit-link boost (via `combineScore`),
+          // but the raw vector hits don't — apply the same boost so an in-context
+          // semantic-only record ranks up *before* RRF fuses the two lists.
+          const boostedSemantic = boostSemantic(semantic, boost)
           return {
             query,
             mode,
             semanticAvailable: true,
-            chunks: boostSemantic(semantic, boost).slice(0, limit),
+            chunks: fuseRanked([lexical, boostedSemantic], limit),
           }
-        }
-        const lexical = await lexicalHits(query, { limit: candidateLimit, recordType, boost, now })
-        // Lexical hits already carry the explicit-link boost (via `combineScore`),
-        // but the raw vector hits don't — apply the same boost so an in-context
-        // semantic-only record ranks up *before* RRF fuses the two lists.
-        const boostedSemantic = boostSemantic(semantic, boost)
-        return {
-          query,
-          mode,
-          semanticAvailable: true,
-          chunks: fuseRanked([lexical, boostedSemantic], limit),
         }
       }
     }

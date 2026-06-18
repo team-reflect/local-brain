@@ -160,6 +160,28 @@ vec0 cosine-KNN ordering, and a real end-to-end model + KNN test (ranks by meani
   `cargo check --workspace`, `cargo test --workspace` (46 tests), `cargo clippy --workspace
   --all-targets` clean.
 
+## Post-review fixes — fifth pass (Cursor Bugbot on PR #27, head 981dd2b)
+- **Medium — Stale pending stops CLI indexing:** once semantic search was enabled and `pending`
+  hit 0, `useEmbeddingsStatus` stopped polling entirely, so chunks written by a non-UI path (the
+  `brain` CLI indexing while the window is open, or another window) were never embedded until a
+  focus/settings refetch. The refetch cadence is now an extracted, exported pure function,
+  `embeddingsRefetchInterval`: it still fast-polls (1.5s) while loading or draining and still
+  stops dead on a `failed` runtime or sticky `backfillError`, but when idle-and-healthy it keeps
+  a slow 30s heartbeat so `EmbeddingsSync` notices externally written chunks on its own — without
+  reintroducing the 1.5s hammering the failure guards exist to prevent. New cadence-contract
+  cases in `embeddings.test.ts`.
+- **Medium — Semantic available with empty hits:** in `semantic`/`hybrid` mode a `ready` runtime
+  whose KNN found no neighbour within the distance cutoff still returned `semanticAvailable: true`
+  with empty/unhelpful chunks and skipped the lexical fallback the unavailable-runtime path
+  provides. `retrieve()` now treats an empty KNN result as "semantic contributed nothing": it
+  falls through to the lexical-only result (so `semantic` mode never returns empty while lexical
+  hits exist, and `hybrid` reports availability matching the fused contribution). New empty-KNN
+  cases for both modes in `retrieve.modes.test.ts`.
+- Re-verified (Rust touched only by re-running gates; this pass edits TypeScript only):
+  `git diff --check` clean, `pnpm check` (145 core + 52 desktop tests), desktop build,
+  `cargo fmt --all -- --check`, `cargo check --workspace`, `cargo test --workspace` (18 + sidecar
+  suites pass).
+
 ## Repo state
 - Branch: `codex/local-brain-reflect-embeddings`
 - PR: https://github.com/maccman/local-brain/pull/27 (base `master`)

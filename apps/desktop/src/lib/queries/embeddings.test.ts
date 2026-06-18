@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { type EmbedStatus, setBridge } from '@local-brain/core'
-import { rebuildEmbeddings } from './embeddings'
+import { type EmbeddingsStatus, type EmbedStatus, setBridge } from '@local-brain/core'
+import { embeddingsRefetchInterval, rebuildEmbeddings } from './embeddings'
 
 /**
  * Rebuild safety contract (Bugbot #27 high-severity fix): the rebuild must never
@@ -63,6 +63,56 @@ function installBridge(
   })
   return { commands, persistedError: () => persistedError }
 }
+
+/**
+ * Polling-cadence contract (Bugbot "Stale pending stops CLI indexing"): once the
+ * runtime is ready and `pending` hits 0 the status query must NOT go silent — a
+ * non-UI writer (the `brain` CLI, another window) can add chunks without
+ * invalidating this query, so the poll has to keep a slow heartbeat to notice
+ * them. Failed runtimes and sticky backfill errors still stop polling entirely.
+ */
+function status(overrides: Partial<EmbeddingsStatus> = {}): EmbeddingsStatus {
+  return {
+    enabled: true,
+    runtime: { status: 'ready', model: 'all-MiniLM-L6-v2' },
+    modelId: 'all-MiniLM-L6-v2',
+    indexed: 10,
+    totalChunks: 10,
+    pending: 0,
+    ready: true,
+    backfillError: null,
+    ...overrides,
+  }
+}
+
+describe('embeddingsRefetchInterval', () => {
+  it('does not poll before data loads or when disabled', () => {
+    expect(embeddingsRefetchInterval(undefined)).toBe(false)
+    expect(embeddingsRefetchInterval(status({ enabled: false }))).toBe(false)
+  })
+
+  it('fast-polls while the model loads or chunks are pending', () => {
+    expect(embeddingsRefetchInterval(status({ runtime: { status: 'loading' } }))).toBe(1500)
+    expect(embeddingsRefetchInterval(status({ pending: 4, ready: false }))).toBe(1500)
+  })
+
+  it('keeps a slow heartbeat when idle so externally written chunks get noticed', () => {
+    // Ready, nothing pending, healthy: an earlier "stop at pending 0" left CLI
+    // writes unembedded until a focus refetch. The heartbeat keeps it live.
+    expect(embeddingsRefetchInterval(status())).toBe(30_000)
+  })
+
+  it('stops polling a failed runtime or a sticky backfill error', () => {
+    expect(
+      embeddingsRefetchInterval(status({ runtime: { status: 'failed', message: 'boom' } })),
+    ).toBe(false)
+    expect(embeddingsRefetchInterval(status({ backfillError: 'onnx blew up' }))).toBe(false)
+    // Even with chunks pending, a sticky error must not resume the retry loop.
+    expect(embeddingsRefetchInterval(status({ pending: 3, backfillError: 'onnx blew up' }))).toBe(
+      false,
+    )
+  })
+})
 
 describe('rebuildEmbeddings', () => {
   afterEach(() => setBridge({ invoke: () => Promise.reject(new Error('no bridge')) }))

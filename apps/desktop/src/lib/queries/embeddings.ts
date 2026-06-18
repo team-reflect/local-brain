@@ -3,6 +3,7 @@ import {
   backfillEmbeddings,
   clearEmbeddings,
   embedEnsure,
+  type EmbeddingsStatus,
   getEmbeddingsStatus,
   isEmbedReady,
   setBackfillError,
@@ -19,23 +20,43 @@ import { errorMessage } from '../utils'
 
 export const EMBEDDINGS_STATUS_KEY = ['embeddings-status'] as const
 
+/** Fast poll while the model downloads/loads or chunks are actively draining. */
+const ACTIVE_REFETCH_MS = 1500
+
+/**
+ * Slow idle heartbeat once indexing is healthy and caught up. New chunks can be
+ * written by a non-UI path — the `brain` CLI indexing while the window is open,
+ * or another window — without ever invalidating this query, so a one-shot "stop
+ * polling when pending hits 0" would leave them unembedded until the next focus
+ * or settings refetch. The heartbeat lets `EmbeddingsSync` notice them on its
+ * own. 30s is slow enough not to reintroduce the 1.5s hammering that the
+ * failed/backfill-error guards below exist to avoid.
+ */
+const IDLE_REFETCH_MS = 30_000
+
+/**
+ * Decide the status poll cadence from the latest status. Extracted (and exported)
+ * so the polling contract can be tested directly without a live React Query timer.
+ */
+export function embeddingsRefetchInterval(data: EmbeddingsStatus | undefined): number | false {
+  if (!data || !data.enabled) return false
+  // Don't fast-poll a `failed` runtime or a runtime whose last backfill threw:
+  // pending never drains on its own in either case, and `EmbeddingsSync` no
+  // longer auto-retries the load or the backfill. Recovery comes from an
+  // explicit user action (re-enable / rebuild), whose mutation invalidates
+  // this query (and clears the sticky backfill error first).
+  if (data.runtime.status === 'failed' || data.backfillError) return false
+  // Actively working: model still loading, or chunks waiting to embed.
+  if (data.runtime.status === 'loading' || data.pending > 0) return ACTIVE_REFETCH_MS
+  // Idle but healthy: heartbeat so externally written chunks get embedded.
+  return IDLE_REFETCH_MS
+}
+
 export function useEmbeddingsStatus() {
   return useQuery({
     queryKey: EMBEDDINGS_STATUS_KEY,
     queryFn: getEmbeddingsStatus,
-    // Poll while the model downloads/loads or chunks remain to embed.
-    refetchInterval: (query) => {
-      const data = query.state.data
-      if (!data || !data.enabled) return false
-      // Don't poll a `failed` runtime or a runtime whose last backfill threw:
-      // pending never drains on its own in either case, and `EmbeddingsSync` no
-      // longer auto-retries the load or the backfill. Recovery comes from an
-      // explicit user action (re-enable / rebuild), whose mutation invalidates
-      // this query (and clears the sticky backfill error first).
-      if (data.runtime.status === 'failed' || data.backfillError) return false
-      const busy = data.runtime.status === 'loading' || data.pending > 0
-      return busy ? 1500 : false
-    },
+    refetchInterval: (query) => embeddingsRefetchInterval(query.state.data),
   })
 }
 
