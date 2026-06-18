@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
-import { screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { setModelProvider } from '@local-brain/core'
 import { SettingsSurface } from './settings'
 import { installFakeBridge, renderWithProviders } from '../test/utils'
@@ -20,10 +20,16 @@ describe('SettingsSurface (Plan 08)', () => {
     expect(screen.getByRole('heading', { name: 'General' })).toBeDefined()
   })
 
-  it('renders the AI providers boundary with an add form and live status', async () => {
+  it('renders AI providers as a Reflect-style row card with an add dialog', async () => {
     renderWithProviders(<SettingsSurface section="ai-providers" />)
     await waitFor(() => expect(screen.getByRole('button', { name: 'Add provider' })).toBeDefined())
-    // The closed-boundary reason surfaces (no provider configured).
-    await waitFor(() => expect(screen.getByText(/No AI provider is configured/)).toBeDefined())
+    expect(screen.getByText(/No AI providers configured/)).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add provider' }))
+
+    expect(await screen.findByRole('dialog', { name: 'Add AI provider' })).toBeDefined()
+    expect(screen.getByText('Provider')).toBeDefined()
+    expect(screen.getByText('Default model')).toBeDefined()
+    expect(screen.getByText('API key')).toBeDefined()
   })
 })
