@@ -7,17 +7,34 @@ questions needing Alex.
 
 ## Current State
 
-- **Phase:** 04a — Ingestion core engine (TS): paragraph-aware chunking, SHA-256 content
-  hashing, transactional `ingestDocument`/`ingestInteraction` (record + chunks + links in
-  one batch) with content-hash duplicate detection, and an extraction seam. `pnpm check` +
-  `cargo check` green, PR open. (Plan 04 split into 04a/04b/04c — DEC-10.)
-- **Active branch:** `codex/local-brain-04a-ingestion-core` (base `…-03b-desktop-shell-ii`).
+- **Phase:** 04b — Rust safe file-read primitives: `read_text_file` (canonicalize, size
+  cap, UTF-8, SHA-256, kind-by-extension) and `read_text_folder` (recursive scan skipping
+  hidden/unsupported/oversized/binary/duplicate/out-of-root files, with counts) + typed TS
+  bindings. `cargo test` + `pnpm check` green, PR open. (Plan 04 split into 04a/04b/04c —
+  DEC-10; 04a done.)
+- **Active branch:** `codex/local-brain-04b-ingestion-fs` (base `…-04a-ingestion-core`).
 - **Mode:** Sequential. This session builds the stack layer by layer; no parallel
   worker sessions are spawned. (Within a layer, read-only research may fan out, but
   commits are made sequentially from this session.)
 - **Blockers:** none at this checkpoint.
 
 ## Log
+
+### 2026-06-17 — Phase 04b: Rust safe file-read primitives
+- Built `apps/desktop/src-tauri/src/fs.rs`: `read_text_file` (canonicalize the
+  user-selected path, require a regular file, 5 MiB size cap, require valid UTF-8, detect
+  kind by extension, SHA-256 the bytes, clear typed errors otherwise) and `read_text_folder`
+  (recursive scan that skips hidden / unsupported / oversized / binary / duplicate files and
+  anything resolving outside the chosen root via a symlink, returning per-file skip reasons +
+  imported/skipped counts). Registered both commands in `lib.rs`; added `sha2` to the
+  workspace; added typed `readTextFile`/`readTextFolder` zod bindings in
+  `packages/core/src/ipc/fs.ts`.
+- **Hashing:** the Rust hash is SHA-256 over the file's raw UTF-8 bytes (intra-scan dup
+  flagging only); the authoritative cross-record dedupe hash stays the 04a one, computed at
+  ingest over normalized text, so 04c will pass `contents` through `ingestDocument`.
+- **Verification:** `cargo fmt --all -- --check` ✓; `cargo check --workspace` ✓;
+  `cargo test --workspace` ✓ — 12 tests (3 new `fs` tests + 9 existing); `pnpm check` ✓
+  (the new bindings typecheck; 57 JS tests unchanged); `git diff --check` ✓.
 
 ### 2026-06-17 — Phase 04a: Ingestion core engine (Plan 04 split)
 - Split Plan 04 into **04a** (this PR — the TS ingestion engine), **04b** (Rust safe
@@ -219,18 +236,19 @@ questions needing Alex.
 - Committed (`5c02ab5`), pushed, opened **PR #1** (base `master`).
 
 ### Next
-- **04b** (`codex/local-brain-04b-ingestion-fs`, base `…-04a-ingestion-core`): Rust
-  safe file-read primitives — user-selected files only, canonical-path validation, size
-  caps, content hash (`sha2`, matching 04a), folder enumeration with imported/skipped/
-  duplicate counts; plus TS bindings. Then **04c** (ingestion UI) and **05** (extraction).
-- Nine PRs open and awaiting review: **#1** (supervisor), **#2** (foundation),
-  **#3** (schema), **#4** (db package), **#5** (Rust IPC bridge), **#6** (core actions
-  + seed), **#7** (03a desktop shell), **#8** (03b desktop shell II), **#9** (04a ingestion
-  core — `pnpm check` + cargo check green). Plan 02 (DB layer) and Plan 03 (desktop shell)
-  are complete; Plan 04 is underway (04a done, 04b/04c next). A full end-to-end run of the
-  assembled app (`pnpm tauri dev`/`build`) is still pending and is required before the app
-  can be called done. When #1 merges to `master`, rebase the stack and retarget bases
-  upward.
+- **04c** (`codex/local-brain-04c-ingestion-ui`, base `…-04b-ingestion-fs`): the
+  ingestion UI — a paste/import dialog (document vs interaction, title/kind/date, optional
+  people/org/project/task links), folder import wired to `read_text_folder` + `ingestDocument`
+  with imported/skipped/duplicate reporting, and "Add" actions from the surfaces + command
+  palette. Then **05** (extraction) onward.
+- Ten PRs open and awaiting review: **#1** (supervisor), **#2** (foundation), **#3**
+  (schema), **#4** (db package), **#5** (Rust IPC bridge), **#6** (core actions + seed),
+  **#7** (03a desktop shell), **#8** (03b desktop shell II), **#9** (04a ingestion core),
+  **#10** (04b Rust file-read primitives — `cargo test` + `pnpm check` green). Plan 02 (DB
+  layer) and Plan 03 (desktop shell) are complete; Plan 04 is underway (04a + 04b done, 04c
+  next). A full end-to-end run of the assembled app (`pnpm tauri dev`/`build`) is still
+  pending and is required before the app can be called done. When #1 merges to `master`,
+  rebase the stack and retarget bases upward.
 
 ## Verification ledger
 
