@@ -36,6 +36,9 @@ export {
   getEmbeddingsStatus,
   isEmbeddingsEnabled,
   setEmbeddingsEnabled,
+  getBackfillError,
+  setBackfillError,
   EMBEDDINGS_ENABLED_KEY,
+  EMBEDDINGS_BACKFILL_ERROR_KEY,
   type EmbeddingsStatus,
 } from './status'

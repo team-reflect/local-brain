@@ -5,8 +5,10 @@ import {
   embedEnsure,
   getEmbeddingsStatus,
   isEmbedReady,
+  setBackfillError,
   setEmbeddingsEnabled,
 } from '@local-brain/core'
+import { errorMessage } from '../utils'
 
 /**
  * Semantic-search settings hooks (Reflect-embeddings port). The status query
@@ -25,11 +27,12 @@ export function useEmbeddingsStatus() {
     refetchInterval: (query) => {
       const data = query.state.data
       if (!data || !data.enabled) return false
-      // Don't poll a `failed` runtime: backfill is gated on `ready`, so pending
-      // never drains on its own, and `EmbeddingsSync` no longer auto-retries the
-      // load. Recovery comes from an explicit user action (re-enable / rebuild),
-      // whose mutation invalidates this query.
-      if (data.runtime.status === 'failed') return false
+      // Don't poll a `failed` runtime or a runtime whose last backfill threw:
+      // pending never drains on its own in either case, and `EmbeddingsSync` no
+      // longer auto-retries the load or the backfill. Recovery comes from an
+      // explicit user action (re-enable / rebuild), whose mutation invalidates
+      // this query (and clears the sticky backfill error first).
+      if (data.runtime.status === 'failed' || data.backfillError) return false
       const busy = data.runtime.status === 'loading' || data.pending > 0
       return busy ? 1500 : false
     },
@@ -42,7 +45,12 @@ export function useSetEmbeddingsEnabled() {
   return useMutation({
     mutationFn: async (enabled: boolean) => {
       await setEmbeddingsEnabled(enabled)
-      if (enabled) await embedEnsure()
+      if (enabled) {
+        // Re-enabling is an explicit recovery action: clear any sticky backfill
+        // error so the coordinator resumes indexing once the model is ready.
+        await setBackfillError(null)
+        await embedEnsure()
+      }
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY }),
   })
@@ -67,8 +75,17 @@ export async function rebuildEmbeddings(): Promise<void> {
         : 'Embedding model is still loading; rebuild once it is ready.',
     )
   }
+  // Rebuild is an explicit recovery action: clear the sticky backfill error so a
+  // success leaves a clean status, but re-persist it if this rebuild also throws
+  // so the UI keeps reporting the failure instead of silently pretending again.
+  await setBackfillError(null)
   await clearEmbeddings()
-  await backfillEmbeddings()
+  try {
+    await backfillEmbeddings()
+  } catch (error) {
+    await setBackfillError(errorMessage(error))
+    throw error
+  }
 }
 
 /** Wipe and rebuild every vector (model change / repair). */

@@ -184,9 +184,14 @@ export async function retrieve(query: string, options: RetrieveOptions = {}): Pr
   // that isn't a clean `ready` + successful embed. Lexical never gets skipped on
   // failure, so retrieval can't return empty just because vectors are missing.
   // Respect the user's kill-switch first: if semantic search is disabled we must
-  // not embed the query or use vectors, even while the model stays loaded.
+  // not embed the query or use vectors, even while the model stays loaded. And an
+  // empty/whitespace query carries no semantic signal — embedding a blank string
+  // and running KNN would surface unrelated nearest neighbours and falsely report
+  // `semanticAvailable: true`, so we skip semantic entirely and degrade to lexical
+  // (which itself returns `[]` for a query with no searchable tokens).
   try {
-    const status = (await isEmbeddingsEnabled()) ? await embedStatus() : null
+    const hasQueryText = query.trim().length > 0
+    const status = hasQueryText && (await isEmbeddingsEnabled()) ? await embedStatus() : null
     if (status && isEmbedReady(status)) {
       const [vector] = await embedTexts([query])
       if (vector && vector.length > 0) {

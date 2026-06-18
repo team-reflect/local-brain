@@ -15,6 +15,16 @@ import { countPending } from './pipeline'
 /** Settings kill-switch: is semantic indexing/search enabled? Opt-in. */
 export const EMBEDDINGS_ENABLED_KEY = 'embeddings.enabled'
 
+/**
+ * Last incremental-backfill failure, persisted so the UI/coordinator stop
+ * pretending indexing is progressing after a backfill threw. The runtime can
+ * report `ready` while a backfill (embed/persist) fails mid-pass; without this
+ * marker `pending` stays > 0, the status keeps polling, and the coordinator
+ * re-attempts the same failing backfill forever. Cleared on a clean backfill or
+ * an explicit user action (re-enable / rebuild). Null means no pending failure.
+ */
+export const EMBEDDINGS_BACKFILL_ERROR_KEY = 'embeddings.backfillError'
+
 export interface EmbeddingsStatus {
   /** Whether the user has turned semantic search on. */
   enabled: boolean
@@ -29,6 +39,8 @@ export interface EmbeddingsStatus {
   pending: number
   /** True once the runtime is ready and nothing is pending. */
   ready: boolean
+  /** Last incremental-backfill error message, or null when indexing is healthy. */
+  backfillError: string | null
 }
 
 export async function isEmbeddingsEnabled(): Promise<boolean> {
@@ -37,6 +49,16 @@ export async function isEmbeddingsEnabled(): Promise<boolean> {
 
 export async function setEmbeddingsEnabled(enabled: boolean): Promise<void> {
   await setSetting(EMBEDDINGS_ENABLED_KEY, enabled)
+}
+
+/** The last persisted incremental-backfill failure, or null when healthy. */
+export async function getBackfillError(): Promise<string | null> {
+  return getSetting<string | null>(EMBEDDINGS_BACKFILL_ERROR_KEY, null)
+}
+
+/** Record (or clear, with `null`) the last incremental-backfill failure. */
+export async function setBackfillError(message: string | null): Promise<void> {
+  await setSetting(EMBEDDINGS_BACKFILL_ERROR_KEY, message)
 }
 
 /** A best-effort runtime poll that degrades to `uninitialized` off-desktop. */
@@ -49,7 +71,7 @@ async function safeRuntimeStatus(): Promise<EmbedStatus> {
 }
 
 export async function getEmbeddingsStatus(): Promise<EmbeddingsStatus> {
-  const [enabled, runtime, totalRow, pending] = await Promise.all([
+  const [enabled, runtime, totalRow, pending, backfillError] = await Promise.all([
     isEmbeddingsEnabled(),
     safeRuntimeStatus(),
     db
@@ -57,6 +79,7 @@ export async function getEmbeddingsStatus(): Promise<EmbeddingsStatus> {
       .select((eb) => eb.fn.countAll<number>().as('count'))
       .executeTakeFirst(),
     countPending(EMBEDDING_MODEL_ID),
+    getBackfillError(),
   ])
 
   const totalChunks = Number(totalRow?.count ?? 0)
@@ -69,5 +92,6 @@ export async function getEmbeddingsStatus(): Promise<EmbeddingsStatus> {
     totalChunks,
     pending,
     ready: runtime.status === 'ready' && pending === 0,
+    backfillError,
   }
 }

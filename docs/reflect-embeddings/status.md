@@ -62,9 +62,28 @@ Branch: `codex/local-brain-reflect-embeddings` · Base: `master` @ 58c801f
   older model (after a model change or partial rebuild) can't rank into semantic/hybrid
   results. Test added in `semantic.test.ts` (query restricts `model_id`).
 
-## Verification results (second review pass, no Rust touched)
+## Bugbot fixes (third review pass on PR #27, head 84c7349)
+- ✅ **Medium — Backfill errors swallowed silently.** `EmbeddingsSync` no longer
+  `.catch(() => undefined)`s incremental backfill failures. A thrown backfill is persisted
+  to a new `embeddings.backfillError` setting (surfaced on `EmbeddingsStatus`); a clean run
+  (completed or disable-aborted) clears it. The coordinator gates auto-backfill on
+  `!backfillError` and `useEmbeddingsStatus` stops polling when it is set — so a failing
+  backfill is reported instead of looping while the UI pretends indexing is progressing.
+  Recovery is explicit: re-enable and `rebuildEmbeddings()` both clear the marker first and
+  re-persist if the rebuild itself throws. Settings/Diagnostics show "indexing failed: …"
+  and an error box. Tests: `embeddings-sync.dom.test.tsx` (persists + stops retrying),
+  `embeddings.test.ts` (rebuild persists on failure), `pipeline.test.mjs` (status surfaces
+  + clears the persisted error).
+- ✅ **Medium — Whitespace queries run semantic KNN.** `retrieve()` now guards on
+  `query.trim().length > 0` before reading the kill-switch / runtime status, so a blank or
+  whitespace-only query never embeds, never runs vector KNN, and never reports
+  `semanticAvailable: true` just because the runtime is ready (it degrades to lexical, which
+  itself returns `[]` for a tokenless query). Tests added in `retrieve.modes.test.ts`
+  (hybrid + semantic skip embed/KNN for whitespace-only input).
+
+## Verification results (third review pass, no Rust touched)
 - `git diff --check` — clean
-- `pnpm check` — pass (lint + typecheck + 139 core + 45 desktop tests + schema-drift)
+- `pnpm check` — pass (lint + typecheck + 142 core + 47 desktop tests + schema-drift)
 - `pnpm --filter @local-brain/desktop build` — pass
 - Rust checks not re-run: this pass changed only TypeScript (no `src-tauri`/crates edits).
   Prior Rust verification still holds — `cargo fmt`/`check`/`test --workspace` (50 tests)

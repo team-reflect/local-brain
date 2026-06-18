@@ -135,4 +135,22 @@ describe('retrieve modes', () => {
     expect(result.semanticAvailable).toBe(false)
     expect(commands).not.toContain('embed_texts')
   })
+
+  it('hybrid does not run semantic KNN for a whitespace-only query', async () => {
+    const commands = installBridge({ status: 'ready' })
+    const result = await retrieve('   \n\t ', { mode: 'hybrid' })
+    // A blank query has no semantic signal: it must not embed or run KNN, and must
+    // not claim semantic availability just because the runtime is ready.
+    expect(result.semanticAvailable).toBe(false)
+    expect(commands).not.toContain('embed_status')
+    expect(commands).not.toContain('embed_texts')
+  })
+
+  it('semantic mode returns no results for a whitespace-only query', async () => {
+    const commands = installBridge({ status: 'ready' })
+    const result = await retrieve('   ', { mode: 'semantic' })
+    expect(result.semanticAvailable).toBe(false)
+    expect(result.chunks).toEqual([])
+    expect(commands).not.toContain('embed_texts')
+  })
 })

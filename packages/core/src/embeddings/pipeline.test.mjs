@@ -11,9 +11,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   backfillEmbeddings,
   countPending,
+  getBackfillError,
   getEmbeddingsStatus,
   ingestDocument,
   pruneOrphanEmbeddings,
+  setBackfillError,
   setBridge,
   setEmbeddingsEnabled,
 } from '@local-brain/core'
@@ -153,6 +155,29 @@ describe('getEmbeddingsStatus', () => {
     expect(status.indexed).toBe(0)
     expect(status.pending).toBe(3)
     expect(status.ready).toBe(false)
+    expect(status.backfillError).toBeNull()
+  })
+
+  it('surfaces a persisted backfill error and clears it on null', async () => {
+    const database = freshDatabase()
+    installComboBridge(database)
+    await ingestDocument({ title: 'Doc', bodyText: threeChunkBody() })
+    await setEmbeddingsEnabled(true)
+
+    // A backfill that threw mid-pass records the failure; pending stays > 0, so
+    // without this marker the status would keep claiming indexing is in flight.
+    await setBackfillError('embed_texts failed: onnx blew up')
+    expect(await getBackfillError()).toBe('embed_texts failed: onnx blew up')
+
+    const failed = await getEmbeddingsStatus()
+    expect(failed.backfillError).toBe('embed_texts failed: onnx blew up')
+    expect(failed.pending).toBe(3)
+    expect(failed.ready).toBe(false)
+
+    // An explicit recovery (re-enable / rebuild) clears the sticky error.
+    await setBackfillError(null)
+    const cleared = await getEmbeddingsStatus()
+    expect(cleared.backfillError).toBeNull()
   })
 
   it('reports ready once enabled, indexed, and nothing pending', async () => {

@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { backfillEmbeddings, embedEnsure } from '@local-brain/core'
+import { backfillEmbeddings, embedEnsure, setBackfillError } from '@local-brain/core'
 import { EMBEDDINGS_STATUS_KEY, useEmbeddingsStatus } from '../lib/queries'
+import { errorMessage } from '../lib/utils'
 
 /**
  * Headless coordinator for semantic search (Reflect-embeddings port). Mounted
@@ -36,11 +37,24 @@ export function EmbeddingsSync(): null {
       return
     }
 
-    // 2. Once ready, embed whatever is still pending.
-    if (data.runtime.status === 'ready' && data.pending > 0 && !backfilling.current) {
+    // 2. Once ready, embed whatever is still pending. A prior failure is sticky
+    //    (`data.backfillError`): pending never drains on its own, so re-running the
+    //    same failing backfill on every poll would just hammer it — like the
+    //    `failed` runtime above, recovery is an explicit user action (re-enable /
+    //    "Rebuild index"), both of which clear the error before retrying.
+    if (
+      data.runtime.status === 'ready' &&
+      data.pending > 0 &&
+      !data.backfillError &&
+      !backfilling.current
+    ) {
       backfilling.current = true
       void backfillEmbeddings({ isStale: () => status.data?.enabled === false })
-        .catch(() => undefined)
+        // A clean run (completed or cooperatively aborted on disable) clears any
+        // stale marker; a throw is persisted so the status/UI stops pretending
+        // indexing is progressing and the poll/retry loop above halts.
+        .then(() => setBackfillError(null))
+        .catch((error: unknown) => setBackfillError(errorMessage(error)))
         .finally(() => {
           backfilling.current = false
           void queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY })

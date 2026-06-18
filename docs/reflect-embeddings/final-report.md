@@ -118,6 +118,27 @@ vec0 cosine-KNN ordering, and a real end-to-end model + KNN test (ranks by meani
 - Re-verified (TypeScript-only pass; no `src-tauri`/crate edits, so Rust checks not re-run):
   `git diff --check` clean, `pnpm check` (139 core + 45 desktop), desktop build pass.
 
+## Post-review fixes — third pass (Cursor Bugbot on PR #27, head 84c7349)
+- **Medium — Backfill errors swallowed silently:** `EmbeddingsSync` previously
+  `.catch(() => undefined)`-ed incremental backfill failures, so a backfill that threw left
+  `pending > 0` while the UI kept polling and re-attempting the same failing pass — looking
+  like indexing was progressing when nothing was embedded. The coordinator now persists the
+  failure to a new `embeddings.backfillError` setting (surfaced on `EmbeddingsStatus`), gates
+  auto-backfill on `!backfillError`, and `useEmbeddingsStatus` stops polling when it is set —
+  mirroring the failed-runtime handling. A clean run clears the marker; re-enable and
+  `rebuildEmbeddings()` clear it on the way in and re-persist if the rebuild itself throws.
+  Settings → Semantic search shows an error box and Diagnostics reads "indexing failed: …".
+  Tests: `embeddings-sync.dom.test.tsx` (persists + stops retrying), `embeddings.test.ts`
+  (rebuild persists on failure), `pipeline.test.mjs` (status surfaces + clears it).
+- **Medium — Whitespace queries run semantic KNN:** `retrieve()` now short-circuits on
+  `query.trim().length === 0` before reading the kill-switch or runtime status, so an empty
+  or whitespace-only query never embeds a blank string, never runs vec0 KNN against unrelated
+  neighbours, and never reports `semanticAvailable: true` just because the runtime is ready —
+  it degrades to lexical (which returns `[]` for a tokenless query). New whitespace cases in
+  `retrieve.modes.test.ts`.
+- Re-verified (TypeScript-only pass; no `src-tauri`/crate edits, so Rust checks not re-run):
+  `git diff --check` clean, `pnpm check` (142 core + 47 desktop), desktop build pass.
+
 ## Repo state
 - Branch: `codex/local-brain-reflect-embeddings`
 - PR: https://github.com/maccman/local-brain/pull/27 (base `master`)

@@ -242,6 +242,9 @@ function megabytes(bytes: number): string {
 function describeSemantic(status: EmbeddingsStatus | undefined): string {
   if (!status) return '…'
   if (!status.enabled) return 'off (lexical fallback)'
+  // A backfill failure leaves the runtime `ready` but indexing stalled — report
+  // the stall rather than the (now misleading) "indexing — n/m chunks" line.
+  if (status.backfillError) return `indexing failed: ${status.backfillError}`
   switch (status.runtime.status) {
     case 'failed':
       return `error: ${status.runtime.message}`
@@ -319,6 +322,13 @@ function SemanticSearch(): ReactNode {
           </div>
         ) : null}
 
+        {status?.enabled && runtime?.status !== 'failed' && status.backfillError ? (
+          <div className="rounded-md border border-destructive/40 bg-destructive/5 px-4 py-3 text-xs text-destructive">
+            Indexing stopped after an error: {status.backfillError}. Use “Rebuild index” to try
+            again.
+          </div>
+        ) : null}
+
         {status?.enabled && (runtime?.status === 'ready' || runtime?.status === 'uninitialized') ? (
           <div className="rounded-md border border-border bg-card px-4 py-3">
             <dl className="grid grid-cols-[8rem_1fr] gap-x-3 gap-y-1.5 text-xs">
@@ -326,12 +336,20 @@ function SemanticSearch(): ReactNode {
               <dd
                 className={cn(
                   'font-mono',
-                  status.ready
-                    ? 'text-emerald-600 dark:text-emerald-400'
-                    : 'text-blue-600 dark:text-blue-400',
+                  status.backfillError
+                    ? 'text-destructive'
+                    : status.ready
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : 'text-blue-600 dark:text-blue-400',
                 )}
               >
-                {status.ready ? 'ready' : status.pending > 0 ? 'indexing' : 'preparing'}
+                {status.backfillError
+                  ? 'error'
+                  : status.ready
+                    ? 'ready'
+                    : status.pending > 0
+                      ? 'indexing'
+                      : 'preparing'}
               </dd>
               <dt className="text-muted-foreground">Model</dt>
               <dd className="font-mono text-foreground">{status.modelId}</dd>
