@@ -120,7 +120,7 @@ Ask
   - linked records
 
 Settings
-  - brain (identity: name, color, location, schema version; switch/create/open/forget)
+  - brain (identity: name, color, folder reveal)
   - AI providers
   - brain root, local database path, and asset directory path
   - diagnostics

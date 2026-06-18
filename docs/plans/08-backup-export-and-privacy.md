@@ -41,7 +41,6 @@ and row-level sensitivity labels.
    - rebuild derived search/chunk data after destructive operations
 3. Add keychain integration for AI provider keys.
 4. Add model boundary settings:
-   - external model calls enabled/disabled
    - selected provider/model
    - diagnostics showing whether Ask can run
 5. Add diagnostics:

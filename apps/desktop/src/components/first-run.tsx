@@ -104,11 +104,7 @@ export function FirstRun(): ReactNode {
               <span className="font-medium text-foreground">Bring your own model (optional)</span>
               <span className="mt-0.5 block text-muted-foreground">
                 Ask and extraction stay off until you add an AI provider.{' '}
-                {model.data?.configured
-                  ? model.data.canRun
-                    ? 'A model is configured.'
-                    : 'A model is configured (external calls are turned off in Settings).'
-                  : 'No model is configured yet.'}
+                {model.data?.configured ? 'A model is configured.' : 'No model is configured yet.'}
               </span>
             </span>
           </li>

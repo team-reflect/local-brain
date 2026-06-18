@@ -10,7 +10,6 @@ import {
   keychainHas,
   keychainSet,
   rebuildSearchIndexes,
-  setModelEnabled,
   updateAiProvidersState,
   withAiProviderAdded,
   withAiProviderRemoved,
@@ -34,17 +33,6 @@ export function useModelSettings() {
 
 export function useKeychainHas(account: string) {
   return useQuery({ queryKey: ['keychain-has', account], queryFn: () => keychainHas(account) })
-}
-
-export function useSetModelEnabled() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (enabled: boolean) => setModelEnabled(enabled),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['model-settings'] })
-      void queryClient.invalidateQueries({ queryKey: ['model-status'] })
-    },
-  })
 }
 
 async function refreshModelQueries(queryClient: ReturnType<typeof useQueryClient>): Promise<void> {

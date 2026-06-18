@@ -1,12 +1,10 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Plus } from 'lucide-react'
-import { cn } from '../lib/utils'
 import {
   useAddAiProvider,
   useMakeDefaultAiProvider,
   useModelSettings,
   useRemoveAiProvider,
-  useSetModelEnabled,
 } from '../lib/queries'
 import { AddAiProviderDialog } from './add-ai-provider-dialog'
 import { AiProviderRow } from './ai-provider-row'
@@ -20,7 +18,6 @@ import { Section } from './section'
  */
 export function AiProvidersSettings(): ReactNode {
   const settings = useModelSettings()
-  const setEnabled = useSetModelEnabled()
   const addProvider = useAddAiProvider()
   const removeProvider = useRemoveAiProvider()
   const makeDefault = useMakeDefaultAiProvider()
@@ -64,26 +61,6 @@ export function AiProvidersSettings(): ReactNode {
           </Button>
         </div>
 
-        <label
-          className={cn(
-            'flex items-start justify-between gap-4 px-4 py-3.5 text-sm',
-            setEnabled.isPending ? 'opacity-60' : null,
-          )}
-        >
-          <span className="min-w-0">
-            <span className="block font-medium text-foreground">Allow external model calls</span>
-            <span className="mt-0.5 block text-xs text-muted-foreground">
-              Ask and extraction stay off when this is disabled, even if provider keys are saved.
-            </span>
-          </span>
-          <input
-            type="checkbox"
-            className="mt-0.5 accent-primary"
-            checked={settings.data?.enabled ?? true}
-            disabled={setEnabled.isPending}
-            onChange={(event) => setEnabled.mutate(event.target.checked)}
-          />
-        </label>
       </div>
 
       {adding ? (

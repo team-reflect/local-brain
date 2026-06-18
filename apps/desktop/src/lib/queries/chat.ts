@@ -67,7 +67,7 @@ export function useAsk() {
   })
 }
 
-/** The model-boundary status (configured? enabled? can it run?). */
+/** The model-boundary status (configured? can it run?). */
 export function useModelStatus() {
   return useQuery({ queryKey: ['model-status'], queryFn: getModelStatus })
 }

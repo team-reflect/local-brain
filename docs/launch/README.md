@@ -57,8 +57,8 @@ CLI resolves storage as:
 4. `$BRAIN_ROOT`
 5. the legacy platform data path for diagnostics/dev workflows
 
-The active brain folder, SQLite path, and assets path are shown in **Settings →
-Brain**, **Settings → Local database**, and **Settings → Diagnostics**.
+The active brain folder is shown in **Settings → Brain**. SQLite and asset paths
+are shown in **Settings → Local database** and **Settings → Diagnostics**.
 Migrations run automatically when a brain is opened and the schema is versioned.
 
 ## Importing your first record
@@ -105,7 +105,6 @@ AI provider key:
 - The desktop stores the key in the **macOS keychain** (Settings → AI providers) —
   never in app settings or the export.
 - The CLI reads `ANTHROPIC_API_KEY` from the environment.
-- A master **kill switch** (Settings → AI providers) disables all external calls.
 - With no key, the AI surface degrades cleanly: Ask shows "not configured" and
   extraction is a no-op. Lexical (FTS5) search always works.
 
@@ -118,7 +117,7 @@ needed to answer are sent, assembled through one checked helper.
   `brain add …` with `--brain <dir>`, open the app and choose a folder, or pass
   the advanced `--db` override.
 - **Ask says "not configured":** add an AI provider key (Settings → AI providers) or set
-  `ANTHROPIC_API_KEY` for the CLI. Check the kill switch isn't off.
+  `ANTHROPIC_API_KEY` for the CLI.
 - **`brain ask` returns evidence but no prose:** no model configured — the cited
   chunks are returned for your agent to reason over.
 - **Gatekeeper blocks the app:** unsigned alpha build; right-click → Open.

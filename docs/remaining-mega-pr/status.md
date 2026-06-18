@@ -31,7 +31,7 @@ functionality, apply the Reflect visual system around it.
 
 **`apps/desktop/src/surfaces/settings.tsx`** — 1 hunk (in `ModelBoundary`):
 - HEAD held the full Plan 08 BYOK model-keys UI (key input, save/clear,
-  kill-switch, status grid); the reflect side carried a stale styling tweak to
+  status grid); the reflect side carried a stale styling tweak to
   the *old* simple Diagnostics card (`rounded-md` → `rounded-lg`) that no longer
   exists in this structure. Kept all of Plan 08's `ModelBoundary` verbatim;
   discarded the stale Diagnostics stub (HEAD already has a richer `Diagnostics`

@@ -66,8 +66,8 @@ stay off the UI thread when added.
 - [x] Provider keys are keychain-only (desktop) / env-only (CLI); never in
       settings rows.
 - [x] No hosted Local Brain service in the core path; SQLite is the only store.
-- [x] External model calls gated by a present key **and** an enable kill switch;
-      both surfaced in Settings → AI providers and Diagnostics.
+- [x] External model calls are available when an AI provider key is configured;
+      provider status is surfaced in Settings → AI providers and Diagnostics.
 - [x] External payloads are minimal: only retrieved cited chunks, assembled
       through one checked helper.
 - [x] Every factual Ask answer persists `evidence_refs` that open the source.

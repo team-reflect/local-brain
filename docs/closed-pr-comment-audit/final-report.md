@@ -26,7 +26,7 @@ positive (the flagged behaviour is the intended, safer design).
 | Model key precedence | `apps/desktop/src/lib/ai/install-model.ts` | One shared `resolveProviderKey` (env-first escape hatch, then keychain) for both startup and live refresh; env override preserved on keychain failure. |
 | Keychain errors | `apps/desktop/src-tauri/src/keychain.rs` | Distinguish `errSecItemNotFound` (exit 44 → no key) from real failures (locked/denied → `Err`) in `keychain_get`/`keychain_delete`. |
 | Topbar Add | `apps/desktop/src/components/app-shell.tsx` | `variant="primary"` — the documented single indigo action. |
-| First-run model copy | `apps/desktop/src/components/first-run.tsx` | Use `configured` (not `canRun`) and name the kill-switch case honestly. |
+| First-run model copy | `apps/desktop/src/components/first-run.tsx` | Use `configured` (not `canRun`); the old separate external-call toggle has since been removed. |
 | First-run a11y | `apps/desktop/src/components/first-run.tsx`, `…/lib/commands/modal-guard.ts`, `…/lib/commands/use-shortcuts.ts` | `role="dialog"`/`aria-modal`, focus trap, and a blocking-modal guard that suppresses global shortcuts (incl. ⌘K) while the overlay is open. |
 
 ## Not changed (with reason)

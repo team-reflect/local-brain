@@ -338,7 +338,7 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
 - **Verification:** `pnpm check` ✓ — typecheck + oxlint + **144 tests** (111 core: +8
   match-query, +6 ranking, +4 context, +5 extractor-json, +4 anthropic, +10 real-SQLite Plan-06
   round-trips — FTS retrieve/degrade, global search, cited Ask + persisted evidence_refs,
-  kill-switch, model-backed extractor, daily brief/plan-day/changes; 4 db; 33 desktop incl. a
+  provider boundary, model-backed extractor, daily brief/plan-day/changes; 4 db; 33 desktop incl. a
   new Ask closed-boundary render test). `pnpm --filter @local-brain/desktop build` ✓ (2075
   modules). `cargo fmt --all -- --check` ✓; `cargo check --workspace` ✓; `cargo test
   --workspace` ✓ (18 Rust tests, unchanged). `git diff --check` ✓.
@@ -391,7 +391,7 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
     `rebuildSearchIndexes` — FTS5 rebuild), `ipc/storage.ts` (typed bindings), `executeRaw` for FTS
     maintenance.
   - **Desktop:** `installModel` now reads the key from the keychain (env override for dev);
-    Settings → Model is interactive (set/clear keychain key, kill-switch toggle, live status);
+    Settings → Model is interactive (set/clear keychain key, live status);
     Backup & export does real backup + JSON export with product states; Local database shows the
     resolved path; Diagnostics shows db path / migrations / FTS / semantic / keychain / model /
     CLI-skill + restore instructions.

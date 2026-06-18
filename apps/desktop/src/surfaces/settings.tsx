@@ -1,12 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { appVersion, type BrainInfo } from '@local-brain/core'
+import { appVersion } from '@local-brain/core'
 import { AiProvidersSettings } from '../components/ai-providers-settings'
-import { Check, FolderOpen, Plus, SquareArrowOutUpRight } from 'lucide-react'
-import { BrainDialog, type BrainDialogMode } from '../components/brain-dialog'
+import { Check, ChevronsUpDown, SquareArrowOutUpRight } from 'lucide-react'
 import { BrainSwatch } from '../components/brain-swatch'
 import { Button } from '../components/button'
 import { Section } from '../components/section'
+import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover'
 import { BRAIN_COLOR_OPTIONS } from '../lib/brain-colors'
 import { cn } from '../lib/utils'
 import { controlClass, sectionLabel } from '../lib/ui'
@@ -15,10 +15,8 @@ import {
   useBrains,
   useDatabasePath,
   useEmbeddingsStatus,
-  useForgetBrain,
   useModelSettings,
   useModelStatus,
-  useOpenBrain,
   useRebuildEmbeddings,
   useRenameBrain,
   useRevealBrain,
@@ -133,28 +131,18 @@ function General(): ReactNode {
   )
 }
 
-function formatMs(ms: number): string {
-  return ms > 0 ? new Date(ms).toLocaleString() : '—'
-}
-
 function BrainSettings(): ReactNode {
   const active = useActiveBrain()
-  const brains = useBrains()
   const rename = useRenameBrain()
   const setColor = useSetBrainColor()
-  const forget = useForgetBrain()
-  const openBrain = useOpenBrain()
   const reveal = useRevealBrain()
-  const [dialog, setDialog] = useState<{ open: boolean; mode: BrainDialogMode }>({
-    open: false,
-    mode: 'create',
-  })
   const [nameDraft, setNameDraft] = useState<string | null>(null)
+  const [colorOpen, setColorOpen] = useState(false)
 
   const brain = active.data
-  const others = (brains.data ?? []).filter((entry) => !entry.isActive)
   const nameValue = nameDraft ?? brain?.name ?? ''
   const nameChanged = brain != null && nameValue.trim().length > 0 && nameValue.trim() !== brain.name
+  const colorLabel = BRAIN_COLOR_OPTIONS.find((option) => option.id === brain?.color)?.label ?? 'Indigo'
 
   function saveName(): void {
     if (brain && nameChanged) {
@@ -166,13 +154,6 @@ function BrainSettings(): ReactNode {
   return (
     <Section title="Brain">
       <div className="flex flex-col gap-4 text-sm">
-        <p className="text-muted-foreground">
-          A <strong className="font-medium text-foreground">brain</strong> is one local folder —
-          your top-level workspace containing the SQLite database, assets, and support files. Switch
-          between brains from the picker at the top of the sidebar. (The Network <em>Graph</em> is a
-          different thing: a visualization of the records inside this brain.)
-        </p>
-
         {brain ? (
           <div className="flex flex-col gap-4 rounded-lg border border-border bg-card p-4">
             <div className="flex items-center gap-2.5">
@@ -201,31 +182,51 @@ function BrainSettings(): ReactNode {
             </BrainField>
 
             <BrainField label="Color">
-              <div className="flex flex-wrap gap-1.5">
-                {BRAIN_COLOR_OPTIONS.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    aria-label={option.label}
-                    aria-pressed={option.id === brain.color}
-                    title={option.label}
-                    onClick={() => setColor.mutate({ rootPath: brain.rootPath, color: option.id })}
-                    className={cn(
-                      'flex size-6 items-center justify-center rounded-md ring-2 ring-offset-1 ring-offset-card transition-colors',
-                      option.id === brain.color ? 'ring-ring' : 'ring-transparent hover:ring-border',
-                    )}
+              <Popover open={colorOpen} onOpenChange={setColorOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="w-fit min-w-40 justify-between"
+                    aria-label="Brain color"
                   >
-                    <span
-                      aria-hidden
-                      className="size-4 rounded-[4px]"
-                      style={{ backgroundColor: option.css }}
-                    />
-                  </button>
-                ))}
-              </div>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <BrainSwatch color={brain.color} className="size-3.5" />
+                      <span className="truncate">{colorLabel}</span>
+                    </span>
+                    <ChevronsUpDown className="size-3.5 text-muted-foreground" aria-hidden />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-44 p-1">
+                  {BRAIN_COLOR_OPTIONS.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      aria-pressed={option.id === brain.color}
+                      onClick={() => {
+                        setColor.mutate({ rootPath: brain.rootPath, color: option.id })
+                        setColorOpen(false)
+                      }}
+                      className={cn(
+                        'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-secondary',
+                        option.id === brain.color ? 'text-foreground' : 'text-muted-foreground',
+                      )}
+                    >
+                      <span
+                        aria-hidden
+                        className="size-3.5 rounded-[4px]"
+                        style={{ backgroundColor: option.css }}
+                      />
+                      <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                      {option.id === brain.color ? (
+                        <Check className="size-3.5 text-primary" aria-hidden />
+                      ) : null}
+                    </button>
+                  ))}
+                </PopoverContent>
+              </Popover>
             </BrainField>
 
-            <BrainField label="Brain folder">
+            <BrainField label="Folder">
               <div className="flex items-center gap-2">
                 <code className="min-w-0 flex-1 truncate rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs text-card-foreground">
                   {brain.rootPath}
@@ -236,85 +237,11 @@ function BrainSettings(): ReactNode {
                 </Button>
               </div>
             </BrainField>
-
-            <BrainField label="Database">
-              <code className="min-w-0 flex-1 truncate rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs text-card-foreground">
-                {brain.databasePath}
-              </code>
-            </BrainField>
-
-            <BrainField label="Assets">
-              <code className="min-w-0 flex-1 truncate rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs text-card-foreground">
-                {brain.assetsPath}
-              </code>
-            </BrainField>
-
-            <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1.5 text-xs">
-              <dt className="text-muted-foreground">Schema</dt>
-              <dd className="font-mono text-foreground">
-                {brain.schemaVersion != null ? `v${brain.schemaVersion}` : '—'}
-              </dd>
-              <dt className="text-muted-foreground">Created</dt>
-              <dd className="font-mono text-foreground">{formatMs(brain.createdMs)}</dd>
-              <dt className="text-muted-foreground">Last opened</dt>
-              <dd className="font-mono text-foreground">{formatMs(brain.lastOpenedMs)}</dd>
-            </dl>
           </div>
         ) : (
           <p className="text-muted-foreground">No active brain.</p>
         )}
-
-        <div className="flex flex-col gap-2">
-          <span className={sectionLabel}>All brains</span>
-          {others.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              This is your only brain. Create or open another to switch between them.
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-px">
-              {others.map((entry: BrainInfo) => (
-                <li
-                  key={entry.rootPath}
-                  className="flex items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-secondary/60"
-                >
-                  <BrainSwatch color={entry.color} className="size-4" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm text-foreground">{entry.name}</span>
-                    <span className="block truncate font-mono text-xs text-muted-foreground">{entry.rootPath}</span>
-                  </span>
-                  <Button variant="outline" onClick={() => openBrain.mutate(entry.rootPath)}>
-                    Switch
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() => forget.mutate(entry.rootPath)}
-                    aria-label={`Forget ${entry.name}`}
-                  >
-                    Forget
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        <div className="flex gap-2">
-          <Button variant="primary" onClick={() => setDialog({ open: true, mode: 'create' })}>
-            <Plus className="size-4" aria-hidden />
-            New brain…
-          </Button>
-          <Button variant="outline" onClick={() => setDialog({ open: true, mode: 'open' })}>
-            <FolderOpen className="size-4" aria-hidden />
-            Open another brain…
-          </Button>
-        </div>
       </div>
-
-      <BrainDialog
-        open={dialog.open}
-        mode={dialog.mode}
-        onClose={() => setDialog((current) => ({ ...current, open: false }))}
-      />
     </Section>
   )
 }
@@ -520,9 +447,9 @@ function LocalDatabase(): ReactNode {
       <div className="flex flex-col gap-2 text-sm text-muted-foreground">
         <p>
           Each brain is a folder on this machine. This is the SQLite path inside the active
-          brain{active.data ? ` (“${active.data.name}”)` : ''}; manage and switch brains under{' '}
-          <strong className="font-medium text-foreground">Settings → Brain</strong>. Migrations run
-          automatically when a brain is opened; the schema is versioned in the app.
+          brain{active.data ? ` (“${active.data.name}”)` : ''}; switch, create, and open brains
+          from the sidebar brain switcher. Migrations run automatically when a brain is opened; the
+          schema is versioned in the app.
         </p>
         <div className="rounded-md border border-border bg-card px-4 py-3 font-mono text-xs text-card-foreground break-all">
           {path.data ?? 'resolving…'}
