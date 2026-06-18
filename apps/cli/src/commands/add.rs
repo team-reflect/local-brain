@@ -502,7 +502,6 @@ pub fn add_asset(
         format!("{hash}-{filename}")
     };
     let relative_path = format!("assets/objects/{prefix}/{stored_name}");
-    ensure_asset_file(assets_path, &relative_path, &bytes)?;
 
     let original_path = args
         .file
@@ -529,6 +528,10 @@ pub fn add_asset(
     )?;
     let linked = insert_asset_links(&tx, &id, &args.links, args.role, args.caption)?;
     tx.commit()?;
+    if let Err(err) = ensure_asset_file(assets_path, &relative_path, &bytes) {
+        let _ = conn.execute("DELETE FROM assets WHERE id = ?1", params![id]);
+        return Err(err);
+    }
     report_asset(json, &id, false, linked)
 }
 

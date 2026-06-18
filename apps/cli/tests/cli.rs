@@ -9,6 +9,7 @@ use std::process::{Command, Output};
 use brain_schema::LATEST_SCHEMA_VERSION;
 use rusqlite::Connection;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
 const BIN: &str = env!("CARGO_BIN_EXE_brain");
@@ -69,6 +70,12 @@ fn run_brain_json(root: &Path, args: &[&str]) -> Value {
 
 fn db_path(dir: &TempDir) -> std::path::PathBuf {
     dir.path().join("brain.sqlite")
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
 }
 
 #[test]
@@ -416,6 +423,38 @@ fn add_asset_copies_file_and_links_to_interaction() {
         .unwrap();
     assert_ne!(reimported_storage_path, storage_path);
     assert!(root.join(reimported_storage_path).is_file());
+}
+
+#[test]
+fn add_asset_rolls_back_manifest_when_file_write_fails() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().join("BrokenAssetsBrain");
+    let source = dir.path().join("blocked.txt");
+    let bytes = b"blocked bytes";
+    std::fs::write(&source, bytes).unwrap();
+
+    run_brain_json(&root, &["--json", "status"]);
+    let hash = sha256_hex(bytes);
+    let prefix = &hash[0..2];
+    let blocked_prefix = root.join("assets").join("objects").join(prefix);
+    std::fs::create_dir_all(blocked_prefix.parent().unwrap()).unwrap();
+    std::fs::write(&blocked_prefix, "not a directory").unwrap();
+
+    let out = run_with_brain(
+        &root,
+        &["--json", "add", "asset", "--file", source.to_str().unwrap()],
+    );
+    assert!(!out.status.success());
+
+    let conn = Connection::open(root.join("brain.sqlite")).unwrap();
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM assets WHERE content_hash = ?1",
+            [&hash],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 0);
 }
 
 #[test]
