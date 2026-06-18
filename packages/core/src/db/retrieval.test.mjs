@@ -23,8 +23,6 @@ import {
   runExtraction,
   setExtractor,
   setModelProvider,
-  setSetting,
-  MODEL_ENABLED_KEY,
 } from '@local-brain/core'
 import { freshDatabase, installSqliteBridge } from './sqlite-harness.mjs'
 
@@ -125,14 +123,14 @@ describe('Plan 06 Ask + model boundary', () => {
     expect(citations[0].sourceTitle).toBe('Northwind partnership proposal')
   })
 
-  it('respects the external-calls kill switch even with a provider present', async () => {
-    setModelProvider(mockProvider(() => 'should not be called'))
-    await setSetting(MODEL_ENABLED_KEY, false)
+  it('can run when a provider is configured', async () => {
+    setModelProvider(mockProvider(() => 'The provider answered.'))
     const status = await getModelStatus()
     expect(status.configured).toBe(true)
-    expect(status.canRun).toBe(false)
+    expect(status.canRun).toBe(true)
     const res = await ask('anything')
-    expect(res.answered).toBe(false)
+    expect(res.answered).toBe(true)
+    expect(res.answer).toBe('The provider answered.')
   })
 })
 

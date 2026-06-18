@@ -14,10 +14,9 @@ import { getModelProvider } from './provider'
  * and one `evidence_refs` row per cited source so the UI/CLI can open the exact
  * document or interaction the answer relied on.
  *
- * When the model boundary is closed (no provider/key, or external calls
- * disabled) it does NOT call a model: it persists an honest, clearly-labelled
- * message and returns `answered: false`. The conversation still reads as a real
- * thread, and the failure reason is explicit.
+ * When the model boundary is closed (no provider/key) it does NOT call a model:
+ * it persists an honest, clearly-labelled message and returns `answered: false`.
+ * The conversation still reads as a real thread, and the failure reason is explicit.
  */
 
 export interface AskCitation extends Citation {

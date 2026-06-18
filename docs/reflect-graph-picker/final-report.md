@@ -54,10 +54,9 @@ Network visualization.
 - **App gating** (`App.tsx`): resolves the active brain and remounts the shell
   keyed by its path; switch hooks invalidate the whole query cache so every
   surface refetches against the new brain.
-- **Settings → Brain** section: identity (name rename, color picker, location +
-  reveal, schema version, created/last-opened), the list of other brains
-  (switch/forget), and create/open. Local database + Diagnostics now report the
-  active brain. New `go.brain` command (`Mod-Shift-B`).
+- **Settings → Brain** section: active identity (name rename), color picker, and
+  folder reveal. Local database + Diagnostics report database/assets details for
+  the active brain. New `go.brain` command (`Mod-Shift-B`).
 
 ### Tests
 
@@ -68,7 +67,7 @@ Network visualization.
   regression tests below (`cargo test` — 19 desktop-lib tests).
 - Core: brain IPC binding arg/shape tests + lenient color parse.
 - Desktop DOM: `BrainSwitcher` (shows active brain, switches, opens new-brain
-  dialog), `Settings → Brain` (identity, color picker, other-brains list), and
+  dialog), `Settings → Brain` (identity, color popover, folder only), and
   `BrainDialog` native picker (mocks `lib/native-dialog`: "Browse…" fills the path
   from the save dialog and creates; open mode uses the open dialog). The shared
   fake bridge gained a non-db command responder.
