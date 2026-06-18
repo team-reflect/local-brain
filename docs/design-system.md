@@ -146,8 +146,10 @@ Rules:
 
 ### App Shell (`components/app-shell.tsx`)
 
-- 260px sunken sidebar: indigo brand dot + "Local Brain" (sans semibold), a quiet
-  ⌘K search field, compact nav rows, and a pinned "Add record" action at the bottom.
+- 260px sunken sidebar: the **brain switcher** in the brand slot (the active
+  brain's color swatch + name, sans semibold, opening a keyboard-navigable menu),
+  compact nav rows, and a pinned "Add record" action with the Settings gear at the
+  bottom. The quiet ⌘K search trigger lives in the topbar.
 - Active nav row: `bg-secondary` grey wash, foreground text, **indigo icon**;
   inactive rows use muted text and hover to the grey wash.
 - Topbar: back/forward, a quiet Search trigger with a mono ⌘K keycap, and the single
