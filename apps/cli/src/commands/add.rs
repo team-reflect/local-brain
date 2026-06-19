@@ -196,15 +196,31 @@ fn find_external_identity(
     Ok(id)
 }
 
+struct ExternalIdentityWrite<'a> {
+    entity_type: &'a str,
+    entity_id: &'a str,
+    source_id: Option<&'a str>,
+    kind: &'a str,
+    external_id: Option<&'a str>,
+    url: Option<&'a str>,
+    /// True for `--allow-duplicate` forks: never claim or re-point an existing
+    /// identity, only insert when the (source, kind, external_id) row is free.
+    force_duplicate: bool,
+}
+
 fn insert_external_identity(
     conn: &Connection,
-    entity_type: &str,
-    entity_id: &str,
-    source_id: Option<&str>,
-    kind: &str,
-    external_id: Option<&str>,
-    url: Option<&str>,
+    write: ExternalIdentityWrite,
 ) -> Result<(), CliError> {
+    let ExternalIdentityWrite {
+        entity_type,
+        entity_id,
+        source_id,
+        kind,
+        external_id,
+        url,
+        force_duplicate,
+    } = write;
     let (Some(source_id), Some(external_id)) = (
         source_id,
         normalize_optional(external_id).filter(|value| !value.is_empty()),
@@ -216,46 +232,62 @@ fn insert_external_identity(
             "unknown external identity entity type '{entity_type}'"
         ))
     })?;
-    // `INSERT OR IGNORE` alone is wrong on a re-import of an archived record: the
-    // unique (source_id, kind, external_id) row still points at the archived
-    // entity, so the new active record would never get an identity row and later
-    // imports would skip `find_external_identity` (which only matches active
-    // rows). The `ON CONFLICT` update therefore handles two cases:
-    //   1. Re-point the conflicting identity at the new entity, but ONLY when the
-    //      currently-referenced entity is no longer active. This mirrors
-    //      `find_external_identity`'s active-only scope and never clobbers an
-    //      identity that still maps to a live record.
-    //   2. Refresh the stored `url` when the re-import dedupes onto the SAME
-    //      active entity and carries a new/changed `--original-url`. Without this,
-    //      a duplicate import that resolves to the existing active record would
-    //      skip the update entirely and a fresh URL (including filling a
-    //      previously null one) would never land. `COALESCE` keeps a real URL from
-    //      being clobbered with NULL on a URL-less re-import.
+    // A `--allow-duplicate` import deliberately forks a *new* record even though a
+    // match exists. The unique (source_id, kind, external_id) identity already
+    // belongs to the matched record, so the new fork must never claim or re-point
+    // it: doing so would steal the mapping (and the DO UPDATE re-point branch
+    // below could fire if the matched record were archived). `DO NOTHING` keeps
+    // the identity on its current owner and still inserts cleanly when no row
+    // exists yet, instead of relying on the upsert's WHERE clause silently
+    // evaluating false (which is fragile and depends on SQLite no-op semantics).
+    let conflict_action = if force_duplicate {
+        "DO NOTHING".to_string()
+    } else {
+        // `INSERT OR IGNORE` alone is wrong on a re-import of an archived record:
+        // the unique (source_id, kind, external_id) row still points at the
+        // archived entity, so the new active record would never get an identity
+        // row and later imports would skip `find_external_identity` (which only
+        // matches active rows). The `ON CONFLICT` update therefore handles two
+        // cases:
+        //   1. Re-point the conflicting identity at the new entity, but ONLY when
+        //      the currently-referenced entity is no longer active. This mirrors
+        //      `find_external_identity`'s active-only scope and never clobbers an
+        //      identity that still maps to a live record.
+        //   2. Refresh the stored `url` when the re-import dedupes onto the SAME
+        //      active entity and carries a new/changed `--original-url`. Without
+        //      this, a duplicate import that resolves to the existing active
+        //      record would skip the update entirely and a fresh URL (including
+        //      filling a previously null one) would never land. `COALESCE` keeps a
+        //      real URL from being clobbered with NULL on a URL-less re-import.
+        format!(
+            "DO UPDATE SET
+               entity_type = excluded.entity_type,
+               entity_id = excluded.entity_id,
+               url = COALESCE(excluded.url, external_identities.url),
+               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             WHERE (
+                 external_identities.entity_id <> excluded.entity_id
+                 AND NOT EXISTS (
+                   SELECT 1 FROM {table} t
+                   WHERE t.id = external_identities.entity_id
+                     AND t.archived_at IS NULL
+                 )
+               )
+               OR (
+                 external_identities.entity_id = excluded.entity_id
+                 AND excluded.url IS NOT NULL
+                 AND (
+                   external_identities.url IS NULL
+                   OR external_identities.url <> excluded.url
+                 )
+               )"
+        )
+    };
     let sql = format!(
         "INSERT INTO external_identities
            (id, entity_type, entity_id, source_id, kind, external_id, url)
          VALUES (?1,?2,?3,?4,?5,?6,?7)
-         ON CONFLICT (source_id, kind, external_id) DO UPDATE SET
-           entity_type = excluded.entity_type,
-           entity_id = excluded.entity_id,
-           url = COALESCE(excluded.url, external_identities.url),
-           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-         WHERE (
-             external_identities.entity_id <> excluded.entity_id
-             AND NOT EXISTS (
-               SELECT 1 FROM {table} t
-               WHERE t.id = external_identities.entity_id
-                 AND t.archived_at IS NULL
-             )
-           )
-           OR (
-             external_identities.entity_id = excluded.entity_id
-             AND excluded.url IS NOT NULL
-             AND (
-               external_identities.url IS NULL
-               OR external_identities.url <> excluded.url
-             )
-           )",
+         ON CONFLICT (source_id, kind, external_id) {conflict_action}",
     );
     conn.execute(
         &sql,
@@ -762,6 +794,28 @@ fn blank_to_none(value: Option<String>) -> Option<String> {
     value.filter(|text| !text.trim().is_empty())
 }
 
+/// Does a *different* active person already own this normalized email, either as
+/// their denormalized `people.primary_email` or as a `person_emails` row? Used to
+/// keep the one-person-per-email invariant when a record is resolved via external
+/// identity (which skips email-based dedupe). `email` must already be normalized
+/// (lowercased) so it matches `person_emails.normalized_email` and the lowercased
+/// denormalized primary.
+fn email_owned_by_other(conn: &Connection, person_id: &str, email: &str) -> Result<bool, CliError> {
+    let owned: bool = conn.query_row(
+        "SELECT EXISTS(
+           SELECT 1
+           FROM people p
+           LEFT JOIN person_emails pe ON pe.person_id = p.id
+           WHERE p.archived_at IS NULL
+             AND p.id <> ?2
+             AND (lower(p.primary_email) = ?1 OR pe.normalized_email = ?1)
+         )",
+        params![email, person_id],
+        |row| row.get(0),
+    )?;
+    Ok(owned)
+}
+
 fn enrich_duplicate_person(
     conn: &Connection,
     id: &str,
@@ -770,7 +824,15 @@ fn enrich_duplicate_person(
     phones: &[String],
 ) -> Result<bool, CliError> {
     let preferred_name = normalize_optional(args.preferred_name);
-    let primary_email = emails.first().cloned();
+    // Never promote an address another active person already owns into the blank
+    // denormalized people.primary_email: insert_person_handles already skips such
+    // emails for person_emails, so without this the external-id dedupe path could
+    // leave the normalized table clean while stamping someone else's address onto
+    // this person's primary_email. See email_owned_by_other.
+    let primary_email = match emails.first() {
+        Some(email) if !email_owned_by_other(conn, id, email)? => Some(email.clone()),
+        _ => None,
+    };
     let primary_phone = phones.first().cloned();
     let headline = normalize_optional(args.headline);
     let location = normalize_optional(args.location);
@@ -868,6 +930,13 @@ fn enrich_duplicate_person_email(
     if !has_text(&email) || !is_blank(&current) {
         return Ok(false);
     }
+    // Mirror enrich_duplicate_person / insert_person_handles: never stamp an
+    // address another active person already owns onto this blank primary_email.
+    if let Some(addr) = email.as_deref() {
+        if email_owned_by_other(conn, id, addr)? {
+            return Ok(false);
+        }
+    }
     conn.execute(
         "UPDATE people
          SET primary_email = ?1,
@@ -918,19 +987,7 @@ fn insert_person_handles(
         // could attach an address another active person already owns, breaking
         // the one-person-per-email invariant find_duplicate_person enforces.
         // Skip any email a *different* active person already holds.
-        let owned_elsewhere: bool = conn.query_row(
-            "SELECT EXISTS(
-               SELECT 1
-               FROM people p
-               LEFT JOIN person_emails pe ON pe.person_id = p.id
-               WHERE p.archived_at IS NULL
-                 AND p.id <> ?2
-                 AND (lower(p.primary_email) = ?1 OR pe.normalized_email = ?1)
-             )",
-            params![email, person_id],
-            |row| row.get(0),
-        )?;
-        if owned_elsewhere {
+        if email_owned_by_other(conn, person_id, email)? {
             continue;
         }
         // Compare against the denormalized primary case-insensitively: imported
@@ -1004,6 +1061,10 @@ pub fn add_person(conn: &mut Connection, json: bool, args: AddPersonArgs) -> Res
         args.external_id,
     )?;
     let existing = existing_by_external.or(find_duplicate_person(conn, full_name, &emails)?);
+    // True when we fall through to the new-record path *despite* a match existing,
+    // i.e. `--allow-duplicate` forced a fork. The new record must not steal the
+    // matched record's external identity.
+    let force_duplicate = existing.is_some() && args.allow_duplicate;
     if let Some(existing) = existing {
         if !args.allow_duplicate {
             // Apply the handle, enrichment, and external-identity writes as one
@@ -1014,12 +1075,15 @@ pub fn add_person(conn: &mut Connection, json: bool, args: AddPersonArgs) -> Res
             enrich_duplicate_person(&tx, &existing, &args, &emails, &phones)?;
             insert_external_identity(
                 &tx,
-                "person",
-                &existing,
-                source_id.as_deref(),
-                &kind,
-                args.external_id,
-                args.original_url,
+                ExternalIdentityWrite {
+                    entity_type: "person",
+                    entity_id: &existing,
+                    source_id: source_id.as_deref(),
+                    kind: &kind,
+                    external_id: args.external_id,
+                    url: args.original_url,
+                    force_duplicate: false,
+                },
             )?;
             tx.commit()?;
             return report_person(json, &existing, true);
@@ -1049,12 +1113,15 @@ pub fn add_person(conn: &mut Connection, json: bool, args: AddPersonArgs) -> Res
     insert_person_handles(&tx, &id, &emails, &phones, source_id.as_deref())?;
     insert_external_identity(
         &tx,
-        "person",
-        &id,
-        source_id.as_deref(),
-        &kind,
-        args.external_id,
-        args.original_url,
+        ExternalIdentityWrite {
+            entity_type: "person",
+            entity_id: &id,
+            source_id: source_id.as_deref(),
+            kind: &kind,
+            external_id: args.external_id,
+            url: args.original_url,
+            force_duplicate,
+        },
     )?;
     tx.commit()?;
     report_person(json, &id, false)
@@ -1098,12 +1165,15 @@ pub fn add_person_from_email(
         enrich_duplicate_person_email(&tx, &existing, &assessment.email)?;
         insert_external_identity(
             &tx,
-            "person",
-            &existing,
-            source_id.as_deref(),
-            "contact",
-            args.external_id,
-            None,
+            ExternalIdentityWrite {
+                entity_type: "person",
+                entity_id: &existing,
+                source_id: source_id.as_deref(),
+                kind: "contact",
+                external_id: args.external_id,
+                url: None,
+                force_duplicate: false,
+            },
         )?;
         tx.commit()?;
         return report_person_assessment(json, Some(&existing), false, true, &assessment);
@@ -1127,12 +1197,15 @@ pub fn add_person_from_email(
     insert_person_handles(&tx, &id, &emails, &[], source_id.as_deref())?;
     insert_external_identity(
         &tx,
-        "person",
-        &id,
-        source_id.as_deref(),
-        "contact",
-        args.external_id,
-        None,
+        ExternalIdentityWrite {
+            entity_type: "person",
+            entity_id: &id,
+            source_id: source_id.as_deref(),
+            kind: "contact",
+            external_id: args.external_id,
+            url: None,
+            force_duplicate: false,
+        },
     )?;
     tx.commit()?;
     report_person_assessment(json, Some(&id), true, false, &assessment)
@@ -1573,52 +1646,62 @@ pub fn add_interaction(
     let body = normalize_text(&args.body);
     let hash = content_hash(&body);
     let source_id = source_id(conn, args.source_slug)?;
-    if let Some(existing) = find_external_identity(
+    let existing_by_external = find_external_identity(
         conn,
         "interaction",
         source_id.as_deref(),
         "record",
         args.external_id,
-    )? {
+    )?;
+    if let Some(existing) = existing_by_external.as_deref() {
         if !args.allow_duplicate {
             let tx = conn.transaction()?;
-            enrich_duplicate_interaction(&tx, &existing, &args)?;
-            insert_links(&tx, "interaction", &existing, &args.links)?;
-            insert_raw_participants(&tx, &existing, source_id.as_deref(), &args.raw_participants)?;
+            enrich_duplicate_interaction(&tx, existing, &args)?;
+            insert_links(&tx, "interaction", existing, &args.links)?;
+            insert_raw_participants(&tx, existing, source_id.as_deref(), &args.raw_participants)?;
             insert_external_identity(
                 &tx,
-                "interaction",
-                &existing,
-                source_id.as_deref(),
-                "record",
-                args.external_id,
-                args.original_url,
+                ExternalIdentityWrite {
+                    entity_type: "interaction",
+                    entity_id: existing,
+                    source_id: source_id.as_deref(),
+                    kind: "record",
+                    external_id: args.external_id,
+                    url: args.original_url,
+                    force_duplicate: false,
+                },
             )?;
             tx.commit()?;
-            return report_record(json, "interaction", &existing, true, 0);
+            return report_record(json, "interaction", existing, true, 0);
         }
     }
-    if let Some(existing) =
-        find_duplicate_interaction(conn, &hash, args.external_id, source_id.as_deref())?
-    {
+    let existing_by_dup =
+        find_duplicate_interaction(conn, &hash, args.external_id, source_id.as_deref())?;
+    if let Some(existing) = existing_by_dup.as_deref() {
         if !args.allow_duplicate {
             let tx = conn.transaction()?;
-            enrich_duplicate_interaction(&tx, &existing, &args)?;
-            insert_links(&tx, "interaction", &existing, &args.links)?;
-            insert_raw_participants(&tx, &existing, source_id.as_deref(), &args.raw_participants)?;
+            enrich_duplicate_interaction(&tx, existing, &args)?;
+            insert_links(&tx, "interaction", existing, &args.links)?;
+            insert_raw_participants(&tx, existing, source_id.as_deref(), &args.raw_participants)?;
             insert_external_identity(
                 &tx,
-                "interaction",
-                &existing,
-                source_id.as_deref(),
-                "record",
-                args.external_id,
-                args.original_url,
+                ExternalIdentityWrite {
+                    entity_type: "interaction",
+                    entity_id: existing,
+                    source_id: source_id.as_deref(),
+                    kind: "record",
+                    external_id: args.external_id,
+                    url: args.original_url,
+                    force_duplicate: false,
+                },
             )?;
             tx.commit()?;
-            return report_record(json, "interaction", &existing, true, 0);
+            return report_record(json, "interaction", existing, true, 0);
         }
     }
+    // Reaching here past a match means `--allow-duplicate` forced a new record; it
+    // must not steal the matched interaction's external identity.
+    let force_duplicate = existing_by_external.is_some() || existing_by_dup.is_some();
     let id = new_id();
     let tx = conn.transaction()?;
     tx.execute(
@@ -1641,12 +1724,15 @@ pub fn add_interaction(
     insert_raw_participants(&tx, &id, source_id.as_deref(), &args.raw_participants)?;
     insert_external_identity(
         &tx,
-        "interaction",
-        &id,
-        source_id.as_deref(),
-        "record",
-        args.external_id,
-        args.original_url,
+        ExternalIdentityWrite {
+            entity_type: "interaction",
+            entity_id: &id,
+            source_id: source_id.as_deref(),
+            kind: "record",
+            external_id: args.external_id,
+            url: args.original_url,
+            force_duplicate,
+        },
     )?;
     tx.commit()?;
     report_record(json, "interaction", &id, false, count)
@@ -2589,6 +2675,298 @@ mod tests {
         assert_eq!(
             email_handles, 0,
             "duplicate-path handle write must roll back when a later step fails"
+        );
+    }
+
+    fn interaction_args<'a>(
+        body: &str,
+        external_id: Option<&'a str>,
+        allow_duplicate: bool,
+    ) -> AddInteractionArgs<'a> {
+        AddInteractionArgs {
+            title: Some("Subject"),
+            kind: "note",
+            occurred_at: None,
+            source_slug: Some("manual"),
+            external_id,
+            original_url: None,
+            body: body.to_string(),
+            links: vec![],
+            raw_participants: vec![],
+            allow_duplicate,
+        }
+    }
+
+    #[test]
+    fn external_identity_dedupe_does_not_enrich_blank_primary_with_owned_email() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // Alice owns alice@example.com (external id ext-alice).
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Alice Owner",
+                vec!["alice@example.com"],
+                vec![],
+                Some("ext-alice"),
+            ),
+        )
+        .unwrap();
+
+        // Bob is a separate active person carrying external id ext-bob but, crucially,
+        // a *blank* denormalized primary_email so the enrichment path is live.
+        add_person(
+            &mut conn,
+            true,
+            person_args("Bob Other", vec![], vec![], Some("ext-bob")),
+        )
+        .unwrap();
+        let bob_id = single_person_id(&conn, "Bob Other");
+
+        // Re-import ext-bob (resolves to Bob via external identity, skipping
+        // email-based dedupe) supplying Alice's address. insert_person_handles
+        // already refuses the owned email; the denormalized enrichment path must
+        // refuse it too, or people.primary_email gets stamped with Alice's address
+        // while person_emails stays clean.
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Bob Other",
+                vec!["alice@example.com"],
+                vec![],
+                Some("ext-bob"),
+            ),
+        )
+        .unwrap();
+
+        let bob_primary: Option<String> = conn
+            .query_row(
+                "SELECT primary_email FROM people WHERE id = ?1",
+                params![bob_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            bob_primary, None,
+            "blank primary_email must not be enriched with an email another active person owns"
+        );
+
+        // The denormalized column and the normalized table stay consistent: a
+        // single active person owns alice@example.com.
+        let owners: i64 = conn
+            .query_row(
+                "SELECT COUNT(DISTINCT p.id)
+                 FROM people p
+                 LEFT JOIN person_emails pe ON pe.person_id = p.id
+                 WHERE p.archived_at IS NULL
+                   AND (lower(p.primary_email) = 'alice@example.com'
+                        OR pe.normalized_email = 'alice@example.com')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(owners, 1, "exactly one active person may own the email");
+    }
+
+    #[test]
+    fn add_person_from_email_does_not_enrich_blank_primary_with_owned_email() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // Alice owns alice@example.com.
+        add_person(
+            &mut conn,
+            true,
+            person_args("Alice Owner", vec!["alice@example.com"], vec![], None),
+        )
+        .unwrap();
+
+        // Bob: an active person with a blank primary_email and a Gmail-sourced
+        // external identity, so an add_person_from_email re-import resolves to him
+        // via external identity (skipping email-based dedupe) and exercises
+        // enrich_duplicate_person_email.
+        let bob_id = new_id();
+        conn.execute(
+            "INSERT INTO people (id, full_name) VALUES (?1, 'Bob Other')",
+            params![bob_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO external_identities
+               (id, entity_type, entity_id, source_id, kind, external_id)
+             VALUES (?1, 'person', ?2, 'source_gmail', 'contact', 'msg-bob')",
+            params![new_id(), bob_id],
+        )
+        .unwrap();
+
+        add_person_from_email(
+            &mut conn,
+            true,
+            AddPersonFromEmailArgs {
+                full_name: "Bob Other",
+                email: "alice@example.com",
+                source_slug: Some("gmail"),
+                external_id: Some("msg-bob"),
+            },
+        )
+        .unwrap();
+
+        let bob_primary: Option<String> = conn
+            .query_row(
+                "SELECT primary_email FROM people WHERE id = ?1",
+                params![bob_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            bob_primary, None,
+            "email-import enrichment must not stamp an owned email onto a blank primary_email"
+        );
+        let bob_has_alice_email: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM person_emails
+                 WHERE person_id = ?1 AND normalized_email = 'alice@example.com'",
+                params![bob_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            bob_has_alice_email, 0,
+            "email-import dedupe must not attach an email owned by another person"
+        );
+    }
+
+    #[test]
+    fn allow_duplicate_person_does_not_steal_external_identity() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // First import: an active person owning external id ext-1.
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Robin Spencer",
+                vec!["robin@example.com"],
+                vec![],
+                Some("ext-1"),
+            ),
+        )
+        .unwrap();
+        let original_id = single_person_id(&conn, "Robin Spencer");
+
+        // A forced duplicate import for the *same* external id must succeed (the
+        // identity insert must not error on the unique-constraint conflict) and
+        // must leave the identity pointing at the original active record.
+        add_person(
+            &mut conn,
+            true,
+            AddPersonArgs {
+                allow_duplicate: true,
+                ..person_args(
+                    "Robin Spencer",
+                    vec!["robin.alt@example.com"],
+                    vec![],
+                    Some("ext-1"),
+                )
+            },
+        )
+        .unwrap();
+
+        let active_people: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM people WHERE archived_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            active_people, 2,
+            "allow-duplicate must fork a second record"
+        );
+
+        let identity_rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM external_identities
+                 WHERE kind = 'contact' AND external_id = 'ext-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            identity_rows, 1,
+            "the unique external identity stays a single row"
+        );
+        let identity_target: String = conn
+            .query_row(
+                "SELECT entity_id FROM external_identities
+                 WHERE kind = 'contact' AND external_id = 'ext-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            identity_target, original_id,
+            "a forced duplicate must not steal the original record's external identity"
+        );
+    }
+
+    #[test]
+    fn allow_duplicate_interaction_does_not_steal_external_identity() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // First import: an interaction owning external id int-1.
+        add_interaction(
+            &mut conn,
+            true,
+            interaction_args("first body", Some("int-1"), false),
+        )
+        .unwrap();
+        let original_id: String = conn
+            .query_row(
+                "SELECT entity_id FROM external_identities
+                 WHERE entity_type = 'interaction' AND external_id = 'int-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        // A forced duplicate (distinct body, so find_duplicate_interaction would
+        // not match on content) for the same external id must succeed and leave
+        // the identity on the original interaction.
+        add_interaction(
+            &mut conn,
+            true,
+            interaction_args("a totally different body", Some("int-1"), true),
+        )
+        .unwrap();
+
+        let interaction_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM interactions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            interaction_count, 2,
+            "allow-duplicate must fork a second interaction"
+        );
+        let identity_rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM external_identities
+                 WHERE entity_type = 'interaction' AND external_id = 'int-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            identity_rows, 1,
+            "the unique external identity stays a single row"
+        );
+        let identity_target: String = conn
+            .query_row(
+                "SELECT entity_id FROM external_identities
+                 WHERE entity_type = 'interaction' AND external_id = 'int-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            identity_target, original_id,
+            "a forced duplicate must not steal the original interaction's external identity"
         );
     }
 }

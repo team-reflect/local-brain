@@ -459,3 +459,81 @@ handle) and pass after. All pre-existing primary/dedupe/URL tests still pass.
 | `cargo test -p brain-cli` | 25 unit + 28 integration + 2 skill — all pass (incl. the two new tests) |
 
 No JS was touched. Bugbot has not yet re-reviewed the new head.
+
+## Follow-up: Bugbot re-review on head `79fbc8a` / docs tip `5eba419` (2 fresh issues)
+
+Cursor Bugbot re-reviewed code head `79fbc8a` (docs tip `5eba419`) and flagged
+two new current-head issues, both fixed in the commit that records this section
+(pushed to `feat/import-identity-guardrails`). Both live in
+`apps/cli/src/commands/add.rs`.
+
+### Enrichment assigns owned email — BUGBOT a658372c (comment 3439944924), High
+Finding #13 added a `different active person already owns this email` guard to
+`insert_person_handles`, but the **denormalized** enrichment path stayed
+unguarded. On a duplicate-person import resolved via `find_external_identity`,
+`enrich_duplicate_person` (`add_person`) and `enrich_duplicate_person_email`
+(`add_person_from_email`) could still fill a blank `people.primary_email` from the
+incoming address without checking ownership. The net effect: external-id dedupe
+could stamp Alice's address onto Bob's denormalized `primary_email` while
+`person_emails` stayed clean — the exact split-state finding #13 closed for the
+normalized table.
+
+Fix: the ownership query is factored into a shared `email_owned_by_other(conn,
+person_id, email)` helper (now also used by `insert_person_handles`, removing the
+duplicated SQL). `enrich_duplicate_person` drops its `primary_email` candidate to
+`None` when another active person owns it, so the blank column is left untouched;
+`enrich_duplicate_person_email` returns `Ok(false)` early in the same case.
+Legitimate blank-primary enrichment from an address no one else owns is
+unaffected.
+
+Coverage: `external_identity_dedupe_does_not_enrich_blank_primary_with_owned_email`
+(creates Alice + a blank-primary Bob with an external id, re-imports Bob's id with
+Alice's email, asserts Bob's `primary_email` stays NULL and Alice remains the sole
+owner) and `add_person_from_email_does_not_enrich_blank_primary_with_owned_email`
+(blank-primary Bob with a Gmail external identity, re-imported via the email path
+with Alice's address). Both were confirmed to fail against the pre-fix source
+(Bob's `primary_email` became `alice@example.com`) and pass after.
+
+### Allow-duplicate hits identity constraint — BUGBOT ceb9574f (comment 3439944927), Medium
+With `--allow-duplicate`, `add_person` / `add_interaction` deliberately fork a new
+record but still call `insert_external_identity` for the same `(source, kind,
+external_id)`. The unique identity row already points at the matched active
+record, so the upsert's `ON CONFLICT DO UPDATE … WHERE` clause evaluates false.
+
+Empirical note: Bugbot described this as "the statement errors/rolls back." On the
+bundled SQLite that does **not** reproduce — `ON CONFLICT DO UPDATE` with a false
+`WHERE` is a graceful no-op (verified both via `sqlite3` and a throwaway test
+against the real code: the fork is created, no error, and the identity simply
+stays on the original record). The underlying concern is still legitimate: the
+behavior relies on subtle no-op semantics, and the re-point branch of the upsert
+*could* steal the identity if the matched record were archived.
+
+Fix: `insert_external_identity` gains a `force_duplicate` flag. To stay under
+Clippy's argument limit (the function would otherwise reach 8 params) the call is
+refactored to take an `ExternalIdentityWrite<'_>` params struct — matching the
+existing `AddPersonArgs` / `AddInteractionArgs` convention in this file. When
+`force_duplicate` is true the statement uses `ON CONFLICT (source_id, kind,
+external_id) DO NOTHING`, so a forced fork never claims or re-points an existing
+identity and still inserts cleanly when the row is free. `add_person` /
+`add_interaction` set the flag only when they fall through to the new-record path
+*despite* a match (`existing.is_some() && allow_duplicate`). Non-forced re-import
+behavior — archived re-point and URL refresh — is untouched.
+
+Coverage: `allow_duplicate_person_does_not_steal_external_identity` and
+`allow_duplicate_interaction_does_not_steal_external_identity` each seed an
+original record owning an external id, force a duplicate import of the same id, and
+assert the fork succeeds, a second active record exists, the identity row stays
+single, and it still points at the original. All pre-existing dedupe/URL/archive
+tests still pass.
+
+### Verification (run on the fix commit, atop code head `79fbc8a`)
+
+| Command | Result |
+|---------|--------|
+| `git diff --check` | clean |
+| `cargo fmt -p brain-cli -- --check` | clean |
+| `cargo clippy -p brain-cli --all-targets` | no new warnings; only the pre-existing `large_enum_variant` in `main.rs` (untouched) |
+| `cargo test -p brain-cli` | 29 unit + 28 integration + 2 skill — all pass (incl. the four new tests) |
+
+The two finding #15 tests were independently confirmed to fail before the fix. No
+JS was touched. Bugbot has not yet re-reviewed the new head.

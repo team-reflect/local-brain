@@ -1,6 +1,34 @@
 # PR #48 Bugbot fixes — status
 
-State: **all four original findings + ten follow-ups fixed, tested, and verified locally.**
+State: **all four original findings + twelve follow-ups fixed, tested, and verified locally.**
+
+## Follow-up (fresh current-head Bugbot findings #15–#16, head `5eba419` → `<pushed>`)
+
+Bugbot re-reviewed code head `79fbc8a` / docs tip `5eba419` and posted two fresh
+current-head issues. Both are fixed in `apps/cli/src/commands/add.rs` with focused
+regression coverage.
+
+| # | BUGBOT | Sev | Finding | Fix | Tests |
+|---|--------|-----|---------|-----|-------|
+| 15 | `a658372c` (comment `3439944924`) | High | Enrichment assigns owned email — finding #13 added an owner guard to `insert_person_handles`, but the **denormalized** enrichment path was still unguarded: `enrich_duplicate_person` and `enrich_duplicate_person_email` could fill a blank `people.primary_email` from an incoming address even when another active person already owns it. External-id dedupe could therefore stamp Alice's address onto Bob's `primary_email` while `person_emails` stayed clean | Factored the existing owner check into a shared `email_owned_by_other` helper (now used by `insert_person_handles` too). `enrich_duplicate_person` drops the `primary_email` candidate when another active person owns it; `enrich_duplicate_person_email` returns early in the same case. Legitimate blank-primary enrichment is unaffected | `add.rs` `external_identity_dedupe_does_not_enrich_blank_primary_with_owned_email`, `add_person_from_email_does_not_enrich_blank_primary_with_owned_email` (both confirmed to fail before the fix) |
+| 16 | `ceb9574f` (comment `3439944927`) | Medium | Allow-duplicate hits identity constraint — with `--allow-duplicate`, `add_person`/`add_interaction` fork a new record but still call `insert_external_identity` for the same `(source, kind, external_id)`. The unique row already points at the matched active record, so the upsert's `ON CONFLICT DO UPDATE … WHERE` clause silently evaluates false (verified: a graceful no-op on the bundled SQLite, *not* an error — see note) — fragile, and the re-point branch could steal the identity if the matched record were archived | `insert_external_identity` takes a `force_duplicate` flag (threaded via a new `ExternalIdentityWrite` params struct). Forced-duplicate forks use `ON CONFLICT … DO NOTHING`, so they never claim or re-point an existing identity and still insert cleanly when the row is free; the identity stays on the original record. Non-forced re-import behavior (archived re-point, URL refresh) is unchanged | `add.rs` `allow_duplicate_person_does_not_steal_external_identity`, `allow_duplicate_interaction_does_not_steal_external_identity` |
+
+> Note on #16: Bugbot described the symptom as "the statement errors/rolls back."
+> On the bundled SQLite this does **not** reproduce — `ON CONFLICT DO UPDATE` with
+> a false `WHERE` is a no-op, confirmed both via `sqlite3` and a throwaway test
+> against the real code (the fork is created; the identity stays on the original).
+> The underlying concern is still valid (fragile reliance on no-op semantics plus a
+> latent identity-theft path), so the fix makes the intent explicit with
+> `DO NOTHING` and locks it with regression tests.
+
+Verification (run at code head `79fbc8a` + these fixes): `git diff --check`
+clean, `cargo fmt -p brain-cli -- --check` clean, `cargo clippy -p brain-cli
+--all-targets` no new warnings (only the pre-existing `large_enum_variant` in
+`main.rs`), `cargo test -p brain-cli` = 29 unit + 28 integration + 2 skill all
+pass. The two finding #15 tests were confirmed to fail before the fix. No JS
+touched.
+
+> Bugbot must re-run against the pushed head before findings #15–#16 are settled.
 
 ## Follow-up (fresh current-head Bugbot findings #13–#14, head `897c69d` → `79fbc8a`)
 
