@@ -107,7 +107,21 @@ fn insert_project_links(
             LinkKind::Organization => ("project_organizations", "organization_id", "organization"),
             LinkKind::Document => ("project_documents", "document_id", "document"),
             LinkKind::Interaction => ("project_interactions", "interaction_id", "interaction"),
-            LinkKind::Task => ("project_tasks", "task_id", "task"),
+            LinkKind::Task => {
+                let changed = conn.execute(
+                    "UPDATE tasks
+                     SET project_id = ?1,
+                         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                     WHERE id = ?2",
+                    params![project_id, link.id],
+                )?;
+                if changed == 0 {
+                    return Err(CliError::Runtime(
+                        "could not link task: no matching task".into(),
+                    ));
+                }
+                continue;
+            }
             LinkKind::Project => {
                 return Err(CliError::Runtime(
                     "project records cannot link to another project yet".into(),
