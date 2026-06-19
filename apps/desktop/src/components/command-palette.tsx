@@ -19,11 +19,12 @@ const KIND_LABEL: Record<string, string> = {
   task: 'Task',
   document: 'Document',
   interaction: 'Interaction',
+  asset: 'Asset',
 }
 
 /**
  * Command palette: fuzzy-ish command filtering plus live record search
- * (people, organizations, projects, tasks, documents, interactions). Arrow keys
+ * (people, organizations, projects, tasks, documents, interactions, assets). Arrow keys
  * move the selection across both groups, Enter runs/opens it, Escape closes.
  */
 export function CommandPalette({

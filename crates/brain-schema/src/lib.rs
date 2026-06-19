@@ -21,7 +21,7 @@ pub const SUPPORT_DIRNAME: &str = ".local-brain";
 
 /// Bumped whenever a migration is appended below. Asserted against the applied
 /// `user_version` in tests so the constant can never drift from the list.
-pub const LATEST_SCHEMA_VERSION: usize = 7;
+pub const LATEST_SCHEMA_VERSION: usize = 8;
 
 /// The canonical filesystem layout for one Local Brain root directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +56,7 @@ static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
         M::up(include_str!("../migrations/0005_assets.sql")),
         M::up(include_str!("../migrations/0006_import_identity.sql")),
         M::up(include_str!("../migrations/0007_remove_chat.sql")),
+        M::up(include_str!("../migrations/0008_asset_search.sql")),
     ])
 });
 
@@ -400,6 +401,8 @@ mod tests {
             "person_phones",
             "assets",
             "asset_links",
+            "asset_texts",
+            "asset_search",
         ];
         for table in durable {
             let count: i64 = conn
@@ -590,5 +593,67 @@ mod tests {
             )
             .unwrap();
         assert_eq!(id, "d1");
+    }
+
+    #[test]
+    fn asset_search_indexes_metadata_links_and_text() {
+        let conn = open_in_memory().unwrap();
+        conn.execute(
+            "INSERT INTO interactions (id, title, body_text) VALUES ('i1', 'Inbox import', 'email body')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO assets (
+                id, kind, mime_type, byte_size, storage_path, content_hash,
+                original_filename, original_url
+            ) VALUES (
+                'a1', 'pdf', 'application/pdf', 42, 'assets/receipt.pdf', 'sha256:asset',
+                'Receipt-2446-0056.pdf', 'https://mail.example/message'
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO asset_links (id, asset_id, record_type, record_id, caption)
+             VALUES ('al1', 'a1', 'interaction', 'i1', 'signed invoice attachment')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO asset_texts (asset_id, text, text_source, content_hash)
+             VALUES ('a1', 'durable imported receipt text', 'importer', 'sha256:text')",
+            [],
+        )
+        .unwrap();
+
+        for term in ["\"Receipt-2446-0056\"", "signed", "Inbox", "durable"] {
+            let id: String = conn
+                .query_row(
+                    "SELECT s.asset_id
+                     FROM assets_fts f
+                     JOIN asset_search s ON s.rowid = f.rowid
+                     WHERE assets_fts MATCH ?1",
+                    [term],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(id, "a1", "asset search should find term: {term}");
+        }
+
+        conn.execute("DELETE FROM assets_fts", []).unwrap();
+        conn.execute("INSERT INTO assets_fts(assets_fts) VALUES ('rebuild')", [])
+            .unwrap();
+        let rebuilt_id: String = conn
+            .query_row(
+                "SELECT s.asset_id
+                 FROM assets_fts f
+                 JOIN asset_search s ON s.rowid = f.rowid
+                 WHERE assets_fts MATCH 'imported'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(rebuilt_id, "a1");
     }
 }

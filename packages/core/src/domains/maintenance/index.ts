@@ -73,10 +73,16 @@ export async function hardDeleteRecord(kind: DeletableKind, id: string): Promise
 
 /**
  * Rebuild the FTS5 indexes from the durable content (documents, interactions,
- * content_chunks). Safe to run any time; derived indexes are disposable.
+ * content_chunks, assets, asset links, and asset_texts). Safe to run any time;
+ * derived indexes are disposable.
  */
 export async function rebuildSearchIndexes(): Promise<void> {
   await executeRaw("INSERT INTO documents_fts(documents_fts) VALUES('rebuild')")
   await executeRaw("INSERT INTO interactions_fts(interactions_fts) VALUES('rebuild')")
   await executeRaw("INSERT INTO content_chunks_fts(content_chunks_fts) VALUES('rebuild')")
+  await executeRaw('DELETE FROM asset_search')
+  await executeRaw(
+    'INSERT INTO asset_search (asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at) SELECT asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at FROM asset_search_source',
+  )
+  await executeRaw("INSERT INTO assets_fts(assets_fts) VALUES('rebuild')")
 }

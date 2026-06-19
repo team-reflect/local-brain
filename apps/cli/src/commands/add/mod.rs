@@ -27,7 +27,7 @@ use serde_json::json;
 use crate::error::CliError;
 use crate::output::print_json;
 
-pub use asset::{add_asset, AddAssetArgs};
+pub use asset::{add_asset, set_asset_text, AddAssetArgs};
 pub use document::{add_document, AddDocumentArgs};
 pub use interaction::{add_interaction, AddInteractionArgs};
 pub use memory::{remember, RememberArgs};
