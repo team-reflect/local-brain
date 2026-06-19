@@ -28,6 +28,19 @@ pub(super) fn insert_chunks(
     Ok(chunks.len())
 }
 
+pub(super) fn replace_chunks(
+    conn: &Connection,
+    record_type: &str,
+    record_id: &str,
+    body: &str,
+) -> Result<usize, CliError> {
+    conn.execute(
+        "DELETE FROM content_chunks WHERE record_type = ?1 AND record_id = ?2",
+        params![record_type, record_id],
+    )?;
+    insert_chunks(conn, record_type, record_id, body)
+}
+
 /// Insert the typed link rows for a document/interaction.
 pub(super) fn insert_links(
     conn: &Connection,

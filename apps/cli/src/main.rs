@@ -229,6 +229,9 @@ struct AddInteractionArgs {
     participants: Vec<String>,
     #[arg(long)]
     allow_duplicate: bool,
+    /// Replace body text and regenerated chunks on a source-backed re-import.
+    #[arg(long)]
+    replace_body: bool,
 }
 
 #[derive(Parser)]
@@ -467,6 +470,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
                         links: parse_links(&a.links)?,
                         raw_participants: a.participants.iter().map(String::as_str).collect(),
                         allow_duplicate: a.allow_duplicate,
+                        replace_body: a.replace_body,
                     },
                 ),
                 AddCommand::Project(a) => add::add_project(

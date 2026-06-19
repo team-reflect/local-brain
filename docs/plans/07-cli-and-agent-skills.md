@@ -30,6 +30,9 @@ path resolution, sidecar bundling, installation checks.
   concepts land in `brain`.
 - Importers should use `external_identities.kind` to distinguish upstream identifier
   scopes, for example Gmail `thread` versus `message`.
+- Source-backed interaction imports can replace body text and regenerated chunks when
+  the upstream source is authoritative, for example a Granola transcript replacing an
+  earlier summary-only import.
 - People can have multiple emails and phones. Imports dedupe through external identity,
   then contact handles, then normalized name.
 - Email/calendar interactions can preserve unresolved raw participants without creating
@@ -78,6 +81,7 @@ path resolution, sidecar bundling, installation checks.
    - `brain add person-from-email --full-name ... --email ...`
    - `brain add document --title ... --text-file ...`
    - `brain add interaction --kind meeting --title ... --text-file ...`
+   - `brain add interaction --kind meeting --source granola --external-id ... --summary ... --text-file transcript.txt --replace-body`
    - `brain add interaction --kind email --source gmail --external-kind thread --external-id ... --summary ... --participant ...`
    - `brain add project --name ... --source agent --external-kind cluster --external-id ...`
    - `brain add asset --file ... --link person:... --role avatar`
@@ -133,6 +137,8 @@ path resolution, sidecar bundling, installation checks.
   codes.
 - An agent can import an email body as an interaction, preserve raw participant handles,
   and link attachments as assets.
+- An agent can import a Granola meeting with raw transcript body text and a separate
+  summary, then refresh that body and its chunks idempotently.
 - An agent can import a redacted email or meeting digest as `summary` plus searchable
   body text without storing unsafe raw quote chains.
 - An agent can create or reuse a project/context from imports and link interactions or

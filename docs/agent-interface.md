@@ -42,6 +42,7 @@ brain add document --title "Kitchen remodel notes" --text-file notes.md
 brain add interaction --kind meeting --title "Call with Maya" --text-file transcript.txt
 brain add interaction --kind email --title "Email from Maya" --text-file body.txt --source gmail --external-id msg-123 --participant "from:Maya Chen <maya@example.com>" --json
 brain add interaction --kind email --title "Everlywell Integration" --text-file digest.md --summary "Production credential setup and go-live readiness." --source gmail --external-kind thread --external-id thread-123 --json
+brain add interaction --kind meeting --title "Granola: Northwind kickoff" --text-file transcript.txt --summary "Kickoff decisions and follow-ups." --source granola --external-id meeting-123 --replace-body --json
 brain add project --name "Kitchen remodel" --summary "Budget, contractor, and cabinet decision context." --source agent --external-kind cluster --external-id kitchen-remodel --json
 brain add asset --file maya.jpg --link person:maya --role avatar
 brain add task --title "Send Maya the revised budget" --project "Kitchen remodel"
@@ -128,6 +129,16 @@ When importing emails or calendar events:
 - Preserve raw unresolved participants with repeatable `--participant` values such as
   `from:Robin Spencer <robin@example.com>`; do not create people for every handle.
 - Store binary attachments through `brain add asset --link interaction:<id>`.
+
+When importing Granola meetings:
+
+- Always fetch and store the raw transcript as `interactions.body_text` through
+  `--text-file`; it is the durable evidence the brain should cite.
+- Store Granola's AI note or agent-written digest in `--summary`, not in place of the
+  transcript.
+- Re-import an existing meeting with the same `--source granola --external-id` and
+  `--replace-body` when the transcript becomes available or changes, so search chunks
+  are regenerated from the raw transcript.
 
 When adding an asset:
 

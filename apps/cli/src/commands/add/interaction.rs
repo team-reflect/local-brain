@@ -10,7 +10,7 @@ use super::identity::{
     external_kind, find_duplicate, find_external_identity, insert_external_identity, source_id,
     ExternalIdentityWrite,
 };
-use super::links::{insert_chunks, insert_links};
+use super::links::{insert_chunks, insert_links, replace_chunks};
 use super::report_record;
 use super::text::{normalize_optional, normalize_title};
 use crate::commands::LinkRef;
@@ -31,6 +31,7 @@ pub struct AddInteractionArgs<'a> {
     pub links: Vec<LinkRef>,
     pub raw_participants: Vec<&'a str>,
     pub allow_duplicate: bool,
+    pub replace_body: bool,
 }
 
 fn find_duplicate_interaction(
@@ -116,8 +117,23 @@ fn enrich_existing_interaction(
     args: &AddInteractionArgs,
     source_id: Option<&str>,
     identity_kind: &str,
+    replace_body: bool,
 ) -> Result<(), CliError> {
     enrich_duplicate_interaction(tx, existing, args)?;
+    if replace_body {
+        let body = normalize_text(&args.body);
+        let hash = content_hash(&body);
+        tx.execute(
+            "UPDATE interactions
+             SET body_text = ?1,
+                 summary = CASE WHEN ?2 IS NOT NULL THEN ?2 ELSE summary END,
+                 content_hash = ?3,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             WHERE id = ?4",
+            params![&body, normalize_optional(args.summary), hash, existing,],
+        )?;
+        replace_chunks(tx, "interaction", existing, &body)?;
+    }
     insert_links(tx, "interaction", existing, &args.links)?;
     insert_raw_participants(tx, existing, source_id, &args.raw_participants)?;
     insert_external_identity(
@@ -272,6 +288,17 @@ pub fn add_interaction(
     let hash = content_hash(&body);
     let source_id = source_id(conn, args.source_slug)?;
     let identity_kind = external_kind(args.external_kind);
+    if args.replace_body && body.is_empty() {
+        return Err(CliError::Runtime(
+            "--replace-body requires body text".into(),
+        ));
+    }
+    if args.replace_body && (source_id.is_none() || normalize_optional(args.external_id).is_none())
+    {
+        return Err(CliError::Runtime(
+            "--replace-body requires --source and --external-id".into(),
+        ));
+    }
     let existing_by_external = find_external_identity(
         conn,
         "interaction",
@@ -288,6 +315,7 @@ pub fn add_interaction(
                 &args,
                 source_id.as_deref(),
                 &identity_kind,
+                args.replace_body,
             )?;
             tx.commit()?;
             return report_record(json, "interaction", existing, true, 0);
@@ -309,6 +337,7 @@ pub fn add_interaction(
                 &args,
                 source_id.as_deref(),
                 &identity_kind,
+                false,
             )?;
             tx.commit()?;
             return report_record(json, "interaction", existing, true, 0);
@@ -406,6 +435,7 @@ mod tests {
             links: vec![],
             raw_participants: vec![],
             allow_duplicate,
+            replace_body: false,
         }
     }
 

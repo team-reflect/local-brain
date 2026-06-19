@@ -18,7 +18,8 @@ operate it through the `brain` CLI — never by touching the database file direc
    output and parse stdout only.
 3. **Pick the right noun** (below). Documents ≠ interactions ≠ tasks ≠ memories.
 4. **Cite, don't invent.** Answers and memories are grounded in real records.
-5. **Store signal, not noise.** Don't dump raw chat logs or secrets.
+5. **Store evidence, not noise.** Raw Granola transcripts are durable meeting
+   evidence; low-signal logs, quoted email chains, and secrets are not.
 
 ## The nouns
 
@@ -92,6 +93,11 @@ brain add interaction --kind email --title "Everlywell Integration" \
   --text-file digest.md --source gmail --external-kind thread \
   --external-id thread-123 --json
 
+# Granola meeting import: raw transcript is the body, summary stays separate:
+brain add interaction --kind meeting --title "Granola: Northwind kickoff" \
+  --summary "Kickoff decisions and follow-ups." \
+  --text-file transcript.txt --source granola --external-id meeting-123 --json
+
 # Project/context import target:
 brain add project --name "Everlywell Integration" --summary "PWN Labs Module go-live context." \
   --source agent --external-kind cluster --external-id everlywell-integration --json
@@ -120,6 +126,8 @@ Notes:
   then normalized full name; projects dedupe by external identity, then normalized name;
   assets dedupe by content hash and can still be linked to a new record. Pass
   `--allow-duplicate` only when you truly mean to re-import.
+- For source-backed interaction refreshes, pass `--replace-body` only when the upstream
+  source is authoritative and the existing body should be replaced and re-chunked.
 - Resolve link ids by `brain search` first.
 
 ## Provider-neutral import workflow
@@ -146,8 +154,10 @@ External fetchers such as `gws` read upstream systems, then call `brain`:
 
 - **Gmail:** search narrowly, skip obvious machine/noise messages, group recurring
   conversations by thread, and use `--external-kind thread` for thread digests.
-- **Granola:** import meeting summaries as interactions. Fetch/store transcripts only
-  when exact wording matters; otherwise summaries are usually the better context unit.
+- **Granola:** always fetch and store the raw transcript as the interaction body when
+  it is available. Store Granola's AI note/summary in `--summary`, never as a
+  replacement for the transcript. On re-import, use `--replace-body` with the same
+  `--source granola --external-id <meeting-id>` so chunks match the current transcript.
 - **Contacts:** use trusted contact imports (`brain add person`) with source-backed
   stable ids. Page/stream contacts; do not export a giant one-shot blob. Import names,
   emails, phones, org/title, and stable ids for launch; skip notes, addresses, and
@@ -164,8 +174,8 @@ External fetchers such as `gws` read upstream systems, then call `brain`:
 ## What not to store
 
 - Secrets, API keys, passwords, 2FA codes.
-- Raw, unsummarized logs or whole email threads — capture the signal as a memory,
-  `--summary`, or a short interaction digest instead.
+- Raw, unsummarized low-signal logs or whole email quote chains — capture the signal as
+  a memory, `--summary`, or a short interaction digest instead.
 - Speculation as fact. If you're unsure, lower the memory `--kind` (e.g. `idea`)
   or don't write it.
 

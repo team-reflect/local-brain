@@ -24,9 +24,11 @@ storage.
 - Email import should be thread-aware. Prefer one interaction per meaningful Gmail
   thread or conversation digest when the thread has long quoted history; use
   message-level interactions only for genuinely standalone messages.
-- Importers may store a redacted digest/summary instead of raw body text when the source
-  contains credentials, passwords, legal/medical boilerplate, repeated quote chains, or
-  low-signal notification noise.
+- Importers may store a redacted digest/summary instead of raw body text when email or
+  message sources contain credentials, passwords, legal/medical boilerplate, repeated
+  quote chains, or low-signal notification noise. Granola meeting imports are the
+  exception: always store the raw transcript when it is available, with summaries kept
+  separately.
 - Projects are first-class import targets. Link to existing projects before creating
   one; auto-create a project only for repeated or high-signal ongoing contexts.
 - Reference files, plans, notes, webpages, receipts, and specs are documents.
@@ -81,8 +83,9 @@ storage.
 15. Add provider-shaped import adapters that still write provider-neutral records:
     - Gmail: search/filter noise, group by thread, preserve message participants, use
       external identity kind `thread` or `message`
-    - Granola: import meeting summaries as interactions, fetch transcripts only when
-      exact wording is needed, and infer/link projects from recurring meeting themes
+    - Granola: always fetch raw transcripts as interaction body text, store AI notes or
+      summaries separately, support source-backed body replacement/rechunking, and
+      infer/link projects from recurring meeting themes
     - Contacts: page or stream from the native Contacts API; do not bulk export one
       giant AppleScript blob; import only names, handles, org/title, and stable ids for
       launch
@@ -100,6 +103,8 @@ storage.
 - Imported records can be linked to people, organizations, projects, and tasks.
 - Email and meeting imports can link to or create durable project contexts without
   requiring the user to manually file every record.
+- Granola meeting imports preserve raw transcripts as durable evidence, even when a
+  summary is also stored.
 
 ## Tests or Verification
 

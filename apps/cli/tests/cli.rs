@@ -841,6 +841,134 @@ fn add_interaction_dedupes_by_source_and_preserves_raw_participants() {
 }
 
 #[test]
+fn add_interaction_replace_body_updates_source_backed_record_and_chunks() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    run_json(
+        &db,
+        &[
+            "--json", "source", "ensure", "--slug", "granola", "--name", "Granola",
+        ],
+    );
+    let old_body = "old transcript marker ".repeat(90);
+    let new_body = "raw transcript replacement from Granola";
+
+    let first_args = vec![
+        "--json",
+        "add",
+        "interaction",
+        "--kind",
+        "meeting",
+        "--title",
+        "Granola meeting",
+        "--text",
+        old_body.as_str(),
+        "--source",
+        "granola",
+        "--external-id",
+        "meeting-1",
+    ];
+    let first = run_json(&db, &first_args);
+    assert_eq!(first["isDuplicate"], false);
+    assert!(
+        first["chunkCount"].as_i64().unwrap() > 1,
+        "test setup needs multiple chunks so stale chunk rows are visible"
+    );
+
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Granola meeting",
+            "--text",
+            new_body,
+            "--summary",
+            "Compact AI summary.",
+            "--source",
+            "granola",
+            "--external-id",
+            "meeting-1",
+            "--replace-body",
+        ],
+    );
+    assert_eq!(second["isDuplicate"], true);
+    assert_eq!(second["id"], first["id"]);
+
+    let conn = Connection::open(&db).unwrap();
+    let (body, summary): (String, String) = conn
+        .query_row(
+            "SELECT body_text, summary FROM interactions WHERE id = ?1",
+            [first["id"].as_str().unwrap()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(body, new_body);
+    assert_eq!(summary, "Compact AI summary.");
+
+    let stale_chunks: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM content_chunks
+             WHERE record_type = 'interaction'
+               AND record_id = ?1
+               AND text LIKE '%old transcript marker%'",
+            [first["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stale_chunks, 0);
+    let fresh_chunks: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM content_chunks
+             WHERE record_type = 'interaction'
+               AND record_id = ?1
+               AND text LIKE '%raw transcript replacement%'",
+            [first["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(fresh_chunks, 1);
+}
+
+#[test]
+fn add_interaction_replace_body_rejects_empty_body() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    run_json(
+        &db,
+        &[
+            "--json", "source", "ensure", "--slug", "granola", "--name", "Granola",
+        ],
+    );
+
+    let out = run(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Granola meeting",
+            "--text",
+            "   ",
+            "--source",
+            "granola",
+            "--external-id",
+            "meeting-1",
+            "--replace-body",
+        ],
+    );
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("body text"));
+}
+
+#[test]
 fn add_asset_copies_file_and_links_to_interaction() {
     let dir = TempDir::new().unwrap();
     let root = dir.path().join("AssetsBrain");

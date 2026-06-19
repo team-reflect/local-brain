@@ -168,6 +168,10 @@ Suggested `status` values: `open`, `waiting`, `scheduled`, `done`, `canceled`,
 Human exchanges: meetings, calls, emails, messages, chats, voice notes, notes, and
 events. Email bodies and meeting transcripts live here.
 
+Granola imports should store the raw transcript in `body_text` whenever available.
+AI notes, redacted digests, and agent-written summaries belong in `summary`, not as a
+replacement for the transcript.
+
 Key columns:
 
 - `id`
