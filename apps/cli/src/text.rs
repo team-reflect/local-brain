@@ -34,16 +34,23 @@ pub fn normalize_text(raw: &str) -> String {
     out.trim().to_string()
 }
 
-/// SHA-256 hex of the UTF-8 bytes (already-normalized text). Mirrors `contentHash`.
-pub fn content_hash(text: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(text.as_bytes());
-    let digest = hasher.finalize();
-    let mut hex = String::with_capacity(64);
+/// Lowercase SHA-256 hex of arbitrary bytes. The one hashing primitive for the
+/// CLI: text dedupe ([`content_hash`]) and binary asset dedupe both hash through
+/// here so the digest format can never diverge between them.
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let digest = Sha256::digest(bytes);
+    let mut hex = String::with_capacity(digest.len() * 2);
     for byte in digest {
-        hex.push_str(&format!("{byte:02x}"));
+        hex.push(HEX[(byte >> 4) as usize] as char);
+        hex.push(HEX[(byte & 0x0f) as usize] as char);
     }
     hex
+}
+
+/// SHA-256 hex of the UTF-8 bytes (already-normalized text). Mirrors `contentHash`.
+pub fn content_hash(text: &str) -> String {
+    sha256_hex(text.as_bytes())
 }
 
 /// Hard-split a paragraph longer than `max_chars` (in UTF-16 code units) into

@@ -1,3 +1,7 @@
+//! The CLI's error type and its mapping to stable process exit codes. Keeping
+//! both in one place lets every command return `Result<_, CliError>` and lets
+//! `main` translate a failure into the right exit code without per-command glue.
+
 /// CLI failures, mapped to stable exit codes. Data goes to stdout; every error
 /// here is printed to stderr by `main`.
 #[derive(Debug)]
