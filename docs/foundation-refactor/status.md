@@ -46,6 +46,20 @@ Three current-head Bugbot findings, fixed without broadening the refactor:
 Tests: +6 core integration (`db/integration.test.mjs`), +2 CLI
 (`apps/cli/tests/cli.rs`). Core 190 / CLI 20.
 
+### Re-review of head `67eeae1`
+
+4. `3439862948` / BUGBOT `88b14f71-57bd-4869-9524-84bc549fa76c` — *Ingest skips
+   validation on duplicate.* The earlier fix (#3) still ran the duplicate
+   short-circuit *before* validation, so a whitespace-only paste whose empty-body
+   hash matched an existing un-archived row returned `{ isDuplicate: true }`
+   instead of throwing `ValidationError`. `ingestDocument`/`ingestInteraction` now
+   run `validateNewDocument`/`validateNewInteraction` *before* the duplicate
+   short-circuit, while the content-hash dedupe for valid duplicate payloads is
+   unchanged. Verified: each new test fails on the pre-fix order and passes after.
+   Tests: +2 core integration (whitespace-only duplicate throws for document and
+   interaction; valid duplicate still returns `isDuplicate`). Core 22 in
+   `db/integration.test.mjs`.
+
 ## Verification
 
 All gates green — see `final-report.md` for the exact commands and results.

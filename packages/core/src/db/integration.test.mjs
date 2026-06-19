@@ -276,6 +276,42 @@ describe('04a ingestion (real SQLite round-trip)', () => {
     expect(await listInteractions()).toHaveLength(0)
   })
 
+  it('validates a whitespace-only duplicate document instead of returning isDuplicate', async () => {
+    // A title-only document stores a null body, so its content hash is the
+    // empty-body hash. A later whitespace-only paste hashes to the same value,
+    // but must still be rejected by the write contract rather than short-circuit
+    // to { isDuplicate: true }.
+    await ingestDocument({ title: 'Header only', bodyText: '   ' })
+    await expect(ingestDocument({ title: '   ', bodyText: '  \n\n ' })).rejects.toBeInstanceOf(
+      ValidationError,
+    )
+    expect(await listDocuments()).toHaveLength(1)
+
+    // A valid duplicate (real body that already exists) still dedupes.
+    const first = await ingestDocument({ title: 'Note', bodyText: 'Same content.' })
+    const dup = await ingestDocument({ title: 'Note (again)', bodyText: 'Same content.' })
+    expect(dup.isDuplicate).toBe(true)
+    expect(dup.id).toBe(first.id)
+  })
+
+  it('validates a whitespace-only duplicate interaction instead of returning isDuplicate', async () => {
+    await ingestInteraction({ kind: 'note', title: 'Header only', bodyText: '   ' })
+    await expect(
+      ingestInteraction({ kind: 'note', title: '  ', bodyText: ' \n ' }),
+    ).rejects.toBeInstanceOf(ValidationError)
+    expect(await listInteractions()).toHaveLength(1)
+
+    // A valid duplicate (real body that already exists) still dedupes.
+    const first = await ingestInteraction({ kind: 'note', title: 'Sync', bodyText: 'Same body.' })
+    const dup = await ingestInteraction({
+      kind: 'note',
+      title: 'Sync (again)',
+      bodyText: 'Same body.',
+    })
+    expect(dup.isDuplicate).toBe(true)
+    expect(dup.id).toBe(first.id)
+  })
+
   it('refuses an update that clears the only remaining title or body', async () => {
     // Body-only document: clearing the body would leave it empty.
     const bodyOnly = await createDocument({ bodyText: 'The whole story.' })

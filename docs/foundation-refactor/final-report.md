@@ -166,3 +166,32 @@ The Rust gates below were therefore re-run.
 | `cargo fmt --all -- --check` | ✅ exit 0 |
 | `cargo check --workspace` | ✅ exit 0 |
 | `cargo test --workspace` | ✅ exit 0 (CLI 20, schema 14, desktop-lib 51, +others) |
+
+### Re-review of head `67eeae1`
+
+Bugbot re-reviewed head `67eeae1` and found one fresh current-head issue.
+
+| Bugbot | Comment | Issue | Fix |
+| --- | --- | --- | --- |
+| `88b14f71-57bd-4869-9524-84bc549fa76c` | `3439862948` | Ingest skips validation on duplicate | The previous fix (`3439818587`) ran the duplicate short-circuit *before* validation, so a whitespace-only paste whose empty-body hash matched an existing un-archived row returned `{ isDuplicate: true }` instead of throwing `ValidationError`. `ingestDocument`/`ingestInteraction` now call `validateNewDocument`/`validateNewInteraction` *before* the `dup && !allowDuplicate` short-circuit. The content-hash dedupe for valid duplicate payloads is unchanged. |
+
+**Files changed:** `packages/core/src/ingest/ingest.ts`,
+`packages/core/src/db/integration.test.mjs`,
+`docs/foundation-refactor/status.md`, `docs/foundation-refactor/final-report.md`.
+
+**Tests added:** +2 core integration — whitespace-only duplicate paste throws
+`ValidationError` for both document and interaction ingestion, and a valid
+duplicate paste still returns `isDuplicate` with the original id →
+`db/integration.test.mjs` **22**. Each new test was confirmed to fail on the
+pre-fix ordering and pass after the fix.
+
+**Rust changes:** none — only `packages/core` TS and docs were touched. The Rust
+gates were not re-run.
+
+**Verification (re-run for this follow-up):**
+
+| Command | Result |
+| --- | --- |
+| `pnpm --filter @local-brain/core test integration` | ✅ 22 tests pass |
+| `git diff --check` | ✅ clean |
+| `pnpm check` | ✅ exit 0 |

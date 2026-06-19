@@ -99,12 +99,13 @@ async function findDuplicate(
 
 export async function ingestDocument(input: IngestDocumentInput): Promise<IngestResult> {
   const { body, hash, dup } = await prepare('documents', input)
-  if (dup && !input.allowDuplicate) return { id: dup, isDuplicate: true, chunkCount: 0 }
 
-  // Apply the same write contract as `createDocument`: normalize the title/body
-  // and reject a record with neither, so a whitespace-only paste/import cannot
-  // create a titleless, bodyless document. The chunk/hash path keeps using the
-  // already-normalized `body` so dedupe keys stay identical to the CLI's.
+  // Apply the same write contract as `createDocument` *before* the duplicate
+  // short-circuit: normalize the title/body and reject a record with neither, so
+  // a whitespace-only paste/import cannot return `isDuplicate` against an
+  // existing empty-body hash instead of throwing. The chunk/hash path keeps
+  // using the already-normalized `body` so dedupe keys stay identical to the
+  // CLI's.
   const fields = validateNewDocument({
     title: input.title ?? null,
     bodyText: body,
@@ -112,6 +113,8 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
     summary: input.summary ?? null,
     originalUrl: input.originalUrl ?? null,
   })
+
+  if (dup && !input.allowDuplicate) return { id: dup, isDuplicate: true, chunkCount: 0 }
 
   const id = newId()
   const chunks = await chunkStatements('document', id, body)
@@ -138,11 +141,12 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
 
 export async function ingestInteraction(input: IngestInteractionInput): Promise<IngestResult> {
   const { body, hash, dup } = await prepare('interactions', input)
-  if (dup && !input.allowDuplicate) return { id: dup, isDuplicate: true, chunkCount: 0 }
 
   // Same write contract as `createInteraction` (mirrors `ingestDocument`):
-  // normalize title/body and reject a record with neither. `kind` is left to the
-  // caller, as in the validator, since it is `NOT NULL DEFAULT 'note'`.
+  // normalize title/body and reject a record with neither, *before* the
+  // duplicate short-circuit so a whitespace-only paste/import throws rather than
+  // returning `isDuplicate` against an existing empty-body hash. `kind` is left
+  // to the caller, as in the validator, since it is `NOT NULL DEFAULT 'note'`.
   const fields = validateNewInteraction({
     ...(input.kind !== undefined ? { kind: input.kind } : {}),
     title: input.title ?? null,
@@ -152,6 +156,8 @@ export async function ingestInteraction(input: IngestInteractionInput): Promise<
     externalId: input.externalId ?? null,
     originalUrl: input.originalUrl ?? null,
   })
+
+  if (dup && !input.allowDuplicate) return { id: dup, isDuplicate: true, chunkCount: 0 }
 
   const id = newId()
   const chunks = await chunkStatements('interaction', id, body)
