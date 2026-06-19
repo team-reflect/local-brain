@@ -8,7 +8,7 @@ GitHub review-thread data found 26 unresolved review threads on closed PRs. This
 | PR | Thread | Current status | Notes |
 | --- | --- | --- | --- |
 | #49 | CLI stores empty body not null | Fixed in this branch | `brain add document` now stores title-only document `body_text` as SQL `NULL`; `brain add interaction` already used nullable body storage. |
-| #48 | Email display value discarded | Fixed in this branch | CLI person email handles now preserve trimmed display casing in `people.primary_email` and `person_emails.email`, while dedupe/ownership continues to use `normalized_email`. |
+| #48 | Email display value discarded | Fixed in this branch | CLI person email handles now preserve trimmed display casing in `people.primary_email` and `person_emails.email`, while dedupe/ownership continues to use `normalized_email`. Bugbot follow-up (PR #70): `add_person_from_email` duplicate path was passing `assessment.email` (lowercased) to `enrich_duplicate_person_email` instead of the trimmed display-cased value; fixed and regression-covered. |
 | #48 | Stray markup in plan doc | Fixed in this branch | Removed literal `</content>` and `</invoke>` lines from `docs/pr48-import-identity-guardrails/plan.md`. |
 | #39 | Mac checks block icon generation | Fixed in this branch | `generate-icons.mjs` now runs `pnpm tauri icon` before macOS-only checks and exits after cross-platform icon generation on non-macOS. |
 | #34 | Windows pnpm spawn fails | Fixed in this branch | `generate-icons.mjs` now uses `pnpm.cmd` on Windows. |
@@ -33,4 +33,3 @@ GitHub review-thread data found 26 unresolved review threads on closed PRs. This
 | #15 | Ask leaves orphan user turns | Obsolete | The old `packages/core/src/ai/ask.ts` path no longer exists; Ask is now AI SDK transport based. |
 | #15 | Draft cleared before Ask succeeds | Already fixed | Current Ask composer restores the draft in the send failure `catch` path. |
 | #15 | Source labels mismatch answer citations | Obsolete | The old citation/source-label rendering path no longer exists in the current Ask surface. |
-

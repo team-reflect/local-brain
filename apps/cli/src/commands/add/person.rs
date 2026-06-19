@@ -541,7 +541,11 @@ pub fn add_person_from_email(
         // enrichment, and external-identity writes commit together or not at all.
         let tx = conn.transaction()?;
         insert_person_handles(&tx, &existing, &emails, &[], source_id.as_deref())?;
-        enrich_duplicate_person_email(&tx, &existing, &assessment.email)?;
+        enrich_duplicate_person_email(
+            &tx,
+            &existing,
+            emails.first().map_or(args.email, |e| e.email.as_str()),
+        )?;
         insert_external_identity(
             &tx,
             ExternalIdentityWrite {
@@ -1505,6 +1509,60 @@ mod tests {
         assert_eq!(
             identity_target, original_id,
             "a forced duplicate must not steal the original record's external identity"
+        );
+    }
+
+    #[test]
+    fn add_person_from_email_duplicate_preserves_display_email_casing() {
+        // Regression for: enrich_duplicate_person_email was receiving
+        // assessment.email (already lowercased) instead of the trimmed
+        // display-cased value from the EmailHandle, so people.primary_email
+        // stored lowercase while person_emails.email kept the original casing.
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // Seed a person with no email so primary_email is blank.
+        add_person(
+            &mut conn,
+            true,
+            person_args("Robin Spencer", vec![], vec![], None),
+        )
+        .unwrap();
+        let person_id = single_person_id(&conn, "Robin Spencer");
+
+        add_person_from_email(
+            &mut conn,
+            true,
+            AddPersonFromEmailArgs {
+                full_name: "Robin Spencer",
+                email: "  Robin.Spencer@Example.COM  ",
+                source_slug: Some("gmail"),
+                external_id: Some("msg-1"),
+            },
+        )
+        .unwrap();
+
+        let (primary_email, handle_email, normalized_email): (Option<String>, String, String) =
+            conn.query_row(
+                "SELECT p.primary_email, pe.email, pe.normalized_email
+                 FROM people p
+                 JOIN person_emails pe ON pe.person_id = p.id
+                 WHERE p.id = ?1",
+                params![person_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+
+        assert_eq!(
+            primary_email.as_deref(),
+            Some("Robin.Spencer@Example.COM"),
+            "duplicate enrichment must preserve display casing in people.primary_email"
+        );
+        assert_eq!(
+            handle_email, "Robin.Spencer@Example.COM",
+            "person_emails.email must preserve display casing"
+        );
+        assert_eq!(
+            normalized_email, "robin.spencer@example.com",
+            "person_emails.normalized_email must be lowercase for lookup/dedupe"
         );
     }
 
