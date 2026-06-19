@@ -31,6 +31,39 @@ describe('FirstRun onboarding', () => {
     expect(screen.getByText('Get started')).toBeDefined()
   })
 
+  it('exposes an accessible dialog whose title names the onboarding', async () => {
+    installFakeBridge({ queryRows: [] })
+    renderWithProviders(<FirstRun />)
+    // Radix Dialog renders role="dialog" with the title wired as its accessible
+    // name, so screen readers announce the gate rather than the bare panel.
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.getAttribute('aria-labelledby')).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Welcome to Local Brain' })).toBeDefined()
+  })
+
+  it('does not dismiss on Escape (blocking gate, no completion)', async () => {
+    installFakeBridge({ queryRows: [] })
+    renderWithProviders(<FirstRun />)
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.keyDown(dialog, { key: 'Escape', code: 'Escape' })
+    // Give Radix a tick to (not) close, then confirm it is still mounted.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+    expect(screen.getByRole('dialog')).toBeDefined()
+    expect(screen.getByText('Welcome to Local Brain')).toBeDefined()
+  })
+
+  it('closes via the completion mutation when "Get started" is clicked', async () => {
+    installFakeBridge({ queryRows: [] })
+    renderWithProviders(<FirstRun />)
+    await waitFor(() => expect(screen.getByText('Welcome to Local Brain')).toBeDefined())
+    // Completion flips the install-scoped flag; the gate then unmounts itself.
+    fireEvent.click(screen.getByText('Get started'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(screen.queryByText('Welcome to Local Brain')).toBeNull()
+  })
+
   it('stays hidden once first run is completed (install-scoped flag)', async () => {
     store.set('firstRun.completed', 'true')
     installFakeBridge({ queryRows: [] })

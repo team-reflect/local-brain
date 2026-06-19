@@ -9,8 +9,9 @@ import { cn } from '../../lib/utils'
  * unlike the previous copies — gets focus trap, focus restore on close, scroll
  * lock, Escape, and outside-click dismissal for free from Radix.
  *
- * The card is top-aligned (`pt-[12vh]`, the app's historical placement) rather
- * than vertically centred. Width is left to each consumer's `className`.
+ * The card is top-aligned by default (`pt-[12vh]`, the app's historical
+ * placement); pass `placement="center"` for vertically centred surfaces such as
+ * the blocking first-run gate. Width is left to each consumer's `className`.
  */
 function Dialog(props: ComponentProps<typeof DialogPrimitive.Root>): ReactNode {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />
@@ -48,13 +49,18 @@ function DialogContent({
   className,
   children,
   overlayClassName,
+  placement = 'top',
   ...props
 }: ComponentProps<typeof DialogPrimitive.Content> & {
   overlayClassName?: string
+  /** Vertical placement within the overlay. Defaults to the app's top alignment. */
+  placement?: 'top' | 'center'
 }): ReactNode {
   return (
     <DialogPrimitive.Portal data-slot="dialog-portal">
-      <DialogOverlay className={overlayClassName}>
+      <DialogOverlay
+        className={cn(placement === 'center' && 'items-center pt-10', overlayClassName)}
+      >
         <DialogPrimitive.Content
           data-slot="dialog-content"
           className={cn(
