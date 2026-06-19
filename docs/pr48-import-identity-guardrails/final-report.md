@@ -20,6 +20,13 @@ current-head issue (bug `0116a927-927c-4788-b4f0-1a408b419cc9`, review comment
 `3439779341`), addressed in **code-fix commit `ac5e88f6f070481f5ad4e7452bc89c7fc0bd6d6e`**
 (parent `f72c9f9`), with docs in the commit on top of it. See finding #5.
 
+## Follow-up: three fresh Bugbot findings on head `30e8f13`
+
+Bugbot re-reviewed head `30e8f13` and posted three new current-head issues
+(#6–#8), all addressed in this follow-up commit. Each fix ships with a focused
+regression test confirmed to fail before the fix and pass after. See findings
+#6, #7, #8 below.
+
 ## Files changed (commit 39d74ff)
 
 | File | Change |
@@ -113,6 +120,72 @@ Coverage: `add.rs` unit tests `route_phrase_strips_to_usable_person_name`,
 ` at ` variants), and the negative `assess_skips_route_phrase_noise`; plus the
 new integration test
 `add_person_from_email_strips_route_phrase_and_creates_person`.
+
+### 6. External lookup ignores archived records — BUGBOT e0faaa19 (head 30e8f13)
+`find_external_identity` returned the `entity_id` straight from
+`external_identities` without checking whether the linked person/interaction was
+archived. Every other dedupe path filters `archived_at IS NULL`, so a re-import
+with the same `--source`/`--external-id` could enrich an *archived* record,
+report it as a duplicate, and leave the data off normal active lists.
+
+Fix: a new `entity_table` map resolves an `entity_type` to its owning table
+(`person → people`, `interaction → interactions`, …; every typed record table
+carries `archived_at`). `find_external_identity` now JOINs that table and adds
+`AND t.archived_at IS NULL`, so an archived record is never returned as an active
+duplicate. Active source-scoped behavior is unchanged; an unknown entity type is
+a clear runtime error. When the only match is archived, the import falls through
+to creating a fresh active record.
+
+Coverage: `cli.rs` `add_person_external_id_reimport_skips_archived_record`
+(import → archive → re-import with the same source/external id → a new active
+person is created, the archived row stays archived).
+
+### 7. Duplicate person updates not atomic — BUGBOT cfedd001 (head 30e8f13)
+When a duplicate person was detected, `add_person` and `add_person_from_email`
+ran `insert_person_handles`, the enrichment update, and `insert_external_identity`
+as three separate autocommit statements. If a later step failed, the earlier
+handle/email writes stayed committed even though the command returned an error —
+unlike new-person creation and duplicate-interaction handling, which use a
+transaction.
+
+Fix: both duplicate paths now open a single `conn.transaction()`, perform the
+handle/enrichment/external-identity writes against the `tx`, and `tx.commit()`
+only on success. A late failure rolls the whole duplicate update back.
+
+Coverage: `add.rs` unit tests `add_person_duplicate_path_rolls_back_on_late_failure`
+and `add_person_from_email_duplicate_path_rolls_back_on_late_failure`. Each seeds
+an active person, drops `external_identities` so the final write fails (the
+source-scoped lookup degrades to "no match" gracefully), then asserts the
+duplicate-path handle/enrichment writes were rolled back.
+
+### 8. Name-only participants duplicate reimports — BUGBOT ac4701ae (head 30e8f13)
+`insert_raw_participants` uses `INSERT OR IGNORE`, but migration 0006 only defines
+a unique index for `(interaction_id, normalized_handle, COALESCE(role, ''))` when
+`normalized_handle` is set. Participants with only a `display_name` (e.g.
+`from:Casey Jordan <>`) have no covering uniqueness rule, so each duplicate
+interaction re-import appended another identical row.
+
+Fix: before inserting a handle-less participant, `insert_raw_participants` now
+runs an explicit existence check matching the handle index's semantics —
+`interaction_id = ? AND normalized_handle IS NULL AND display_name = ? AND
+COALESCE(role, '') = ?` — and skips the insert when a matching row already
+exists. No migration was added; the check mirrors the existing schema style.
+
+Coverage: `cli.rs` `add_interaction_reimport_does_not_duplicate_name_only_participant`
+(re-import the same sourced/external-id interaction with the same name-only
+participant → exactly one participant row).
+
+## Verification (follow-up, run at head 30e8f13 + findings #6–#8)
+
+| Command | Result |
+|---------|--------|
+| `git diff --check` | clean |
+| `cargo fmt -p brain-cli -- --check` | clean |
+| `cargo clippy -p brain-cli --all-targets` | no new warnings; one pre-existing `large_enum_variant` in `main.rs` (untouched, out of scope) |
+| `cargo test -p brain-cli` | 18 unit + 28 integration + 2 skill — all pass (incl. 4 new tests for #6–#8) |
+
+Each new test was confirmed to fail against the pre-fix code and pass after. No
+JS was touched in this follow-up.
 
 ## Verification commands & results (run at head 39d74ff)
 

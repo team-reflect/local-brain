@@ -420,6 +420,76 @@ fn add_person_stores_handles_and_external_identity() {
 }
 
 #[test]
+fn add_person_external_id_reimport_skips_archived_record() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Robin Spencer",
+            "--email",
+            "robin@example.com",
+            "--source",
+            "google_people",
+            "--external-id",
+            "people/c9",
+        ],
+    );
+    assert_eq!(first["isDuplicate"], false);
+
+    // Archive the imported person, then re-import with the same source/external
+    // id. The archived record must not be revived as an active duplicate.
+    let conn = Connection::open(&db).unwrap();
+    conn.execute(
+        "UPDATE people SET archived_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+        [first["id"].as_str().unwrap()],
+    )
+    .unwrap();
+    drop(conn);
+
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Robin Spencer",
+            "--email",
+            "robin@example.com",
+            "--source",
+            "google_people",
+            "--external-id",
+            "people/c9",
+        ],
+    );
+    assert_eq!(second["isDuplicate"], false);
+    assert_ne!(second["id"], first["id"]);
+
+    let conn = Connection::open(&db).unwrap();
+    let active: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM people WHERE full_name = 'Robin Spencer' AND archived_at IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let archived: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM people WHERE full_name = 'Robin Spencer' AND archived_at IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(active, 1);
+    assert_eq!(archived, 1);
+}
+
+#[test]
 fn add_person_from_email_creates_humans_and_skips_machine_senders() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
@@ -1037,6 +1107,69 @@ fn add_interaction_keeps_name_only_participant() {
         .unwrap();
     assert_eq!(handle, None);
     assert_eq!(display_name.as_deref(), Some("Casey Jordan"));
+}
+
+#[test]
+fn add_interaction_reimport_does_not_duplicate_name_only_participant() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    // A name-only participant has no covering unique index, so a duplicate
+    // interaction re-import must not append a second identical participant row.
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Name only",
+            "--text",
+            "First body for this upstream message.",
+            "--source",
+            "gmail",
+            "--external-id",
+            "gmail-msg-7",
+            "--participant",
+            "from:Casey Jordan <>",
+        ],
+    );
+    assert_eq!(first["isDuplicate"], false);
+
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Name only again",
+            "--text",
+            "Different body from the same upstream message.",
+            "--source",
+            "gmail",
+            "--external-id",
+            "gmail-msg-7",
+            "--participant",
+            "from:Casey Jordan <>",
+        ],
+    );
+    assert_eq!(second["isDuplicate"], true);
+    assert_eq!(second["id"], first["id"]);
+
+    let conn = Connection::open(&db).unwrap();
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM interaction_participants
+             WHERE interaction_id = ?1 AND role = 'from' AND display_name = 'Casey Jordan'",
+            [first["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 1);
 }
 
 #[test]

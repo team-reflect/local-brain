@@ -136,6 +136,22 @@ fn find_duplicate(conn: &Connection, table: &str, hash: &str) -> Result<Option<S
     Ok(id)
 }
 
+/// Map an `external_identities.entity_type` to its owning table. Every typed
+/// record table carries an `archived_at` column, so callers can scope an
+/// external-id lookup to active records.
+fn entity_table(entity_type: &str) -> Option<&'static str> {
+    match entity_type {
+        "person" => Some("people"),
+        "organization" => Some("organizations"),
+        "project" => Some("projects"),
+        "task" => Some("tasks"),
+        "document" => Some("documents"),
+        "interaction" => Some("interactions"),
+        "asset" => Some("assets"),
+        _ => None,
+    }
+}
+
 fn find_external_identity(
     conn: &Connection,
     entity_type: &str,
@@ -149,15 +165,30 @@ fn find_external_identity(
     ) else {
         return Ok(None);
     };
+    // Only treat the external identity as an active duplicate when the linked
+    // record still exists and is not archived. Other dedupe paths filter
+    // `archived_at IS NULL`; without the join here a re-import with the same
+    // --source/--external-id would enrich an archived record and report a
+    // duplicate, leaving the data off normal active lists.
+    let table = entity_table(entity_type).ok_or_else(|| {
+        CliError::Runtime(format!(
+            "unknown external identity entity type '{entity_type}'"
+        ))
+    })?;
+    let sql = format!(
+        "SELECT ei.entity_id
+         FROM external_identities ei
+         JOIN {table} t ON t.id = ei.entity_id
+         WHERE ei.entity_type = ?1
+           AND ei.source_id = ?2
+           AND ei.kind = ?3
+           AND ei.external_id = ?4
+           AND t.archived_at IS NULL
+         LIMIT 1",
+    );
     let id = conn
         .query_row(
-            "SELECT entity_id
-             FROM external_identities
-             WHERE entity_type = ?1
-               AND source_id = ?2
-               AND kind = ?3
-               AND external_id = ?4
-             LIMIT 1",
+            &sql,
             params![entity_type, source_id, kind, external_id],
             |row| row.get::<_, String>(0),
         )
@@ -857,10 +888,14 @@ pub fn add_person(conn: &mut Connection, json: bool, args: AddPersonArgs) -> Res
     let existing = existing_by_external.or(find_duplicate_person(conn, full_name, &emails)?);
     if let Some(existing) = existing {
         if !args.allow_duplicate {
-            insert_person_handles(conn, &existing, &emails, &phones, source_id.as_deref())?;
-            enrich_duplicate_person(conn, &existing, &args, &emails, &phones)?;
+            // Apply the handle, enrichment, and external-identity writes as one
+            // transaction so a late failure cannot leave a half-updated record,
+            // matching the new-person and duplicate-interaction paths.
+            let tx = conn.transaction()?;
+            insert_person_handles(&tx, &existing, &emails, &phones, source_id.as_deref())?;
+            enrich_duplicate_person(&tx, &existing, &args, &emails, &phones)?;
             insert_external_identity(
-                conn,
+                &tx,
                 "person",
                 &existing,
                 source_id.as_deref(),
@@ -868,6 +903,7 @@ pub fn add_person(conn: &mut Connection, json: bool, args: AddPersonArgs) -> Res
                 args.external_id,
                 args.original_url,
             )?;
+            tx.commit()?;
             return report_person(json, &existing, true);
         }
     }
@@ -937,10 +973,13 @@ pub fn add_person_from_email(
         &emails,
     )?);
     if let Some(existing) = existing {
-        insert_person_handles(conn, &existing, &emails, &[], source_id.as_deref())?;
-        enrich_duplicate_person_email(conn, &existing, &assessment.email)?;
+        // Same atomicity guarantee as add_person's duplicate path: handle,
+        // enrichment, and external-identity writes commit together or not at all.
+        let tx = conn.transaction()?;
+        insert_person_handles(&tx, &existing, &emails, &[], source_id.as_deref())?;
+        enrich_duplicate_person_email(&tx, &existing, &assessment.email)?;
         insert_external_identity(
-            conn,
+            &tx,
             "person",
             &existing,
             source_id.as_deref(),
@@ -948,6 +987,7 @@ pub fn add_person_from_email(
             args.external_id,
             None,
         )?;
+        tx.commit()?;
         return report_person_assessment(json, Some(&existing), false, true, &assessment);
     }
 
@@ -1364,6 +1404,30 @@ fn insert_raw_participants(
         if participant.normalized_handle.is_none() && participant.display_name.is_none() {
             continue;
         }
+        // Migration 0006 only enforces uniqueness for participants that carry a
+        // normalized_handle. Name-only participants (e.g. `from:Casey Jordan <>`)
+        // have no covering unique index, so INSERT OR IGNORE would append a new
+        // identical row on every duplicate interaction re-import. Match the
+        // handle index semantics (interaction_id, identity, COALESCE(role, ''))
+        // with an explicit existence check before inserting.
+        if participant.normalized_handle.is_none() {
+            let already_present = conn
+                .query_row(
+                    "SELECT 1 FROM interaction_participants
+                     WHERE interaction_id = ?1
+                       AND normalized_handle IS NULL
+                       AND display_name = ?2
+                       AND COALESCE(role, '') = ?3
+                     LIMIT 1",
+                    params![interaction_id, participant.display_name, participant.role],
+                    |_| Ok(()),
+                )
+                .ok()
+                .is_some();
+            if already_present {
+                continue;
+            }
+        }
         let changed = conn.execute(
             "INSERT OR IGNORE INTO interaction_participants
              (id, interaction_id, role, handle, normalized_handle, display_name, source_id)
@@ -1779,5 +1843,127 @@ mod tests {
     #[test]
     fn parse_participant_skips_blank() {
         assert!(parse_raw_participant("   ").unwrap().is_none());
+    }
+
+    fn person_args<'a>(
+        full_name: &'a str,
+        emails: Vec<&'a str>,
+        phones: Vec<&'a str>,
+        external_id: Option<&'a str>,
+    ) -> AddPersonArgs<'a> {
+        AddPersonArgs {
+            full_name,
+            preferred_name: None,
+            emails,
+            phones,
+            headline: None,
+            location: None,
+            summary: None,
+            notes: None,
+            reconnect_interval_days: None,
+            source_slug: Some("manual"),
+            external_kind: "contact",
+            external_id,
+            original_url: None,
+            allow_duplicate: false,
+        }
+    }
+
+    fn single_person_id(conn: &Connection, full_name: &str) -> String {
+        conn.query_row(
+            "SELECT id FROM people WHERE full_name = ?1 LIMIT 1",
+            params![full_name],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn add_person_duplicate_path_rolls_back_on_late_failure() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // Seed the active person via the new-person path (no external id yet).
+        add_person(
+            &mut conn,
+            true,
+            person_args("Robin Spencer", vec!["robin@example.com"], vec![], None),
+        )
+        .unwrap();
+        let person_id = single_person_id(&conn, "Robin Spencer");
+
+        // Force the final duplicate-path write (insert_external_identity) to fail
+        // by removing its table. The earlier source-scoped lookup degrades to
+        // "no match" gracefully, so the duplicate is still detected by email.
+        conn.execute("DROP TABLE external_identities", []).unwrap();
+
+        let result = add_person(
+            &mut conn,
+            true,
+            // A new phone handle is written before the failing step.
+            person_args(
+                "Robin Spencer",
+                vec!["robin@example.com"],
+                vec!["+1 555 0103"],
+                Some("ext-1"),
+            ),
+        );
+        assert!(result.is_err(), "expected the missing-table write to error");
+
+        let phone_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM person_phones WHERE person_id = ?1",
+                params![person_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            phone_count, 0,
+            "duplicate-path handle write must roll back when a later step fails"
+        );
+    }
+
+    #[test]
+    fn add_person_from_email_duplicate_path_rolls_back_on_late_failure() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // Seed an active person with a blank primary email so the duplicate path
+        // performs a visible enrichment that should also roll back.
+        add_person(
+            &mut conn,
+            true,
+            person_args("Robin Spencer", vec![], vec![], None),
+        )
+        .unwrap();
+        let person_id = single_person_id(&conn, "Robin Spencer");
+
+        conn.execute("DROP TABLE external_identities", []).unwrap();
+
+        let result = add_person_from_email(
+            &mut conn,
+            true,
+            AddPersonFromEmailArgs {
+                full_name: "Robin Spencer",
+                email: "robin@example.com",
+                source_slug: Some("gmail"),
+                external_id: Some("msg-1"),
+            },
+        );
+        assert!(result.is_err(), "expected the missing-table write to error");
+
+        let (primary_email, email_handles): (Option<String>, i64) = conn
+            .query_row(
+                "SELECT p.primary_email,
+                        (SELECT COUNT(*) FROM person_emails pe WHERE pe.person_id = p.id)
+                 FROM people p WHERE p.id = ?1",
+                params![person_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            primary_email, None,
+            "duplicate-path enrichment must roll back when a later step fails"
+        );
+        assert_eq!(
+            email_handles, 0,
+            "duplicate-path handle write must roll back when a later step fails"
+        );
     }
 }
