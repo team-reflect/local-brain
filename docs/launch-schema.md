@@ -112,7 +112,10 @@ Key columns:
 
 ### `projects`
 
-Personal or professional work areas.
+Personal or professional work areas, including agent-inferred context clusters. A
+project is not a task tag: it is the durable record for an ongoing life/work thread
+that can collect people, organizations, documents, interactions, tasks, decisions, and
+memories.
 
 Key columns:
 
@@ -130,6 +133,13 @@ Key columns:
 - `updated_at`
 
 Suggested `status` values: `active`, `waiting`, `paused`, `done`, `archived`.
+
+Launch projects stay flat. Do not add visible subtasks or parent/child project
+hierarchy before release. Imports and extraction should prefer linking to an existing
+project before creating one; create a new project only when there is repeated or
+high-signal evidence of an ongoing outcome. Store import provenance through
+`sources`/`external_identities`, using `kind` values such as `thread`, `meeting`, or
+`cluster` when the upstream identifier is not a single record id.
 
 ### `tasks`
 
@@ -159,6 +169,10 @@ Suggested `status` values: `open`, `waiting`, `scheduled`, `done`, `canceled`,
 
 Human exchanges: meetings, calls, emails, messages, chats, voice notes, notes, and
 events. Email bodies and meeting transcripts live here.
+
+Granola imports should store the raw transcript in `body_text` whenever available.
+AI notes, redacted digests, and agent-written summaries belong in `summary`, not as a
+replacement for the transcript.
 
 Key columns:
 
@@ -374,6 +388,10 @@ Allowed `subject_type` values: `memory`, `task`.
 
 Lightweight user-defined grouping.
 
+Tags are descriptors and filters, not pseudo-projects. Use a project when the context
+has lifecycle, linked people/orgs, decisions, tasks, or a useful status brief. Use tags
+for cross-cutting labels such as `tax`, `receipt`, `gift`, or `medical`.
+
 `tags` key columns:
 
 - `id`
@@ -522,6 +540,7 @@ The launch schema intentionally omits:
 - Row-level sensitivity labels.
 - Hosted sync tables.
 - Browser/email/calendar OAuth integration tables.
+- User-facing subtasks or project hierarchy.
 
 ## Relationship Intelligence
 

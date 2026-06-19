@@ -25,12 +25,23 @@ path resolution, sidecar bundling, installation checks.
   running and does not use Tauri IPC.
 - Agents can add people, documents, interactions, assets, tasks, and memories with direct
   provenance.
+- Agents can add projects/context clusters, then link imports and tasks to them.
 - Importers use provider-neutral `sources` and `external_identities`; no upstream API
   concepts land in `brain`.
+- Importers should use `external_identities.kind` to distinguish upstream identifier
+  scopes, for example Gmail `thread` versus `message`.
+- Source-backed interaction imports can replace body text and regenerated chunks when
+  the upstream source is authoritative, for example a Granola transcript replacing an
+  earlier summary-only import.
 - People can have multiple emails and phones. Imports dedupe through external identity,
   then contact handles, then normalized name.
 - Email/calendar interactions can preserve unresolved raw participants without creating
   people.
+- Transcript imports must be followed by an analysis pass that writes a summary, links
+  participants/high-signal mentioned people, associates projects, and creates explicit
+  follow-up tasks and stable memories with exact interaction chunk evidence.
+- Source-backed Granola imports return `postAnalysisRequired` in JSON output so agents
+  can treat enrichment as part of the import contract.
 - Assets are first-class searchable records by metadata, links, and optional local
   `asset_texts`; importers can pass attachment text without coupling `brain` to a
   provider.
@@ -78,12 +89,14 @@ path resolution, sidecar bundling, installation checks.
    - `brain add person-from-email --full-name ... --email ...`
    - `brain add document --title ... --text-file ...`
    - `brain add interaction --kind meeting --title ... --text-file ...`
-   - `brain add interaction --kind email --source gmail --external-id ... --participant ...`
+   - `brain add interaction --kind meeting --source granola --external-id ... --summary ... --text-file transcript.txt --replace-body`
+   - `brain add interaction --kind email --source gmail --external-kind thread --external-id ... --summary ... --participant ...`
+   - `brain add project --name ... --source agent --external-kind cluster --external-id ...`
    - `brain add asset --file ... --link person:... --role avatar`
    - `brain add asset --file ... --link interaction:... --text-file ... --text-source importer`
    - `brain asset text set <asset-id> --text-file ... --source ...`
-   - `brain add task --title ...`
-   - `brain remember --kind fact --claim ... --link person:...`
+   - `brain add task --title ... --link interaction:... --link project:... --evidence interaction:...#0`
+   - `brain remember --kind fact --claim ... --link person:... --evidence interaction:...#0`
 6. Add read/query commands:
    - `brain search "..."`
    - `brain today`
@@ -136,12 +149,19 @@ path resolution, sidecar bundling, installation checks.
   codes.
 - An agent can import an email body as an interaction, preserve raw participant handles,
   and link attachments as assets.
+- An agent can import a Granola meeting with raw transcript body text and a separate
+  summary, then refresh that body and its chunks idempotently.
+- An agent can import a redacted email or meeting digest as `summary` plus searchable
+  body text without storing unsafe raw quote chains.
+- An agent can create or reuse a project/context from imports and link interactions or
+  tasks to it.
 - An agent can add a reference note as a document.
 - An agent can add an avatar, image, or attachment as a linked asset.
 - An agent can search an imported attachment by filename/link metadata and by
   importer-provided text.
 - An agent can inspect an asset's metadata, text status, and linked records as JSON.
 - An agent can add a task linked to a person/project.
+- An agent can add transcript-derived tasks linked back to their source interaction.
 - An agent can generate a daily report and todo list from the terminal.
 - An agent can list relationship follow-ups from the terminal.
 - An agent can query the user-centered graph as JSON.

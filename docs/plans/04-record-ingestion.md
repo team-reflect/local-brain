@@ -21,6 +21,19 @@ storage.
 - Imported artifacts become `documents`.
 - Human exchanges become `interactions`.
 - Email bodies and meeting/call transcripts are interactions.
+- Email import should be thread-aware. Prefer one interaction per meaningful Gmail
+  thread or conversation digest when the thread has long quoted history; use
+  message-level interactions only for genuinely standalone messages.
+- Importers may store a redacted digest/summary instead of raw body text when email or
+  message sources contain credentials, passwords, legal/medical boilerplate, repeated
+  quote chains, or low-signal notification noise. Granola meeting imports are the
+  exception: always store the raw transcript when it is available, with summaries kept
+  separately.
+- Projects are first-class import targets. Link to existing projects before creating
+  one; auto-create a project only for repeated or high-signal ongoing contexts.
+- Transcript import is not complete at capture: run a post-analysis pass that generates
+  a summary, links participants and high-signal mentioned people, links or creates the
+  project context, and extracts explicit follow-up tasks.
 - Reference files, plans, notes, webpages, receipts, and specs are documents.
 - Original path, URL, external ID, and content hash are optional metadata on the
   document or interaction.
@@ -64,12 +77,27 @@ storage.
 10. Store readable text on `documents.body_text` or `interactions.body_text`.
 11. Generate `content_chunks` inside the same transaction.
 12. Trigger extraction jobs from newly created or changed records.
-13. Show imported documents, interactions, and linked assets in relevant detail pages.
-14. Leave a seam for a future typed ingestion inbox:
+13. Run transcript post-analysis for meeting/call imports:
+    - summary separate from raw transcript body
+    - participant and high-signal people links
+    - project links or conservative project creation
+    - explicit tasks linked to the source interaction with chunk evidence
+    - stable transcript-backed memories with chunk evidence
+14. Show imported documents, interactions, and linked assets in relevant detail pages.
+15. Leave a seam for a future typed ingestion inbox:
     - app or external helper writes an envelope atomically
     - Local Brain drains it on launch or file event
     - raw record is saved before any enrichment
     - enrichment retries without blocking capture
+16. Add provider-shaped import adapters that still write provider-neutral records:
+    - Gmail: search/filter noise, group by thread, preserve message participants, use
+      external identity kind `thread` or `message`
+    - Granola: always fetch raw transcripts as interaction body text, store AI notes or
+      summaries separately, support source-backed body replacement/rechunking, and
+      infer/link projects from recurring meeting themes
+    - Contacts: page or stream from the native Contacts API; do not bulk export one
+      giant AppleScript blob; import only names, handles, org/title, and stable ids for
+      launch
 
 ## Acceptance Criteria
 
@@ -82,6 +110,13 @@ storage.
   imports.
 - Chunks are generated for every imported document and interaction.
 - Imported records can be linked to people, organizations, projects, and tasks.
+- Email and meeting imports can link to or create durable project contexts without
+  requiring the user to manually file every record.
+- Granola meeting imports preserve raw transcripts as durable evidence, even when a
+  summary is also stored.
+- Transcript imports create or update graph context: people, projects, explicit
+  follow-up tasks, and stable memories are linked back to the source interaction
+  and cited to exact chunks.
 
 ## Tests or Verification
 

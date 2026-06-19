@@ -5,17 +5,18 @@
 //! than re-created.
 
 use rusqlite::{params, Connection};
+use serde_json::json;
 
 use super::identity::{
-    find_duplicate, find_external_identity, insert_external_identity, source_id,
+    external_kind, find_duplicate, find_external_identity, insert_external_identity, source_id,
     ExternalIdentityWrite,
 };
-use super::links::{insert_chunks, insert_links};
-use super::report_record;
+use super::links::{insert_chunks, insert_links, replace_chunks};
 use super::text::{normalize_optional, normalize_title};
 use crate::commands::LinkRef;
 use crate::error::CliError;
 use crate::id::new_id;
+use crate::output::print_json;
 use crate::text::{content_hash, normalize_text};
 
 pub struct AddInteractionArgs<'a> {
@@ -25,31 +26,35 @@ pub struct AddInteractionArgs<'a> {
     pub ended_at: Option<&'a str>,
     pub location: Option<&'a str>,
     pub source_slug: Option<&'a str>,
+    pub external_kind: &'a str,
     pub external_id: Option<&'a str>,
     pub original_url: Option<&'a str>,
+    pub summary: Option<&'a str>,
     pub body: Option<String>,
     pub links: Vec<LinkRef>,
     pub raw_participants: Vec<&'a str>,
     pub self_participants: Vec<&'a str>,
     pub allow_duplicate: bool,
+    pub replace_body: bool,
 }
 
 fn find_duplicate_interaction(
     conn: &Connection,
     hash: &str,
+    identity_kind: &str,
     external_id: Option<&str>,
     source_id: Option<&str>,
 ) -> Result<Option<String>, CliError> {
-    if let Some(external_id) = normalize_optional(external_id) {
-        // The source-scoped `external_identities` lookup already ran in the
-        // caller. This legacy fallback matches the denormalized
-        // `interactions.external_id` column, but it must NOT merge across
-        // sources: an external id is only unique within a source. We therefore
-        // skip any interaction that another source has already claimed, and —
-        // when this import omits a source — only match unclaimed/legacy rows.
-        let id = conn
-            .query_row(
-                "SELECT i.id FROM interactions i
+    if identity_kind == "record" {
+        if let Some(external_id) = normalize_optional(external_id) {
+            // The source-scoped `external_identities` lookup already ran in the
+            // caller. This legacy fallback matches only rows that predate
+            // `external_identities`; once any scoped identity claims a row, the
+            // generic denormalized `interactions.external_id` must not merge across
+            // sources or external-kind scopes.
+            let id = conn
+                .query_row(
+                    "SELECT i.id FROM interactions i
                  WHERE i.archived_at IS NULL
                    AND i.external_id IS NOT NULL
                    AND i.external_id = ?1
@@ -57,17 +62,22 @@ fn find_duplicate_interaction(
                      SELECT 1 FROM external_identities ei
                      WHERE ei.entity_type = 'interaction'
                        AND ei.entity_id = i.id
-                       AND ei.kind = 'record'
-                       AND (?2 IS NULL OR ei.source_id <> ?2)
                    )
                  LIMIT 1",
-                params![external_id, source_id],
-                |row| row.get::<_, String>(0),
-            )
-            .ok();
-        if id.is_some() {
-            return Ok(id);
+                    params![external_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .ok();
+            if id.is_some() {
+                return Ok(id);
+            }
+            if source_id.is_some() {
+                return Ok(None);
+            }
         }
+    }
+    if source_id.is_some() && normalize_optional(external_id).is_some() {
+        return Ok(None);
     }
     find_duplicate(conn, "interactions", hash)
 }
@@ -85,26 +95,31 @@ fn enrich_duplicate_interaction(
              original_url = CASE
                WHEN (original_url IS NULL OR trim(original_url) = '') AND ?2 IS NOT NULL
                THEN ?2 ELSE original_url END,
+             summary = CASE
+               WHEN (summary IS NULL OR trim(summary) = '') AND ?3 IS NOT NULL
+               THEN ?3 ELSE summary END,
              occurred_at = CASE
-               WHEN (occurred_at IS NULL OR trim(occurred_at) = '') AND ?3 IS NOT NULL
-               THEN ?3 ELSE occurred_at END,
+               WHEN (occurred_at IS NULL OR trim(occurred_at) = '') AND ?4 IS NOT NULL
+               THEN ?4 ELSE occurred_at END,
              ended_at = CASE
-               WHEN (ended_at IS NULL OR trim(ended_at) = '') AND ?4 IS NOT NULL
-               THEN ?4 ELSE ended_at END,
+               WHEN (ended_at IS NULL OR trim(ended_at) = '') AND ?5 IS NOT NULL
+               THEN ?5 ELSE ended_at END,
              location = CASE
-               WHEN (location IS NULL OR trim(location) = '') AND ?5 IS NOT NULL
-               THEN ?5 ELSE location END,
+               WHEN (location IS NULL OR trim(location) = '') AND ?6 IS NOT NULL
+               THEN ?6 ELSE location END,
              updated_at = CASE
                WHEN ((external_id IS NULL OR trim(external_id) = '') AND ?1 IS NOT NULL)
                  OR ((original_url IS NULL OR trim(original_url) = '') AND ?2 IS NOT NULL)
-                 OR ((occurred_at IS NULL OR trim(occurred_at) = '') AND ?3 IS NOT NULL)
-                 OR ((ended_at IS NULL OR trim(ended_at) = '') AND ?4 IS NOT NULL)
-                 OR ((location IS NULL OR trim(location) = '') AND ?5 IS NOT NULL)
+                 OR ((summary IS NULL OR trim(summary) = '') AND ?3 IS NOT NULL)
+                 OR ((occurred_at IS NULL OR trim(occurred_at) = '') AND ?4 IS NOT NULL)
+                 OR ((ended_at IS NULL OR trim(ended_at) = '') AND ?5 IS NOT NULL)
+                 OR ((location IS NULL OR trim(location) = '') AND ?6 IS NOT NULL)
                THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE updated_at END
-         WHERE id = ?6",
+         WHERE id = ?7",
         params![
             normalize_optional(args.external_id),
             normalize_optional(args.original_url),
+            normalize_optional(args.summary),
             normalize_optional(args.occurred_at),
             normalize_optional(args.ended_at),
             normalize_optional(args.location),
@@ -123,8 +138,30 @@ fn enrich_existing_interaction(
     existing: &str,
     args: &AddInteractionArgs,
     source_id: Option<&str>,
-) -> Result<(), CliError> {
+    identity_kind: &str,
+    replace_body: bool,
+) -> Result<usize, CliError> {
     enrich_duplicate_interaction(tx, existing, args)?;
+    let mut chunk_count = 0;
+    if replace_body {
+        let body = args
+            .body
+            .as_deref()
+            .map(normalize_text)
+            .filter(|body| !body.is_empty())
+            .ok_or_else(|| CliError::Runtime("--replace-body requires body text".into()))?;
+        let hash = content_hash(&body);
+        tx.execute(
+            "UPDATE interactions
+             SET body_text = ?1,
+                 summary = CASE WHEN ?2 IS NOT NULL THEN ?2 ELSE summary END,
+                 content_hash = ?3,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             WHERE id = ?4",
+            params![&body, normalize_optional(args.summary), hash, existing,],
+        )?;
+        chunk_count = replace_chunks(tx, "interaction", existing, &body)?;
+    }
     insert_links(tx, "interaction", existing, &args.links)?;
     insert_raw_participants(tx, existing, source_id, &args.raw_participants)?;
     insert_self_participants(tx, existing, source_id, &args.self_participants)?;
@@ -134,13 +171,13 @@ fn enrich_existing_interaction(
             entity_type: "interaction",
             entity_id: existing,
             source_id,
-            kind: "record",
+            kind: identity_kind,
             external_id: args.external_id,
             url: args.original_url,
             force_duplicate: false,
         },
     )?;
-    Ok(())
+    Ok(chunk_count)
 }
 
 #[derive(Debug)]
@@ -409,6 +446,51 @@ fn find_person_by_email(
     Ok(id)
 }
 
+fn requires_post_analysis(args: &AddInteractionArgs) -> bool {
+    args.source_slug
+        .is_some_and(|slug| slug.eq_ignore_ascii_case("granola"))
+}
+
+fn report_interaction(
+    json_output: bool,
+    id: &str,
+    duplicate: bool,
+    chunk_count: usize,
+    post_analysis_required: bool,
+) -> Result<(), CliError> {
+    if json_output {
+        let mut value = json!({
+            "kind": "interaction",
+            "id": id,
+            "isDuplicate": duplicate,
+            "chunkCount": chunk_count,
+        });
+        if post_analysis_required {
+            value["postAnalysisRequired"] = json!(true);
+            value["postAnalysisChecklist"] = json!([
+                "summary",
+                "people",
+                "projects",
+                "followUpTasks",
+                "stableMemories",
+            ]);
+        }
+        print_json(&value)
+    } else {
+        if duplicate {
+            println!("interaction {id} (duplicate, skipped)");
+        } else {
+            println!("interaction {id} ({chunk_count} chunks)");
+        }
+        if post_analysis_required {
+            eprintln!(
+                "brain: post-analysis required: summary, people, projects, follow-up tasks, stable memories"
+            );
+        }
+        Ok(())
+    }
+}
+
 pub fn add_interaction(
     conn: &mut Connection,
     json: bool,
@@ -427,33 +509,63 @@ pub fn add_interaction(
     }
     let hash = body.as_deref().map(content_hash);
     let source_id = source_id(conn, args.source_slug)?;
+    let identity_kind = external_kind(args.external_kind);
+    if args.replace_body && body.is_none() {
+        return Err(CliError::Runtime(
+            "--replace-body requires body text".into(),
+        ));
+    }
+    if args.replace_body && (source_id.is_none() || normalize_optional(args.external_id).is_none())
+    {
+        return Err(CliError::Runtime(
+            "--replace-body requires --source and --external-id".into(),
+        ));
+    }
     let existing_by_external = find_external_identity(
         conn,
         "interaction",
         source_id.as_deref(),
-        "record",
+        &identity_kind,
         args.external_id,
     )?;
     if let Some(existing) = existing_by_external.as_deref() {
         if !args.allow_duplicate {
             let tx = conn.transaction()?;
-            enrich_existing_interaction(&tx, existing, &args, source_id.as_deref())?;
+            let count = enrich_existing_interaction(
+                &tx,
+                existing,
+                &args,
+                source_id.as_deref(),
+                &identity_kind,
+                args.replace_body,
+            )?;
             tx.commit()?;
-            return report_record(json, "interaction", existing, true, 0);
+            return report_interaction(json, existing, true, count, requires_post_analysis(&args));
         }
     }
     let existing_by_dup = match hash.as_deref() {
-        Some(hash) => {
-            find_duplicate_interaction(conn, hash, args.external_id, source_id.as_deref())?
-        }
+        Some(hash) => find_duplicate_interaction(
+            conn,
+            hash,
+            &identity_kind,
+            args.external_id,
+            source_id.as_deref(),
+        )?,
         None => None,
     };
     if let Some(existing) = existing_by_dup.as_deref() {
         if !args.allow_duplicate {
             let tx = conn.transaction()?;
-            enrich_existing_interaction(&tx, existing, &args, source_id.as_deref())?;
+            let count = enrich_existing_interaction(
+                &tx,
+                existing,
+                &args,
+                source_id.as_deref(),
+                &identity_kind,
+                args.replace_body,
+            )?;
             tx.commit()?;
-            return report_record(json, "interaction", existing, true, 0);
+            return report_interaction(json, existing, true, count, requires_post_analysis(&args));
         }
     }
     // Reaching here past a match means `--allow-duplicate` forced a new record; it
@@ -463,13 +575,14 @@ pub fn add_interaction(
     let tx = conn.transaction()?;
     tx.execute(
         "INSERT INTO interactions
-         (id, kind, title, body_text, occurred_at, ended_at, location, external_id, original_url, content_hash)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+         (id, kind, title, body_text, summary, occurred_at, ended_at, location, external_id, original_url, content_hash)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
         params![
             id,
             args.kind,
             title,
             body.as_deref(),
+            normalize_optional(args.summary),
             normalize_optional(args.occurred_at),
             normalize_optional(args.ended_at),
             normalize_optional(args.location),
@@ -491,14 +604,14 @@ pub fn add_interaction(
             entity_type: "interaction",
             entity_id: &id,
             source_id: source_id.as_deref(),
-            kind: "record",
+            kind: &identity_kind,
             external_id: args.external_id,
             url: args.original_url,
             force_duplicate,
         },
     )?;
     tx.commit()?;
-    report_record(json, "interaction", &id, false, count)
+    report_interaction(json, &id, false, count, requires_post_analysis(&args))
 }
 
 #[cfg(test)]
@@ -547,13 +660,16 @@ mod tests {
             ended_at: None,
             location: None,
             source_slug: Some("manual"),
+            external_kind: "record",
             external_id,
             original_url: None,
+            summary: None,
             body: Some(body.to_string()),
             links: vec![],
             raw_participants: vec![],
             self_participants: vec![],
             allow_duplicate,
+            replace_body: false,
         }
     }
 

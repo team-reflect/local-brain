@@ -20,7 +20,8 @@ use clap::{Parser, Subcommand};
 use serde_json::json;
 
 use commands::{
-    add, graph as graph_cmd, parse_links, read, report, resolve_optional_text, resolve_text, source,
+    add, graph as graph_cmd, parse_evidence_refs, parse_links, read, report, resolve_optional_text,
+    resolve_text, source,
 };
 use error::CliError;
 use output::{diag, print_json};
@@ -121,6 +122,8 @@ enum AddCommand {
     Document(AddDocumentArgs),
     /// Add a human interaction (meeting, call, note, …).
     Interaction(AddInteractionArgs),
+    /// Add a project/context.
+    Project(AddProjectArgs),
     /// Add a task.
     Task(AddTaskArgs),
 }
@@ -234,6 +237,9 @@ struct AddInteractionArgs {
     /// Upstream source slug, e.g. gmail, google_calendar, google_people.
     #[arg(long)]
     source: Option<String>,
+    /// Upstream identity scope, e.g. record, message, thread, event.
+    #[arg(long, default_value = "record")]
+    external_kind: String,
     /// Stable upstream record id scoped to --source.
     #[arg(long)]
     external_id: Option<String>,
@@ -241,6 +247,8 @@ struct AddInteractionArgs {
     #[arg(long)]
     original_url: Option<String>,
     /// Optional readable body text. Use --text-file for large bodies.
+    #[arg(long)]
+    summary: Option<String>,
     #[arg(long)]
     text: Option<String>,
     /// Optional file containing body text, or '-' to read stdin.
@@ -258,6 +266,39 @@ struct AddInteractionArgs {
     /// Force a new record even if content or external identity already matches.
     #[arg(long)]
     allow_duplicate: bool,
+    /// Replace body text and regenerated chunks on a source-backed re-import.
+    #[arg(long)]
+    replace_body: bool,
+}
+
+#[derive(Parser)]
+struct AddProjectArgs {
+    #[arg(long)]
+    name: String,
+    #[arg(long, default_value = "active")]
+    status: String,
+    #[arg(long)]
+    kind: Option<String>,
+    #[arg(long)]
+    summary: Option<String>,
+    #[arg(long)]
+    notes: Option<String>,
+    #[arg(long)]
+    started_on: Option<String>,
+    #[arg(long)]
+    target_date: Option<String>,
+    #[arg(long)]
+    source: Option<String>,
+    #[arg(long, default_value = "record")]
+    external_kind: String,
+    #[arg(long)]
+    external_id: Option<String>,
+    #[arg(long)]
+    original_url: Option<String>,
+    #[arg(long = "link", value_name = "KIND:ID")]
+    links: Vec<String>,
+    #[arg(long)]
+    allow_duplicate: bool,
 }
 
 #[derive(Parser)]
@@ -270,6 +311,9 @@ struct AddTaskArgs {
     due_at: Option<String>,
     #[arg(long = "link", value_name = "KIND:ID")]
     links: Vec<String>,
+    /// Exact source chunk evidence, e.g. `interaction:01ABC#0`.
+    #[arg(long = "evidence", value_name = "DOCUMENT_OR_INTERACTION:ID#CHUNK")]
+    evidence: Vec<String>,
 }
 
 #[derive(Parser)]
@@ -280,6 +324,9 @@ struct RememberArgs {
     claim: String,
     #[arg(long = "link", value_name = "KIND:ID")]
     links: Vec<String>,
+    /// Exact source chunk evidence, e.g. `interaction:01ABC#0`.
+    #[arg(long = "evidence", value_name = "DOCUMENT_OR_INTERACTION:ID#CHUNK")]
+    evidence: Vec<String>,
 }
 
 #[derive(Parser)]
@@ -505,12 +552,34 @@ fn run(cli: Cli) -> Result<(), CliError> {
                         ended_at: a.ended_at.as_deref(),
                         location: a.location.as_deref(),
                         source_slug: a.source.as_deref(),
+                        external_kind: &a.external_kind,
                         external_id: a.external_id.as_deref(),
                         original_url: a.original_url.as_deref(),
+                        summary: a.summary.as_deref(),
                         body: resolve_optional_text(a.text.as_deref(), a.text_file.as_deref())?,
                         links: parse_links(&a.links)?,
                         raw_participants: a.participants.iter().map(String::as_str).collect(),
                         self_participants: a.self_participants.iter().map(String::as_str).collect(),
+                        allow_duplicate: a.allow_duplicate,
+                        replace_body: a.replace_body,
+                    },
+                ),
+                AddCommand::Project(a) => add::add_project(
+                    &mut conn,
+                    json,
+                    add::AddProjectArgs {
+                        name: &a.name,
+                        status: &a.status,
+                        kind: a.kind.as_deref(),
+                        summary: a.summary.as_deref(),
+                        notes: a.notes.as_deref(),
+                        started_on: a.started_on.as_deref(),
+                        target_date: a.target_date.as_deref(),
+                        source_slug: a.source.as_deref(),
+                        external_kind: &a.external_kind,
+                        external_id: a.external_id.as_deref(),
+                        original_url: a.original_url.as_deref(),
+                        links: parse_links(&a.links)?,
                         allow_duplicate: a.allow_duplicate,
                     },
                 ),
@@ -523,6 +592,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
                         due_at: a.due_at.as_deref(),
                         project_id: None,
                         links: parse_links(&a.links)?,
+                        evidence: parse_evidence_refs(&a.evidence)?,
                     },
                 ),
             }
@@ -550,6 +620,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
                     kind: &a.kind,
                     claim: &a.claim,
                     links: parse_links(&a.links)?,
+                    evidence: parse_evidence_refs(&a.evidence)?,
                 },
             )
         }

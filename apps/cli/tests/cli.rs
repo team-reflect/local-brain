@@ -518,6 +518,161 @@ fn source_ensure_is_idempotent() {
 }
 
 #[test]
+fn add_project_dedupes_by_source_identity_and_name() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    run_json(
+        &db,
+        &[
+            "--json", "source", "ensure", "--slug", "gmail", "--name", "Gmail",
+        ],
+    );
+
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "project",
+            "--name",
+            "Everlywell Integration",
+            "--summary",
+            "PWN Labs Module go-live context.",
+            "--source",
+            "gmail",
+            "--external-kind",
+            "thread-cluster",
+            "--external-id",
+            "everlywell-integration",
+        ],
+    );
+    assert_eq!(first["kind"], "project");
+    assert_eq!(first["isDuplicate"], false);
+
+    let by_identity = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "project",
+            "--name",
+            "Different Name",
+            "--source",
+            "gmail",
+            "--external-kind",
+            "thread-cluster",
+            "--external-id",
+            "everlywell-integration",
+        ],
+    );
+    assert_eq!(by_identity["isDuplicate"], true);
+    assert_eq!(by_identity["id"], first["id"]);
+
+    let by_name = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "project",
+            "--name",
+            " Everlywell   Integration ",
+        ],
+    );
+    assert_eq!(by_name["isDuplicate"], true);
+    assert_eq!(by_name["id"], first["id"]);
+}
+
+#[test]
+fn add_interaction_keeps_message_and_thread_external_ids_separate() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    run_json(
+        &db,
+        &[
+            "--json", "source", "ensure", "--slug", "gmail", "--name", "Gmail",
+        ],
+    );
+
+    let message = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Message import",
+            "--summary",
+            "Message-level summary.",
+            "--text",
+            "Message-level body.",
+            "--source",
+            "gmail",
+            "--external-kind",
+            "message",
+            "--external-id",
+            "abc123",
+        ],
+    );
+    let thread = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Thread import",
+            "--summary",
+            "Thread-level summary.",
+            "--text",
+            "Thread-level body.",
+            "--source",
+            "gmail",
+            "--external-kind",
+            "thread",
+            "--external-id",
+            "abc123",
+        ],
+    );
+    assert_ne!(message["id"], thread["id"]);
+    let record = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Legacy record import",
+            "--summary",
+            "Record-level summary.",
+            "--text",
+            "Message-level body.",
+            "--source",
+            "gmail",
+            "--external-id",
+            "abc123",
+        ],
+    );
+    assert_ne!(record["id"], message["id"]);
+    assert_ne!(record["id"], thread["id"]);
+
+    let conn = Connection::open(&db).unwrap();
+    let summary: String = conn
+        .query_row(
+            "SELECT summary FROM interactions WHERE id = ?1",
+            [thread["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(summary, "Thread-level summary.");
+}
+
+#[test]
 fn add_person_stores_handles_and_external_identity() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
@@ -797,6 +952,134 @@ fn add_interaction_dedupes_by_source_and_preserves_raw_participants() {
 }
 
 #[test]
+fn add_interaction_replace_body_updates_source_backed_record_and_chunks() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    run_json(
+        &db,
+        &[
+            "--json", "source", "ensure", "--slug", "granola", "--name", "Granola",
+        ],
+    );
+    let old_body = "old transcript marker ".repeat(90);
+    let new_body = "raw transcript replacement from Granola";
+
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Granola meeting",
+            "--text",
+            old_body.as_str(),
+            "--source",
+            "granola",
+            "--external-id",
+            "meeting-1",
+        ],
+    );
+    assert_eq!(first["isDuplicate"], false);
+    assert!(
+        first["chunkCount"].as_i64().unwrap() > 1,
+        "test setup needs multiple chunks so stale chunk rows are visible"
+    );
+    let interaction_link = format!("interaction:{}", first["id"].as_str().unwrap());
+    let interaction_evidence = format!("{interaction_link}#0");
+    let task = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "task",
+            "--title",
+            "Transcript follow-up",
+            "--link",
+            &interaction_link,
+            "--evidence",
+            &interaction_evidence,
+        ],
+    );
+
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Granola meeting",
+            "--text",
+            new_body,
+            "--summary",
+            "Compact AI summary.",
+            "--source",
+            "granola",
+            "--external-id",
+            "meeting-1",
+            "--replace-body",
+        ],
+    );
+    assert_eq!(second["isDuplicate"], true);
+    assert_eq!(second["id"], first["id"]);
+    assert_eq!(second["chunkCount"], 1);
+
+    let conn = Connection::open(&db).unwrap();
+    let (body, summary): (String, String) = conn
+        .query_row(
+            "SELECT body_text, summary FROM interactions WHERE id = ?1",
+            [first["id"].as_str().unwrap()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(body, new_body);
+    assert_eq!(summary, "Compact AI summary.");
+
+    let stale_chunks: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM content_chunks
+             WHERE record_type = 'interaction'
+               AND record_id = ?1
+               AND text LIKE '%old transcript marker%'",
+            [first["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stale_chunks, 0);
+    let fresh_chunks: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM content_chunks
+             WHERE record_type = 'interaction'
+               AND record_id = ?1
+               AND text LIKE '%raw transcript replacement%'",
+            [first["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(fresh_chunks, 1);
+    let evidence_refs: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM evidence_refs er
+             JOIN content_chunks cc ON cc.id = er.chunk_id
+             WHERE er.subject_type = 'task'
+               AND er.subject_id = ?1
+               AND cc.record_type = 'interaction'
+               AND cc.record_id = ?2
+               AND cc.chunk_index = 0",
+            (task["id"].as_str().unwrap(), first["id"].as_str().unwrap()),
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(evidence_refs, 1);
+}
+
+#[test]
 fn add_interaction_stores_calendar_fields_and_resolves_known_participants() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
@@ -919,6 +1202,44 @@ fn add_interaction_stores_calendar_fields_and_resolves_known_participants() {
         )
         .unwrap();
     assert_eq!(unresolved_visitor, 1);
+}
+
+#[test]
+fn granola_interaction_reports_post_analysis_requirement() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    run_json(
+        &db,
+        &[
+            "--json", "source", "ensure", "--slug", "granola", "--name", "Granola",
+        ],
+    );
+
+    let interaction = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Granola transcript",
+            "--text",
+            "Raw transcript body.",
+            "--summary",
+            "Short summary.",
+            "--source",
+            "granola",
+            "--external-id",
+            "meeting-analysis-1",
+        ],
+    );
+
+    assert_eq!(interaction["postAnalysisRequired"], true);
+    let checklist = interaction["postAnalysisChecklist"].as_array().unwrap();
+    assert!(checklist.iter().any(|item| item == "people"));
+    assert!(checklist.iter().any(|item| item == "followUpTasks"));
 }
 
 #[test]
@@ -1056,6 +1377,40 @@ fn add_interaction_external_id_reimport_enriches_start_time() {
         )
         .unwrap();
     assert_eq!(occurred_at, "2026-07-09");
+}
+
+#[test]
+fn add_interaction_replace_body_rejects_empty_body() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    run_json(
+        &db,
+        &[
+            "--json", "source", "ensure", "--slug", "granola", "--name", "Granola",
+        ],
+    );
+
+    let out = run(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Granola meeting",
+            "--text",
+            "   ",
+            "--source",
+            "granola",
+            "--external-id",
+            "meeting-1",
+            "--replace-body",
+        ],
+    );
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("body text"));
 }
 
 #[test]
@@ -2034,6 +2389,153 @@ fn show_task_returns_camelcase_fields() {
     let shown = run_json(&db, &["--json", "show", "task", id]);
     assert_eq!(shown["title"], "Ship it");
     assert_eq!(shown["id"], id);
+}
+
+#[test]
+fn add_task_links_to_origin_interaction_and_project() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let interaction = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Transcript",
+            "--text",
+            "Discussed a follow-up task.",
+        ],
+    );
+    let project = run_json(
+        &db,
+        &["--json", "add", "project", "--name", "Transcript Follow-up"],
+    );
+    let interaction_link = format!("interaction:{}", interaction["id"].as_str().unwrap());
+    let interaction_evidence = format!("{}#0", interaction_link);
+    let project_link = format!("project:{}", project["id"].as_str().unwrap());
+    let task = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "task",
+            "--title",
+            "Do the follow-up",
+            "--link",
+            &interaction_link,
+            "--link",
+            &project_link,
+            "--evidence",
+            &interaction_evidence,
+        ],
+    );
+    assert_eq!(task["evidence"], 1);
+    let task_id = task["id"].as_str().unwrap();
+    let conn = Connection::open(&db).unwrap();
+    let (project_id, origin_interaction_id): (String, String) = conn
+        .query_row(
+            "SELECT project_id, origin_interaction_id FROM tasks WHERE id = ?1",
+            [task_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(project_id, project["id"].as_str().unwrap());
+    assert_eq!(origin_interaction_id, interaction["id"].as_str().unwrap());
+
+    let task_interactions: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM task_interactions WHERE task_id = ?1 AND interaction_id = ?2",
+            (task_id, interaction["id"].as_str().unwrap()),
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(task_interactions, 1);
+    let project_tasks: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM project_tasks WHERE task_id = ?1 AND project_id = ?2",
+            (task_id, project["id"].as_str().unwrap()),
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(project_tasks, 1);
+    let evidence_refs: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM evidence_refs er
+             JOIN content_chunks cc ON cc.id = er.chunk_id
+             WHERE er.subject_type = 'task'
+               AND er.subject_id = ?1
+               AND cc.record_type = 'interaction'
+               AND cc.record_id = ?2
+               AND cc.chunk_index = 0",
+            (task_id, interaction["id"].as_str().unwrap()),
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(evidence_refs, 1);
+}
+
+#[test]
+fn remember_can_cite_source_interaction_chunk() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let interaction = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Transcript",
+            "--text",
+            "Alex prefers transcript-backed memories.",
+        ],
+    );
+    let interaction_link = format!("interaction:{}", interaction["id"].as_str().unwrap());
+    let interaction_evidence = format!("{}#0", interaction_link);
+
+    let memory = run_json(
+        &db,
+        &[
+            "--json",
+            "remember",
+            "--kind",
+            "preference",
+            "--claim",
+            "Alex prefers transcript-backed memories.",
+            "--link",
+            &interaction_link,
+            "--evidence",
+            &interaction_evidence,
+        ],
+    );
+
+    assert_eq!(memory["links"], 1);
+    assert_eq!(memory["evidence"], 1);
+    let conn = Connection::open(&db).unwrap();
+    let evidence_refs: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM evidence_refs er
+             JOIN content_chunks cc ON cc.id = er.chunk_id
+             WHERE er.subject_type = 'memory'
+               AND er.subject_id = ?1
+               AND cc.record_type = 'interaction'
+               AND cc.record_id = ?2
+               AND cc.chunk_index = 0",
+            (
+                memory["id"].as_str().unwrap(),
+                interaction["id"].as_str().unwrap(),
+            ),
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(evidence_refs, 1);
 }
 
 #[test]

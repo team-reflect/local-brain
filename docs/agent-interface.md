@@ -49,12 +49,16 @@ brain add person-from-email --full-name "Maya Chen" --email maya@example.com --s
 brain add document --title "Kitchen remodel notes" --text-file notes.md
 brain add interaction --kind meeting --title "Call with Maya" --text-file transcript.txt
 brain add interaction --kind email --title "Email from Maya" --text-file body.txt --source gmail --external-id msg-123 --participant "from:Maya Chen <maya@example.com>" --json
+brain add interaction --kind email --title "Everlywell Integration" --text-file digest.md --summary "Production credential setup and go-live readiness." --source gmail --external-kind thread --external-id thread-123 --json
+brain add interaction --kind meeting --title "Granola: Northwind kickoff" --text-file transcript.txt --summary "Kickoff decisions and follow-ups." --source granola --external-id meeting-123 --replace-body --json
 brain add interaction --kind event --title "Calendar: Hotel stay" --occurred-at 2026-07-09 --ended-at 2026-07-12 --location "Louma" --source google_calendar --external-id event-123 --self-participant "attendee:You <alex@example.com>" --json
+brain add project --name "Kitchen remodel" --summary "Budget, contractor, and cabinet decision context." --source agent --external-kind cluster --external-id kitchen-remodel --json
 brain add asset --file maya.jpg --link person:maya --role avatar
 brain add asset --file invoice.pdf --link interaction:email-id --text-file extracted.txt --text-source importer --json
 brain asset text set asset-id --text-file - --source importer --json
-brain add task --title "Send Maya the revised budget" --link project:kitchen-remodel
-brain remember --kind decision --claim "Maya approved the revised budget range" --link person:maya
+brain add task --title "Send Maya the revised budget" --link project:<id>
+brain add task --title "Send cardiologist shortlist to Dr. Vargas" --link interaction:<id> --link project:<id> --link person:<id> --evidence interaction:<id>#0 --json
+brain remember --kind decision --claim "Maya approved the revised budget range" --link person:maya --link interaction:<id> --evidence interaction:<id>#0
 ```
 
 Query records:
@@ -104,9 +108,15 @@ Before adding a record:
 
 1. Search for likely duplicates.
 2. Reuse existing people, organizations, projects, and tasks when possible.
-3. Include title, kind, date, and provenance metadata when known.
-4. Link the new record to relevant people, organizations, projects, or tasks.
-5. Let extraction create hidden memories unless the agent has an explicit atomic claim
+3. Include title, kind, date, and provenance metadata when known. For source-backed
+   imports, use the correct external identity scope, such as Gmail `--external-kind
+   thread` versus `message`.
+4. Link the new record to relevant people, organizations, projects, or tasks. Search
+   existing projects before creating one; auto-create projects only for repeated or
+   high-signal ongoing contexts.
+5. When a task or memory is derived from a source record, cite the exact source chunk
+   with `--evidence document:<id>#<chunk>` or `--evidence interaction:<id>#<chunk>`.
+6. Let extraction create hidden memories unless the agent has an explicit atomic claim
    to store.
 
 When adding a person:
@@ -126,6 +136,10 @@ When adding a person:
 When importing emails or calendar events:
 
 - Store readable body text as an interaction.
+- Prefer thread-level digests for long Gmail conversations; store raw message-level
+  bodies only when the message is standalone and safe.
+- Use `--summary` for a compact redacted import summary, while still passing
+  `--text-file` or `--text` for searchable body/digest text.
 - Pass provider identity through generic `--source` and `--external-id`.
 - For calendar events, map structured fields onto the interaction before notes:
   `--occurred-at` for start, `--ended-at` for end, `--location` for venue or
@@ -143,6 +157,22 @@ When importing emails or calendar events:
   not as the primary storage for start/end/location/attendee data.
 - Calendar items with a title and structured fields may omit `--text` / `--text-file`.
 - Store binary attachments through `brain add asset --link interaction:<id>`.
+
+When importing Granola meetings:
+
+- Always fetch and store the raw transcript as `interactions.body_text` through
+  `--text-file`; it is the durable evidence the brain should cite.
+- Store Granola's AI note or agent-written digest in `--summary`, not in place of the
+  transcript.
+- Re-import an existing meeting with the same `--source granola --external-id` and
+  `--replace-body` when the transcript becomes available or changes, so search chunks
+  are regenerated from the raw transcript.
+- Treat `postAnalysisRequired: true` in `brain add interaction --json` output as a
+  hard follow-up, not a suggestion.
+- Before the import is considered complete, run post-analysis: link participants and
+  high-signal mentioned people, link or create the project context, write explicit
+  follow-up tasks linked back to `interaction:<id>` with chunk evidence, and store
+  only transcript-backed memories with chunk evidence.
 
 When adding an asset:
 
@@ -163,7 +193,7 @@ When adding a memory:
 - Keep it atomic.
 - Use one of: fact, preference, decision, commitment, instruction, risk, idea.
 - Link it to visible records.
-- Add evidence when the claim came from a document or interaction.
+- Add chunk evidence when the claim came from a document or interaction.
 
 ## Skill Contract
 
