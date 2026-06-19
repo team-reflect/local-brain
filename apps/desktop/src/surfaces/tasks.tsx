@@ -78,7 +78,7 @@ export function TasksSurface(): ReactNode {
   ]
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-4">
+    <div className="mx-auto flex h-full min-h-0 max-w-4xl flex-col gap-4">
       <div className="flex justify-end">
         <div className="flex items-center gap-1">
           {FILTERS.map((option) => (
@@ -105,6 +105,7 @@ export function TasksSurface(): ReactNode {
         isLoading={tasks.isLoading}
         onRowClick={(task) => navigate({ kind: 'task', id: task.id })}
         empty={<EmptyState title="No tasks in this view" />}
+        className="flex-1"
       />
     </div>
   )
