@@ -1,6 +1,25 @@
 # PR #48 Bugbot fixes — status
 
-State: **all four original findings + eight follow-ups fixed, tested, and verified locally.**
+State: **all four original findings + ten follow-ups fixed, tested, and verified locally.**
+
+## Follow-up (fresh current-head Bugbot findings #13–#14, head `897c69d` → `79fbc8a`)
+
+Bugbot re-reviewed head `897c69d1b0609a5ada1926a963e5e0ebe96aa58c` (NEUTRAL) and
+flagged two fresh current-head issues, both in `insert_person_handles` in
+`apps/cli/src/commands/add.rs`.
+
+| # | BUGBOT | Sev | Finding | Fix | Tests |
+|---|--------|-----|---------|-----|-------|
+| 13 | `91f03bec` (comment `3439926606`) | Medium | External dedupe ignores email owner — when `add_person`/`add_person_from_email` resolve a duplicate via `find_external_identity`, they skip the email-based `find_duplicate_person` path but still call `insert_person_handles`. Because `person_emails` is unique only per `person_id`, the same normalized email could be attached to a **second** active person, breaking one-person-per-email | The email loop now skips any address a *different* active person already owns (matching either `lower(people.primary_email)` or `person_emails.normalized_email`, the same columns `find_duplicate_person` uses). It is a no-op on the new-person and email-dedupe paths, so only the external-identity path that bypassed the invariant is affected | `add.rs` `external_identity_dedupe_does_not_steal_another_persons_email` |
+| 14 | `edd77a86` (comment `3439926608`) | Low | Primary promotion uses raw strings — promotion compared a denormalized `people.primary_email`/`primary_phone` to imported handles with exact string equality, so a legacy primary that means the **same** lowercased email or differently-formatted phone never received `is_primary = 1` | Emails now compare case-insensitively via `normalize_email`; phones compare on their digit-only `normalize_phone` form (requiring a non-empty normalized value on both sides). The index-0 fallback is unchanged | `add.rs` `legacy_denormalized_primary_syncs_to_handle_despite_formatting` |
+
+Verification (run at head `79fbc8a`): `git diff --check` clean, `cargo fmt -p
+brain-cli -- --check` clean, `cargo clippy -p brain-cli --all-targets` no new
+warnings (only the pre-existing `large_enum_variant`), `cargo test -p brain-cli`
+= 25 unit + 28 integration + 2 skill all pass. Both new tests were confirmed to
+fail before their fix. No JS touched.
+
+> Bugbot must re-run against the pushed head before these findings are settled.
 
 ## Follow-up (fresh current-head Bugbot finding #12, head `5e09c39`/`bb9cf9d`)
 
