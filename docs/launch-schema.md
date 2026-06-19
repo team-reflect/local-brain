@@ -18,6 +18,8 @@ The schema should make everyday questions easy:
 - Store imported readable text directly in SQLite.
 - Store binary asset bytes as app-managed files under the chosen brain root; SQLite owns
   the asset manifest, typed links, provenance, and deletion state.
+- Store optional asset-derived text in SQLite so imported attachments can be searched
+  without making binary bytes the database payload.
 - Preserve provenance on the record that owns the text.
 - Derive chunks for search and embeddings from documents and interactions.
 - Keep memories hidden by default and link them to visible records.
@@ -232,6 +234,24 @@ Suggested `kind` values: `avatar`, `logo`, `image`, `screenshot`, `attachment`,
 
 `storage_path` is app-relative, for example `assets/pasted-20260618-ab12cd34.png` or
 `assets/objects/ab/abcdef...jpg`. Absolute paths stay in provenance fields only.
+
+### `asset_texts`
+
+Optional durable text extracted from, or supplied with, an asset. This is the local
+path for importer-provided email attachment text and safe UTF-8 text-like files. PDFs,
+images, and other binary files remain searchable by metadata until a later local
+extractor or OCR pass populates this table.
+
+Key columns:
+
+- `asset_id`
+- `text`
+- `text_source`
+- `content_hash`
+- `created_at`
+- `updated_at`
+
+Allowed `text_source` values: `importer`, `local_extraction`, `manual`.
 
 ### `sources` and `external_identities`
 
@@ -480,6 +500,11 @@ Each join table should include:
          +----------------+       +-------------+       +------------+
          | evidence_refs  |       | asset_links |------>|   assets   |
          +----------------+       +-------------+       +------------+
+                                                       ^
+                                                       |
+                                                 +-------------+
+                                                 | asset_texts |
+                                                 +-------------+
            ^      ^     ^
            |      |     |
       +---------+ | +--------------------+
@@ -494,9 +519,12 @@ Each join table should include:
 
 ## Derived Indexes
 
-- FTS5 tables over `documents.body_text`, `interactions.body_text`,
-  `content_chunks.text`, task titles/descriptions, people names, organization names,
-  and project names.
+- FTS5 tables over document title/body, interaction title/body, `content_chunks.text`,
+  and a derived asset projection (`assets_fts`) covering filename/title, kind, MIME
+  type, storage path, original URL, link captions, linked record titles, and
+  `asset_texts.text`.
+- People, organizations, projects, and tasks currently use deterministic name/title
+  matching for global search; they do not have dedicated FTS tables yet.
 - Vector index over `content_chunks` (`chunk_embeddings` + the `chunk_vectors` vec0
   virtual table; sqlite-vec, 384-dim cosine). Derived and rebuildable; vectors are
   generated on demand by the desktop `fastembed` runtime. See `docs/reflect-embeddings/`.

@@ -20,6 +20,7 @@ const ROUTES: Route[] = [
   { kind: 'task', id: 't-1' },
   { kind: 'document', id: 'd-1' },
   { kind: 'interaction', id: 'i-1' },
+  { kind: 'asset', id: 'a-1' },
   { kind: 'ask' },
   { kind: 'ask', conversationId: 'c-1' },
   { kind: 'settings' },
@@ -60,5 +61,6 @@ describe('route serialization', () => {
     expect(sectionForRoute({ kind: 'task', id: 't' })).toBe('tasks')
     expect(sectionForRoute({ kind: 'person', id: 'p' })).toBe('network')
     expect(sectionForRoute({ kind: 'project', id: 'p' })).toBe('projects')
+    expect(sectionForRoute({ kind: 'asset', id: 'a' })).toBe('today')
   })
 })

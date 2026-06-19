@@ -107,6 +107,38 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
         }
     }
 
+    let mut asset_stmt = conn.prepare(
+        "SELECT s.asset_id,
+                s.title,
+                s.subtitle,
+                COALESCE(
+                  NULLIF(snippet(assets_fts, 0, '[', ']', '…', 10), ''),
+                  NULLIF(snippet(assets_fts, 2, '[', ']', '…', 10), ''),
+                  NULLIF(snippet(assets_fts, 3, '[', ']', '…', 10), ''),
+                  NULLIF(snippet(assets_fts, 1, '[', ']', '…', 10), '')
+                ),
+                bm25(assets_fts, 10.0, 2.0, 2.0, 1.0)
+         FROM assets_fts
+         JOIN asset_search s ON s.rowid = assets_fts.rowid
+         JOIN assets a ON a.id = s.asset_id
+         WHERE assets_fts MATCH ?1 AND a.archived_at IS NULL
+         ORDER BY bm25(assets_fts, 10.0, 2.0, 2.0, 1.0)
+         LIMIT ?2",
+    )?;
+    let asset_rows = asset_stmt.query_map(params![mq, limit as i64], |row| {
+        Ok(json!({
+            "kind": "asset",
+            "id": row.get::<_, String>(0)?,
+            "title": row.get::<_, String>(1)?,
+            "subtitle": row.get::<_, Option<String>>(2)?,
+            "snippet": row.get::<_, Option<String>>(3)?,
+            "score": lexical_score(row.get::<_, f64>(4)?),
+        }))
+    })?;
+    for row in asset_rows {
+        hits.push(row?);
+    }
+
     for (table, name_col, kind) in [
         ("people", "full_name", "person"),
         ("organizations", "name", "organization"),
@@ -314,6 +346,7 @@ pub fn show(conn: &Connection, json: bool, kind: &str, id: &str) -> Result<(), C
             "SELECT id, title, status AS subtitle, description, due_at, scheduled_for, priority, project_id FROM tasks WHERE id = ?1",
             id,
         )?,
+        "asset" => fetch_asset(conn, id)?,
         other => return Err(CliError::Runtime(format!("unknown record kind '{other}'"))),
     };
     let Some(record) = record else {
@@ -326,6 +359,77 @@ pub fn show(conn: &Connection, json: bool, kind: &str, id: &str) -> Result<(), C
         println!("{}", serde_json::to_string_pretty(&record)?);
         Ok(())
     }
+}
+
+fn fetch_asset(conn: &Connection, id: &str) -> Result<Option<Value>, CliError> {
+    let Some(mut record) = fetch_one(
+        conn,
+        "SELECT a.id,
+                COALESCE(NULLIF(trim(a.original_filename), ''), a.storage_path) AS title,
+                a.kind AS subtitle,
+                a.kind,
+                a.mime_type,
+                a.byte_size,
+                a.storage_path,
+                a.content_hash,
+                a.original_filename,
+                a.original_path,
+                a.original_url,
+                at.text_source,
+                at.content_hash AS text_content_hash,
+                length(at.text) AS text_length,
+                at.updated_at AS text_updated_at,
+                a.created_at,
+                a.updated_at
+         FROM assets a
+         LEFT JOIN asset_texts at ON at.asset_id = a.id
+         WHERE a.id = ?1 AND a.archived_at IS NULL",
+        id,
+    )?
+    else {
+        return Ok(None);
+    };
+
+    let links = asset_links(conn, id)?;
+    if let Some(obj) = record.as_object_mut() {
+        obj.insert("linkedRecords".to_string(), Value::Array(links));
+    }
+    Ok(Some(record))
+}
+
+fn asset_links(conn: &Connection, asset_id: &str) -> Result<Vec<Value>, CliError> {
+    let mut stmt = conn.prepare(
+        "SELECT al.record_type,
+                al.record_id,
+                al.role,
+                al.caption,
+                COALESCE(p.full_name, o.name, pr.name, t.title, d.title, i.title) AS title
+         FROM asset_links al
+         LEFT JOIN people p
+           ON al.record_type = 'person' AND p.id = al.record_id AND p.archived_at IS NULL
+         LEFT JOIN organizations o
+           ON al.record_type = 'organization' AND o.id = al.record_id AND o.archived_at IS NULL
+         LEFT JOIN projects pr
+           ON al.record_type = 'project' AND pr.id = al.record_id AND pr.archived_at IS NULL
+         LEFT JOIN tasks t
+           ON al.record_type = 'task' AND t.id = al.record_id AND t.archived_at IS NULL
+         LEFT JOIN documents d
+           ON al.record_type = 'document' AND d.id = al.record_id AND d.archived_at IS NULL
+         LEFT JOIN interactions i
+           ON al.record_type = 'interaction' AND i.id = al.record_id AND i.archived_at IS NULL
+         WHERE al.asset_id = ?1
+         ORDER BY al.created_at, al.id",
+    )?;
+    let rows = stmt.query_map(params![asset_id], |row| {
+        Ok(json!({
+            "kind": row.get::<_, String>(0)?,
+            "id": row.get::<_, String>(1)?,
+            "role": row.get::<_, Option<String>>(2)?,
+            "caption": row.get::<_, Option<String>>(3)?,
+            "title": row.get::<_, Option<String>>(4)?,
+        }))
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(CliError::from)
 }
 
 /// Fetch one row as a JSON object keyed by column/alias name (camelCase-ish).

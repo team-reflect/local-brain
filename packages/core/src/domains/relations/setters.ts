@@ -23,6 +23,7 @@ export type LinkableKind =
   | 'task'
   | 'document'
   | 'interaction'
+  | 'asset'
 
 export interface LinkRef {
   kind: LinkableKind
@@ -38,6 +39,42 @@ type Unlinker = (id: IdFor) => Compilable
  * pages' linked-record sections.
  */
 const UNLINKERS: Record<string, Unlinker> = {
+  'asset|person': (id) =>
+    db
+      .deleteFrom('assetLinks')
+      .where('assetId', '=', id('asset'))
+      .where('recordType', '=', 'person')
+      .where('recordId', '=', id('person')),
+  'asset|organization': (id) =>
+    db
+      .deleteFrom('assetLinks')
+      .where('assetId', '=', id('asset'))
+      .where('recordType', '=', 'organization')
+      .where('recordId', '=', id('organization')),
+  'asset|project': (id) =>
+    db
+      .deleteFrom('assetLinks')
+      .where('assetId', '=', id('asset'))
+      .where('recordType', '=', 'project')
+      .where('recordId', '=', id('project')),
+  'asset|task': (id) =>
+    db
+      .deleteFrom('assetLinks')
+      .where('assetId', '=', id('asset'))
+      .where('recordType', '=', 'task')
+      .where('recordId', '=', id('task')),
+  'asset|document': (id) =>
+    db
+      .deleteFrom('assetLinks')
+      .where('assetId', '=', id('asset'))
+      .where('recordType', '=', 'document')
+      .where('recordId', '=', id('document')),
+  'asset|interaction': (id) =>
+    db
+      .deleteFrom('assetLinks')
+      .where('assetId', '=', id('asset'))
+      .where('recordType', '=', 'interaction')
+      .where('recordId', '=', id('interaction')),
   'organization|person': (id) =>
     db
       .deleteFrom('affiliations')

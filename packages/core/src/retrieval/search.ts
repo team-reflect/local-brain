@@ -5,10 +5,11 @@ import { combineScore, lexicalScore, recencyScore } from './ranking'
 import { toLikePattern, toMatchQuery } from './match-query'
 
 /**
- * Global search across the six visible record types, for the command/search
+ * Global search across the visible record types, for the command/search
  * palette and the search surface. Documents and interactions are searched by
  * full text (FTS5 over title + body, title-weighted); people, organizations,
- * projects, and tasks are matched on their names/titles (no body to index).
+ * projects, and tasks are matched on their names/titles; assets use their own
+ * FTS projection over metadata, linked-record context, and optional local text.
  * Results are merged and ranked into one list.
  *
  * This is the navigational/find surface. Grounded retrieval for Ask and agents
@@ -21,7 +22,7 @@ export interface SearchHit {
   id: string
   title: string
   subtitle: string | null
-  /** A short matched excerpt for documents/interactions; null for name hits. */
+  /** A short matched excerpt for FTS hits; null for name hits. */
   snippet: string | null
   score: number
 }
@@ -43,7 +44,7 @@ interface FtsRecordRow {
   id: string
   title: string | null
   subtitle: string | null
-  snippet: string
+  snippet: string | null
   recordDate: string | null
   bm25: number
 }
@@ -106,6 +107,29 @@ export async function globalSearch(query: string, options: SearchOptions = {}): 
       `
         .execute(db)
         .then((r) => r.rows.map((row) => ftsHit('interaction', row, now))),
+    )
+  }
+
+  if (wants(options.kinds, 'asset')) {
+    tasks.push(
+      sql<FtsRecordRow>`
+        SELECT s.asset_id AS "id", s.title AS "title", s.subtitle AS "subtitle",
+               COALESCE(
+                 NULLIF(snippet(assets_fts, 0, '[', ']', '…', 10), ''),
+                 NULLIF(snippet(assets_fts, 2, '[', ']', '…', 10), ''),
+                 NULLIF(snippet(assets_fts, 3, '[', ']', '…', 10), ''),
+                 NULLIF(snippet(assets_fts, 1, '[', ']', '…', 10), '')
+               ) AS "snippet",
+               s.updated_at AS "recordDate",
+               bm25(assets_fts, 10.0, 2.0, 2.0, 1.0) AS "bm25"
+        FROM assets_fts
+        JOIN asset_search s ON s.rowid = assets_fts.rowid
+        JOIN assets a ON a.id = s.asset_id
+        WHERE assets_fts MATCH ${match} AND a.archived_at IS NULL
+        ORDER BY bm25(assets_fts, 10.0, 2.0, 2.0, 1.0) LIMIT ${perKind}
+      `
+        .execute(db)
+        .then((r) => r.rows.map((row) => ftsHit('asset', row, now))),
     )
   }
 
@@ -182,7 +206,7 @@ function ftsHit(kind: RecordKind, row: FtsRecordRow, now: Date): SearchHit {
     id: row.id,
     title: row.title ?? '(untitled)',
     subtitle: row.subtitle,
-    snippet: row.snippet,
+    snippet: row.snippet ?? null,
     score: combineScore({ lexical, recency }),
   }
 }

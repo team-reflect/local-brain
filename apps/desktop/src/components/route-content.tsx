@@ -12,6 +12,7 @@ import { TaskDetail } from '../surfaces/detail/task'
 import { DocumentDetail } from '../surfaces/detail/document'
 import { InteractionDetail } from '../surfaces/detail/interaction'
 import { OrganizationDetail } from '../surfaces/detail/organization'
+import { AssetDetail } from '../surfaces/detail/asset'
 
 /** The single place routes become surfaces. */
 export function RouteContent({ route }: { route: Route }): ReactNode {
@@ -36,6 +37,8 @@ export function RouteContent({ route }: { route: Route }): ReactNode {
       return <DocumentDetail id={route.id} />
     case 'interaction':
       return <InteractionDetail id={route.id} />
+    case 'asset':
+      return <AssetDetail id={route.id} />
     case 'ask':
       return <AskSurface conversationId={route.conversationId} />
     case 'settings':

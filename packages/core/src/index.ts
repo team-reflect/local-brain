@@ -108,6 +108,16 @@ export {
   type InteractionParticipantInput,
 } from './domains/interactions/setters'
 
+// Assets
+export {
+  getAsset,
+  getAssetDetail,
+  listAssetLinkedRecords,
+  type Asset,
+  type AssetText,
+  type AssetDetail,
+} from './domains/assets/getters'
+
 // Organizations
 export {
   listOrganizations,

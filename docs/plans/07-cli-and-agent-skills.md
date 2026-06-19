@@ -31,6 +31,9 @@ path resolution, sidecar bundling, installation checks.
   then contact handles, then normalized name.
 - Email/calendar interactions can preserve unresolved raw participants without creating
   people.
+- Assets are first-class searchable records by metadata, links, and optional local
+  `asset_texts`; importers can pass attachment text without coupling `brain` to a
+  provider.
 - Agents can search and ask, but cited answers still come from document or interaction
   chunks.
 - stdout carries data only; diagnostics and warnings go to stderr.
@@ -77,6 +80,8 @@ path resolution, sidecar bundling, installation checks.
    - `brain add interaction --kind meeting --title ... --text-file ...`
    - `brain add interaction --kind email --source gmail --external-id ... --participant ...`
    - `brain add asset --file ... --link person:... --role avatar`
+   - `brain add asset --file ... --link interaction:... --text-file ... --text-source importer`
+   - `brain asset text set <asset-id> --text-file ... --source ...`
    - `brain add task --title ...`
    - `brain remember --kind fact --claim ... --link person:...`
 6. Add read/query commands:
@@ -92,6 +97,7 @@ path resolution, sidecar bundling, installation checks.
    - `brain show organization ...`
    - `brain show project ...`
    - `brain show task ...`
+   - `brain show asset ...`
 7. Define output contracts:
    - stdout data only
    - stderr diagnostics only
@@ -106,7 +112,8 @@ path resolution, sidecar bundling, installation checks.
    - when to add a document versus interaction
    - how to cite evidence
    - how to avoid duplicate records
-   - how to add and link binary assets without inlining bytes into SQLite text fields
+- how to add and link binary assets without inlining bytes into SQLite text fields
+- how to add searchable text for assets when the importer has extracted it
    - how to import email text, attachments, contacts, and raw participants through
      generic CLI commands
    - how to query before writing
@@ -132,6 +139,9 @@ path resolution, sidecar bundling, installation checks.
   and link attachments as assets.
 - An agent can add a reference note as a document.
 - An agent can add an avatar, image, or attachment as a linked asset.
+- An agent can search an imported attachment by filename/link metadata and by
+  importer-provided text.
+- An agent can inspect an asset's metadata, text status, and linked records as JSON.
 - An agent can add a task linked to a person/project.
 - An agent can ask a cited question from the terminal.
 - An agent can generate a daily report and todo list from the terminal.

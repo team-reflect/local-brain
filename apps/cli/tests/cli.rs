@@ -3,8 +3,9 @@
 //! JSON contracts, and verify stdout/stderr separation. No model key is needed:
 //! `ask` is exercised in its degraded (evidence-only) mode.
 
+use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 use brain_schema::LATEST_SCHEMA_VERSION;
 use rusqlite::Connection;
@@ -38,6 +39,28 @@ fn run_with_brain(root: &Path, args: &[&str]) -> Output {
         .expect("failed to run brain")
 }
 
+fn run_with_brain_stdin(root: &Path, args: &[&str], stdin: &str) -> Output {
+    let mut child = Command::new(BIN)
+        .arg("--brain")
+        .arg(root)
+        .args(args)
+        .env_remove("BRAIN_DB")
+        .env_remove("BRAIN_ROOT")
+        .env_remove("ANTHROPIC_API_KEY")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to run brain");
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(stdin.as_bytes())
+        .expect("failed to write stdin");
+    child.wait_with_output().expect("failed to wait for brain")
+}
+
 fn run_json(db: &Path, args: &[&str]) -> Value {
     let out = run(db, args);
     assert!(
@@ -55,6 +78,21 @@ fn run_json(db: &Path, args: &[&str]) -> Value {
 
 fn run_brain_json(root: &Path, args: &[&str]) -> Value {
     let out = run_with_brain(root, args);
+    assert!(
+        out.status.success(),
+        "command {args:?} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
+        panic!(
+            "stdout for {args:?} was not JSON ({e}): {}",
+            String::from_utf8_lossy(&out.stdout)
+        )
+    })
+}
+
+fn run_brain_json_stdin(root: &Path, args: &[&str], stdin: &str) -> Value {
+    let out = run_with_brain_stdin(root, args, stdin);
     assert!(
         out.status.success(),
         "command {args:?} failed: {}",
@@ -853,6 +891,109 @@ fn add_asset_copies_file_and_links_to_interaction() {
         .unwrap();
     assert_ne!(reimported_storage_path, storage_path);
     assert!(root.join(reimported_storage_path).is_file());
+}
+
+#[test]
+fn asset_search_finds_filename_links_and_text() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().join("AssetSearchBrain");
+    let source = dir.path().join("receipt.pdf");
+    std::fs::write(&source, b"%PDF fake binary bytes").unwrap();
+
+    let interaction = run_brain_json(
+        &root,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Gmail receipt thread",
+            "--text",
+            "Plain text email body mentions the Northwind order.",
+        ],
+    );
+    let link = format!("interaction:{}", interaction["id"].as_str().unwrap());
+    let asset = run_brain_json(
+        &root,
+        &[
+            "--json",
+            "add",
+            "asset",
+            "--file",
+            source.to_str().unwrap(),
+            "--kind",
+            "attachment",
+            "--mime-type",
+            "application/pdf",
+            "--original-filename",
+            "Receipt-2446-0056.pdf",
+            "--caption",
+            "signed invoice attachment",
+            "--link",
+            &link,
+            "--text",
+            "Extracted importer receipt total and vendor text",
+            "--text-source",
+            "importer",
+        ],
+    );
+
+    let filename_results = run_brain_json(&root, &["--json", "search", "Receipt-2446-0056"]);
+    assert!(filename_results["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|hit| {
+            hit["kind"] == "asset"
+                && hit["id"] == asset["id"]
+                && hit["title"] == "Receipt-2446-0056.pdf"
+        }));
+
+    let text_results = run_brain_json(&root, &["--json", "search", "vendor"]);
+    assert!(text_results["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|hit| hit["kind"] == "asset" && hit["id"] == asset["id"]));
+
+    let interaction_results = run_brain_json(&root, &["--json", "search", "Northwind"]);
+    assert!(interaction_results["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|hit| hit["kind"] == "interaction" && hit["id"] == interaction["id"]));
+
+    run_brain_json_stdin(
+        &root,
+        &[
+            "--json",
+            "asset",
+            "text",
+            "set",
+            asset["id"].as_str().unwrap(),
+            "--text-file",
+            "-",
+            "--source",
+            "manual",
+        ],
+        "Corrected searchable asset text with reimbursable keyword.",
+    );
+    let updated_results = run_brain_json(&root, &["--json", "search", "reimbursable"]);
+    assert!(updated_results["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|hit| hit["kind"] == "asset" && hit["id"] == asset["id"]));
+
+    let shown = run_brain_json(
+        &root,
+        &["--json", "show", "asset", asset["id"].as_str().unwrap()],
+    );
+    assert_eq!(shown["title"], "Receipt-2446-0056.pdf");
+    assert_eq!(shown["textSource"], "manual");
+    assert_eq!(shown["linkedRecords"][0]["kind"], "interaction");
 }
 
 #[test]

@@ -19,7 +19,8 @@ settings.
 
 - FTS5 is the first search path.
 - Embeddings are additive and optional until packaging and speed are proven.
-- Retrieval ranks visible records and chunks from documents and interactions.
+- Global search ranks visible records, including assets. Ask/retrieval ranks chunks from
+  documents and interactions.
 - One `retrieve()` API serves Ask, daily reports, graph context, search enrichment, and
   CLI reads.
 - AI answers cite `content_chunks` through `evidence_refs`.
@@ -47,6 +48,7 @@ settings.
    - tasks
    - documents
    - interactions
+   - assets
 2. Add a command/search palette:
    - Cmd/Ctrl+K opens instantly
    - empty query shows recent/active records and useful commands
@@ -61,7 +63,8 @@ settings.
    - open Graph
    - run daily report
    - rebuild derived indexes
-4. Add FTS over `content_chunks.text` and visible record titles/names.
+4. Add FTS over `content_chunks.text`, document/interaction title/body text, and asset
+   metadata/text.
    - use `unicode61` initially
    - rank with title/name boosts where applicable
    - return snippets for chunk hits
@@ -113,6 +116,8 @@ settings.
 ## Acceptance Criteria
 
 - Global search finds records by name, title, and body text.
+- Global search finds assets by filename, MIME/kind/storage metadata, original URL,
+  link captions, linked record titles, and optional local asset text.
 - Cmd/Ctrl+K provides one keyboard-native surface for find, navigate, and command
   execution.
 - Ask can answer a question using local documents and interactions.
@@ -124,7 +129,8 @@ settings.
 - Daily brief retrieval includes relationship follow-ups, stale relationships, and
   upcoming important dates.
 - Graph data can be generated from durable typed records without a separate graph table.
-- Search and Ask both use the same retrieval contract.
+- Search and Ask share ranking/query helpers where applicable, but asset search is
+  navigational; factual Ask citations still come from document/interaction chunks.
 - Semantic search can be unavailable while lexical search still works.
 - The app behaves clearly when no AI provider or local model is configured.
 
