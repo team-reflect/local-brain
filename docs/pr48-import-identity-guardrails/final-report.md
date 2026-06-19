@@ -399,3 +399,63 @@ and URL/repoint tests still pass.
 
 No JS was touched. Bugbot has not yet re-reviewed the new head; the watcher will
 wait for Bugbot/checks.
+
+## Follow-up: Bugbot re-review on head `897c69d` (2 fresh issues)
+
+Cursor Bugbot re-reviewed head `897c69d1b0609a5ada1926a963e5e0ebe96aa58c`
+(NEUTRAL) and flagged two new current-head issues, both fixed in the commit that
+records this section (pushed to `feat/import-identity-guardrails`). Both live in
+`insert_person_handles` in `apps/cli/src/commands/add.rs`.
+
+### External dedupe ignores email owner — BUGBOT 91f03bec (comment 3439926606)
+When `add_person` / `add_person_from_email` resolve a duplicate via
+`find_external_identity`, they skip the email-based `find_duplicate_person` path
+and still call `insert_person_handles`. Because `person_emails` is unique only per
+`person_id`, the same normalized email could be attached to a *second* active
+person, breaking the one-person-per-email invariant that `find_duplicate_person`
+otherwise enforces.
+
+Fix: the email loop in `insert_person_handles` now checks, per email, whether a
+*different* active person already owns that normalized address (matching either
+`lower(people.primary_email)` or `person_emails.normalized_email`, the same
+columns `find_duplicate_person` uses). If so it skips attaching the handle. This
+is a no-op on the new-person and email-dedupe paths (there the resolved person is
+the email's only possible owner), so the guard only bites the external-identity
+path that previously bypassed the invariant. Phones are unaffected — they are not
+part of the one-person-per-handle dedupe rule.
+
+### Primary promotion uses raw strings — BUGBOT edd77a86 (comment 3439926608)
+Promotion matched a denormalized `people.primary_email` / `people.primary_phone`
+to an imported handle with exact string equality (`primary == email.as_str()` /
+`primary == phone.as_str()`). Imported emails are lowercased and phones can differ
+in formatting, so a legacy primary that means the *same* address/number often
+never received `is_primary = 1`, defeating the table-sync the earlier fix
+intended.
+
+Fix: emails now compare case-insensitively via
+`normalize_email(Some(primary)) == Some(email)`; phones compare on their
+digit-only form via `normalize_phone`, requiring a non-empty normalized value on
+both sides. The index-0 fallback (no denormalized primary recorded) is unchanged,
+so the new-person path and the existing multi-primary guard still hold.
+
+Coverage: two new `add.rs` unit tests.
+`external_identity_dedupe_does_not_steal_another_persons_email` creates two
+distinct active people, re-imports one's external id while supplying the other's
+email, and asserts the second person never absorbs the first's address (and that
+exactly one active person owns it).
+`legacy_denormalized_primary_syncs_to_handle_despite_formatting` seeds a person
+whose denormalized columns hold a mixed-case email and a differently-formatted
+phone, imports the normalized handles, and asserts each is synced to
+`is_primary = 1`. Both were independently confirmed to fail against the pre-fix
+source (the missing guard left the stolen email row; raw equality left no primary
+handle) and pass after. All pre-existing primary/dedupe/URL tests still pass.
+
+### Verification (run on the fix commit, atop head `897c69d`)
+
+| Command | Result |
+|---------|--------|
+| `cargo fmt -p brain-cli -- --check` | clean |
+| `cargo clippy -p brain-cli --all-targets` | no new warnings; only the pre-existing `large_enum_variant` (untouched) |
+| `cargo test -p brain-cli` | 25 unit + 28 integration + 2 skill — all pass (incl. the two new tests) |
+
+No JS was touched. Bugbot has not yet re-reviewed the new head.

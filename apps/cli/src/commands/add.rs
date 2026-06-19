@@ -913,9 +913,32 @@ fn insert_person_handles(
         |row| row.get(0),
     )?;
     for (index, email) in emails.iter().enumerate() {
+        // person_emails is only unique per person_id, so without this guard a
+        // record resolved via external identity (which skips email-based dedupe)
+        // could attach an address another active person already owns, breaking
+        // the one-person-per-email invariant find_duplicate_person enforces.
+        // Skip any email a *different* active person already holds.
+        let owned_elsewhere: bool = conn.query_row(
+            "SELECT EXISTS(
+               SELECT 1
+               FROM people p
+               LEFT JOIN person_emails pe ON pe.person_id = p.id
+               WHERE p.archived_at IS NULL
+                 AND p.id <> ?2
+                 AND (lower(p.primary_email) = ?1 OR pe.normalized_email = ?1)
+             )",
+            params![email, person_id],
+            |row| row.get(0),
+        )?;
+        if owned_elsewhere {
+            continue;
+        }
+        // Compare against the denormalized primary case-insensitively: imported
+        // emails are lowercased, but a legacy people.primary_email may not be, so
+        // raw string equality would fail to sync the matching handle to primary.
         let is_primary_handle = !has_primary_email
             && match primary_email.as_deref() {
-                Some(primary) => primary == email.as_str(),
+                Some(primary) => normalize_email(Some(primary)).as_deref() == Some(email.as_str()),
                 None => index == 0,
             };
         let is_primary = i64::from(is_primary_handle);
@@ -932,9 +955,17 @@ fn insert_person_handles(
         |row| row.get(0),
     )?;
     for (index, phone) in phones.iter().enumerate() {
+        // Match the denormalized primary by its digit-only form: a legacy
+        // people.primary_phone can be stored with different formatting than the
+        // imported handle, so raw string equality would miss the same number and
+        // never sync it to is_primary.
         let is_primary_handle = !has_primary_phone
             && match primary_phone.as_deref() {
-                Some(primary) => primary == phone.as_str(),
+                Some(primary) => {
+                    let normalized_primary = normalize_phone(Some(primary));
+                    normalized_primary.is_some()
+                        && normalized_primary == normalize_phone(Some(phone))
+                }
                 None => index == 0,
             };
         let is_primary = i64::from(is_primary_handle);
@@ -2144,6 +2175,137 @@ mod tests {
             primary_phones, 0,
             "legacy denormalized primary_phone must block promoting the imported phone"
         );
+    }
+
+    #[test]
+    fn legacy_denormalized_primary_syncs_to_handle_despite_formatting() {
+        // The denormalized columns can carry a differently-cased email or a
+        // differently-formatted phone than the imported (normalized) handles.
+        // Promotion must match on the normalized form so the same address/number
+        // gets is_primary = 1, keeping person_emails / person_phones in sync with
+        // the legacy people.primary_email / people.primary_phone columns.
+        let conn = brain_schema::open_in_memory().unwrap();
+        let person_id = new_id();
+        conn.execute(
+            "INSERT INTO people (id, full_name, primary_email, primary_phone)
+             VALUES (?1, 'Robin Spencer', 'Robin@Example.COM', '+1 (555) 010-0100')",
+            params![person_id],
+        )
+        .unwrap();
+
+        insert_person_handles(
+            &conn,
+            &person_id,
+            &["robin@example.com".to_string()],
+            &["+15550100100".to_string()],
+            None,
+        )
+        .unwrap();
+
+        let primary_email: Option<String> = conn
+            .query_row(
+                "SELECT email FROM person_emails
+                 WHERE person_id = ?1 AND is_primary = 1",
+                params![person_id],
+                |row| row.get(0),
+            )
+            .ok();
+        assert_eq!(
+            primary_email.as_deref(),
+            Some("robin@example.com"),
+            "case-insensitive primary_email match must sync the handle to primary"
+        );
+
+        let primary_phone: Option<String> = conn
+            .query_row(
+                "SELECT phone FROM person_phones
+                 WHERE person_id = ?1 AND is_primary = 1",
+                params![person_id],
+                |row| row.get(0),
+            )
+            .ok();
+        assert_eq!(
+            primary_phone.as_deref(),
+            Some("+15550100100"),
+            "differently-formatted primary_phone must still sync the handle to primary"
+        );
+    }
+
+    #[test]
+    fn external_identity_dedupe_does_not_steal_another_persons_email() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // Alice owns alice@example.com (external id ext-alice).
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Alice Owner",
+                vec!["alice@example.com"],
+                vec![],
+                Some("ext-alice"),
+            ),
+        )
+        .unwrap();
+        let alice_id = single_person_id(&conn, "Alice Owner");
+
+        // Bob is a separate active person carrying external id ext-bob.
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Bob Other",
+                vec!["bob@example.com"],
+                vec![],
+                Some("ext-bob"),
+            ),
+        )
+        .unwrap();
+        let bob_id = single_person_id(&conn, "Bob Other");
+
+        // Re-import ext-bob (resolves to Bob via external identity, skipping
+        // email-based dedupe) but supplying Alice's email. Bob must not absorb an
+        // address another active person already owns.
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Bob Other",
+                vec!["alice@example.com"],
+                vec![],
+                Some("ext-bob"),
+            ),
+        )
+        .unwrap();
+
+        let bob_has_alice_email: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM person_emails
+                 WHERE person_id = ?1 AND normalized_email = 'alice@example.com'",
+                params![bob_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            bob_has_alice_email, 0,
+            "external-id dedupe must not attach an email owned by another person"
+        );
+
+        // The one-person-per-email invariant still holds: a single active person
+        // owns alice@example.com, and it is Alice.
+        let owners: i64 = conn
+            .query_row(
+                "SELECT COUNT(DISTINCT p.id)
+                 FROM people p
+                 LEFT JOIN person_emails pe ON pe.person_id = p.id
+                 WHERE p.archived_at IS NULL
+                   AND (lower(p.primary_email) = 'alice@example.com'
+                        OR pe.normalized_email = 'alice@example.com')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(owners, 1, "exactly one active person may own the email");
+        assert_ne!(alice_id, bob_id, "Alice and Bob are distinct people");
     }
 
     #[test]
