@@ -306,7 +306,13 @@ fn assess_person_import(raw_name: &str, email: &str) -> PersonImportAssessment {
     {
         reason_codes.push("email_as_name");
     }
-    if has_route_phrase {
+    // A routing marker (" via ", " from ", " at ") was stripped from the display
+    // name. That alone is not disqualifying: senders such as
+    // "Robin Spencer via LinkedIn" normalize to a perfectly usable "Robin Spencer".
+    // Only flag it when the residual name does not independently read like a
+    // capitalized person name, so noise like "noreply via Mailchimp" -> "noreply"
+    // is still skipped.
+    if has_route_phrase && !looks_like_capitalized_person_name(&normalized_name) {
         reason_codes.push("route_phrase");
     }
     if has_numeric_or_token_noise(&normalized_name) {
@@ -1698,6 +1704,51 @@ mod tests {
         let person = assess_person_import("Smith, John", "john@example.com");
         assert_eq!(person.normalized_name, "John Smith");
         assert!(person.should_create_person, "{:?}", person.reason_codes);
+    }
+
+    #[test]
+    fn route_phrase_strips_to_usable_person_name() {
+        // A routing marker is stripped, leaving a clean person name.
+        let (name, had_route) = normalize_untrusted_name("Robin Spencer via LinkedIn");
+        assert_eq!(name, "Robin Spencer");
+        assert!(had_route);
+    }
+
+    #[test]
+    fn assess_creates_person_after_stripping_route_phrase() {
+        // Legitimate senders whose display name carries a routing marker must
+        // still create a person once the marker is removed.
+        for raw in [
+            "Robin Spencer via LinkedIn",
+            "Robin Spencer from Acme",
+            "Robin Spencer at LinkedIn",
+        ] {
+            let person = assess_person_import(raw, "robin@example.com");
+            assert_eq!(person.normalized_name, "Robin Spencer", "{raw}");
+            assert!(
+                person.should_create_person,
+                "{raw} reason_codes: {:?}",
+                person.reason_codes
+            );
+            assert!(
+                !person.reason_codes.contains(&"route_phrase"),
+                "{raw} should not be flagged route_phrase: {:?}",
+                person.reason_codes
+            );
+        }
+    }
+
+    #[test]
+    fn assess_skips_route_phrase_noise() {
+        // When stripping the routing marker leaves something that is not a
+        // capitalized person name, the import is still skipped and flagged.
+        let noise = assess_person_import("noreply via Mailchimp", "sender@example.com");
+        assert!(!noise.should_create_person);
+        assert!(
+            noise.reason_codes.contains(&"route_phrase"),
+            "{:?}",
+            noise.reason_codes
+        );
     }
 
     #[test]

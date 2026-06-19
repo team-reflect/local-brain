@@ -1084,6 +1084,50 @@ fn add_person_from_email_skips_org_comma_labels() {
 }
 
 #[test]
+fn add_person_from_email_strips_route_phrase_and_creates_person() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    // "Robin Spencer via LinkedIn" normalizes to a usable person name once the
+    // routing marker is stripped, so a person is created and not flagged.
+    let created = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person-from-email",
+            "--full-name",
+            "Robin Spencer via LinkedIn",
+            "--email",
+            "robin@example.com",
+        ],
+    );
+    assert_eq!(created["created"], true);
+    assert_eq!(created["normalizedName"], "Robin Spencer");
+    let codes = created["reasonCodes"].as_array().unwrap();
+    assert!(codes.is_empty(), "reasonCodes: {codes:?}");
+
+    // A routing marker that strips down to non-name noise is still skipped.
+    let skipped = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person-from-email",
+            "--full-name",
+            "noreply via Mailchimp",
+            "--email",
+            "sender@example.com",
+        ],
+    );
+    assert_eq!(skipped["id"], Value::Null);
+    let codes = skipped["reasonCodes"].as_array().unwrap();
+    assert!(
+        codes.iter().any(|c| c == "route_phrase"),
+        "reasonCodes: {codes:?}"
+    );
+}
+
+#[test]
 fn search_finds_added_records_by_full_text() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
