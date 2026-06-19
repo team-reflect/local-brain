@@ -25,6 +25,7 @@ import {
   listProjects,
   listTasks,
   type ListTasksOptions,
+  type NewProject,
 } from '@local-brain/core'
 
 /**
@@ -52,7 +53,7 @@ export function useProjects() {
 export function useCreateProject() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (name: string) => createProject({ name }),
+    mutationFn: (input: NewProject) => createProject(input),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['projects'] }),

@@ -15,11 +15,13 @@ export function ProjectCreateDialog({ open, onClose, onCreated }: ProjectCreateD
   const createProject = useCreateProject()
   const inputRef = useRef<HTMLInputElement>(null)
   const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open) return
     setName('')
+    setDescription('')
     setError(null)
   }, [open])
 
@@ -34,7 +36,7 @@ export function ProjectCreateDialog({ open, onClose, onCreated }: ProjectCreateD
 
     setError(null)
     try {
-      const id = await createProject.mutateAsync(trimmed)
+      const id = await createProject.mutateAsync({ name: trimmed, summary: description })
       onCreated(id)
       onClose()
     } catch (cause) {
@@ -54,7 +56,7 @@ export function ProjectCreateDialog({ open, onClose, onCreated }: ProjectCreateD
       >
         <DialogTitle className="border-b border-border px-4 py-2.5">New project</DialogTitle>
         <DialogDescription id="new-project-description" className="sr-only">
-          Create a project record.
+          Create a project with an optional description.
         </DialogDescription>
         <form onSubmit={submit} className="flex flex-col gap-3 p-4">
           <label className="flex flex-col gap-1.5 text-xs font-medium text-[hsl(var(--lb-ink-2))]">
@@ -71,6 +73,15 @@ export function ProjectCreateDialog({ open, onClose, onCreated }: ProjectCreateD
                 'h-8 rounded-md border border-input bg-background px-2.5 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/20',
                 error ? 'border-destructive focus:border-destructive focus:ring-destructive/20' : null,
               )}
+            />
+          </label>
+          <label className="flex flex-col gap-1.5 text-xs font-medium text-[hsl(var(--lb-ink-2))]">
+            Description
+            <textarea
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              rows={3}
+              className="min-h-20 resize-none rounded-md border border-input bg-background px-2.5 py-2 text-sm font-normal text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/20"
             />
           </label>
           {error ? (
