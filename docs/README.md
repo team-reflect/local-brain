@@ -21,6 +21,7 @@ including a graph view centered on the user.
 - [Agent Interface](agent-interface.md)
 - [UI Direction](ui-direction.md)
 - [Design System](design-system.md)
+- [Frontend Architecture](frontend-architecture.md)
 - [MVP Plan](mvp-plan.md)
 - [Implementation Plans](plans/00-overview.md)
 - [Open Questions](open-questions.md)

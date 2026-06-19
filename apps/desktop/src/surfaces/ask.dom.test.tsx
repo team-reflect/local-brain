@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
-import { screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { setModelProvider } from '@local-brain/core'
 import { AskSurface } from './ask'
 import { installFakeBridge, renderWithProviders } from '../test/utils'
@@ -39,5 +39,22 @@ describe('AskSurface model boundary', () => {
 
     await waitFor(() => expect(screen.getByText('What did we decide?')).toBeDefined())
     expect(screen.queryByText(/No AI provider is configured/)).toBeNull()
+  })
+
+  it('opens chat history in a popover and dismisses it on Escape', async () => {
+    installFakeBridge({
+      query: (sql) =>
+        sql.includes('chat_conversations')
+          ? [{ id: 'chat-1', title: 'Past chat', archivedAt: null }]
+          : [],
+    })
+
+    renderWithProviders(<AskSurface conversationId={undefined} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Chat history' }))
+    expect(await screen.findByText('Past chat')).toBeDefined()
+
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByText('Past chat')).toBeNull())
   })
 })

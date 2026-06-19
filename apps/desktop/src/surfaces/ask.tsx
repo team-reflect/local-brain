@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { ArrowUp, Check, ExternalLink, FileText, History, MessageSquare, MessagesSquare, Plus } from 'lucide-react'
 import { Button } from '../components/button'
+import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover'
 import { cn } from '../lib/utils'
 import {
   useAsk,
@@ -219,41 +220,40 @@ function AskComposer({
         <div className="flex items-center gap-2 px-2.5 pb-2.5">
           <span className="px-1 text-xs text-muted-foreground">Cited answers</span>
           <div className="flex-1" />
-          <div className="relative">
-            <button
-              type="button"
-              aria-label="Chat history"
-              onClick={() => setHistoryOpen((open) => !open)}
-              className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-            >
-              <History aria-hidden className="size-4" />
-            </button>
-            {historyOpen ? (
-              <div className="absolute bottom-full right-0 z-20 mb-2 w-72 overflow-hidden rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg">
-                {conversations.length === 0 ? (
-                  <p className="px-2 py-1.5 text-[13px] text-muted-foreground">No past chats</p>
-                ) : (
-                  conversations.map((conversation) => {
-                    const current = conversation.id === conversationId
-                    return (
-                      <button
-                        key={conversation.id}
-                        type="button"
-                        onClick={() => {
-                          setHistoryOpen(false)
-                          onOpenConversation(conversation.id)
-                        }}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                      >
-                        <span className="min-w-0 flex-1 truncate">{conversation.title ?? 'Untitled'}</span>
-                        {current ? <Check aria-hidden className="size-3.5 shrink-0 text-primary" /> : null}
-                      </button>
-                    )
-                  })
-                )}
-              </div>
-            ) : null}
-          </div>
+          <Popover open={historyOpen} onOpenChange={setHistoryOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                aria-label="Chat history"
+                className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              >
+                <History aria-hidden className="size-4" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="end" side="top" className="w-72 gap-0 p-1">
+              {conversations.length === 0 ? (
+                <p className="px-2 py-1.5 text-[13px] text-muted-foreground">No past chats</p>
+              ) : (
+                conversations.map((conversation) => {
+                  const current = conversation.id === conversationId
+                  return (
+                    <button
+                      key={conversation.id}
+                      type="button"
+                      onClick={() => {
+                        setHistoryOpen(false)
+                        onOpenConversation(conversation.id)
+                      }}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                    >
+                      <span className="min-w-0 flex-1 truncate">{conversation.title ?? 'Untitled'}</span>
+                      {current ? <Check aria-hidden className="size-3.5 shrink-0 text-primary" /> : null}
+                    </button>
+                  )
+                })
+              )}
+            </PopoverContent>
+          </Popover>
           {hasConversation && !pending ? (
             <Button variant="ghost" size="sm" onClick={onNewConversation}>
               <Plus aria-hidden className="size-3.5" />

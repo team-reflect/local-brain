@@ -43,6 +43,20 @@ describe('CommandPalette', () => {
     expect(ctx.navigate).toHaveBeenCalledWith({ kind: 'tasks' })
   })
 
+  it('closes on Escape via the dialog primitive', () => {
+    const onClose = vi.fn()
+    renderWithProviders(<CommandPalette open onClose={onClose} context={context()} />)
+
+    const input = screen.getByPlaceholderText(/Search records or run a command/)
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('renders nothing while closed', () => {
+    renderWithProviders(<CommandPalette open={false} onClose={() => {}} context={context()} />)
+    expect(screen.queryByPlaceholderText(/Search records or run a command/)).toBeNull()
+  })
+
   it('searches records and opens the selected one', async () => {
     const ctx = context()
     // Only the people query returns a row; other record queries stay empty.
