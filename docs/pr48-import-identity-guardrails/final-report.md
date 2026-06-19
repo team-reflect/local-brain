@@ -352,3 +352,50 @@ Some("https://example.com/robin")`) and pass after. The pre-existing repoint tes
 The new test was independently confirmed to fail against the pre-fix source and
 pass after. No JS was touched. Bugbot has not yet re-reviewed head `5d55329`.
 </content>
+
+## Follow-up: Bugbot re-review on head `811c7de` (1 fresh issue)
+
+Cursor Bugbot re-reviewed head `811c7ded15bf7504b350d08ead3123dd11e15276` and
+flagged one new current-head issue, fixed in the commit that records this
+section (pushed to `feat/import-identity-guardrails`).
+
+### Legacy primary ignores handle promotion — BUGBOT 15a6ebb6 (comment 3439900183)
+`apps/cli/src/commands/add.rs` — `insert_person_handles` decided whether to
+promote the first imported email/phone to `is_primary = 1` using only existing
+rows in `person_emails` / `person_phones`. A legacy person can record its primary
+*only* in the denormalized `people.primary_email` / `people.primary_phone`
+columns with no `is_primary` row yet, so a duplicate re-import could mark a new,
+unrelated handle as primary while the denormalized column still pointed
+elsewhere — leaving the normalized and denormalized primaries disagreeing.
+
+Fix: `insert_person_handles` now reads the denormalized `people.primary_email`
+and `people.primary_phone` columns (collapsed to `None` when blank via a new
+`blank_to_none` helper). A handle is promoted to primary only when the person has
+no `is_primary` row yet **and** either (a) no denormalized primary is recorded
+(fall back to index 0, the original rule) or (b) the handle's value matches the
+denormalized primary — which syncs the normalized table without ever promoting a
+different freshly imported address. The new-person path is unaffected because it
+pre-populates the denormalized column from the first handle, so that handle still
+matches and stays primary. The earlier multi-primary guard
+(`duplicate_enrichment_keeps_single_primary_handle`) is preserved.
+
+Coverage: new `add.rs` unit test
+`legacy_denormalized_primary_blocks_handle_promotion` — seeds a person carrying
+only the denormalized `primary_email`/`primary_phone` columns (no handle rows),
+imports a different email and phone via `insert_person_handles`, and asserts
+neither imported handle is promoted to primary. Confirmed to fail against the
+pre-fix rule (`index == 0` would set `is_primary = 1`, `left: 1, right: 0`) and
+pass after. The pre-existing `duplicate_enrichment_keeps_single_primary_handle`
+and URL/repoint tests still pass.
+
+### Verification (run on the fix commit, atop head `811c7de`)
+
+| Command | Result |
+|---------|--------|
+| `git diff --check` | clean |
+| `cargo fmt -p brain-cli -- --check` | clean |
+| `cargo test -p brain-cli` | 23 unit + 28 integration + 2 skill — all pass (incl. the new legacy-primary test) |
+| `cargo clippy -p brain-cli --all-targets` | no new warnings; only the pre-existing `large_enum_variant` in `main.rs` (untouched) |
+
+No JS was touched. Bugbot has not yet re-reviewed the new head; the watcher will
+wait for Bugbot/checks.

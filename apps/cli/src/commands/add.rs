@@ -756,6 +756,12 @@ fn is_blank(value: &Option<String>) -> bool {
     !has_text(value)
 }
 
+/// Collapse a blank-or-missing string column to `None` so callers can treat an
+/// empty denormalized value the same as an absent one.
+fn blank_to_none(value: Option<String>) -> Option<String> {
+    value.filter(|text| !text.trim().is_empty())
+}
+
 fn enrich_duplicate_person(
     conn: &Connection,
     id: &str,
@@ -880,16 +886,39 @@ fn insert_person_handles(
     source_id: Option<&str>,
 ) -> Result<(), CliError> {
     // On duplicate-person enrichment the record may already own a primary
-    // handle. Only the first handle of a person that has none yet should be
-    // promoted to primary; otherwise a re-import that adds secondary addresses
-    // would leave the person with multiple primary emails or phones.
+    // handle. Only a person that has none yet should get one promoted; otherwise
+    // a re-import that adds secondary addresses would leave the person with
+    // multiple primary emails or phones.
+    //
+    // A legacy person can record its primary *only* in the denormalized
+    // people.primary_email / people.primary_phone columns, with no is_primary
+    // row in person_emails / person_phones yet. When that column is set we must
+    // promote the handle that matches it (syncing the normalized table) rather
+    // than blindly promoting index 0, which on a re-import could mark a
+    // different, freshly imported address as primary while the denormalized
+    // column still points elsewhere. The new-person path also pre-populates the
+    // denormalized column from the first handle, so matching keeps that handle
+    // primary too.
+    let (primary_email, primary_phone): (Option<String>, Option<String>) = conn.query_row(
+        "SELECT primary_email, primary_phone FROM people WHERE id = ?1",
+        params![person_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let primary_email = blank_to_none(primary_email);
+    let primary_phone = blank_to_none(primary_phone);
+
     let has_primary_email: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM person_emails WHERE person_id = ?1 AND is_primary = 1)",
         params![person_id],
         |row| row.get(0),
     )?;
     for (index, email) in emails.iter().enumerate() {
-        let is_primary = i64::from(index == 0 && !has_primary_email);
+        let is_primary_handle = !has_primary_email
+            && match primary_email.as_deref() {
+                Some(primary) => primary == email.as_str(),
+                None => index == 0,
+            };
+        let is_primary = i64::from(is_primary_handle);
         conn.execute(
             "INSERT OR IGNORE INTO person_emails
              (id, person_id, email, normalized_email, is_primary, source_id)
@@ -903,7 +932,12 @@ fn insert_person_handles(
         |row| row.get(0),
     )?;
     for (index, phone) in phones.iter().enumerate() {
-        let is_primary = i64::from(index == 0 && !has_primary_phone);
+        let is_primary_handle = !has_primary_phone
+            && match primary_phone.as_deref() {
+                Some(primary) => primary == phone.as_str(),
+                None => index == 0,
+            };
+        let is_primary = i64::from(is_primary_handle);
         conn.execute(
             "INSERT OR IGNORE INTO person_phones
              (id, person_id, phone, normalized_phone, is_primary, source_id)
@@ -2060,6 +2094,55 @@ mod tests {
             primary_phones(&conn),
             1,
             "duplicate enrichment must not create a second primary phone"
+        );
+    }
+
+    #[test]
+    fn legacy_denormalized_primary_blocks_handle_promotion() {
+        // A legacy person can carry only the denormalized people.primary_email /
+        // people.primary_phone columns with no is_primary row in person_emails /
+        // person_phones yet. Importing a new handle for such a person must not
+        // promote it to primary, or the is_primary flag would point somewhere
+        // other than the denormalized primary columns still record.
+        let conn = brain_schema::open_in_memory().unwrap();
+        let person_id = new_id();
+        conn.execute(
+            "INSERT INTO people (id, full_name, primary_email, primary_phone)
+             VALUES (?1, 'Robin Spencer', 'robin@example.com', '+15550100')",
+            params![person_id],
+        )
+        .unwrap();
+
+        insert_person_handles(
+            &conn,
+            &person_id,
+            &["robin.work@example.com".to_string()],
+            &["+15550200".to_string()],
+            None,
+        )
+        .unwrap();
+
+        let primary_emails: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM person_emails WHERE person_id = ?1 AND is_primary = 1",
+                params![person_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let primary_phones: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM person_phones WHERE person_id = ?1 AND is_primary = 1",
+                params![person_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            primary_emails, 0,
+            "legacy denormalized primary_email must block promoting the imported email"
+        );
+        assert_eq!(
+            primary_phones, 0,
+            "legacy denormalized primary_phone must block promoting the imported phone"
         );
     }
 
