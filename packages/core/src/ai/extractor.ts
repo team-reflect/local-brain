@@ -23,7 +23,7 @@ Return ONLY a single JSON object (no prose, no code fences) with these optional 
 - "organizations": { ref, name, kind?, domain?, location? }
 - "affiliations": { personRef, organizationRef, title?, role?, isCurrent? }
 - "projects": { ref, name }
-- "tasks": { ref, title, description?, status?, dueAt?, projectRef?, personRefs?, evidence? }
+- "tasks": { ref, title, description?, status?, dueAt?, projectRef?, assigneeRefs?, personRefs?, evidence? }
 - "memories": { kind, claim, confidence?, subjects?: [{ ref, role? }], evidence?: [{ chunkIndex, note? }] }
 Rules:
 - "ref" is a short local id you invent (e.g. "p1", "org1"); reuse it to link entities.
@@ -32,6 +32,9 @@ Rules:
 - Prefer merging onto an existing candidate (reuse its exact name) over inventing duplicates.
 - Projects are manually created user structure. Only include a project when it clearly
   matches an existing project candidate below; do not invent new project names.
+- For tasks, use "assigneeRefs" for the person(s) responsible for doing the task (e.g.
+  "Dana should send the deck" → assigneeRef: dana_ref). Use "personRefs" for people merely
+  mentioned in relation to the task but not responsible for it.
 - Only include what the text supports. Omit anything you are unsure of. Empty arrays are fine.`
 
 function buildPrompt(context: ExtractionContext): string {

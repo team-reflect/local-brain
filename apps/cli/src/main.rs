@@ -307,6 +307,9 @@ struct AddTaskArgs {
     /// Exact source chunk evidence, e.g. `interaction:01ABC#0`.
     #[arg(long = "evidence", value_name = "DOCUMENT_OR_INTERACTION:ID#CHUNK")]
     evidence: Vec<String>,
+    /// Person ID to assign this task to (repeatable; creates task_people row with role='assignee').
+    #[arg(long, value_name = "PERSON_ID")]
+    assignee: Vec<String>,
 }
 
 #[derive(Parser)]
@@ -579,6 +582,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
                         project_id: None,
                         links: parse_links(&a.links)?,
                         evidence: parse_evidence_refs(&a.evidence)?,
+                        assignee_ids: a.assignee.clone(),
                     },
                 ),
             }
@@ -809,7 +813,8 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
                 "purpose": "Copy bytes into the managed assets directory and link them to a typed record.",
             },
             "addTask": {
-                "usage": "brain --json add task --title <title> [--due-at <iso>] [--link kind:id...]",
+                "usage": "brain --json add task --title <title> [--due-at <iso>] [--link kind:id...] [--assignee <person-id>...]",
+                "assigneeFlag": "Use --assignee <person-id> (repeatable) to mark someone as responsible for the task. Creates a task_people row with role='assignee'. Distinct from generic --link person:<id> which creates a generic person link.",
             },
             "remember": {
                 "usage": "brain --json remember --kind <fact|preference|decision|commitment|instruction|risk|idea> --claim <atomic claim> --link kind:id...",

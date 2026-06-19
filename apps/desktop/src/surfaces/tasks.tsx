@@ -5,7 +5,7 @@ import { Checkbox } from '../components/ui/checkbox'
 import { DataList, type Column } from '../components/data-list'
 import { EmptyState } from '../components/empty-state'
 import { cn } from '../lib/utils'
-import { useArchiveTask, useCompleteTask, useTasks } from '../lib/queries'
+import { useAllTaskAssignees, useArchiveTask, useCompleteTask, useTasks } from '../lib/queries'
 import { useRouter } from '../routing/router'
 
 const FILTERS = ['all', 'open', 'waiting', 'scheduled', 'done'] as const
@@ -16,6 +16,7 @@ export function TasksSurface(): ReactNode {
   const tasks = useTasks(filter === 'all' ? {} : { status: filter })
   const complete = useCompleteTask()
   const archive = useArchiveTask()
+  const assigneesQuery = useAllTaskAssignees()
 
   const columns: Column<Task>[] = [
     {
@@ -45,6 +46,20 @@ export function TasksSurface(): ReactNode {
       header: 'Status',
       className: 'w-28',
       render: (task) => <StatusBadge status={task.status} />,
+    },
+    {
+      key: 'assignee',
+      header: 'Assignee',
+      className: 'w-32',
+      render: (task) => {
+        const taskAssignees = assigneesQuery.data?.get(task.id) ?? []
+        if (taskAssignees.length === 0) return <span className="text-muted-foreground">—</span>
+        return (
+          <span className="truncate text-xs text-muted-foreground">
+            {taskAssignees.map((a) => a.personName).join(', ')}
+          </span>
+        )
+      },
     },
     {
       key: 'due',

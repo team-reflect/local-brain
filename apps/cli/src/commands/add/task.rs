@@ -19,6 +19,7 @@ pub struct AddTaskArgs<'a> {
     pub project_id: Option<String>,
     pub links: Vec<LinkRef>,
     pub evidence: Vec<EvidenceRef>,
+    pub assignee_ids: Vec<String>,
 }
 
 pub fn add_task(conn: &mut Connection, json: bool, args: AddTaskArgs) -> Result<(), CliError> {
@@ -32,6 +33,10 @@ pub fn add_task(conn: &mut Connection, json: bool, args: AddTaskArgs) -> Result<
             "a task can link to only one project".into(),
         ));
     }
+    // Collect assignee ids up-front so person links can skip those already
+    // handled as assignees (prevents duplicate task_people rows).
+    use std::collections::HashSet;
+    let assignee_set: HashSet<&str> = args.assignee_ids.iter().map(|s| s.as_str()).collect();
     let id = new_id();
     let tx = conn.transaction()?;
     tx.execute(
@@ -41,6 +46,11 @@ pub fn add_task(conn: &mut Connection, json: bool, args: AddTaskArgs) -> Result<
     for link in &args.links {
         match link.kind {
             LinkKind::Person => {
+                // Skip generic link if this person is already being inserted as
+                // an assignee; the assignee loop below writes the canonical row.
+                if assignee_set.contains(link.id.as_str()) {
+                    continue;
+                }
                 tx.execute(
                     "INSERT INTO task_people (id, task_id, person_id) VALUES (?1,?2,?3)",
                     params![new_id(), id, link.id],
@@ -81,10 +91,23 @@ pub fn add_task(conn: &mut Connection, json: bool, args: AddTaskArgs) -> Result<
             }
         }
     }
+    // Iterate the deduplicated set so that repeating --assignee <id> does not
+    // attempt a second insert and hit the UNIQUE (task_id, person_id) constraint.
+    for assignee_id in &assignee_set {
+        tx.execute(
+            "INSERT INTO task_people (id, task_id, person_id, role) VALUES (?1,?2,?3,'assignee')",
+            params![new_id(), id, assignee_id],
+        )?;
+    }
     insert_evidence_refs(&tx, "task", &id, &args.evidence)?;
     tx.commit()?;
     if json {
-        print_json(&json!({ "kind": "task", "id": id, "evidence": args.evidence.len() }))
+        print_json(&json!({
+            "kind": "task",
+            "id": id,
+            "evidence": args.evidence.len(),
+            "assigneeCount": assignee_set.len(),
+        }))
     } else {
         println!("task {id}");
         Ok(())

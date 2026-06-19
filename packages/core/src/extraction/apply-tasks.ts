@@ -1,5 +1,6 @@
 import { db } from '../db/client'
 import { newId } from '../db/id'
+import { TASK_PERSON_ROLE_ASSIGNEE } from '../domains/tasks/getters'
 import type { ExtractionResult } from './contracts'
 import { normalizeName } from './match'
 import { loadTaskCandidates } from './apply-store'
@@ -21,6 +22,7 @@ export async function applyTasks(ctx: ApplyContext, tasks: ExtractionResult['tas
     }
     const deps = [
       ...(task.projectRef != null ? [task.projectRef] : []),
+      ...task.assigneeRefs,
       ...task.personRefs,
       ...task.organizationRefs,
     ]
@@ -60,9 +62,28 @@ export async function applyTasks(ctx: ApplyContext, tasks: ExtractionResult['tas
     ctx.resolve(task.ref, 'task', id)
     ctx.summary.tasks.created++
 
+    // Insert assignees with role='assignee'; track their person ids to dedup
+    // both duplicate refs within assigneeRefs and overlap with personRefs.
+    const assigneePersonIds = new Set<string>()
+    for (const assigneeRef of task.assigneeRefs) {
+      const person = ctx.resolved.get(assigneeRef)
+      if (person?.type === 'person' && !assigneePersonIds.has(person.id)) {
+        assigneePersonIds.add(person.id)
+        ctx.inserts.links.push(
+          db.insertInto('taskPeople').values({
+            id: newId(),
+            taskId: id,
+            personId: person.id,
+            role: TASK_PERSON_ROLE_ASSIGNEE,
+          }),
+        )
+        ctx.summary.links.created++
+      }
+    }
+    // Generic person links (role=null); skip those already inserted as assignee.
     for (const personRef of task.personRefs) {
       const person = ctx.resolved.get(personRef)
-      if (person?.type === 'person') {
+      if (person?.type === 'person' && !assigneePersonIds.has(person.id)) {
         ctx.inserts.links.push(
           db.insertInto('taskPeople').values({ id: newId(), taskId: id, personId: person.id }),
         )

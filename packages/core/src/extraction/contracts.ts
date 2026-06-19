@@ -104,6 +104,9 @@ export const extractedTaskSchema = z.object({
   dueAt: z.string().nullish(),
   scheduledFor: z.string().nullish(),
   projectRef: ref.nullish(),
+  /** People responsible for doing the task; stored with role='assignee'. */
+  assigneeRefs: z.array(ref).default([]),
+  /** Generic related people (e.g. mentioned, context); stored with role=null. */
   personRefs: z.array(ref).default([]),
   organizationRefs: z.array(ref).default([]),
   evidence: z.array(evidenceRefSchema).default([]),
@@ -193,6 +196,10 @@ export function validateExtraction(result: ExtractionResult): string[] {
   for (const task of result.tasks) {
     requireRef(task.projectRef, `task "${task.ref}"`)
     requireType(task.projectRef ?? '', 'project', `task "${task.ref}" projectRef`)
+    for (const assigneeRef of task.assigneeRefs) {
+      requireRef(assigneeRef, `task "${task.ref}"`)
+      requireType(assigneeRef, 'person', `task "${task.ref}" assigneeRef`)
+    }
     for (const personRef of task.personRefs) {
       requireRef(personRef, `task "${task.ref}"`)
       requireType(personRef, 'person', `task "${task.ref}" personRef`)

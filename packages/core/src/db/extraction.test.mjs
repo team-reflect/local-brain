@@ -6,6 +6,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
+  TASK_PERSON_ROLE_ASSIGNEE,
   applyExtraction,
   createPerson,
   createProject,
@@ -14,15 +15,18 @@ import {
   getTaskLinks,
   ingestDocument,
   ingestInteraction,
+  listAllTaskAssignees,
   listCitationsForSubject,
   listMemories,
   listMemoriesForRecord,
   listPeople,
   listProjects,
+  listTaskAssignees,
   listTasks,
   parseExtractionResult,
   runExtraction,
   setExtractor,
+  validateExtraction,
 } from '@local-brain/core'
 import { freshDatabase, installSqliteBridge } from './sqlite-harness.mjs'
 
@@ -220,6 +224,154 @@ describe('05a extraction apply (real SQLite golden round-trip)', () => {
     expect(summary.memories.created).toBe(0)
     expect(await listMemories()).toHaveLength(0)
     expect(await listMemoriesForRecord('document', doc.id)).toHaveLength(0)
+  })
+
+  it('stores assigneeRefs with role=assignee and exposes them via getTaskLinks.assignees', async () => {
+    const doc = await ingestDocument({ title: 'Follow-up', bodyText: 'Dana should send the deck.' })
+    const result = parseExtractionResult({
+      people: [
+        { ref: 'p_dana', fullName: 'Dana Scully' },
+        { ref: 'p_alex', fullName: 'Alex Rivera' },
+      ],
+      tasks: [
+        {
+          ref: 't_deck',
+          title: 'Send the deck',
+          assigneeRefs: ['p_dana'],
+          personRefs: ['p_alex'],
+          evidence: [{ chunkIndex: 0 }],
+        },
+      ],
+    })
+
+    const summary = await applyExtraction({ recordType: 'document', recordId: doc.id }, result)
+    expect(summary.tasks.created).toBe(1)
+    expect(summary.people.created).toBe(2)
+
+    const task = (await listTasks())[0]
+    const taskLinks = await getTaskLinks(task.id)
+
+    // assignees shows only Dana (role='assignee')
+    expect(taskLinks.assignees.map((a) => a.title)).toEqual(['Dana Scully'])
+    // people shows both (backward compat — all task-person links)
+    expect(taskLinks.people.map((p) => p.title).sort()).toEqual(['Alex Rivera', 'Dana Scully'])
+    // subtitle distinguishes the role
+    const danaLink = taskLinks.people.find((p) => p.title === 'Dana Scully')
+    expect(danaLink?.subtitle).toBe(TASK_PERSON_ROLE_ASSIGNEE)
+    const alexLink = taskLinks.people.find((p) => p.title === 'Alex Rivera')
+    expect(alexLink?.subtitle).toBeNull()
+
+    // listTaskAssignees and listAllTaskAssignees helper
+    const perTask = await listTaskAssignees(task.id)
+    expect(perTask.map((a) => a.personName)).toEqual(['Dana Scully'])
+    const allAssignees = await listAllTaskAssignees()
+    expect(allAssignees.map((a) => a.personName)).toEqual(['Dana Scully'])
+  })
+
+  it('deduplicates person in both assigneeRefs and personRefs, keeping assignee role', async () => {
+    const doc = await ingestDocument({ title: 'Overlap', bodyText: 'Alex should do it.' })
+    const result = parseExtractionResult({
+      people: [{ ref: 'p_alex', fullName: 'Alex Rivera' }],
+      tasks: [
+        {
+          ref: 't_do',
+          title: 'Do the thing',
+          assigneeRefs: ['p_alex'],
+          personRefs: ['p_alex'], // same person in both — must not create two rows
+        },
+      ],
+    })
+
+    const summary = await applyExtraction({ recordType: 'document', recordId: doc.id }, result)
+    expect(summary.tasks.created).toBe(1)
+    expect(summary.people.created).toBe(1)
+
+    const task = (await listTasks())[0]
+    const taskLinks = await getTaskLinks(task.id)
+    expect(taskLinks.assignees).toHaveLength(1)
+    expect(taskLinks.assignees[0].title).toBe('Alex Rivera')
+    // people returns the single row (deduped - only one task_people row)
+    expect(taskLinks.people).toHaveLength(1)
+    expect(taskLinks.people[0].subtitle).toBe('assignee')
+  })
+
+  it('holds a task back when its assignee ref is gated out by confidence', async () => {
+    const doc = await ingestDocument({ title: 'Tipsheet', bodyText: 'Maybe assignee.' })
+    const result = parseExtractionResult({
+      people: [{ ref: 'p_low', fullName: 'Maybe Owner', confidence: 0.2 }],
+      tasks: [
+        {
+          ref: 't_dep',
+          title: 'Task assigned to gated person',
+          confidence: 0.95,
+          assigneeRefs: ['p_low'],
+          evidence: [{ chunkIndex: 0 }],
+        },
+      ],
+    })
+    const summary = await applyExtraction({ recordType: 'document', recordId: doc.id }, result, {
+      minConfidence: 0.6,
+    })
+
+    // Both the gated person and the dependent task become suggestions
+    expect(summary.suggestions.map((s) => s.label).sort()).toEqual([
+      'Maybe Owner', 'Task assigned to gated person',
+    ])
+    expect(summary.tasks.created).toBe(0)
+    expect(await listTasks()).toHaveLength(0)
+  })
+
+  it('deduplicates duplicate assignee refs resolving to the same person', async () => {
+    // A model may emit the same ref twice in assigneeRefs, or two refs that
+    // merge-resolve to the same person. Either way, only one task_people row
+    // with role='assignee' should be written.
+    const doc = await ingestDocument({ title: 'Dupe assignee', bodyText: 'Alex twice.' })
+    const existingId = await createPerson({ fullName: 'Alex Rivera', primaryEmail: 'alex@example.com' })
+    const result = parseExtractionResult({
+      // Two refs that resolve to the same person via email merge.
+      people: [
+        { ref: 'p_alex1', fullName: 'Alex Rivera', primaryEmail: 'alex@example.com' },
+        { ref: 'p_alex2', fullName: 'Alex R.',     primaryEmail: 'alex@example.com' },
+      ],
+      tasks: [
+        {
+          ref: 't_do',
+          title: 'Send it twice',
+          assigneeRefs: ['p_alex1', 'p_alex2'], // both resolve to same DB row
+        },
+      ],
+    })
+
+    const summary = await applyExtraction({ recordType: 'document', recordId: doc.id }, result)
+    expect(summary.tasks.created).toBe(1)
+    expect(summary.people.matched).toBe(2) // both refs matched existing row
+
+    const task = (await listTasks())[0]
+    const taskLinks = await getTaskLinks(task.id)
+    expect(taskLinks.assignees).toHaveLength(1)
+    expect(taskLinks.assignees[0].title).toBe('Alex Rivera')
+    expect(taskLinks.people).toHaveLength(1) // only one task_people row total
+
+    // listTaskAssignees helper also returns exactly one row
+    const assignees = await listTaskAssignees(task.id)
+    expect(assignees).toHaveLength(1)
+    expect(assignees[0].personId).toBe(existingId)
+  })
+
+  it('validates assigneeRefs must be person refs', () => {
+    const result = parseExtractionResult({
+      organizations: [{ ref: 'org1', name: 'Acme' }],
+      tasks: [
+        {
+          ref: 't1',
+          title: 'Bad ref task',
+          assigneeRefs: ['org1'], // org ref, not a person ref — must be rejected
+        },
+      ],
+    })
+    const problems = validateExtraction(result)
+    expect(problems.length).toBeGreaterThan(0)
+    expect(problems.some((p) => p.includes('assigneeRef') && p.includes('person'))).toBe(true)
   })
 
   it('runs the pipeline through the extractor seam only when one is registered', async () => {

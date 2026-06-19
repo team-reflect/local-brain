@@ -3,6 +3,8 @@
 //! These mirror the app's `reports/` endpoints so a daily automation produces
 //! the same structured context from the terminal as the Today surface shows.
 
+use std::collections::HashMap;
+
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 
@@ -41,6 +43,32 @@ fn fetch_open_tasks(conn: &Connection) -> Result<Vec<TaskRow>, CliError> {
     rows.collect::<Result<Vec<_>, _>>().map_err(CliError::from)
 }
 
+/// Load all task assignees (role='assignee') in one query, keyed by task_id.
+fn fetch_task_assignees(conn: &Connection) -> Result<HashMap<String, Vec<Value>>, CliError> {
+    let mut stmt = conn.prepare(
+        "SELECT tp.task_id, tp.person_id, p.full_name
+         FROM task_people tp
+         JOIN people p ON p.id = tp.person_id
+         WHERE tp.role = 'assignee' AND p.archived_at IS NULL
+         ORDER BY p.full_name ASC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    let mut map: HashMap<String, Vec<Value>> = HashMap::new();
+    for row in rows {
+        let (task_id, person_id, name) = row?;
+        map.entry(task_id)
+            .or_default()
+            .push(json!({ "id": person_id, "name": name }));
+    }
+    Ok(map)
+}
+
 /// `overdue | today | soon | scheduled | open` for a task, given today's date and
 /// a soon window. Mirrors core `bucketFor`: a task scheduled for a future day is
 /// `scheduled` (ranked with `soon`), not generic `open`.
@@ -67,7 +95,7 @@ fn bucket_for(task: &TaskRow, today: &str, soon_cutoff: &str) -> &'static str {
     "open"
 }
 
-fn task_json(task: &TaskRow, bucket: &str) -> Value {
+fn task_json(task: &TaskRow, bucket: &str, assignees: &[Value]) -> Value {
     json!({
         "id": task.id,
         "title": task.title,
@@ -77,6 +105,7 @@ fn task_json(task: &TaskRow, bucket: &str) -> Value {
         "priority": task.priority,
         "projectId": task.project_id,
         "bucket": bucket,
+        "assignees": assignees,
     })
 }
 
@@ -110,10 +139,13 @@ fn daily_brief(conn: &Connection) -> Result<Value, CliError> {
     let today = today(conn)?;
     let cutoff = soon_cutoff(conn, 7)?;
     let tasks = fetch_open_tasks(conn)?;
+    let assignee_map = fetch_task_assignees(conn)?;
+    let empty: Vec<Value> = vec![];
     let (mut overdue, mut due_today, mut soon, mut open) = (vec![], vec![], vec![], vec![]);
     for task in &tasks {
         let bucket = bucket_for(task, &today, &cutoff);
-        let value = task_json(task, bucket);
+        let assignees = assignee_map.get(&task.id).unwrap_or(&empty);
+        let value = task_json(task, bucket, assignees);
         match bucket {
             "overdue" => overdue.push(value),
             "today" => due_today.push(value),
@@ -148,6 +180,8 @@ pub fn plan_day(conn: &Connection, json: bool, limit: usize) -> Result<(), CliEr
     let today = today(conn)?;
     let cutoff = soon_cutoff(conn, 7)?;
     let mut tasks = fetch_open_tasks(conn)?;
+    let assignee_map = fetch_task_assignees(conn)?;
+    let empty: Vec<Value> = vec![];
     let rank = |t: &TaskRow| match bucket_for(t, &today, &cutoff) {
         "overdue" => 0,
         "today" => 1,
@@ -168,7 +202,10 @@ pub fn plan_day(conn: &Connection, json: bool, limit: usize) -> Result<(), CliEr
     let plan: Vec<Value> = tasks
         .iter()
         .take(limit)
-        .map(|t| task_json(t, bucket_for(t, &today, &cutoff)))
+        .map(|t| {
+            let assignees = assignee_map.get(&t.id).unwrap_or(&empty);
+            task_json(t, bucket_for(t, &today, &cutoff), assignees)
+        })
         .collect();
     emit(json, &json!({ "tasks": plan }))
 }

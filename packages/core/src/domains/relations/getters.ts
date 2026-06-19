@@ -227,13 +227,16 @@ export async function getProjectLinks(projectId: string): Promise<ProjectLinks> 
 
 export interface TaskLinks {
   projects: LinkedRecord[]
+  /** All task-person links (any role). Includes assignees for backward compat. */
   people: LinkedRecord[]
+  /** People with role='assignee' only. */
+  assignees: LinkedRecord[]
   documents: LinkedRecord[]
   interactions: LinkedRecord[]
 }
 
 export async function getTaskLinks(taskId: string): Promise<TaskLinks> {
-  const [projects, people, documents, interactions] = await Promise.all([
+  const [projects, people, assignees, documents, interactions] = await Promise.all([
     db
       .selectFrom('projects')
       .innerJoin('tasks', 'tasks.projectId', 'projects.id')
@@ -246,6 +249,15 @@ export async function getTaskLinks(taskId: string): Promise<TaskLinks> {
       .selectFrom('people')
       .innerJoin('taskPeople', 'taskPeople.personId', 'people.id')
       .where('taskPeople.taskId', '=', taskId)
+      .where('people.archivedAt', 'is', null)
+      .orderBy('people.fullName', 'asc')
+      .select(['people.id as id', 'people.fullName as title', 'taskPeople.role as subtitle'])
+      .execute(),
+    db
+      .selectFrom('people')
+      .innerJoin('taskPeople', 'taskPeople.personId', 'people.id')
+      .where('taskPeople.taskId', '=', taskId)
+      .where('taskPeople.role', '=', 'assignee')
       .where('people.archivedAt', 'is', null)
       .orderBy('people.fullName', 'asc')
       .select(['people.id as id', 'people.fullName as title', 'taskPeople.role as subtitle'])
@@ -270,6 +282,7 @@ export async function getTaskLinks(taskId: string): Promise<TaskLinks> {
   return {
     projects: asLinks('project', projects),
     people: asLinks('person', people),
+    assignees: asLinks('person', assignees),
     documents: asLinks('document', documents),
     interactions: asLinks('interaction', interactions),
   }
