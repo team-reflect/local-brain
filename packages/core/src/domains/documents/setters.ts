@@ -1,6 +1,7 @@
 import type { Documents } from '@local-brain/db'
 import {
   archiveRecord,
+  assertTitleOrBody,
   insertRecord,
   updateRecord,
   type NewRecord,
@@ -15,8 +16,10 @@ export function createDocument(input: NewDocument): Promise<string> {
   return insertRecord('documents', validateNewDocument(input))
 }
 
-export function updateDocument(id: string, patch: DocumentPatch): Promise<number> {
-  return updateRecord('documents', id, validateDocumentPatch(patch))
+export async function updateDocument(id: string, patch: DocumentPatch): Promise<number> {
+  const clean = validateDocumentPatch(patch)
+  await assertTitleOrBody('documents', id, clean, 'a document')
+  return updateRecord('documents', id, clean)
 }
 
 export function archiveDocument(id: string): Promise<number> {

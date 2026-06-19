@@ -4,6 +4,7 @@ import { db } from './client'
 import { execute } from './commands'
 import { newId } from './id'
 import { nowIso } from './time'
+import { ValidationError } from '../validation'
 
 /**
  * Shared shapes for the per-domain create/update payloads.
@@ -69,6 +70,53 @@ export function updateRecord<T extends RecordTable>(
       .set({ ...patch, updatedAt: nowIso() } as never)
       .where('id', '=', id),
   )
+}
+
+/** Content records carry a human-facing title and/or body. */
+type ContentTable = Extract<RecordTable, 'documents' | 'interactions'>
+
+/** The subset of a patch the title-or-body precondition cares about. */
+interface ContentPatch {
+  title?: string | null
+  bodyText?: string | null
+}
+
+/**
+ * Enforce the "a record needs a title or body" rule on an *update*. The pure
+ * patch validators normalize a blank title/body to `null` but cannot see the
+ * existing row, so a patch that clears the only remaining title or body would
+ * persist an empty, unsearchable record. This reads the current row and rejects
+ * a patch that would leave neither field set.
+ *
+ * The read is skipped when the patch is provably safe — when it supplies a
+ * non-null title or body (content is guaranteed) or touches neither field
+ * (nothing can be cleared) — so the common update paths stay read-free.
+ */
+export async function assertTitleOrBody(
+  table: ContentTable,
+  id: string,
+  patch: ContentPatch,
+  label: string,
+): Promise<void> {
+  const titleProvided = patch.title !== undefined
+  const bodyProvided = patch.bodyText !== undefined
+  if (!titleProvided && !bodyProvided) return
+  if ((titleProvided && patch.title != null) || (bodyProvided && patch.bodyText != null)) return
+
+  // `documents` is a representative member: both content tables share the
+  // `title`/`body_text` columns, so the concrete builder reads the real table.
+  const existing = await db
+    .selectFrom(table as 'documents')
+    .select(['title', 'bodyText'])
+    .where('id', '=', id)
+    .executeTakeFirst()
+  if (!existing) return
+
+  const title = titleProvided ? patch.title : existing.title
+  const body = bodyProvided ? patch.bodyText : existing.bodyText
+  if (!title && !body) {
+    throw new ValidationError(`${label} needs a title or body text`)
+  }
 }
 
 /** Soft-delete: stamp `archived_at` (and `updated_at`) so links/history survive. */

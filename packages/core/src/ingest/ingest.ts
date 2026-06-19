@@ -7,6 +7,8 @@ import { chunkText, normalizeText } from './chunk'
 import { contentHash } from './hash'
 import { markForExtraction } from './extraction-queue'
 import { recomputeRelationshipIntelligence } from '../domains/relationships/recompute'
+import { validateNewDocument } from '../domains/documents/validators'
+import { validateNewInteraction } from '../domains/interactions/validators'
 
 /**
  * Ingestion: turn pasted/imported text into a `document` or `interaction` with
@@ -99,18 +101,30 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
   const { body, hash, dup } = await prepare('documents', input)
   if (dup && !input.allowDuplicate) return { id: dup, isDuplicate: true, chunkCount: 0 }
 
+  // Apply the same write contract as `createDocument`: normalize the title/body
+  // and reject a record with neither, so a whitespace-only paste/import cannot
+  // create a titleless, bodyless document. The chunk/hash path keeps using the
+  // already-normalized `body` so dedupe keys stay identical to the CLI's.
+  const fields = validateNewDocument({
+    title: input.title ?? null,
+    bodyText: body,
+    kind: input.kind ?? null,
+    summary: input.summary ?? null,
+    originalUrl: input.originalUrl ?? null,
+  })
+
   const id = newId()
   const chunks = await chunkStatements('document', id, body)
   const statements: Compilable[] = [
     db.insertInto('documents').values({
       id,
-      title: input.title ?? null,
-      kind: input.kind ?? null,
-      bodyText: body,
-      summary: input.summary ?? null,
+      title: fields.title,
+      kind: fields.kind ?? null,
+      bodyText: fields.bodyText,
+      summary: fields.summary ?? null,
       mimeType: input.mimeType ?? null,
       originalPath: input.originalPath ?? null,
-      originalUrl: input.originalUrl ?? null,
+      originalUrl: fields.originalUrl ?? null,
       authoredAt: input.authoredAt ?? null,
       contentHash: hash,
     }),
@@ -126,20 +140,33 @@ export async function ingestInteraction(input: IngestInteractionInput): Promise<
   const { body, hash, dup } = await prepare('interactions', input)
   if (dup && !input.allowDuplicate) return { id: dup, isDuplicate: true, chunkCount: 0 }
 
+  // Same write contract as `createInteraction` (mirrors `ingestDocument`):
+  // normalize title/body and reject a record with neither. `kind` is left to the
+  // caller, as in the validator, since it is `NOT NULL DEFAULT 'note'`.
+  const fields = validateNewInteraction({
+    ...(input.kind !== undefined ? { kind: input.kind } : {}),
+    title: input.title ?? null,
+    bodyText: body,
+    summary: input.summary ?? null,
+    location: input.location ?? null,
+    externalId: input.externalId ?? null,
+    originalUrl: input.originalUrl ?? null,
+  })
+
   const id = newId()
   const chunks = await chunkStatements('interaction', id, body)
   const statements: Compilable[] = [
     db.insertInto('interactions').values({
       id,
       ...(input.kind !== undefined ? { kind: input.kind } : {}),
-      title: input.title ?? null,
-      bodyText: body,
-      summary: input.summary ?? null,
+      title: fields.title,
+      bodyText: fields.bodyText,
+      summary: fields.summary ?? null,
       occurredAt: input.occurredAt ?? null,
-      location: input.location ?? null,
-      externalId: input.externalId ?? null,
+      location: fields.location ?? null,
+      externalId: fields.externalId ?? null,
       originalPath: input.originalPath ?? null,
-      originalUrl: input.originalUrl ?? null,
+      originalUrl: fields.originalUrl ?? null,
       contentHash: hash,
     }),
     ...chunks.statements,

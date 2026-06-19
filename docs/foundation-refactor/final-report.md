@@ -126,3 +126,43 @@ Test counts after the refactor:
 - **Desktop query-invalidation tuning** (a few mutation hooks call
   `invalidateQueries()` with no key filter) is real but behavioral and was left to
   its own focused PR.
+
+## Follow-up — Cursor Bugbot fixes (current head)
+
+Three Bugbot findings raised on the PR head were fixed in place. Each closes a
+hole where the write contract introduced by this refactor was not yet enforced on
+every path; none broadens the refactor's scope.
+
+| Bugbot | Comment | Issue | Fix |
+| --- | --- | --- | --- |
+| `ed6682f5-34f0-4f31-8e38-11c6568e4bc8` | `3439812121` | Patch clears required title or body | `assertTitleOrBody` (new, `db/records.ts`) reads the existing row; `updateDocument`/`updateInteraction` reject a patch that would leave a record with neither title nor body. The read is skipped when the patch provably keeps content (supplies a non-null title/body) or touches neither field. |
+| `cf909b13-9108-41f6-9a57-c6b37ad5dda3` | `3439812126` | CLI title trim not squish | `squish`/`normalize_title` (new, `apps/cli/src/commands/add.rs`) collapse internal whitespace, matching core `squish`; `add document`/`add interaction` titles use it. |
+| `40bc1e31-511e-425b-bc1a-397a894a056a` | `3439818587` | Ingest bypasses document validation | `ingestDocument` (and `ingestInteraction`, for symmetry) now run their fields through `validateNewDocument`/`validateNewInteraction` before insert, so a whitespace-only paste/import cannot create a titleless/bodyless record. The already-normalized body still feeds the hash/chunk path, so dedupe keys are unchanged. |
+
+**Files changed:** `packages/core/src/db/records.ts`,
+`packages/core/src/domains/documents/setters.ts`,
+`packages/core/src/domains/interactions/setters.ts`,
+`packages/core/src/ingest/ingest.ts`,
+`packages/core/src/db/integration.test.mjs`,
+`apps/cli/src/commands/add.rs`, `apps/cli/tests/cli.rs`.
+
+**Tests added:** +6 core integration (whitespace-only document/interaction
+ingest rejected, title-only ingest squished with null body, update clearing the
+sole title/body rejected, clearing one field when the other is supplied allowed)
+→ core **190**. +2 CLI (document/interaction title internal-whitespace squish)
+→ CLI **20**.
+
+**Rust changes:** yes — `apps/cli/src/commands/add.rs` and `apps/cli/tests/cli.rs`.
+The Rust gates below were therefore re-run.
+
+**Verification (re-run for the follow-up):**
+
+| Command | Result |
+| --- | --- |
+| `git diff --check` | ✅ clean |
+| `pnpm check` | ✅ exit 0 (core 190 tests) |
+| `pnpm --filter @local-brain/desktop build` | ✅ vite build OK (pre-existing warnings only) |
+| `pnpm --filter @local-brain/desktop sidecar` | ✅ staged `brain-aarch64-apple-darwin` |
+| `cargo fmt --all -- --check` | ✅ exit 0 |
+| `cargo check --workspace` | ✅ exit 0 |
+| `cargo test --workspace` | ✅ exit 0 (CLI 20, schema 14, desktop-lib 51, +others) |

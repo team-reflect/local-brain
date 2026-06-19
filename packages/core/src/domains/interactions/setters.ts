@@ -2,7 +2,13 @@ import type { Interactions } from '@local-brain/db'
 import { db } from '../../db/client'
 import { batch } from '../../db/commands'
 import { newId } from '../../db/id'
-import { archiveRecord, updateRecord, type NewRecord, type RecordPatch } from '../../db/records'
+import {
+  archiveRecord,
+  assertTitleOrBody,
+  updateRecord,
+  type NewRecord,
+  type RecordPatch,
+} from '../../db/records'
 import { recomputeRelationshipIntelligence } from '../relationships/recompute'
 import { validateNewInteraction, validateInteractionPatch } from './validators'
 
@@ -45,8 +51,10 @@ export async function createInteraction(
   return id
 }
 
-export function updateInteraction(id: string, patch: InteractionPatch): Promise<number> {
-  return updateRecord('interactions', id, validateInteractionPatch(patch))
+export async function updateInteraction(id: string, patch: InteractionPatch): Promise<number> {
+  const clean = validateInteractionPatch(patch)
+  await assertTitleOrBody('interactions', id, clean, 'an interaction')
+  return updateRecord('interactions', id, clean)
 }
 
 export function archiveInteraction(id: string): Promise<number> {

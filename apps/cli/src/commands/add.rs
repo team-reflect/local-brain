@@ -22,6 +22,19 @@ fn normalize_optional(raw: Option<&str>) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+/// Collapse internal whitespace runs to single spaces and trim, preserving case.
+/// The Rust twin of core `squish` (`packages/core/src/text/normalize.ts`), used
+/// for short display labels like titles so the CLI and app store them identically.
+fn squish(raw: &str) -> String {
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Normalize a title to its storage form (squish), collapsing blank to `None`.
+/// Mirrors the core `labelOrNull` used by `validateNewDocument`/`Interaction`.
+fn normalize_title(raw: Option<&str>) -> Option<String> {
+    raw.map(squish).filter(|value| !value.is_empty())
+}
+
 fn normalize_email(raw: Option<&str>) -> Option<String> {
     normalize_optional(raw).map(|value| value.to_lowercase())
 }
@@ -568,7 +581,7 @@ pub fn add_document(
     args: AddDocumentArgs,
 ) -> Result<(), CliError> {
     let body = normalize_text(&args.body);
-    let title = normalize_optional(args.title);
+    let title = normalize_title(args.title);
     // Parity with the core `validateNewDocument`: both columns are nullable in
     // SQLite, so reject a document with neither a title nor a body.
     if title.is_none() && body.is_empty() {
@@ -662,7 +675,7 @@ pub fn add_interaction(
     args: AddInteractionArgs,
 ) -> Result<(), CliError> {
     let body = normalize_text(&args.body);
-    let title = normalize_optional(args.title);
+    let title = normalize_title(args.title);
     // Parity with the core `validateNewInteraction`: reject one with neither a
     // title nor a body.
     if title.is_none() && body.is_empty() {

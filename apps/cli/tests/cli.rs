@@ -203,6 +203,62 @@ fn add_interaction_rejects_empty_title_and_body() {
 }
 
 #[test]
+fn add_document_squishes_internal_title_whitespace() {
+    // Parity with the core `squish`: internal whitespace runs collapse to single
+    // spaces (not just trimmed ends) so the CLI and app store titles identically.
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let added = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "document",
+            "--title",
+            "  Field   note\tdraft ",
+            "--text",
+            "body",
+        ],
+    );
+    let conn = Connection::open(&db).unwrap();
+    let title: String = conn
+        .query_row(
+            "SELECT title FROM documents WHERE id = ?1",
+            [added["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(title, "Field note draft");
+}
+
+#[test]
+fn add_interaction_squishes_internal_title_whitespace() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let added = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--title",
+            "  Sync   up ",
+            "--text",
+            "we talked",
+        ],
+    );
+    let conn = Connection::open(&db).unwrap();
+    let title: String = conn
+        .query_row(
+            "SELECT title FROM interactions WHERE id = ?1",
+            [added["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(title, "Sync up");
+}
+
+#[test]
 fn add_person_dedupes_and_returns_contact_fields() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
