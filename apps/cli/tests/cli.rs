@@ -1005,6 +1005,60 @@ fn add_interaction_allows_structured_calendar_event_without_body() {
 }
 
 #[test]
+fn add_interaction_external_id_reimport_enriches_start_time() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "event",
+            "--title",
+            "Calendar: Needs start",
+            "--source",
+            "google_calendar",
+            "--external-id",
+            "calendar-event-start-later",
+        ],
+    );
+    assert_eq!(first["isDuplicate"], false);
+
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "event",
+            "--title",
+            "Calendar: Needs start",
+            "--occurred-at",
+            "2026-07-09",
+            "--source",
+            "google_calendar",
+            "--external-id",
+            "calendar-event-start-later",
+        ],
+    );
+    assert_eq!(second["isDuplicate"], true);
+    assert_eq!(second["id"], first["id"]);
+
+    let conn = Connection::open(&db).unwrap();
+    let occurred_at: String = conn
+        .query_row(
+            "SELECT occurred_at FROM interactions WHERE id = ?1",
+            [first["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(occurred_at, "2026-07-09");
+}
+
+#[test]
 fn add_interaction_self_participant_links_self_and_dedupes_roles() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);

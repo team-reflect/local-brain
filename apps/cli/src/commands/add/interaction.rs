@@ -85,22 +85,27 @@ fn enrich_duplicate_interaction(
              original_url = CASE
                WHEN (original_url IS NULL OR trim(original_url) = '') AND ?2 IS NOT NULL
                THEN ?2 ELSE original_url END,
+             occurred_at = CASE
+               WHEN (occurred_at IS NULL OR trim(occurred_at) = '') AND ?3 IS NOT NULL
+               THEN ?3 ELSE occurred_at END,
              ended_at = CASE
-               WHEN (ended_at IS NULL OR trim(ended_at) = '') AND ?3 IS NOT NULL
-               THEN ?3 ELSE ended_at END,
+               WHEN (ended_at IS NULL OR trim(ended_at) = '') AND ?4 IS NOT NULL
+               THEN ?4 ELSE ended_at END,
              location = CASE
-               WHEN (location IS NULL OR trim(location) = '') AND ?4 IS NOT NULL
-               THEN ?4 ELSE location END,
+               WHEN (location IS NULL OR trim(location) = '') AND ?5 IS NOT NULL
+               THEN ?5 ELSE location END,
              updated_at = CASE
                WHEN ((external_id IS NULL OR trim(external_id) = '') AND ?1 IS NOT NULL)
                  OR ((original_url IS NULL OR trim(original_url) = '') AND ?2 IS NOT NULL)
-                 OR ((ended_at IS NULL OR trim(ended_at) = '') AND ?3 IS NOT NULL)
-                 OR ((location IS NULL OR trim(location) = '') AND ?4 IS NOT NULL)
+                 OR ((occurred_at IS NULL OR trim(occurred_at) = '') AND ?3 IS NOT NULL)
+                 OR ((ended_at IS NULL OR trim(ended_at) = '') AND ?4 IS NOT NULL)
+                 OR ((location IS NULL OR trim(location) = '') AND ?5 IS NOT NULL)
                THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE updated_at END
-         WHERE id = ?5",
+         WHERE id = ?6",
         params![
             normalize_optional(args.external_id),
             normalize_optional(args.original_url),
+            normalize_optional(args.occurred_at),
             normalize_optional(args.ended_at),
             normalize_optional(args.location),
             id,
