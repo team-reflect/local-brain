@@ -220,10 +220,17 @@ fn insert_external_identity(
     // unique (source_id, kind, external_id) row still points at the archived
     // entity, so the new active record would never get an identity row and later
     // imports would skip `find_external_identity` (which only matches active
-    // rows). Re-point the conflicting identity at the new entity, but ONLY when
-    // the currently-referenced entity is no longer active. This mirrors
-    // `find_external_identity`'s active-only scope and never clobbers an identity
-    // that still maps to a live record.
+    // rows). The `ON CONFLICT` update therefore handles two cases:
+    //   1. Re-point the conflicting identity at the new entity, but ONLY when the
+    //      currently-referenced entity is no longer active. This mirrors
+    //      `find_external_identity`'s active-only scope and never clobbers an
+    //      identity that still maps to a live record.
+    //   2. Refresh the stored `url` when the re-import dedupes onto the SAME
+    //      active entity and carries a new/changed `--original-url`. Without this,
+    //      a duplicate import that resolves to the existing active record would
+    //      skip the update entirely and a fresh URL (including filling a
+    //      previously null one) would never land. `COALESCE` keeps a real URL from
+    //      being clobbered with NULL on a URL-less re-import.
     let sql = format!(
         "INSERT INTO external_identities
            (id, entity_type, entity_id, source_id, kind, external_id, url)
@@ -231,13 +238,23 @@ fn insert_external_identity(
          ON CONFLICT (source_id, kind, external_id) DO UPDATE SET
            entity_type = excluded.entity_type,
            entity_id = excluded.entity_id,
-           url = excluded.url,
+           url = COALESCE(excluded.url, external_identities.url),
            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-         WHERE external_identities.entity_id <> excluded.entity_id
-           AND NOT EXISTS (
-             SELECT 1 FROM {table} t
-             WHERE t.id = external_identities.entity_id
-               AND t.archived_at IS NULL
+         WHERE (
+             external_identities.entity_id <> excluded.entity_id
+             AND NOT EXISTS (
+               SELECT 1 FROM {table} t
+               WHERE t.id = external_identities.entity_id
+                 AND t.archived_at IS NULL
+             )
+           )
+           OR (
+             external_identities.entity_id = excluded.entity_id
+             AND excluded.url IS NOT NULL
+             AND (
+               external_identities.url IS NULL
+               OR external_identities.url <> excluded.url
+             )
            )",
     );
     conn.execute(
@@ -2167,6 +2184,120 @@ mod tests {
         assert_eq!(
             identity_target, owner_id,
             "an active external identity must not be re-pointed on re-import"
+        );
+    }
+
+    #[test]
+    fn add_person_reimport_refreshes_external_identity_url_on_same_active_record() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // First import: an active person carrying external id "ext-1" but no URL.
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Robin Spencer",
+                vec!["robin@example.com"],
+                vec![],
+                Some("ext-1"),
+            ),
+        )
+        .unwrap();
+        let person_id = single_person_id(&conn, "Robin Spencer");
+        let stored_url: Option<String> = conn
+            .query_row(
+                "SELECT url FROM external_identities
+                 WHERE entity_type = 'person' AND kind = 'contact' AND external_id = 'ext-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored_url, None, "first import should leave the URL null");
+
+        // Re-import the same external id (dedupes onto the same active person) now
+        // carrying an original URL. The duplicate path must fill the null URL.
+        add_person(
+            &mut conn,
+            true,
+            AddPersonArgs {
+                original_url: Some("https://example.com/robin"),
+                ..person_args(
+                    "Robin Spencer",
+                    vec!["robin@example.com"],
+                    vec![],
+                    Some("ext-1"),
+                )
+            },
+        )
+        .unwrap();
+        let same_person = single_person_id(&conn, "Robin Spencer");
+        assert_eq!(same_person, person_id, "re-import must dedupe, not fork");
+        let filled_url: Option<String> = conn
+            .query_row(
+                "SELECT url FROM external_identities
+                 WHERE entity_type = 'person' AND kind = 'contact' AND external_id = 'ext-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            filled_url.as_deref(),
+            Some("https://example.com/robin"),
+            "duplicate re-import must fill a previously null external-identity URL"
+        );
+
+        // A later re-import with a changed URL must refresh the stored value.
+        add_person(
+            &mut conn,
+            true,
+            AddPersonArgs {
+                original_url: Some("https://example.com/robin-updated"),
+                ..person_args(
+                    "Robin Spencer",
+                    vec!["robin@example.com"],
+                    vec![],
+                    Some("ext-1"),
+                )
+            },
+        )
+        .unwrap();
+        let refreshed_url: Option<String> = conn
+            .query_row(
+                "SELECT url FROM external_identities
+                 WHERE entity_type = 'person' AND kind = 'contact' AND external_id = 'ext-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            refreshed_url.as_deref(),
+            Some("https://example.com/robin-updated"),
+            "duplicate re-import must refresh a changed external-identity URL"
+        );
+
+        // A URL-less re-import must not clobber the stored URL back to null.
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Robin Spencer",
+                vec!["robin@example.com"],
+                vec![],
+                Some("ext-1"),
+            ),
+        )
+        .unwrap();
+        let preserved_url: Option<String> = conn
+            .query_row(
+                "SELECT url FROM external_identities
+                 WHERE entity_type = 'person' AND kind = 'contact' AND external_id = 'ext-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            preserved_url.as_deref(),
+            Some("https://example.com/robin-updated"),
+            "a URL-less re-import must not clobber an existing external-identity URL"
         );
     }
 

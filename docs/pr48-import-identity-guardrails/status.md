@@ -1,6 +1,22 @@
 # PR #48 Bugbot fixes — status
 
-State: **all four original findings + seven follow-ups fixed, tested, and verified locally.**
+State: **all four original findings + eight follow-ups fixed, tested, and verified locally.**
+
+## Follow-up (fresh current-head Bugbot finding #12, head `5e09c39`/`bb9cf9d`)
+
+Bugbot re-reviewed head `5e09c39` (NEUTRAL) and flagged one fresh current-head
+issue.
+
+| # | BUGBOT | Sev | Finding | Fix | Tests |
+|---|--------|-----|---------|-----|-------|
+| 12 | `82b9d5f2` (comment `3439881613`) | Medium | Duplicate import skips URL refresh — `insert_external_identity`'s `ON CONFLICT DO UPDATE` only ran when `entity_id <> excluded.entity_id`, so a re-import that resolves to the **same active** record skipped the update entirely; a new `--original-url` never refreshed `external_identities.url`, including filling a previously null URL | The `ON CONFLICT` `WHERE` now has a second branch: same active entity **and** a new/changed non-null `excluded.url` also triggers the update. `url` is set via `COALESCE(excluded.url, external_identities.url)` so a URL-less re-import never clobbers an existing URL with NULL. The archived re-point branch is unchanged | `add.rs` `add_person_reimport_refreshes_external_identity_url_on_same_active_record` — fills a null URL, refreshes a changed URL, and asserts a URL-less re-import preserves the stored value (confirmed to fail before the fix with `left: None, right: Some("https://example.com/robin")`) |
+
+Verification (run at this head): `cargo fmt -p brain-cli -- --check` clean,
+`cargo test -p brain-cli` = 22 unit + 28 integration + 2 skill all pass. The
+regression test was confirmed to fail before the fix and pass after. No JS
+touched.
+
+> Bugbot must re-run against the pushed head before finding #12 is settled.
 
 ## Follow-up (fresh current-head Bugbot finding #11, head `71bbff6`/`bca58b6`)
 
