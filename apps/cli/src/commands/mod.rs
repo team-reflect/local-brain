@@ -27,6 +27,22 @@ pub enum LinkKind {
     Interaction,
 }
 
+impl LinkKind {
+    /// The canonical `record_type` string stored in join/provenance tables
+    /// (`memory_links`, `asset_links`, …). The single source of truth so every
+    /// writer labels a link the same way.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LinkKind::Person => "person",
+            LinkKind::Organization => "organization",
+            LinkKind::Project => "project",
+            LinkKind::Task => "task",
+            LinkKind::Document => "document",
+            LinkKind::Interaction => "interaction",
+        }
+    }
+}
+
 /// A parsed `--link kind:id` reference.
 #[derive(Debug, Clone)]
 pub struct LinkRef {
