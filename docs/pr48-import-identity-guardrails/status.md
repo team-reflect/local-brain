@@ -1,6 +1,17 @@
 # PR #48 Bugbot fixes — status
 
-State: **all four original findings + twelve follow-ups fixed, tested, and verified locally.**
+State: **all four original findings + thirteen follow-ups fixed, tested, and verified locally.**
+
+## Follow-up (fresh current-head Bugbot finding #17, head `ee84f3b`)
+
+Bugbot re-reviewed head `ee84f3b` and flagged one fresh current-head issue, fixed
+in `apps/cli/src/commands/add.rs` with focused regression coverage.
+
+| # | BUGBOT | Sev | Finding | Fix | Tests |
+|---|--------|-----|---------|-----|-------|
+| 17 | `91178eb0` (comment `3439998469`) | Medium | Fork sets owned primary email — finding #15 guarded the **enrichment** paths, but `add_person`'s new-record/fork path (after `--allow-duplicate` or any new-person path) still wrote `people.primary_email` from `emails.first()` with no owner check. `insert_person_handles` skips such emails via `email_owned_by_other`, so the fork could show a stolen address on `people.primary_email` with no matching `person_emails` row, breaking the one-person-per-email invariant the duplicate/enrichment paths enforce | The new-person `INSERT` now computes its `primary_email` through `email_owned_by_other` (inside the same transaction): the first email is only stamped onto `people.primary_email` when no other active person owns it, otherwise the column stays NULL — mirroring `enrich_duplicate_person` / `insert_person_handles`. Unowned-email creation is unchanged | `add.rs` `allow_duplicate_fork_does_not_set_owned_primary_email` (confirmed to fail before the fix: the fork's `primary_email` was `Some("alice@example.com")`) |
+
+> Bugbot must re-run against the pushed head before this finding is settled.
 
 ## Follow-up (fresh current-head Bugbot findings #15–#16, head `5eba419` → `75d5ac7`)
 

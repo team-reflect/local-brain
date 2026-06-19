@@ -1092,6 +1092,17 @@ pub fn add_person(conn: &mut Connection, json: bool, args: AddPersonArgs) -> Res
 
     let id = new_id();
     let tx = conn.transaction()?;
+    // Never stamp an address another active person already owns onto the new
+    // record's denormalized people.primary_email: insert_person_handles skips
+    // such emails for person_emails, so without this guard a --allow-duplicate
+    // fork (or any new-person path) could show a stolen address on
+    // people.primary_email with no matching person_emails row, breaking the
+    // one-person-per-email invariant the duplicate/enrichment paths enforce.
+    // See email_owned_by_other.
+    let primary_email = match emails.first() {
+        Some(email) if !email_owned_by_other(&tx, &id, email)? => Some(email.clone()),
+        _ => None,
+    };
     tx.execute(
         "INSERT INTO people (
            id, full_name, preferred_name, primary_email, primary_phone, headline,
@@ -1101,7 +1112,7 @@ pub fn add_person(conn: &mut Connection, json: bool, args: AddPersonArgs) -> Res
             id,
             full_name,
             normalize_optional(args.preferred_name),
-            emails.first(),
+            primary_email,
             phones.first(),
             normalize_optional(args.headline),
             normalize_optional(args.location),
@@ -2905,6 +2916,84 @@ mod tests {
         assert_eq!(
             identity_target, original_id,
             "a forced duplicate must not steal the original record's external identity"
+        );
+    }
+
+    #[test]
+    fn allow_duplicate_fork_does_not_set_owned_primary_email() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // Alice: an active person who owns alice@example.com.
+        add_person(
+            &mut conn,
+            true,
+            person_args("Alice Smith", vec!["alice@example.com"], vec![], None),
+        )
+        .unwrap();
+        let original_id = single_person_id(&conn, "Alice Smith");
+
+        // A forced duplicate that re-imports Alice's address forks a new record.
+        // insert_person_handles skips the owned email for person_emails, so the
+        // new people.primary_email must not be stamped with it either — otherwise
+        // the fork shows a stolen address with no matching person_emails row.
+        add_person(
+            &mut conn,
+            true,
+            AddPersonArgs {
+                allow_duplicate: true,
+                ..person_args("Alice Smith", vec!["alice@example.com"], vec![], None)
+            },
+        )
+        .unwrap();
+
+        let fork_id: String = conn
+            .query_row(
+                "SELECT id FROM people WHERE archived_at IS NULL AND id <> ?1",
+                params![original_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        let fork_primary_email: Option<String> = conn
+            .query_row(
+                "SELECT primary_email FROM people WHERE id = ?1",
+                params![fork_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            fork_primary_email, None,
+            "a forced duplicate must not stamp an owned email onto its primary_email"
+        );
+
+        // The skipped email must leave no person_emails row on the fork, keeping
+        // the one-person-per-email invariant intact.
+        let fork_email_rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM person_emails WHERE person_id = ?1",
+                params![fork_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            fork_email_rows, 0,
+            "the owned email is skipped, so the fork holds no person_emails row"
+        );
+
+        // Alice still solely owns the address.
+        let owners: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM people p
+                 LEFT JOIN person_emails pe ON pe.person_id = p.id
+                 WHERE p.archived_at IS NULL
+                   AND (lower(p.primary_email) = 'alice@example.com'
+                        OR pe.normalized_email = 'alice@example.com')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            owners, 1,
+            "alice@example.com must stay owned by exactly one person"
         );
     }
 
