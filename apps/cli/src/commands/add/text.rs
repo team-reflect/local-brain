@@ -36,23 +36,6 @@ pub(super) fn normalize_phone(raw: Option<&str>) -> Option<String> {
         .filter(|value: &String| !value.is_empty())
 }
 
-/// Normalize each item with `normalize`, dropping blanks and exact duplicates
-/// while preserving first-seen order.
-pub(super) fn normalize_many<'a>(
-    raw: impl IntoIterator<Item = &'a str>,
-    normalize: fn(Option<&str>) -> Option<String>,
-) -> Vec<String> {
-    let mut values = Vec::new();
-    for item in raw {
-        if let Some(value) = normalize(Some(item)) {
-            if !values.iter().any(|existing| existing == &value) {
-                values.push(value);
-            }
-        }
-    }
-    values
-}
-
 /// Fold a display name to a comparison key: lowercase, strip diacritics, replace
 /// punctuation with spaces, and collapse whitespace. Used for name-based dedupe.
 pub(super) fn normalize_name(raw: &str) -> String {

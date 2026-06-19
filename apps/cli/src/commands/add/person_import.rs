@@ -10,7 +10,6 @@ use super::text::{normalize_email, valid_email};
 /// The outcome of assessing one untrusted `(name, email)` import pair.
 pub(super) struct PersonImportAssessment {
     pub normalized_name: String,
-    pub email: String,
     pub should_create_person: bool,
     pub reason_codes: Vec<&'static str>,
 }
@@ -63,7 +62,6 @@ pub(super) fn assess_person_import(raw_name: &str, email: &str) -> PersonImportA
 
     PersonImportAssessment {
         normalized_name,
-        email,
         should_create_person: reason_codes.is_empty(),
         reason_codes,
     }

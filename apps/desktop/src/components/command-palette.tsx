@@ -3,7 +3,7 @@ import { Search } from 'lucide-react'
 import { VisuallyHidden } from 'radix-ui'
 import { listCommands } from '../lib/commands/registry'
 import type { CommandContext } from '../lib/commands/types'
-import { useGlobalSearch } from '../lib/queries'
+import { useQuickSearch } from '../lib/queries'
 import { routeForRecord } from '../routing/route'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 
@@ -40,7 +40,7 @@ export function CommandPalette({
 }): ReactNode {
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState(0)
-  const search = useGlobalSearch(open ? query : '')
+  const search = useQuickSearch(open ? query : '')
 
   useEffect(() => {
     if (open) {

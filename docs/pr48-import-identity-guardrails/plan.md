@@ -55,5 +55,3 @@ Launch head: a7320da266511eaca514e987a19c60808f621cb5
 - `cargo fmt`, `cargo clippy`, focused `cargo test` for the CLI crate
 - focused vitest for `packages/core` interactions setters
 - `pnpm check`
-</content>
-</invoke>
