@@ -1,7 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { AppShell } from './app-shell'
+
+const queryMocks = vi.hoisted(() => ({
+  createProject: {
+    isPending: false,
+    mutateAsync: vi.fn(),
+  },
+}))
 
 vi.mock('../routing/router', () => ({
   useRouter: () => ({
@@ -12,6 +19,29 @@ vi.mock('../routing/router', () => ({
     canBack: false,
     canForward: true,
   }),
+}))
+
+vi.mock('../lib/queries', () => ({
+  useProjects: () => ({
+    isLoading: false,
+    data: [
+      {
+        id: 'project-1',
+        name: 'Apollo',
+        status: 'active',
+        kind: null,
+        summary: null,
+        notes: null,
+        startedOn: null,
+        targetDate: null,
+        completedOn: null,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        archivedAt: null,
+      },
+    ],
+  }),
+  useCreateProject: () => queryMocks.createProject,
 }))
 
 vi.mock('./brain-switcher', () => ({
@@ -47,5 +77,18 @@ describe('AppShell', () => {
     expect(back.closest('aside')).not.toBe(sidebar)
     expect(forward.closest('aside')).not.toBe(sidebar)
     expect(back.parentElement?.className).toContain('absolute')
+  })
+
+  it('renders projects as a collapsible sidebar section', () => {
+    render(<AppShell />)
+
+    const projects = screen.getByRole('button', { name: /Projects/ })
+    expect(screen.getByRole('button', { name: 'Apollo' })).toBeDefined()
+
+    fireEvent.click(projects)
+
+    expect(projects.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByRole('button', { name: 'Apollo' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Create project' })).toBeDefined()
   })
 })
