@@ -48,7 +48,6 @@ export function FirstRun(): ReactNode {
       <DialogContent
         placement="center"
         className="w-[36rem] p-6"
-        aria-describedby="first-run-description"
         onEscapeKeyDown={blockDismiss}
         onPointerDownOutside={blockDismiss}
         onInteractOutside={blockDismiss}

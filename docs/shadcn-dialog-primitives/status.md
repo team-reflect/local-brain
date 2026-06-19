@@ -10,4 +10,11 @@ Complete. Not blocked.
 - Extended `first-run.dom.test.tsx`: accessible dialog + title, Escape does not
   dismiss, completion closes via the mutation path.
 
+**Bugbot follow-up (PR #72):** `DialogContent` had a manual `aria-describedby=
+"first-run-description"` with no matching element. Fixed by removing the
+explicit attribute — Radix Dialog auto-wires `aria-describedby` from Content to
+Description via React context, so the manual override was both redundant and
+broken. Added a focused test asserting the idref resolves to a real DOM element.
+7/7 first-run tests pass.
+
 Verification results are in `final-report.md`.

@@ -40,10 +40,22 @@ alone.
   dynamic-import warnings only).
 - Rust untouched; no Rust gates required.
 
+## Bugbot follow-up
+
+Cursor Bugbot flagged a dangling `aria-describedby="first-run-description"` on
+`DialogContent` with no matching element id. Fixed by removing the explicit
+attribute: Radix Dialog automatically wires `aria-describedby` from
+`DialogPrimitive.Content` to `DialogPrimitive.Description` via React context, so
+the manual id was both redundant and broken. Added a focused test
+(`first-run.dom.test.tsx`) that asserts the idref resolves to a real DOM element.
+
+- `git diff --check origin/master...HEAD` — clean (exit 0).
+- `pnpm --filter @local-brain/desktop test first-run` — 7/7 pass.
+
 ## Repo state
 
 - Branch: `codex/local-brain-shadcn-dialog-primitives`
 - Base: `origin/master` @ `21feb6b1b33e984012c72cf1800bd0d3a031c067`
 - PR: https://github.com/maccman/local-brain/pull/72
-- Commit (code + docs): `28e8d4214605fa274ed4581bcca930b6b759da7d`
-- Final HEAD updated by the report-finalize commit below; see `git log`.
+- Initial commit (code + docs): `28e8d4214605fa274ed4581bcca930b6b759da7d`
+- Bugbot follow-up commit: see `git log` for final HEAD.

@@ -41,6 +41,16 @@ describe('FirstRun onboarding', () => {
     expect(screen.getByRole('heading', { name: 'Welcome to Local Brain' })).toBeDefined()
   })
 
+  it('aria-describedby on the dialog points to an element that exists in the DOM', async () => {
+    installFakeBridge({ queryRows: [] })
+    renderWithProviders(<FirstRun />)
+    const dialog = await screen.findByRole('dialog')
+    const descId = dialog.getAttribute('aria-describedby')
+    expect(descId).toBeTruthy()
+    // If this is null the idref is dangling — Radix wiring broke or a manual id was wrong.
+    expect(document.getElementById(descId!)).not.toBeNull()
+  })
+
   it('does not dismiss on Escape (blocking gate, no completion)', async () => {
     installFakeBridge({ queryRows: [] })
     renderWithProviders(<FirstRun />)
