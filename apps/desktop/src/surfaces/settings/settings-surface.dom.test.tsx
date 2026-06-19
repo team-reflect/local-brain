@@ -2,8 +2,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { setModelProvider } from '@local-brain/core'
-import { SettingsSurface } from './settings'
-import { installFakeBridge, renderWithProviders } from '../test/utils'
+import { SettingsSurface } from '.'
+import { installFakeBridge, renderWithProviders } from '../../test/utils'
 
 describe('SettingsSurface (Plan 08)', () => {
   beforeEach(() => {
