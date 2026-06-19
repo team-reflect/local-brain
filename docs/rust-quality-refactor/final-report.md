@@ -116,5 +116,4 @@ test.
 - Branch: `codex/local-brain-rust-quality-refactor`
 - Base: `master` @ a05e6ab
 - PR URL: https://github.com/maccman/local-brain/pull/50
-- Final head SHA: 5c200f956a5e4f7b641751d60a21be4f14553671 (before this report-URL
-  commit; see the branch tip for the amended SHA)
+- Final head SHA: 8a0ab44c634fb93c111033c8355e09e2bdc1b286
