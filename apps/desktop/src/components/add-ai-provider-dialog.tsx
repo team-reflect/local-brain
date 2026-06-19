@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import {
   AI_PROVIDERS,
   aiProvider,
@@ -9,6 +9,7 @@ import { controlClass, sectionLabel } from '../lib/ui'
 import type { NewAiProvider } from '../lib/queries'
 import { Alert } from './alert'
 import { Button } from './button'
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
 import { ModelCombobox } from './model-combobox'
 
 export function AddAiProviderDialog({
@@ -26,15 +27,6 @@ export function AddAiProviderDialog({
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [unverified, setUnverified] = useState(false)
-  const providerRef = useRef<HTMLSelectElement>(null)
-
-  useEffect(() => {
-    const opener = document.activeElement
-    providerRef.current?.focus()
-    return () => {
-      if (opener instanceof HTMLElement) opener.focus()
-    }
-  }, [])
 
   function changeProvider(next: AiProviderId): void {
     const nextProvider = aiProvider(next)
@@ -85,27 +77,13 @@ export function AddAiProviderDialog({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-foreground/25 pt-[12vh] backdrop-blur-[1px]"
-      onClick={requestClose}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="add-ai-provider-title"
-        className="flex w-[24rem] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-[0_8px_28px_rgba(2,6,23,0.16)]"
-        onClick={(event) => event.stopPropagation()}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') requestClose()
-        }}
-      >
+    <Dialog open onOpenChange={(next) => (next ? undefined : requestClose())}>
+      <DialogContent className="w-[24rem]" aria-describedby="add-ai-provider-description">
         <div className="border-b border-border px-4 py-3">
-          <h3 id="add-ai-provider-title" className="text-sm font-semibold text-foreground">
-            Add AI provider
-          </h3>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <DialogTitle>Add AI provider</DialogTitle>
+          <DialogDescription id="add-ai-provider-description" className="mt-1">
             The API key is stored in your OS keychain, never in your brain.
-          </p>
+          </DialogDescription>
         </div>
         <form
           className="flex flex-col gap-3 px-4 py-3"
@@ -117,7 +95,6 @@ export function AddAiProviderDialog({
           <label className="flex flex-col gap-1">
             <span className={sectionLabel}>Provider</span>
             <select
-              ref={providerRef}
               value={provider}
               disabled={submitting}
               onChange={(event) => changeProvider(event.target.value as AiProviderId)}
@@ -191,7 +168,7 @@ export function AddAiProviderDialog({
             </Button>
           </div>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

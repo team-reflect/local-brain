@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { SettingsSurface } from './settings'
-import { installFakeBridge, renderWithProviders } from '../test/utils'
+import { SettingsSurface } from '.'
+import { installFakeBridge, renderWithProviders } from '../../test/utils'
 
 const ACTIVE = {
   rootPath: '/data/local-brain',

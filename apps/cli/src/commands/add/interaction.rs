@@ -23,14 +23,17 @@ pub struct AddInteractionArgs<'a> {
     pub title: Option<&'a str>,
     pub kind: &'a str,
     pub occurred_at: Option<&'a str>,
+    pub ended_at: Option<&'a str>,
+    pub location: Option<&'a str>,
     pub source_slug: Option<&'a str>,
     pub external_kind: &'a str,
     pub external_id: Option<&'a str>,
     pub original_url: Option<&'a str>,
     pub summary: Option<&'a str>,
-    pub body: String,
+    pub body: Option<String>,
     pub links: Vec<LinkRef>,
     pub raw_participants: Vec<&'a str>,
+    pub self_participants: Vec<&'a str>,
     pub allow_duplicate: bool,
     pub replace_body: bool,
 }
@@ -71,7 +74,13 @@ fn find_duplicate_interaction(
             if id.is_some() {
                 return Ok(id);
             }
+            if source_id.is_some() {
+                return Ok(None);
+            }
         }
+    }
+    if source_id.is_some() && normalize_optional(external_id).is_some() {
+        return Ok(None);
     }
     find_duplicate(conn, "interactions", hash)
 }
@@ -92,16 +101,31 @@ fn enrich_duplicate_interaction(
              summary = CASE
                WHEN (summary IS NULL OR trim(summary) = '') AND ?3 IS NOT NULL
                THEN ?3 ELSE summary END,
+             occurred_at = CASE
+               WHEN (occurred_at IS NULL OR trim(occurred_at) = '') AND ?4 IS NOT NULL
+               THEN ?4 ELSE occurred_at END,
+             ended_at = CASE
+               WHEN (ended_at IS NULL OR trim(ended_at) = '') AND ?5 IS NOT NULL
+               THEN ?5 ELSE ended_at END,
+             location = CASE
+               WHEN (location IS NULL OR trim(location) = '') AND ?6 IS NOT NULL
+               THEN ?6 ELSE location END,
              updated_at = CASE
                WHEN ((external_id IS NULL OR trim(external_id) = '') AND ?1 IS NOT NULL)
                  OR ((original_url IS NULL OR trim(original_url) = '') AND ?2 IS NOT NULL)
                  OR ((summary IS NULL OR trim(summary) = '') AND ?3 IS NOT NULL)
+                 OR ((occurred_at IS NULL OR trim(occurred_at) = '') AND ?4 IS NOT NULL)
+                 OR ((ended_at IS NULL OR trim(ended_at) = '') AND ?5 IS NOT NULL)
+                 OR ((location IS NULL OR trim(location) = '') AND ?6 IS NOT NULL)
                THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE updated_at END
-         WHERE id = ?4",
+         WHERE id = ?7",
         params![
             normalize_optional(args.external_id),
             normalize_optional(args.original_url),
             normalize_optional(args.summary),
+            normalize_optional(args.occurred_at),
+            normalize_optional(args.ended_at),
+            normalize_optional(args.location),
             id,
         ],
     )?;
@@ -119,10 +143,16 @@ fn enrich_existing_interaction(
     source_id: Option<&str>,
     identity_kind: &str,
     replace_body: bool,
-) -> Result<(), CliError> {
+) -> Result<usize, CliError> {
     enrich_duplicate_interaction(tx, existing, args)?;
+    let mut chunk_count = 0;
     if replace_body {
-        let body = normalize_text(&args.body);
+        let body = args
+            .body
+            .as_deref()
+            .map(normalize_text)
+            .filter(|body| !body.is_empty())
+            .ok_or_else(|| CliError::Runtime("--replace-body requires body text".into()))?;
         let hash = content_hash(&body);
         tx.execute(
             "UPDATE interactions
@@ -133,10 +163,11 @@ fn enrich_existing_interaction(
              WHERE id = ?4",
             params![&body, normalize_optional(args.summary), hash, existing,],
         )?;
-        replace_chunks(tx, "interaction", existing, &body)?;
+        chunk_count = replace_chunks(tx, "interaction", existing, &body)?;
     }
     insert_links(tx, "interaction", existing, &args.links)?;
     insert_raw_participants(tx, existing, source_id, &args.raw_participants)?;
+    insert_self_participants(tx, existing, source_id, &args.self_participants)?;
     insert_external_identity(
         tx,
         ExternalIdentityWrite {
@@ -149,7 +180,7 @@ fn enrich_existing_interaction(
             force_duplicate: false,
         },
     )?;
-    Ok(())
+    Ok(chunk_count)
 }
 
 #[derive(Debug)]
@@ -224,42 +255,85 @@ fn insert_raw_participants(
         let Some(participant) = parse_raw_participant(raw)? else {
             continue;
         };
-        // Defensive guard: never write a row that fails the migration 0006
-        // CHECK, even if a future parser change loses this invariant.
-        if participant.normalized_handle.is_none() && participant.display_name.is_none() {
+        let person_id = match participant.normalized_handle.as_deref() {
+            Some(handle) if handle.contains('@') => find_person_by_email(conn, handle)?,
+            _ => None,
+        };
+        inserted += insert_participant(
+            conn,
+            interaction_id,
+            source_id,
+            &participant,
+            person_id.as_deref(),
+        )?;
+    }
+    Ok(inserted)
+}
+
+fn insert_self_participants(
+    conn: &Connection,
+    interaction_id: &str,
+    source_id: Option<&str>,
+    participants: &[&str],
+) -> Result<usize, CliError> {
+    if participants.is_empty() {
+        return Ok(0);
+    }
+    let self_id = find_self_person(conn)?.ok_or_else(|| {
+        CliError::Runtime("--self-participant requires an active self person".into())
+    })?;
+    let mut inserted = 0;
+    for raw in participants {
+        let Some(participant) = parse_raw_participant(raw)? else {
             continue;
-        }
-        // Migration 0006 only enforces uniqueness for participants that carry a
-        // normalized_handle. Name-only participants (e.g. `from:Casey Jordan <>`)
-        // have no covering unique index, so INSERT OR IGNORE would append a new
-        // identical row on every duplicate interaction re-import. Match the
-        // handle index semantics (interaction_id, identity, COALESCE(role, ''))
-        // with an explicit existence check before inserting.
-        if participant.normalized_handle.is_none() {
-            let already_present = conn
-                .query_row(
-                    "SELECT 1 FROM interaction_participants
-                     WHERE interaction_id = ?1
-                       AND normalized_handle IS NULL
-                       AND display_name = ?2
-                       AND COALESCE(role, '') = ?3
-                     LIMIT 1",
-                    params![interaction_id, participant.display_name, participant.role],
-                    |_| Ok(()),
-                )
-                .ok()
-                .is_some();
-            if already_present {
-                continue;
-            }
-        }
+        };
+        inserted += insert_participant(
+            conn,
+            interaction_id,
+            source_id,
+            &participant,
+            Some(&self_id),
+        )?;
+    }
+    Ok(inserted)
+}
+
+fn insert_participant(
+    conn: &Connection,
+    interaction_id: &str,
+    source_id: Option<&str>,
+    participant: &RawParticipant,
+    person_id: Option<&str>,
+) -> Result<usize, CliError> {
+    if participant.normalized_handle.is_none()
+        && participant.display_name.is_none()
+        && person_id.is_none()
+    {
+        return Ok(0);
+    }
+
+    if let Some(person_id) = person_id {
         let changed = conn.execute(
-            "INSERT OR IGNORE INTO interaction_participants
-             (id, interaction_id, role, handle, normalized_handle, display_name, source_id)
-             VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            "UPDATE interaction_participants
+             SET role = CASE
+                   WHEN (role IS NULL OR trim(role) = '') AND ?3 IS NOT NULL
+                   THEN ?3 ELSE role END,
+                 handle = CASE
+                   WHEN (handle IS NULL OR trim(handle) = '') AND ?4 IS NOT NULL
+                   THEN ?4 ELSE handle END,
+                 normalized_handle = CASE
+                   WHEN (normalized_handle IS NULL OR trim(normalized_handle) = '') AND ?5 IS NOT NULL
+                   THEN ?5 ELSE normalized_handle END,
+                 display_name = CASE
+                   WHEN (display_name IS NULL OR trim(display_name) = '') AND ?6 IS NOT NULL
+                   THEN ?6 ELSE display_name END,
+                 source_id = CASE
+                   WHEN source_id IS NULL AND ?7 IS NOT NULL THEN ?7 ELSE source_id END
+             WHERE interaction_id = ?1
+               AND person_id = ?2",
             params![
-                new_id(),
                 interaction_id,
+                person_id,
                 participant.role,
                 participant.handle,
                 participant.normalized_handle,
@@ -267,9 +341,112 @@ fn insert_raw_participants(
                 source_id,
             ],
         )?;
-        inserted += changed;
+        if changed > 0 {
+            return Ok(0);
+        }
     }
-    Ok(inserted)
+
+    if let Some(handle) = participant.normalized_handle.as_deref() {
+        let changed = conn.execute(
+            "UPDATE interaction_participants
+             SET person_id = CASE
+                   WHEN person_id IS NULL AND ?4 IS NOT NULL THEN ?4 ELSE person_id END,
+                 handle = CASE
+                   WHEN (handle IS NULL OR trim(handle) = '') AND ?5 IS NOT NULL
+                   THEN ?5 ELSE handle END,
+                 display_name = CASE
+                   WHEN (display_name IS NULL OR trim(display_name) = '') AND ?6 IS NOT NULL
+                   THEN ?6 ELSE display_name END,
+                 source_id = CASE
+                   WHEN source_id IS NULL AND ?7 IS NOT NULL THEN ?7 ELSE source_id END
+             WHERE interaction_id = ?1
+               AND normalized_handle = ?2
+               AND COALESCE(role, '') = ?3
+               AND (?4 IS NULL OR person_id IS NULL OR person_id = ?4)",
+            params![
+                interaction_id,
+                handle,
+                participant.role,
+                person_id,
+                participant.handle,
+                participant.display_name,
+                source_id,
+            ],
+        )?;
+        if changed > 0 {
+            return Ok(0);
+        }
+    } else if participant.display_name.is_some() {
+        let already_present = conn
+            .query_row(
+                "SELECT 1 FROM interaction_participants
+                 WHERE interaction_id = ?1
+                   AND normalized_handle IS NULL
+                   AND display_name = ?2
+                   AND COALESCE(role, '') = ?3
+                 LIMIT 1",
+                params![interaction_id, participant.display_name, participant.role],
+                |_| Ok(()),
+            )
+            .ok()
+            .is_some();
+        if already_present {
+            return Ok(0);
+        }
+    }
+
+    let changed = conn.execute(
+        "INSERT OR IGNORE INTO interaction_participants
+         (id, interaction_id, person_id, role, handle, normalized_handle, display_name, source_id)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+        params![
+            new_id(),
+            interaction_id,
+            person_id,
+            participant.role,
+            participant.handle,
+            participant.normalized_handle,
+            participant.display_name,
+            source_id,
+        ],
+    )?;
+    Ok(changed)
+}
+
+fn find_self_person(conn: &Connection) -> Result<Option<String>, CliError> {
+    let id = conn
+        .query_row(
+            "SELECT id FROM people
+             WHERE is_self = 1 AND archived_at IS NULL
+             LIMIT 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .ok();
+    Ok(id)
+}
+
+fn find_person_by_email(
+    conn: &Connection,
+    normalized_email: &str,
+) -> Result<Option<String>, CliError> {
+    let id = conn
+        .query_row(
+            "SELECT p.id
+             FROM people p
+             LEFT JOIN person_emails pe ON pe.person_id = p.id
+             WHERE p.archived_at IS NULL
+               AND (
+                 lower(p.primary_email) = ?1
+                 OR pe.normalized_email = ?1
+               )
+             ORDER BY p.created_at ASC
+             LIMIT 1",
+            params![normalized_email],
+            |row| row.get::<_, String>(0),
+        )
+        .ok();
+    Ok(id)
 }
 
 fn requires_post_analysis(args: &AddInteractionArgs) -> bool {
@@ -322,19 +499,21 @@ pub fn add_interaction(
     json: bool,
     args: AddInteractionArgs,
 ) -> Result<(), CliError> {
-    let body = normalize_text(&args.body);
+    let body = args
+        .body
+        .as_deref()
+        .map(normalize_text)
+        .filter(|body| !body.is_empty());
     let title = normalize_title(args.title);
-    // Parity with the core `validateNewInteraction`: reject one with neither a
-    // title nor a body.
-    if title.is_none() && body.is_empty() {
+    if title.is_none() && body.is_none() {
         return Err(CliError::Runtime(
             "an interaction needs a title or body text".into(),
         ));
     }
-    let hash = content_hash(&body);
+    let hash = body.as_deref().map(content_hash);
     let source_id = source_id(conn, args.source_slug)?;
     let identity_kind = external_kind(args.external_kind);
-    if args.replace_body && body.is_empty() {
+    if args.replace_body && body.is_none() {
         return Err(CliError::Runtime(
             "--replace-body requires body text".into(),
         ));
@@ -355,7 +534,7 @@ pub fn add_interaction(
     if let Some(existing) = existing_by_external.as_deref() {
         if !args.allow_duplicate {
             let tx = conn.transaction()?;
-            enrich_existing_interaction(
+            let count = enrich_existing_interaction(
                 &tx,
                 existing,
                 &args,
@@ -364,29 +543,32 @@ pub fn add_interaction(
                 args.replace_body,
             )?;
             tx.commit()?;
-            return report_interaction(json, existing, true, 0, requires_post_analysis(&args));
+            return report_interaction(json, existing, true, count, requires_post_analysis(&args));
         }
     }
-    let existing_by_dup = find_duplicate_interaction(
-        conn,
-        &hash,
-        &identity_kind,
-        args.external_id,
-        source_id.as_deref(),
-    )?;
+    let existing_by_dup = match hash.as_deref() {
+        Some(hash) => find_duplicate_interaction(
+            conn,
+            hash,
+            &identity_kind,
+            args.external_id,
+            source_id.as_deref(),
+        )?,
+        None => None,
+    };
     if let Some(existing) = existing_by_dup.as_deref() {
         if !args.allow_duplicate {
             let tx = conn.transaction()?;
-            enrich_existing_interaction(
+            let count = enrich_existing_interaction(
                 &tx,
                 existing,
                 &args,
                 source_id.as_deref(),
                 &identity_kind,
-                false,
+                args.replace_body,
             )?;
             tx.commit()?;
-            return report_interaction(json, existing, true, 0, requires_post_analysis(&args));
+            return report_interaction(json, existing, true, count, requires_post_analysis(&args));
         }
     }
     // Reaching here past a match means `--allow-duplicate` forced a new record; it
@@ -396,23 +578,29 @@ pub fn add_interaction(
     let tx = conn.transaction()?;
     tx.execute(
         "INSERT INTO interactions
-         (id, kind, title, body_text, summary, occurred_at, external_id, original_url, content_hash)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+         (id, kind, title, body_text, summary, occurred_at, ended_at, location, external_id, original_url, content_hash)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
         params![
             id,
             args.kind,
             title,
-            body,
+            body.as_deref(),
             normalize_optional(args.summary),
-            args.occurred_at,
+            normalize_optional(args.occurred_at),
+            normalize_optional(args.ended_at),
+            normalize_optional(args.location),
             normalize_optional(args.external_id),
             normalize_optional(args.original_url),
-            hash
+            hash.as_deref()
         ],
     )?;
-    let count = insert_chunks(&tx, "interaction", &id, &body)?;
+    let count = match body.as_deref() {
+        Some(body) => insert_chunks(&tx, "interaction", &id, body)?,
+        None => 0,
+    };
     insert_links(&tx, "interaction", &id, &args.links)?;
     insert_raw_participants(&tx, &id, source_id.as_deref(), &args.raw_participants)?;
+    insert_self_participants(&tx, &id, source_id.as_deref(), &args.self_participants)?;
     insert_external_identity(
         &tx,
         ExternalIdentityWrite {
@@ -472,14 +660,17 @@ mod tests {
             title: Some("Subject"),
             kind: "note",
             occurred_at: None,
+            ended_at: None,
+            location: None,
             source_slug: Some("manual"),
             external_kind: "record",
             external_id,
             original_url: None,
             summary: None,
-            body: body.to_string(),
+            body: Some(body.to_string()),
             links: vec![],
             raw_participants: vec![],
+            self_participants: vec![],
             allow_duplicate,
             replace_body: false,
         }

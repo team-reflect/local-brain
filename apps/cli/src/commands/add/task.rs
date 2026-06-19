@@ -20,6 +20,16 @@ pub struct AddTaskArgs<'a> {
 }
 
 pub fn add_task(conn: &mut Connection, json: bool, args: AddTaskArgs) -> Result<(), CliError> {
+    let project_links = args
+        .links
+        .iter()
+        .filter(|link| matches!(link.kind, LinkKind::Project))
+        .count();
+    if project_links > 1 {
+        return Err(CliError::Runtime(
+            "a task can link to only one project".into(),
+        ));
+    }
     let id = new_id();
     let tx = conn.transaction()?;
     tx.execute(

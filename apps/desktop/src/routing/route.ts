@@ -18,6 +18,7 @@ export type Route =
   | { kind: 'task'; id: string }
   | { kind: 'document'; id: string }
   | { kind: 'interaction'; id: string }
+  | { kind: 'asset'; id: string }
   | { kind: 'settings'; section?: string }
 
 export const HOME_ROUTE: Route = { kind: 'today' }
@@ -42,6 +43,8 @@ export function routeForRecord(kind: RecordKind, id: string): Route | null {
       return { kind: 'document', id }
     case 'interaction':
       return { kind: 'interaction', id }
+    case 'asset':
+      return { kind: 'asset', id }
     case 'memory':
       return null
   }
@@ -59,6 +62,7 @@ export function routesEqual(a: Route, b: Route): boolean {
     case 'task':
     case 'document':
     case 'interaction':
+    case 'asset':
       return a.id === (b as { id: string }).id
     case 'settings':
       return a.section === (b as Extract<Route, { kind: 'settings' }>).section
@@ -90,6 +94,8 @@ export function routeToPath(route: Route): string {
       return `/documents/${encodeURIComponent(route.id)}`
     case 'interaction':
       return `/interactions/${encodeURIComponent(route.id)}`
+    case 'asset':
+      return `/assets/${encodeURIComponent(route.id)}`
     case 'settings':
       return route.section ? `/settings?section=${encodeURIComponent(route.section)}` : '/settings'
   }
@@ -125,6 +131,8 @@ export function routeFromPath(pathWithQuery: string): Route {
       return id ? { kind: 'document', id: decodeURIComponent(id) } : { kind: 'today' }
     case 'interactions':
       return id ? { kind: 'interaction', id: decodeURIComponent(id) } : { kind: 'today' }
+    case 'assets':
+      return id ? { kind: 'asset', id: decodeURIComponent(id) } : { kind: 'today' }
     case 'graph':
       return { kind: 'network', tab: 'graph' }
     case 'settings': {
@@ -153,6 +161,7 @@ export function sectionForRoute(route: Route): string {
       return 'projects'
     case 'document':
     case 'interaction':
+    case 'asset':
       return 'today'
     case 'settings':
       return 'settings'

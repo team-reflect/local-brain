@@ -34,11 +34,37 @@ pub(super) fn replace_chunks(
     record_id: &str,
     body: &str,
 ) -> Result<usize, CliError> {
+    let chunks = chunk_text(body);
+    for (index, text) in chunks.iter().enumerate() {
+        let chunk_index = index as i64;
+        let existing_id = conn
+            .query_row(
+                "SELECT id FROM content_chunks
+                 WHERE record_type = ?1 AND record_id = ?2 AND chunk_index = ?3
+                 LIMIT 1",
+                params![record_type, record_id, chunk_index],
+                |row| row.get::<_, String>(0),
+            )
+            .ok();
+        if let Some(existing_id) = existing_id {
+            conn.execute(
+                "UPDATE content_chunks SET text = ?1 WHERE id = ?2",
+                params![text, existing_id],
+            )?;
+        } else {
+            conn.execute(
+                "INSERT INTO content_chunks (id, record_type, record_id, chunk_index, text)
+                 VALUES (?1,?2,?3,?4,?5)",
+                params![new_id(), record_type, record_id, chunk_index, text],
+            )?;
+        }
+    }
     conn.execute(
-        "DELETE FROM content_chunks WHERE record_type = ?1 AND record_id = ?2",
-        params![record_type, record_id],
+        "DELETE FROM content_chunks
+         WHERE record_type = ?1 AND record_id = ?2 AND chunk_index >= ?3",
+        params![record_type, record_id, chunks.len() as i64],
     )?;
-    insert_chunks(conn, record_type, record_id, body)
+    Ok(chunks.len())
 }
 
 /// Attach exact chunk evidence to a memory or task.

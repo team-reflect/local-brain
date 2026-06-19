@@ -1,3 +1,4 @@
+import { sql } from 'kysely'
 import { db } from '../../db/client'
 import type { LinkedRecord, RecordKind } from './types'
 
@@ -22,6 +23,27 @@ function asLinks(kind: RecordKind, rows: RawRow[]): LinkedRecord[] {
     title: row.title ?? '(untitled)',
     subtitle: row.subtitle,
   }))
+}
+
+interface RawAssetRow {
+  id: string
+  title: string | null
+  subtitle: string | null
+}
+
+async function getAssetLinks(recordType: string, recordId: string): Promise<LinkedRecord[]> {
+  const rows = await sql<RawAssetRow>`
+    SELECT a.id AS "id",
+           COALESCE(NULLIF(trim(a.original_filename), ''), a.storage_path) AS "title",
+           COALESCE(NULLIF(trim(a.mime_type), ''), NULLIF(trim(a.kind), '')) AS "subtitle"
+    FROM assets a
+    JOIN asset_links al ON al.asset_id = a.id
+    WHERE al.record_type = ${recordType}
+      AND al.record_id = ${recordId}
+      AND a.archived_at IS NULL
+    ORDER BY COALESCE(NULLIF(trim(a.original_filename), ''), a.storage_path) ASC
+  `.execute(db)
+  return asLinks('asset', rows.rows)
 }
 
 export interface PersonLinks {
@@ -258,10 +280,11 @@ export interface DocumentLinks {
   projects: LinkedRecord[]
   interactions: LinkedRecord[]
   tasks: LinkedRecord[]
+  assets: LinkedRecord[]
 }
 
 export async function getDocumentLinks(documentId: string): Promise<DocumentLinks> {
-  const [people, projects, interactions, tasks] = await Promise.all([
+  const [people, projects, interactions, tasks, assets] = await Promise.all([
     db
       .selectFrom('people')
       .innerJoin('documentPeople', 'documentPeople.personId', 'people.id')
@@ -294,12 +317,14 @@ export async function getDocumentLinks(documentId: string): Promise<DocumentLink
       .orderBy('tasks.title', 'asc')
       .select(['tasks.id as id', 'tasks.title as title', 'tasks.status as subtitle'])
       .execute(),
+    getAssetLinks('document', documentId),
   ])
   return {
     people: asLinks('person', people),
     projects: asLinks('project', projects),
     interactions: asLinks('interaction', interactions),
     tasks: asLinks('task', tasks),
+    assets,
   }
 }
 
@@ -308,10 +333,11 @@ export interface InteractionLinks {
   organizations: LinkedRecord[]
   documents: LinkedRecord[]
   tasks: LinkedRecord[]
+  assets: LinkedRecord[]
 }
 
 export async function getInteractionLinks(interactionId: string): Promise<InteractionLinks> {
-  const [projects, organizations, documents, tasks] = await Promise.all([
+  const [projects, organizations, documents, tasks, assets] = await Promise.all([
     db
       .selectFrom('projects')
       .innerJoin('projectInteractions', 'projectInteractions.projectId', 'projects.id')
@@ -344,11 +370,13 @@ export async function getInteractionLinks(interactionId: string): Promise<Intera
       .orderBy('tasks.title', 'asc')
       .select(['tasks.id as id', 'tasks.title as title', 'tasks.status as subtitle'])
       .execute(),
+    getAssetLinks('interaction', interactionId),
   ])
   return {
     projects: asLinks('project', projects),
     organizations: asLinks('organization', organizations),
     documents: asLinks('document', documents),
     tasks: asLinks('task', tasks),
+    assets,
   }
 }

@@ -2,8 +2,9 @@
 //! They run the real built binary (`CARGO_BIN_EXE_brain`), assert the stable
 //! JSON contracts, and verify stdout/stderr separation.
 
+use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 use brain_schema::LATEST_SCHEMA_VERSION;
 use rusqlite::Connection;
@@ -35,6 +36,28 @@ fn run_with_brain(root: &Path, args: &[&str]) -> Output {
         .expect("failed to run brain")
 }
 
+fn run_with_brain_stdin(root: &Path, args: &[&str], stdin: &str) -> Output {
+    let mut child = Command::new(BIN)
+        .arg("--brain")
+        .arg(root)
+        .args(args)
+        .env_remove("BRAIN_DB")
+        .env_remove("BRAIN_ROOT")
+        .env_remove("ANTHROPIC_API_KEY")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to run brain");
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(stdin.as_bytes())
+        .expect("failed to write stdin");
+    child.wait_with_output().expect("failed to wait for brain")
+}
+
 fn run_json(db: &Path, args: &[&str]) -> Value {
     let out = run(db, args);
     assert!(
@@ -52,6 +75,21 @@ fn run_json(db: &Path, args: &[&str]) -> Value {
 
 fn run_brain_json(root: &Path, args: &[&str]) -> Value {
     let out = run_with_brain(root, args);
+    assert!(
+        out.status.success(),
+        "command {args:?} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
+        panic!(
+            "stdout for {args:?} was not JSON ({e}): {}",
+            String::from_utf8_lossy(&out.stdout)
+        )
+    })
+}
+
+fn run_brain_json_stdin(root: &Path, args: &[&str], stdin: &str) -> Value {
+    let out = run_with_brain_stdin(root, args, stdin);
     assert!(
         out.status.success(),
         "command {args:?} failed: {}",
@@ -128,6 +166,57 @@ fn brain_root_env_derives_standard_folder_layout() {
         value["assetsPath"],
         canonical.join("assets").display().to_string()
     );
+}
+
+#[test]
+fn contract_reports_agent_cli_contract() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let contract = run_json(&db, &["--json", "contract"]);
+    assert_eq!(contract["name"], "brain");
+    assert_eq!(contract["output"]["stdout"], "data only");
+    assert_eq!(
+        contract["commands"]["addInteraction"]["calendarMapping"]["end"],
+        "--ended-at"
+    );
+    assert_eq!(
+        contract["commands"]["addInteraction"]["calendarMapping"]["selfAttendees"],
+        "--self-participant"
+    );
+    assert!(contract["commands"]["addInteraction"]["usage"]
+        .as_str()
+        .unwrap()
+        .contains("[--text <text>|--text-file <path|->]"));
+    assert!(contract["writeRules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|rule| rule
+            .as_str()
+            .unwrap()
+            .contains("typed fields over burying structure")));
+}
+
+#[test]
+fn json_errors_are_machine_readable_on_stderr() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let out = run(&db, &["--json", "add", "interaction", "--text", "   "]);
+    assert!(!out.status.success());
+    assert!(out.stdout.is_empty(), "errors must not write to stdout");
+    let error: Value = serde_json::from_slice(&out.stderr).unwrap_or_else(|e| {
+        panic!(
+            "stderr was not JSON ({e}): {}",
+            String::from_utf8_lossy(&out.stderr)
+        )
+    });
+    assert_eq!(error["ok"], false);
+    assert_eq!(error["error"]["kind"], "runtime");
+    assert_eq!(error["error"]["exitCode"], 1);
+    assert!(error["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("title or body"));
 }
 
 #[test]
@@ -853,26 +942,44 @@ fn add_interaction_replace_body_updates_source_backed_record_and_chunks() {
     let old_body = "old transcript marker ".repeat(90);
     let new_body = "raw transcript replacement from Granola";
 
-    let first_args = vec![
-        "--json",
-        "add",
-        "interaction",
-        "--kind",
-        "meeting",
-        "--title",
-        "Granola meeting",
-        "--text",
-        old_body.as_str(),
-        "--source",
-        "granola",
-        "--external-id",
-        "meeting-1",
-    ];
-    let first = run_json(&db, &first_args);
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Granola meeting",
+            "--text",
+            old_body.as_str(),
+            "--source",
+            "granola",
+            "--external-id",
+            "meeting-1",
+        ],
+    );
     assert_eq!(first["isDuplicate"], false);
     assert!(
         first["chunkCount"].as_i64().unwrap() > 1,
         "test setup needs multiple chunks so stale chunk rows are visible"
+    );
+    let interaction_link = format!("interaction:{}", first["id"].as_str().unwrap());
+    let interaction_evidence = format!("{interaction_link}#0");
+    let task = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "task",
+            "--title",
+            "Transcript follow-up",
+            "--link",
+            &interaction_link,
+            "--evidence",
+            &interaction_evidence,
+        ],
     );
 
     let second = run_json(
@@ -898,6 +1005,7 @@ fn add_interaction_replace_body_updates_source_backed_record_and_chunks() {
     );
     assert_eq!(second["isDuplicate"], true);
     assert_eq!(second["id"], first["id"]);
+    assert_eq!(second["chunkCount"], 1);
 
     let conn = Connection::open(&db).unwrap();
     let (body, summary): (String, String) = conn
@@ -932,6 +1040,146 @@ fn add_interaction_replace_body_updates_source_backed_record_and_chunks() {
         )
         .unwrap();
     assert_eq!(fresh_chunks, 1);
+    let evidence_refs: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM evidence_refs er
+             JOIN content_chunks cc ON cc.id = er.chunk_id
+             WHERE er.subject_type = 'task'
+               AND er.subject_id = ?1
+               AND cc.record_type = 'interaction'
+               AND cc.record_id = ?2
+               AND cc.chunk_index = 0",
+            (task["id"].as_str().unwrap(), first["id"].as_str().unwrap()),
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(evidence_refs, 1);
+}
+
+#[test]
+fn add_interaction_stores_calendar_fields_and_resolves_known_participants() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let alice = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Alice Wyatt",
+            "--email",
+            "alice@example.com",
+        ],
+    );
+    let alice_id = alice["id"].as_str().unwrap();
+
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Calendar: Stay at Louma",
+            "--occurred-at",
+            "2026-07-09",
+            "--text",
+            "Calendar: primary\nStatus: confirmed",
+            "--source",
+            "google_calendar",
+            "--external-id",
+            "calendar-event-1",
+            "--participant",
+            "organizer:Alice Wyatt <ALICE@example.com>",
+            "--participant",
+            "attendee:Visitor <visitor@example.com>",
+        ],
+    );
+    assert_eq!(first["isDuplicate"], false);
+
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Calendar: Stay at Louma",
+            "--occurred-at",
+            "2026-07-09",
+            "--ended-at",
+            "2026-07-12",
+            "--location",
+            "Louma Country Shepherd's Hut",
+            "--text",
+            "Calendar: primary\nStatus: confirmed\nEnd: 2026-07-12",
+            "--source",
+            "google_calendar",
+            "--external-id",
+            "calendar-event-1",
+            "--original-url",
+            "https://www.google.com/calendar/event?eid=calendar-event-1",
+            "--participant",
+            "organizer:Alice Wyatt <alice@example.com>",
+        ],
+    );
+    assert_eq!(second["isDuplicate"], true);
+    assert_eq!(second["id"], first["id"]);
+
+    let conn = Connection::open(&db).unwrap();
+    let (occurred_at, ended_at, location, original_url): (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = conn
+        .query_row(
+            "SELECT occurred_at, ended_at, location, original_url
+             FROM interactions
+             WHERE id = ?1",
+            [first["id"].as_str().unwrap()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(occurred_at.as_deref(), Some("2026-07-09"));
+    assert_eq!(ended_at.as_deref(), Some("2026-07-12"));
+    assert_eq!(location.as_deref(), Some("Louma Country Shepherd's Hut"));
+    assert_eq!(
+        original_url.as_deref(),
+        Some("https://www.google.com/calendar/event?eid=calendar-event-1")
+    );
+
+    let linked_alice: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM interaction_participants
+             WHERE interaction_id = ?1
+               AND person_id = ?2
+               AND normalized_handle = 'alice@example.com'",
+            (first["id"].as_str().unwrap(), alice_id),
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(linked_alice, 1);
+
+    let unresolved_visitor: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM interaction_participants
+             WHERE interaction_id = ?1
+               AND person_id IS NULL
+               AND normalized_handle = 'visitor@example.com'",
+            [first["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(unresolved_visitor, 1);
 }
 
 #[test]
@@ -973,6 +1221,143 @@ fn granola_interaction_reports_post_analysis_requirement() {
 }
 
 #[test]
+fn add_interaction_allows_structured_calendar_event_without_body() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "event",
+            "--title",
+            "Calendar: Hotel stay",
+            "--occurred-at",
+            "2026-07-09",
+            "--ended-at",
+            "2026-07-12",
+            "--location",
+            "Louma Country Shepherd's Hut",
+            "--source",
+            "google_calendar",
+            "--external-id",
+            "calendar-event-no-body",
+        ],
+    );
+    assert_eq!(first["isDuplicate"], false);
+    assert_eq!(first["chunkCount"], 0);
+
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "event",
+            "--title",
+            "Calendar: Hotel stay",
+            "--occurred-at",
+            "2026-07-09",
+            "--ended-at",
+            "2026-07-12",
+            "--location",
+            "Louma Country Shepherd's Hut",
+            "--source",
+            "google_calendar",
+            "--external-id",
+            "calendar-event-no-body",
+            "--original-url",
+            "https://www.google.com/calendar/event?eid=calendar-event-no-body",
+        ],
+    );
+    assert_eq!(second["isDuplicate"], true);
+    assert_eq!(second["id"], first["id"]);
+
+    let conn = Connection::open(&db).unwrap();
+    let (body_text, content_hash, chunks, original_url): (
+        Option<String>,
+        Option<String>,
+        i64,
+        Option<String>,
+    ) = conn
+        .query_row(
+            "SELECT body_text,
+                    content_hash,
+                    (SELECT COUNT(*) FROM content_chunks WHERE record_type = 'interaction' AND record_id = interactions.id),
+                    original_url
+             FROM interactions
+             WHERE id = ?1",
+            [first["id"].as_str().unwrap()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(body_text, None);
+    assert_eq!(content_hash, None);
+    assert_eq!(chunks, 0);
+    assert_eq!(
+        original_url.as_deref(),
+        Some("https://www.google.com/calendar/event?eid=calendar-event-no-body")
+    );
+}
+
+#[test]
+fn add_interaction_external_id_reimport_enriches_start_time() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "event",
+            "--title",
+            "Calendar: Needs start",
+            "--source",
+            "google_calendar",
+            "--external-id",
+            "calendar-event-start-later",
+        ],
+    );
+    assert_eq!(first["isDuplicate"], false);
+
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "event",
+            "--title",
+            "Calendar: Needs start",
+            "--occurred-at",
+            "2026-07-09",
+            "--source",
+            "google_calendar",
+            "--external-id",
+            "calendar-event-start-later",
+        ],
+    );
+    assert_eq!(second["isDuplicate"], true);
+    assert_eq!(second["id"], first["id"]);
+
+    let conn = Connection::open(&db).unwrap();
+    let occurred_at: String = conn
+        .query_row(
+            "SELECT occurred_at FROM interactions WHERE id = ?1",
+            [first["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(occurred_at, "2026-07-09");
+}
+
+#[test]
 fn add_interaction_replace_body_rejects_empty_body() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
@@ -1004,6 +1389,185 @@ fn add_interaction_replace_body_rejects_empty_body() {
     );
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("body text"));
+}
+
+#[test]
+fn add_interaction_self_participant_links_self_and_dedupes_roles() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    run_json(&db, &["--json", "status"]);
+    let conn = Connection::open(&db).unwrap();
+    conn.execute(
+        "INSERT INTO people (id, full_name, is_self) VALUES ('self-test', 'You', 1)",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    let interaction = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Calendar: Self marked",
+            "--source",
+            "google_calendar",
+            "--external-id",
+            "calendar-self-1",
+            "--self-participant",
+            "organizer:You <alex@maccaw.org>",
+            "--self-participant",
+            "attendee:You <alex@maccaw.org>",
+        ],
+    );
+    let id = interaction["id"].as_str().unwrap();
+
+    let conn = Connection::open(&db).unwrap();
+    let (rows, role, handle, normalized_handle, display_name, source_id): (
+        i64,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = conn
+        .query_row(
+            "SELECT COUNT(*), role, handle, normalized_handle, display_name, source_id
+             FROM interaction_participants
+             WHERE interaction_id = ?1 AND person_id = ?2",
+            (id, "self-test"),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(rows, 1);
+    assert_eq!(role.as_deref(), Some("organizer"));
+    assert_eq!(handle.as_deref(), Some("alex@maccaw.org"));
+    assert_eq!(normalized_handle.as_deref(), Some("alex@maccaw.org"));
+    assert_eq!(display_name.as_deref(), Some("You"));
+    assert_eq!(source_id.as_deref(), Some("source_google_calendar"));
+}
+
+#[test]
+fn add_interaction_self_participant_requires_self_row() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    run_json(&db, &["--json", "status"]);
+    let conn = Connection::open(&db).unwrap();
+    conn.execute("DELETE FROM people WHERE is_self = 1", [])
+        .unwrap();
+    drop(conn);
+
+    let out = run(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--title",
+            "Calendar: No self",
+            "--self-participant",
+            "attendee:You <alex@example.com>",
+        ],
+    );
+    assert!(!out.status.success());
+    assert!(out.stdout.is_empty());
+    let error: Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "runtime");
+    assert!(error["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("--self-participant requires an active self person"));
+}
+
+#[test]
+fn add_interaction_reimport_resolves_existing_raw_participant() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Calendar: Dinner",
+            "--text",
+            "Calendar body",
+            "--source",
+            "google_calendar",
+            "--external-id",
+            "calendar-event-2",
+            "--participant",
+            "attendee:Alice Wyatt <alice@example.com>",
+        ],
+    );
+
+    let alice = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Alice Wyatt",
+            "--email",
+            "alice@example.com",
+        ],
+    );
+    let alice_id = alice["id"].as_str().unwrap();
+
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Calendar: Dinner",
+            "--text",
+            "Calendar body",
+            "--source",
+            "google_calendar",
+            "--external-id",
+            "calendar-event-2",
+            "--participant",
+            "attendee:Alice Wyatt <alice@example.com>",
+        ],
+    );
+    assert_eq!(second["isDuplicate"], true);
+    assert_eq!(second["id"], first["id"]);
+
+    let conn = Connection::open(&db).unwrap();
+    let (participant_rows, linked_rows): (i64, i64) = conn
+        .query_row(
+            "SELECT COUNT(*),
+                    SUM(CASE WHEN person_id = ?2 THEN 1 ELSE 0 END)
+             FROM interaction_participants
+             WHERE interaction_id = ?1
+               AND normalized_handle = 'alice@example.com'",
+            (first["id"].as_str().unwrap(), alice_id),
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(participant_rows, 1);
+    assert_eq!(linked_rows, 1);
 }
 
 #[test]
@@ -1148,6 +1712,109 @@ fn add_asset_copies_file_and_links_to_interaction() {
         .unwrap();
     assert_ne!(reimported_storage_path, storage_path);
     assert!(root.join(reimported_storage_path).is_file());
+}
+
+#[test]
+fn asset_search_finds_filename_links_and_text() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().join("AssetSearchBrain");
+    let source = dir.path().join("receipt.pdf");
+    std::fs::write(&source, b"%PDF fake binary bytes").unwrap();
+
+    let interaction = run_brain_json(
+        &root,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Gmail receipt thread",
+            "--text",
+            "Plain text email body mentions the Northwind order.",
+        ],
+    );
+    let link = format!("interaction:{}", interaction["id"].as_str().unwrap());
+    let asset = run_brain_json(
+        &root,
+        &[
+            "--json",
+            "add",
+            "asset",
+            "--file",
+            source.to_str().unwrap(),
+            "--kind",
+            "attachment",
+            "--mime-type",
+            "application/pdf",
+            "--original-filename",
+            "Receipt-2446-0056.pdf",
+            "--caption",
+            "signed invoice attachment",
+            "--link",
+            &link,
+            "--text",
+            "Extracted importer receipt total and vendor text",
+            "--text-source",
+            "importer",
+        ],
+    );
+
+    let filename_results = run_brain_json(&root, &["--json", "search", "Receipt-2446-0056"]);
+    assert!(filename_results["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|hit| {
+            hit["kind"] == "asset"
+                && hit["id"] == asset["id"]
+                && hit["title"] == "Receipt-2446-0056.pdf"
+        }));
+
+    let text_results = run_brain_json(&root, &["--json", "search", "vendor"]);
+    assert!(text_results["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|hit| hit["kind"] == "asset" && hit["id"] == asset["id"]));
+
+    let interaction_results = run_brain_json(&root, &["--json", "search", "Northwind"]);
+    assert!(interaction_results["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|hit| hit["kind"] == "interaction" && hit["id"] == interaction["id"]));
+
+    run_brain_json_stdin(
+        &root,
+        &[
+            "--json",
+            "asset",
+            "text",
+            "set",
+            asset["id"].as_str().unwrap(),
+            "--text-file",
+            "-",
+            "--source",
+            "manual",
+        ],
+        "Corrected searchable asset text with reimbursable keyword.",
+    );
+    let updated_results = run_brain_json(&root, &["--json", "search", "reimbursable"]);
+    assert!(updated_results["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|hit| hit["kind"] == "asset" && hit["id"] == asset["id"]));
+
+    let shown = run_brain_json(
+        &root,
+        &["--json", "show", "asset", asset["id"].as_str().unwrap()],
+    );
+    assert_eq!(shown["title"], "Receipt-2446-0056.pdf");
+    assert_eq!(shown["textSource"], "manual");
+    assert_eq!(shown["linkedRecords"][0]["kind"], "interaction");
 }
 
 #[test]

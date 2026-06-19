@@ -15,10 +15,17 @@ or approved local database access.
 - Store readable imported text in SQLite through the CLI.
 - Store binary assets through CLI file import so SQLite can record metadata and typed
   links while bytes stay in the app-managed `assets/` directory.
+- Store asset-derived plain text in `asset_texts` when an importer already has it.
+  Text-like UTF-8 files can be indexed locally; PDFs/images remain metadata-searchable
+  until a later OCR/local extraction pass.
 - Keep imports provider-neutral: upstream tools translate source records into generic
   `brain` CLI calls.
 - Preserve provenance directly on documents, interactions, tasks, memories, and
   evidence references.
+- Treat `brain --json contract` as the discoverable source of truth for command shapes,
+  link syntax, source identity rules, exit codes, and import mappings.
+- In `--json` mode, parse command failures from JSON on stderr:
+  `{ ok: false, error: { kind, message, exitCode } }`.
 - Prefer cited records and evidence over uncited summaries.
 - Never invent context. Add uncertain details as low-confidence memories or skip them.
 
@@ -27,6 +34,7 @@ or approved local database access.
 Status and diagnostics:
 
 ```bash
+brain --json contract
 brain status
 brain doctor --json
 brain path
@@ -43,8 +51,11 @@ brain add interaction --kind meeting --title "Call with Maya" --text-file transc
 brain add interaction --kind email --title "Email from Maya" --text-file body.txt --source gmail --external-id msg-123 --participant "from:Maya Chen <maya@example.com>" --json
 brain add interaction --kind email --title "Everlywell Integration" --text-file digest.md --summary "Production credential setup and go-live readiness." --source gmail --external-kind thread --external-id thread-123 --json
 brain add interaction --kind meeting --title "Granola: Northwind kickoff" --text-file transcript.txt --summary "Kickoff decisions and follow-ups." --source granola --external-id meeting-123 --replace-body --json
+brain add interaction --kind event --title "Calendar: Hotel stay" --occurred-at 2026-07-09 --ended-at 2026-07-12 --location "Louma" --source google_calendar --external-id event-123 --self-participant "attendee:You <alex@example.com>" --json
 brain add project --name "Kitchen remodel" --summary "Budget, contractor, and cabinet decision context." --source agent --external-kind cluster --external-id kitchen-remodel --json
 brain add asset --file maya.jpg --link person:maya --role avatar
+brain add asset --file invoice.pdf --link interaction:email-id --text-file extracted.txt --text-source importer --json
+brain asset text set asset-id --text-file - --source importer --json
 brain add task --title "Send Maya the revised budget" --link project:<id>
 brain add task --title "Send cardiologist shortlist to Dr. Vargas" --link interaction:<id> --link project:<id> --link person:<id> --evidence interaction:<id>#0 --json
 brain remember --kind decision --claim "Maya approved the revised budget range" --link person:maya --link interaction:<id> --evidence interaction:<id>#0
@@ -59,6 +70,7 @@ brain report daily --json
 brain tasks plan-day --json
 brain graph --center self --json
 brain show person maya --json
+brain show asset asset-id --json
 brain show project "Kitchen remodel"
 ```
 
@@ -129,8 +141,21 @@ When importing emails or calendar events:
 - Use `--summary` for a compact redacted import summary, while still passing
   `--text-file` or `--text` for searchable body/digest text.
 - Pass provider identity through generic `--source` and `--external-id`.
+- For calendar events, map structured fields onto the interaction before notes:
+  `--occurred-at` for start, `--ended-at` for end, `--location` for venue or
+  address, and `--original-url` for the provider event URL.
+- Use `--kind meeting` for people-centered calendar items and `--kind event` for
+  travel, lodging, reservations, reminders, and all-day schedule blocks, even when
+  they have attendees.
+- Link known people with `--link person:<id>` when the importer has already resolved
+  them. Raw participant email handles that match existing people are also resolved by
+  the CLI.
 - Preserve raw unresolved participants with repeatable `--participant` values such as
   `from:Robin Spencer <robin@example.com>`; do not create people for every handle.
+- Use `--self-participant` for attendee rows the upstream provider marks as the user.
+- Keep notes for source-specific details that do not have typed Local Brain fields,
+  not as the primary storage for start/end/location/attendee data.
+- Calendar items with a title and structured fields may omit `--text` / `--text-file`.
 - Store binary attachments through `brain add asset --link interaction:<id>`.
 
 When importing Granola meetings:
@@ -156,6 +181,12 @@ When adding an asset:
   screenshot, or source_file.
 - Preserve original filename, original path, URL, MIME type, size, and content hash when
   available.
+- Pass importer-provided plain text with `--text` or `--text-file` and
+  `--text-source importer` when available. Use `brain asset text set` to add text after
+  the asset already exists.
+- Do not pretend PDF/image bytes are searchable by content unless an importer or later
+  local extractor has populated asset text. Metadata, link captions, and linked record
+  titles are searchable immediately.
 
 When adding a memory:
 

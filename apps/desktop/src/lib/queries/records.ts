@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   archiveTask,
   completeTask,
+  createProject,
+  getAssetDetail,
   getDocument,
   getDocumentLinks,
   getGraph,
@@ -47,6 +49,19 @@ export function useProjects() {
   return useQuery({ queryKey: ['projects'], queryFn: () => listProjects() })
 }
 
+export function useCreateProject() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (name: string) => createProject({ name }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['projects'] }),
+        queryClient.invalidateQueries({ queryKey: ['graph'] }),
+      ])
+    },
+  })
+}
+
 export function useProject(id: string) {
   return useQuery({ queryKey: ['project', id], queryFn: () => getProject(id).then((p) => p ?? null) })
 }
@@ -84,6 +99,13 @@ export function useDocument(id: string) {
   return useQuery({
     queryKey: ['document', id],
     queryFn: () => getDocument(id).then((d) => d ?? null),
+  })
+}
+
+export function useAssetDetail(id: string) {
+  return useQuery({
+    queryKey: ['asset', id],
+    queryFn: () => getAssetDetail(id).then((asset) => asset ?? null),
   })
 }
 

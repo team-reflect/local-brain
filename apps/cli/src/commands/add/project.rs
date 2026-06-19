@@ -37,7 +37,11 @@ fn find_duplicate_project(conn: &Connection, name: &str) -> Result<Option<String
     let Some(name) = name else {
         return Ok(None);
     };
-    let mut stmt = conn.prepare("SELECT id, name FROM projects WHERE archived_at IS NULL")?;
+    let mut stmt = conn.prepare(
+        "SELECT id, name FROM projects
+         WHERE archived_at IS NULL
+         ORDER BY created_at ASC, id ASC",
+    )?;
     let rows = stmt.query_map([], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;
