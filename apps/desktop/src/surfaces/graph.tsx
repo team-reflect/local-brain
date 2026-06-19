@@ -1,5 +1,5 @@
-import { useMemo, type ReactNode } from 'react'
-import type { GraphNodeKind } from '@local-brain/core'
+import { useMemo, useState, type ReactNode } from 'react'
+import type { Graph, GraphNodeKind } from '@local-brain/core'
 import { EmptyState } from '../components/empty-state'
 import { Loading } from '../components/loading'
 import { PageHead } from '../components/page-head'
@@ -31,6 +31,8 @@ const KIND_LABEL: Record<GraphNodeKind, string> = {
   memory: 'Memories',
 }
 
+const ALL_KINDS = Object.keys(KIND_LABEL) as GraphNodeKind[]
+
 function routeForNode(node: PositionedNode): Route | null {
   switch (node.kind) {
     case 'self':
@@ -58,38 +60,84 @@ function clip(label: string): string {
 export function GraphSurface({ showHeader = true }: { showHeader?: boolean } = {}): ReactNode {
   const { navigate } = useRouter()
   const graph = useGraph()
-  const layout = useMemo(() => (graph.data ? layoutGraph(graph.data) : null), [graph.data])
+  const [visibleKinds, setVisibleKinds] = useState<ReadonlySet<GraphNodeKind>>(
+    () => new Set(ALL_KINDS),
+  )
 
   const presentKinds = useMemo(() => {
     if (!graph.data) return [] as GraphNodeKind[]
     const seen = new Set(graph.data.nodes.map((node) => node.kind))
-    return (Object.keys(KIND_LABEL) as GraphNodeKind[]).filter((kind) => seen.has(kind))
+    return ALL_KINDS.filter((kind) => seen.has(kind))
   }, [graph.data])
+
+  const filteredGraph = useMemo<Graph | null>(() => {
+    if (!graph.data) return null
+    return {
+      ...graph.data,
+      nodes: graph.data.nodes.filter((node) => visibleKinds.has(node.kind)),
+      truncatedKinds: graph.data.truncatedKinds.filter((kind) => visibleKinds.has(kind)),
+    }
+  }, [graph.data, visibleKinds])
+
+  const layout = useMemo(() => (filteredGraph ? layoutGraph(filteredGraph) : null), [filteredGraph])
+
+  const toggleKind = (kind: GraphNodeKind): void => {
+    setVisibleKinds((current) => {
+      const next = new Set(current)
+      if (next.has(kind)) {
+        next.delete(kind)
+      } else {
+        next.add(kind)
+      }
+      return next
+    })
+  }
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-4">
       {showHeader ? <PageHead eyebrow="Graph" title="Graph" /> : null}
       {graph.isLoading ? (
         <Loading />
-      ) : !layout || layout.nodes.length === 0 ? (
+      ) : !graph.data || graph.data.nodes.length === 0 ? (
         <EmptyState
           title="Nothing to graph yet"
           hint="People, projects, and the records that connect them will appear here."
         />
       ) : (
-        <>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <div className="relative min-h-[24rem] overflow-hidden">
+          <div
+            className="absolute top-3 right-3 z-10 flex w-44 flex-col gap-1.5 rounded-md border border-border bg-background/95 p-2 shadow-[0_8px_28px_rgba(2,6,23,0.12)]"
+            role="group"
+            aria-label="Graph node filters"
+          >
             {presentKinds.map((kind) => (
-              <span key={kind} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <label
+                key={kind}
+                className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <input
+                  type="checkbox"
+                  checked={visibleKinds.has(kind)}
+                  onChange={() => toggleKind(kind)}
+                  className="size-3 accent-[hsl(var(--primary))]"
+                />
                 <span
-                  className="inline-block size-2.5 rounded-full"
+                  aria-hidden="true"
+                  className="inline-block size-2.5 shrink-0 rounded-full"
                   style={{ backgroundColor: KIND_COLOR[kind] }}
                 />
-                {KIND_LABEL[kind]}
-              </span>
+                <span className="min-w-0 truncate">{KIND_LABEL[kind]}</span>
+              </label>
             ))}
           </div>
-          <div className="overflow-hidden">
+          {!layout || layout.nodes.length === 0 ? (
+            <div className="flex min-h-[24rem] items-center justify-center pt-48 sm:pt-0 sm:pr-48">
+              <EmptyState
+                title="All node types hidden"
+                hint="Turn on a node type to draw the graph."
+              />
+            </div>
+          ) : (
             <svg
               viewBox={`0 0 ${layout.width} ${layout.height}`}
               className="h-auto w-full"
@@ -131,14 +179,18 @@ export function GraphSurface({ showHeader = true }: { showHeader?: boolean } = {
                 )
               })}
             </svg>
-          </div>
-          {graph.data && graph.data.truncatedKinds.length > 0 ? (
-            <p className="text-xs text-muted-foreground">
-              Showing a capped view; more exist for: {graph.data.truncatedKinds.join(', ')}.
-            </p>
-          ) : null}
-        </>
+          )}
+        </div>
       )}
+      {!graph.isLoading &&
+      graph.data &&
+      graph.data.nodes.length > 0 &&
+      filteredGraph &&
+      filteredGraph.truncatedKinds.length > 0 ? (
+        <p className="text-xs text-muted-foreground">
+          Showing a capped view; more exist for: {filteredGraph.truncatedKinds.join(', ')}.
+        </p>
+      ) : null}
     </div>
   )
 }
