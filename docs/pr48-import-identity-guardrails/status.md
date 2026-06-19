@@ -2,7 +2,7 @@
 
 State: **all four original findings + twelve follow-ups fixed, tested, and verified locally.**
 
-## Follow-up (fresh current-head Bugbot findings #15–#16, head `5eba419` → `<pushed>`)
+## Follow-up (fresh current-head Bugbot findings #15–#16, head `5eba419` → `75d5ac7`)
 
 Bugbot re-reviewed code head `79fbc8a` / docs tip `5eba419` and posted two fresh
 current-head issues. Both are fixed in `apps/cli/src/commands/add.rs` with focused
