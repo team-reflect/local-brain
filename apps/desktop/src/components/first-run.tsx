@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { Database, KeyRound, Terminal, Sparkles } from 'lucide-react'
 import {
   useCompleteFirstRun,
@@ -8,12 +8,18 @@ import {
 } from '../lib/queries'
 import { pushBlockingModal } from '../lib/commands/modal-guard'
 import { useRouter } from '../routing/router'
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
 
 /**
  * First-run onboarding (Plan 09). Shown once on a fresh install: it confirms
  * where the local brain lives, the model-boundary status for extraction, and how to
  * start — set an AI provider or drive it from the `brain` CLI.
  * Dismissing it sets a settings flag so it never reappears.
+ *
+ * Built on the shared {@link Dialog} primitive, so focus trap, focus restore, and
+ * scroll lock come from Radix. It is a blocking gate: only the explicit actions
+ * below close it (each flips the first-run flag, which unmounts this), so Escape
+ * and outside clicks are refused.
  */
 export function FirstRun(): ReactNode {
   const firstRun = useFirstRun()
@@ -21,72 +27,41 @@ export function FirstRun(): ReactNode {
   const dbPath = useDatabasePath()
   const model = useModelStatus()
   const { navigate } = useRouter()
-  const dialogRef = useRef<HTMLDivElement>(null)
 
   // Only show once we know it hasn't been completed (avoid a flash while loading).
   const shown = firstRun.data === false
 
-  // While shown, this overlay blocks the app: suppress global shortcuts and keep
-  // keyboard focus inside the dialog so background controls cannot be reached.
+  // While shown, suppress global shortcuts (⌘K, navigation, …) so the gate also
+  // blocks keyboard users; Radix already blocks pointer/focus to the background.
   useEffect(() => {
     if (!shown) return
     return pushBlockingModal()
   }, [shown])
 
-  useEffect(() => {
-    if (!shown) return
-    const node = dialogRef.current
-    if (!node) return
-    const focusable = (): HTMLElement[] =>
-      Array.from(
-        node.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-        ),
-      ).filter((el) => !el.hasAttribute('disabled'))
-    focusable()[0]?.focus()
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Tab') return
-      const items = focusable()
-      if (items.length === 0) return
-      const first = items[0]!
-      const last = items[items.length - 1]!
-      const active = document.activeElement
-      if (!node.contains(active)) {
-        event.preventDefault()
-        first.focus()
-      } else if (event.shiftKey && active === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && active === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-    node.addEventListener('keydown', onKeyDown)
-    return () => node.removeEventListener('keydown', onKeyDown)
-  }, [shown])
-
   if (!shown) return null
 
+  // Refuse Escape / outside-click dismissal so the gate cannot be skipped.
+  const blockDismiss = (event: Event): void => event.preventDefault()
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6">
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="first-run-title"
-        className="w-[36rem] max-w-[92vw] rounded-xl border border-border bg-card p-6 shadow-xl"
+    <Dialog open onOpenChange={() => undefined}>
+      <DialogContent
+        placement="center"
+        className="w-[36rem] p-6"
+        onEscapeKeyDown={blockDismiss}
+        onPointerDownOutside={blockDismiss}
+        onInteractOutside={blockDismiss}
       >
         <div className="mb-3 flex items-center gap-2">
           <Sparkles className="size-5 text-primary" />
-          <h2 id="first-run-title" className="font-serif text-xl text-foreground">
+          <DialogTitle className="font-serif text-xl font-normal text-foreground">
             Welcome to Local Brain
-          </h2>
+          </DialogTitle>
         </div>
-        <p className="mb-4 text-sm text-muted-foreground">
+        <DialogDescription className="mb-4 text-sm text-muted-foreground">
           A private, local-first personal CRM and knowledge base. Everything stays in the brain
           folder you selected on this machine — nothing is uploaded.
-        </p>
+        </DialogDescription>
 
         <ul className="mb-5 flex flex-col gap-3 text-sm">
           <li className="flex items-start gap-2.5">
@@ -140,7 +115,7 @@ export function FirstRun(): ReactNode {
             Get started
           </button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }
