@@ -41,6 +41,7 @@ function persistedMessages(messages: ChatMessage[] | undefined): UIMessage[] {
 
 export function AskSurface({ conversationId }: { conversationId: string | undefined }): ReactNode {
   const [draftConversationId, setDraftConversationId] = useState(() => createChatId())
+  const [hydratedConversationId, setHydratedConversationId] = useState<string | null>(null)
   const chatId = conversationId ?? draftConversationId
   const storedMessages = useMessages(conversationId)
   const conversations = useConversations()
@@ -63,9 +64,10 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
   const { error, messages, sendMessage, setMessages, status } = chat
 
   useEffect(() => {
-    if (!conversationId || status !== 'ready' || messages.length > 0 || !storedMessages.data) return
+    if (!conversationId || hydratedConversationId === conversationId || status !== 'ready' || !storedMessages.data) return
     setMessages(initialMessages)
-  }, [conversationId, initialMessages, messages.length, setMessages, status, storedMessages.data])
+    setHydratedConversationId(conversationId)
+  }, [conversationId, hydratedConversationId, initialMessages, setMessages, status, storedMessages.data])
 
   const providerClosed = modelStatus.data && !modelStatus.data.canRun ? modelStatus.data.reason : null
   const pending = status === 'submitted' || status === 'streaming'
@@ -76,7 +78,10 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
     setDraft('')
     try {
       await sendMessage({ text, messageId: createChatId() })
-      if (!conversationId) navigate({ kind: 'ask', conversationId: chatId })
+      if (!conversationId) {
+        setHydratedConversationId(chatId)
+        navigate({ kind: 'ask', conversationId: chatId })
+      }
       void queryClient.invalidateQueries({ queryKey: ['chat-conversations'] })
       void queryClient.invalidateQueries({ queryKey: ['chat-messages', chatId] })
     } catch {
@@ -94,13 +99,15 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
     setDraft('')
     setMessages([])
     setDraftConversationId(nextConversationId)
+    setHydratedConversationId(null)
     if (conversationId) {
       navigate({ kind: 'ask' })
     }
   }
 
-  const displayedMessages = conversationId && storedMessages.data && messages.length === 0 ? initialMessages : messages
-  const showInitialLoading = Boolean(conversationId && storedMessages.isLoading && messages.length === 0)
+  const conversationHydrated = !conversationId || hydratedConversationId === conversationId
+  const displayedMessages = conversationHydrated ? messages : initialMessages
+  const showInitialLoading = Boolean(conversationId && !conversationHydrated && storedMessages.isLoading)
 
   return (
     <div className="flex h-full min-h-0">
