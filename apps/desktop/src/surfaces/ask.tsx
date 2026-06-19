@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react'
 import { useChat } from '@ai-sdk/react'
 import { Plus, Send } from 'lucide-react'
 import { z } from 'zod'
@@ -8,6 +16,8 @@ import { Alert } from '../components/alert'
 import { Button } from '../components/button'
 import { EmptyState } from '../components/empty-state'
 import { Loading } from '../components/loading'
+import { ChatMarkdown } from '../components/chat/chat-markdown'
+import { ChatToolChip, type ToolPart } from '../components/chat/chat-tool-chip'
 import { createAskTransport } from '../lib/ai/ask-transport'
 import { useConversations, useMessages, useModelStatus } from '../lib/queries'
 import { useQueryClient } from '@tanstack/react-query'
@@ -37,6 +47,20 @@ function toUiMessage(message: ChatMessage): UIMessage {
 
 function persistedMessages(messages: ChatMessage[] | undefined): UIMessage[] {
   return (messages ?? []).map(toUiMessage)
+}
+
+/** True when the streaming assistant message has any visible content. */
+function streamingMessageHasContent(message: UIMessage | undefined): boolean {
+  if (!message || message.role !== 'assistant') return false
+  return message.parts.some((p) => {
+    const part = p as Record<string, unknown>
+    const type = String(part['type'] ?? '')
+    const text = String(part['text'] ?? '')
+    return (
+      ((type === 'text' || type === 'reasoning') && text.length > 0) ||
+      type.startsWith('tool-')
+    )
+  })
 }
 
 export function AskSurface({ conversationId }: { conversationId: string | undefined }): ReactNode {
@@ -79,6 +103,14 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
   const historyUnavailable = Boolean(conversationId && storedMessages.isError)
   const waitingForHydration = Boolean(conversationId && !conversationHydrated && !historyUnavailable)
   const composerPending = pending || waitingForHydration || historyUnavailable
+
+  // Show the generic Thinking indicator only before the first assistant content arrives.
+  const lastMessage = messages[messages.length - 1]
+  const showThinking =
+    status === 'submitted' || (status === 'streaming' && !streamingMessageHasContent(lastMessage))
+
+  // The streaming message id — last message while streaming, null otherwise.
+  const streamingMessageId = status === 'streaming' ? (lastMessage?.id ?? null) : null
 
   async function submitDraft(): Promise<void> {
     const text = draft.trim()
@@ -140,7 +172,12 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
             <Loading />
           </div>
         ) : (
-          <MessageList messages={displayedMessages} pending={pending} />
+          <MessageList
+            key={chatId}
+            messages={displayedMessages}
+            streamingMessageId={streamingMessageId}
+            showThinking={showThinking}
+          />
         )}
         {error ? <Alert variant="error" className="mx-auto mb-3 w-full max-w-2xl">{error.message}</Alert> : null}
         <Composer draft={draft} setDraft={setDraft} pending={composerPending} onSubmit={onSubmit} />
@@ -199,8 +236,27 @@ function ConversationRail({
   )
 }
 
-function MessageList({ messages, pending }: { messages: UIMessage[]; pending: boolean }): ReactNode {
-  if (messages.length === 0) {
+function MessageList({
+  messages,
+  streamingMessageId,
+  showThinking,
+}: {
+  messages: UIMessage[]
+  streamingMessageId: string | null
+  showThinking: boolean
+}): ReactNode {
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const pinnedRef = useRef(true)
+
+  // Auto-scroll to bottom when messages change, but only while pinned.
+  useEffect(() => {
+    const container = scrollRef.current
+    if (container && pinnedRef.current) {
+      container.scrollTop = container.scrollHeight
+    }
+  }, [messages, showThinking])
+
+  if (messages.length === 0 && !showThinking) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center">
         <EmptyState
@@ -212,32 +268,100 @@ function MessageList({ messages, pending }: { messages: UIMessage[]; pending: bo
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
+    <div
+      ref={scrollRef}
+      onScroll={(event) => {
+        const t = event.currentTarget
+        pinnedRef.current = t.scrollHeight - t.scrollTop - t.clientHeight < 48
+      }}
+      className="min-h-0 flex-1 overflow-y-auto"
+    >
       <ol className="mx-auto flex w-full max-w-2xl flex-col gap-5 py-2">
         {messages.map((message) => (
-          <li key={message.id} className={cn('flex', message.role === 'user' ? 'justify-end' : 'justify-start')}>
-            <div
-              className={cn(
-                'max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm leading-6',
-                message.role === 'user' ? 'bg-secondary text-foreground' : 'text-foreground',
-              )}
-            >
-              {message.parts.map((part, index) => {
-                if (part.type === 'text') return <span key={`${message.id}-${index}`}>{part.text}</span>
-                if (part.type === 'reasoning') {
-                  return (
-                    <span key={`${message.id}-${index}`} className="block text-muted-foreground">
-                      {part.text}
-                    </span>
-                  )
-                }
-                return null
-              })}
-            </div>
+          <li key={message.id}>
+            <MessageRow message={message} streamingMessageId={streamingMessageId} />
           </li>
         ))}
-        {pending ? <li className="animate-pulse text-sm text-muted-foreground">Thinking...</li> : null}
+        {showThinking ? (
+          <li className="animate-pulse text-sm text-muted-foreground" aria-label="Thinking">
+            Thinking…
+          </li>
+        ) : null}
       </ol>
+    </div>
+  )
+}
+
+function MessageRow({
+  message,
+  streamingMessageId,
+}: {
+  message: UIMessage
+  streamingMessageId: string | null
+}): ReactNode {
+  const isStreaming = message.id === streamingMessageId
+
+  if (message.role === 'user') {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[85%] rounded-lg bg-secondary px-3 py-2 text-sm leading-6 text-foreground">
+          {message.parts.map((part, index) => {
+            if (part.type === 'text') {
+              return (
+                <span key={`${message.id}-${index}`} className="whitespace-pre-wrap">
+                  {part.text}
+                </span>
+              )
+            }
+            return null
+          })}
+        </div>
+      </div>
+    )
+  }
+
+  // Assistant message — interleave text and tool chips
+  return (
+    <div className="flex flex-col gap-2">
+      {message.parts.map((part, index) => {
+        const partRecord = part as Record<string, unknown>
+        const partType = String(partRecord['type'] ?? '')
+
+        if (partType === 'text') {
+          const text = String(partRecord['text'] ?? '')
+          const renderAsPlain = isStreaming
+          if (renderAsPlain) {
+            return (
+              <div
+                key={`${message.id}-${index}`}
+                className="whitespace-pre-wrap text-sm leading-6 text-foreground"
+              >
+                {text}
+              </div>
+            )
+          }
+          return text ? <ChatMarkdown key={`${message.id}-${index}`} text={text} /> : null
+        }
+
+        if (partType === 'reasoning') {
+          return (
+            <span key={`${message.id}-${index}`} className="block text-xs text-muted-foreground">
+              {String(partRecord['text'] ?? '')}
+            </span>
+          )
+        }
+
+        if (partType.startsWith('tool-')) {
+          return (
+            <ChatToolChip
+              key={`${message.id}-${index}`}
+              part={partRecord as unknown as ToolPart}
+            />
+          )
+        }
+
+        return null
+      })}
     </div>
   )
 }

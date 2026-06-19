@@ -24,7 +24,7 @@ export {
 export { db } from './db/client'
 export { execute, executeRaw, batch, type DbStatement } from './db/commands'
 export { newId } from './db/id'
-export { nowIso } from './db/time'
+export { nowIso, localDateString } from './db/time'
 
 // People
 export {
@@ -499,3 +499,7 @@ export {
 
 // Seed / demo data
 export { seedDemoData, type SeedResult } from './seed/seed'
+
+// Chat AI: read-only tools and system prompt builder
+export { buildChatTools, type ChatTools } from './ai/chat/tools'
+export { buildChatSystemPrompt, type ChatSystemPromptInput } from './ai/chat/system-prompt'
