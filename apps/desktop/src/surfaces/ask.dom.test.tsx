@@ -124,6 +124,30 @@ describe('AskSurface', () => {
     expect(screen.getByLabelText('Thinking')).not.toBeNull()
   })
 
+  it('renders earlier text parts as plain text when a tool part follows during streaming', () => {
+    chatMocks.status = 'streaming'
+    chatMocks.messages = [
+      {
+        id: 'a1',
+        role: 'assistant',
+        parts: [
+          { type: 'text', text: '**Bold** text before tool', state: 'done' },
+          {
+            type: 'tool-search_records',
+            toolCallId: 'tc-1',
+            state: 'input-streaming',
+            input: { query: 'test' },
+          },
+        ],
+      } as unknown as UIMessage,
+    ]
+    renderWithProviders(<AskSurface conversationId={undefined} />)
+
+    // Earlier text part should still be plain (not parsed as markdown) while streaming
+    expect(screen.queryByText('Bold')).toBeNull()
+    expect(screen.getByText('**Bold** text before tool')).not.toBeNull()
+  })
+
   it('renders a pending search_records tool chip', () => {
     chatMocks.messages = [
       toolMessage('a1', 'search_records', 'input-available', { query: 'Maya budget' }),

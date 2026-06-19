@@ -14,6 +14,7 @@ import { listProjects } from '../../domains/projects/getters'
 const DEFAULT_SEARCH_LIMIT = 8
 const MAX_SEARCH_LIMIT = 20
 const DEFAULT_PROJECTS_LIMIT = 30
+const MAX_CHUNK_CHARS = 1200
 
 export function buildChatTools() {
   return {
@@ -40,6 +41,7 @@ export function buildChatTools() {
             recordId: chunk.recordId,
             title: chunk.recordTitle ?? null,
             snippet: chunk.snippet,
+            text: chunk.text.length > MAX_CHUNK_CHARS ? chunk.text.slice(0, MAX_CHUNK_CHARS) : chunk.text,
           })),
           count: result.chunks.length,
           semanticAvailable: result.semanticAvailable,

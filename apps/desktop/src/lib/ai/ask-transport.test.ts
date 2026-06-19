@@ -125,7 +125,7 @@ describe('createAskTransport', () => {
     })
 
     // Project context should have been loaded
-    expect(coreMocks.listProjects).toHaveBeenCalledWith({ limit: 30 })
+    expect(coreMocks.listProjects).toHaveBeenCalledWith({ activeOnly: true, limit: 40 })
     expect(coreMocks.buildChatSystemPrompt).toHaveBeenCalledWith(
       expect.objectContaining({ today: '2026-06-19', projects: expect.any(Array) }),
     )

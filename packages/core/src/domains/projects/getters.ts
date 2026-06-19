@@ -7,6 +7,8 @@ export type Project = Selectable<Projects>
 export interface ListProjectsOptions {
   status?: string
   includeArchived?: boolean
+  /** Exclude projects with a non-null completedOn date (default false). */
+  activeOnly?: boolean
   limit?: number
 }
 
@@ -15,6 +17,9 @@ export function listProjects(options: ListProjectsOptions = {}): Promise<Project
   let query = db.selectFrom('projects').selectAll()
   if (!options.includeArchived) {
     query = query.where('archivedAt', 'is', null)
+  }
+  if (options.activeOnly) {
+    query = query.where('completedOn', 'is', null)
   }
   if (options.status !== undefined) {
     query = query.where('status', '=', options.status)

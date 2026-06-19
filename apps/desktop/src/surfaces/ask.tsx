@@ -295,7 +295,6 @@ function MessageRow({
   streamingMessageId: string | null
 }): ReactNode {
   const isStreaming = message.id === streamingMessageId
-  const lastIndex = message.parts.length - 1
 
   if (message.role === 'user') {
     return (
@@ -325,8 +324,7 @@ function MessageRow({
 
         if (partType === 'text') {
           const text = String(partRecord['text'] ?? '')
-          // Only the final part of the active streaming message renders as plain text.
-          const renderAsPlain = isStreaming && index === lastIndex
+          const renderAsPlain = isStreaming
           if (renderAsPlain) {
             return (
               <div

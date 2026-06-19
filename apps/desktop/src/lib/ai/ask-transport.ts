@@ -142,7 +142,7 @@ async function persistLatestUser(conversationId: string, messages: readonly UIMe
 
 async function loadChatContext(): Promise<{ system: string }> {
   const today = nowIso().slice(0, 10)
-  const projects = await listProjects({ limit: 30 })
+  const projects = await listProjects({ activeOnly: true, limit: 40 })
   return {
     system: buildChatSystemPrompt({ today, projects }),
   }
