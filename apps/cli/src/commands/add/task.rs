@@ -91,7 +91,9 @@ pub fn add_task(conn: &mut Connection, json: bool, args: AddTaskArgs) -> Result<
             }
         }
     }
-    for assignee_id in &args.assignee_ids {
+    // Iterate the deduplicated set so that repeating --assignee <id> does not
+    // attempt a second insert and hit the UNIQUE (task_id, person_id) constraint.
+    for assignee_id in &assignee_set {
         tx.execute(
             "INSERT INTO task_people (id, task_id, person_id, role) VALUES (?1,?2,?3,'assignee')",
             params![new_id(), id, assignee_id],
@@ -104,7 +106,7 @@ pub fn add_task(conn: &mut Connection, json: bool, args: AddTaskArgs) -> Result<
             "kind": "task",
             "id": id,
             "evidence": args.evidence.len(),
-            "assigneeCount": args.assignee_ids.len(),
+            "assigneeCount": assignee_set.len(),
         }))
     } else {
         println!("task {id}");
