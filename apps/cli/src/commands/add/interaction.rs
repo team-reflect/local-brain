@@ -48,11 +48,10 @@ fn find_duplicate_interaction(
     if identity_kind == "record" {
         if let Some(external_id) = normalize_optional(external_id) {
             // The source-scoped `external_identities` lookup already ran in the
-            // caller. This legacy fallback matches the denormalized
-            // `interactions.external_id` column, but it must NOT merge across
-            // sources: an external id is only unique within a source. We therefore
-            // skip any interaction that another source has already claimed, and —
-            // when this import omits a source — only match unclaimed/legacy rows.
+            // caller. This legacy fallback matches only rows that predate
+            // `external_identities`; once any scoped identity claims a row, the
+            // generic denormalized `interactions.external_id` must not merge across
+            // sources or external-kind scopes.
             let id = conn
                 .query_row(
                     "SELECT i.id FROM interactions i
@@ -63,11 +62,9 @@ fn find_duplicate_interaction(
                      SELECT 1 FROM external_identities ei
                      WHERE ei.entity_type = 'interaction'
                        AND ei.entity_id = i.id
-                       AND ei.kind = 'record'
-                       AND (?2 IS NULL OR ei.source_id <> ?2)
                    )
                  LIMIT 1",
-                    params![external_id, source_id],
+                    params![external_id],
                     |row| row.get::<_, String>(0),
                 )
                 .ok();

@@ -638,6 +638,28 @@ fn add_interaction_keeps_message_and_thread_external_ids_separate() {
         ],
     );
     assert_ne!(message["id"], thread["id"]);
+    let record = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Legacy record import",
+            "--summary",
+            "Record-level summary.",
+            "--text",
+            "Message-level body.",
+            "--source",
+            "gmail",
+            "--external-id",
+            "abc123",
+        ],
+    );
+    assert_ne!(record["id"], message["id"]);
+    assert_ne!(record["id"], thread["id"]);
 
     let conn = Connection::open(&db).unwrap();
     let summary: String = conn
