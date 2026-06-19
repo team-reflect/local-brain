@@ -43,6 +43,7 @@ All planned work is complete and verified.
 - `pnpm --filter @local-brain/desktop build` — ✅ 2260 modules, no errors
 - `pnpm --filter @local-brain/desktop sidecar` — ✅ compiled, staged
 - `git diff --check origin/master...HEAD` — ✅ no whitespace issues
+- Parent verification: `pnpm check` — ✅ pass (monorepo typecheck, oxlint, all package tests)
 
 ## Deliberate Non-Changes
 

@@ -75,7 +75,7 @@ hand-rolled `role="progressbar"` div in `model-download-progress`.
 
 ## Verification Results
 
-Verified on branch head before commit:
+Claude verification before the implementation commit:
 
 ```
 pnpm --filter @local-brain/desktop typecheck   → pass (0 errors)
@@ -85,8 +85,16 @@ pnpm --filter @local-brain/desktop sidecar     → ✓ compiled + staged
 git diff --check origin/master...HEAD          → no whitespace issues
 ```
 
+Parent verification after PR creation:
+
+```
+pnpm check                                      → pass
+```
+
+This covers monorepo typecheck, oxlint, and all package tests.
+
 ## PR
 
 https://github.com/maccman/local-brain/pull/69
 
-Head: `453a3f5` — feat: adopt shadcn/ui primitives for form controls
+Code commit: `453a3f5` — feat: adopt shadcn/ui primitives for form controls
