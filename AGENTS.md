@@ -52,3 +52,33 @@ Documentation style:
 - Use ASCII diagrams where they clarify schema or UI.
 - Prefer durable product language over implementation names unless the doc is a
   technical plan.
+
+Implementation conventions:
+
+- Use Tauri 2 for the desktop shell. Do not introduce Electron.
+- Keep AI provider calls BYOK and direct to user-approved providers. Do not add a
+  hosted Local Brain model proxy for MVP.
+- Store model keys, credentials, and integration secrets in the OS keychain, not in
+  SQLite, markdown, Git, logs, or local config files.
+- Treat data portability as a product constraint. Export and backup paths should be
+  planned alongside durable schema decisions.
+- Keep the UI keyboard-friendly, sparse, and oriented around browsing, correction,
+  inspection, Ask, and demonstration. Do not add surfaces that compete with the
+  agent-operated workflow.
+- For desktop IPC, define Tauri commands in the native layer, register them in the
+  invoke handler, call them from the frontend through Tauri's `invoke`, and grant
+  plugin permissions through Tauri capabilities.
+- Use TypeScript strictly: no `any` or `as any`, prefer small testable modules, use
+  kebab-case for files and directories, and keep shared public APIs clear.
+- Use Zod at external and JSON boundaries. Normalize database/native snake_case to
+  frontend camelCase once in a bridge layer.
+- For UI work, follow the Local Brain design docs and Reflect Open's component
+  patterns. Check existing shadcn/ui primitives before building custom interactive
+  controls, overlays, dialogs, menus, popovers, or tooltips. Use Lucide icons where
+  appropriate.
+- For React, use named exports, one component per file by default, providers plus
+  small hooks for shared state, and never call hooks conditionally.
+- Before declaring implementation work done, run the focused checks that match the
+  change: TypeScript typecheck/lint for frontend logic, targeted Vitest tests for
+  TypeScript behavior, and targeted Rust tests for native, CLI, migration, or database
+  behavior.
