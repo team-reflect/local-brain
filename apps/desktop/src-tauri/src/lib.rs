@@ -1,3 +1,10 @@
+//! The Local Brain desktop shell (Tauri 2). Rust owns the durable SQLite
+//! connection, the brain registry, the embedding runtime, and the keychain; the
+//! React frontend reaches them only through the `#[tauri::command]` handlers
+//! registered in [`run`]. The same `brain-schema` crate backs both this shell
+//! and the `brain` CLI sidecar, so the desktop writer and CLI reader never skew
+//! on schema or SQLite version.
+
 mod brains;
 mod commands;
 mod db;

@@ -57,8 +57,11 @@ enum Command {
     Doctor,
     /// Add a record (person, asset, document, interaction, or task).
     Add {
+        // Boxed because the `add` subcommands carry by far the largest argument
+        // structs; without indirection the whole `Command` enum is sized to them
+        // (clippy::large_enum_variant).
         #[command(subcommand)]
-        what: AddCommand,
+        what: Box<AddCommand>,
     },
     /// Add a hidden memory (atomic claim) with provenance links.
     Remember(RememberArgs),
@@ -404,7 +407,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
 
         Command::Add { what } => {
             let mut conn = db::open(&db_path)?;
-            match what {
+            match *what {
                 AddCommand::Person(a) => add::add_person(
                     &mut conn,
                     json,
