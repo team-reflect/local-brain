@@ -11,7 +11,7 @@ import { useRouter } from '../routing/router'
 
 /**
  * First-run onboarding (Plan 09). Shown once on a fresh install: it confirms
- * where the local brain lives, the (honest) model-boundary status, and how to
+ * where the local brain lives, the model-boundary status for extraction, and how to
  * start — set an AI provider or drive it from the `brain` CLI.
  * Dismissing it sets a settings flag so it never reappears.
  */
@@ -103,7 +103,7 @@ export function FirstRun(): ReactNode {
             <span>
               <span className="font-medium text-foreground">Bring your own model (optional)</span>
               <span className="mt-0.5 block text-muted-foreground">
-                Ask and extraction stay off until you add an AI provider.{' '}
+                Extraction stays off until you add an AI provider.{' '}
                 {model.data?.configured ? 'A model is configured.' : 'No model is configured yet.'}
               </span>
             </span>

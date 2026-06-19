@@ -8,8 +8,9 @@ bridge, TanStack Query hooks, named exports, strict TS, Vitest DOM suite), so th
 pass targeted a few high-leverage seams instead of broad churn.
 
 - **Branch:** `codex/local-brain-react-quality-refactor`
-- **Head SHA:** `f392446` (code at `f522faa`; tip adds this report)
-- **Base:** `origin/master` @ `f2828f2`
+- **Head SHA:** pending parent verification after merge with latest `master`
+- **Base:** `origin/master` @ `f2828f2`; merged with current `origin/master` @
+  `dd602e9`
 - **PR:** https://github.com/maccman/local-brain/pull/54 (non-draft, open)
 - **Worktree:** clean
 
@@ -35,35 +36,34 @@ pass targeted a few high-leverage seams instead of broad churn.
    `bg-primary` / bordered buttons now use the `Button` primitive (Enable →
    `primary`, Backfill → `primary`, Rebuild → `outline`, Disable → `ghost`).
 
-4. **Ask history menu → `Popover` primitive.** The composer's hand-rolled history
-   toggle never closed on outside-click or Escape; the `Popover` primitive fixes
-   that.
-
-5. **Docs.** New `docs/frontend-architecture.md` (layering, bridge→queries
+4. **Docs.** New `docs/frontend-architecture.md` (layering, bridge→queries
    pipeline, overlay/component conventions, commands/shortcuts, testing), linked
    from `docs/README.md`. Plus `plan.md` / `status.md` / this report.
+
+The initial branch also improved the Ask history popover, but current `master`
+removed the Ask / LLM chat surface in PR #52 before parent review. The merge
+dropped that obsolete change and kept the still-valid Dialog/settings/docs work.
 
 ## Verification (all run on the final tree)
 
 | Check | Result |
 |-------|--------|
 | `git diff --check` | clean |
-| `pnpm check` (typecheck + oxlint + vitest) | **80 tests pass** (was 77; +3 new) |
-| `pnpm --filter @local-brain/desktop build` | pass |
-| `pnpm --filter @local-brain/desktop sidecar` | pass (staged `brain-aarch64-apple-darwin`) |
+| `pnpm check` (typecheck + oxlint + vitest) | passed before upstream merge; parent re-run pending |
+| `pnpm --filter @local-brain/desktop build` | passed before upstream merge; parent re-run pending |
+| `pnpm --filter @local-brain/desktop sidecar` | passed before upstream merge; parent re-run pending |
 
-New DOM tests: command-palette closes on Escape; command-palette renders nothing
-while closed; Ask history popover opens and dismisses on Escape.
+New DOM tests retained after the upstream merge: command-palette closes on
+Escape; command-palette renders nothing while closed.
 
 No Rust/native source was modified, so `cargo` checks were not required (the
 sidecar step compiles the CLI as a build artifact and succeeded).
 
 ## Behavior changes
 
-Two intentional fixes, both prior gaps:
+One intentional fix, a prior gap:
 
 - Dialogs now trap and restore focus and lock background scroll.
-- The Ask history menu now closes on outside-click / Escape.
 
 Everything else is visually and behaviorally equivalent.
 

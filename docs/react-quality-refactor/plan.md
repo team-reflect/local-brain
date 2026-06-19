@@ -1,7 +1,8 @@
 # React Quality Refactor — Plan
 
 **Branch:** `codex/local-brain-react-quality-refactor`
-**Base:** `origin/master` @ `f2828f2`
+**Base:** `origin/master` @ `f2828f2`; reconciled with `origin/master` @ `dd602e9`
+after PR #52 removed Ask / LLM chat surfaces.
 **Scope:** Frontend quality only (`apps/desktop/src`). No Rust refactor.
 
 ## Baseline assessment
@@ -30,10 +31,6 @@ rather than broad churn.
    `SemanticSearch` hand-rolls `bg-primary` / bordered buttons instead of the
    `Button` primitive (a design-system violation called out in `design-system.md`).
 
-3. **Ask history menu (`surfaces/ask.tsx`).** A hand-rolled toggle dropdown with no
-   outside-click or Escape close (only the toggle button dismisses it) — a real UX
-   gap. The `Popover` primitive already solves this.
-
 ## Work items
 
 | # | Change | Why | Risk |
@@ -43,13 +40,11 @@ rather than broad churn.
 | 3 | Refactor `command-palette` onto it | Remove 3rd scrim copy; gain focus restore | med |
 | 4 | Split `settings.tsx` → `surfaces/settings/*` (one component per file) | Convention + maintainability | low |
 | 5 | `SemanticSearch` raw buttons → `Button` primitive | Design-system compliance | low |
-| 6 | Ask history dropdown → `Popover` primitive | Outside-click/Escape close, a11y | low |
-| 7 | Add `docs/frontend-architecture.md` | Durable orientation for future work | n/a |
+| 6 | Add `docs/frontend-architecture.md` | Durable orientation for future work | n/a |
 
 ## Acceptance criteria
 
-- No change to user-visible behavior except the two fixed UX gaps (Ask menu
-  outside-click/Escape close; dialog focus restore/trap).
+- No change to user-visible behavior except dialog focus restore/trap.
 - No `any` / `as any`; strict types preserved; no hook-order or stale-closure hazards.
 - One component per file for the split settings sections; named exports; kebab-case.
 - `git diff --check` clean.
@@ -57,7 +52,7 @@ rather than broad churn.
 - `pnpm --filter @local-brain/desktop build` green.
 - `pnpm --filter @local-brain/desktop sidecar` green.
 - New/updated Vitest DOM tests cover the changed behavior (dialog Escape/focus,
-  Ask menu dismissal, settings section rendering).
+  closed rendering, settings section rendering).
 - Branch pushed; non-draft PR opened against `master`.
 
 ## Out of scope

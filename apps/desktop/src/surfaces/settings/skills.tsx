@@ -12,7 +12,6 @@ export function SkillsSettings(): ReactNode {
         </p>
         <div className="rounded-md border border-border bg-card px-4 py-3 font-mono text-xs text-card-foreground">
           <div>brain search "northwind" --json</div>
-          <div>brain ask "what did we decide?" --json</div>
           <div>brain today --json</div>
           <div>brain add interaction --kind meeting --title "…" --text-file ./notes.md --json</div>
         </div>

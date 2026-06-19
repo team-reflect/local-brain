@@ -133,7 +133,7 @@ Branch: `codex/local-brain-reflect-embeddings` · Base: `master` @ 58c801f
 - Bundling/notarizing the ONNX runtime and the on-demand ~90MB model download still need a
   packaging pass (Plan 09). The runtime degrades to lexical if unavailable, so nothing
   breaks without it.
-- Semantic search is desktop-only; the `brain` CLI keeps its Rust lexical search/ask (no
+- Semantic search is desktop-only; the `brain` CLI keeps its Rust lexical search (no
   embedding runtime in the CLI binary). Documented trade-off — the CLI shares the same DB,
   so vectors written by the desktop are present but the CLI does not query them yet.
 - The e2e model test is `#[ignore]` (network + ~90MB); it passed against a locally cached

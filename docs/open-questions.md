@@ -2,7 +2,7 @@
 
 These questions should stay small and decision-oriented. The core schema direction is
 settled for launch: Local Brain is a personal CRM over SQLite, with documents and
-interactions as first-class records, hidden atomic memories, and cited Ask.
+interactions as first-class records and hidden atomic memories.
 
 ## Product
 
@@ -23,17 +23,14 @@ interactions as first-class records, hidden atomic memories, and cited Ask.
    normalized names and notes first?
 2. Should projects support parent/child hierarchy in launch?
 3. Should tasks support recurrence in launch, or only one-off due/scheduled dates?
-4. Should `content_chunks` include chat messages later, or stay limited to documents
-   and interactions?
+4. Should `content_chunks` stay limited to documents and interactions?
 
 ## AI
 
 1. Which extraction model is good enough for direct application without mandatory
    review?
 2. Which embedding backend is easiest to package on macOS?
-3. Should Ask run without any external provider by using a local model, or is BYOK
-   enough for the first alpha?
-4. How should the app explain external model calls without making the product feel
+3. How should the app explain external model calls without making the product feel
    scary?
 
 ## Distribution

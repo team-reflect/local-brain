@@ -12,13 +12,6 @@ export {
   ModelUnavailableError,
   type ModelStatus,
 } from './boundary'
-export {
-  assembleAnswerContext,
-  citedSubset,
-  type AssembledContext,
-  type Citation as AnswerCitation,
-} from './context'
-export { ask, type AskResult, type AskCitation, type AskOptions } from './ask'
 export { createModelExtractor, extractJsonObject } from './extractor'
 export {
   createAnthropicProvider,

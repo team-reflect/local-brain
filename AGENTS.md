@@ -22,10 +22,10 @@ Current product shape:
   Codex daily automation that ingests context, updates tasks, and records memories.
 - Most reads should also be agent-driven, for example daily reports, todo lists, and
   briefings generated from the CLI or database access.
-- Main user surfaces are Today, Tasks, Network, Projects, Graph, Ask, and Settings.
+- Main user surfaces are Today, Tasks, Network, Projects, Graph, and Settings.
 - Network contains People and Organizations.
 - Documents and Interactions are first-class records, but they are browsed inside
-  person, organization, project, and task detail pages, and through search or Ask.
+  person, organization, project, and task detail pages, and through search.
 - The UI is still important, but mainly for quick browsing, correction, inspection,
   and demonstrating the power of the user's local brain.
 - Relationship intelligence is part of the product model: recency, reconnect cadence,
@@ -60,8 +60,6 @@ Implementation conventions:
   hosted Local Brain model proxy for MVP.
 - Store model keys, credentials, and integration secrets in the OS keychain, not in
   SQLite, markdown, Git, logs, or local config files.
-- Treat data portability as a product constraint. Export and backup paths should be
-  planned alongside durable schema decisions.
 - Keep the UI keyboard-friendly, sparse, and oriented around browsing, correction,
   inspection, Ask, and demonstration. Do not add surfaces that compete with the
   agent-operated workflow.

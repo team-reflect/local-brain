@@ -43,7 +43,6 @@ update-path decision.
 4. Add keyboard and accessibility pass:
    - sidebar
    - command palette
-   - Ask
    - Graph
    - Settings
    - visible focus rings
@@ -65,7 +64,7 @@ update-path decision.
    - keys are keychain-only
    - no hosted Local Brain service in the core path
    - external model payloads are visible and minimal
-   - cited answers link to evidence
+   - extracted memories and tasks link to evidence
 8. Add signing/notarization checklist:
    - Apple Developer ID signing
    - hardened runtime
@@ -93,7 +92,7 @@ update-path decision.
 - A relaunch auto-opens the newest recent brain folder or returns to the chooser if it
   cannot be opened.
 - The user can browse Today, Tasks, Network Graph/People/Organizations, and Projects.
-- The user can search/ask with citations.
+- The user can search records and inspect citations.
 - The user can use the `brain` CLI from a terminal.
 - The user can install/use the Codex skill.
 - A Codex daily automation can update records and produce a daily report/todo list.
@@ -111,7 +110,7 @@ update-path decision.
 - Run accessibility smoke pass.
 - Run performance smoke pass against seed-large data.
 - Manual launch script: first run, choose a brain folder, relaunch recent auto-open,
-  install skill, import document, import interaction, extract, graph, ask, CLI search,
+  install skill, import document, import interaction, extract, graph, CLI search,
   daily report, todo list.
 
 ## Open Questions

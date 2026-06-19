@@ -61,23 +61,6 @@ export interface Assets {
   archivedAt: string | null
 }
 
-export interface ChatConversations {
-  id: string
-  title: string | null
-  createdAt: Generated<string>
-  updatedAt: Generated<string>
-  archivedAt: string | null
-}
-
-export interface ChatMessages {
-  id: string
-  conversationId: string
-  role: string
-  content: string
-  model: string | null
-  createdAt: Generated<string>
-}
-
 export interface ChunkEmbeddings {
   id: number
   chunkId: string
@@ -448,8 +431,6 @@ export interface Database {
   affiliations: Affiliations
   assetLinks: AssetLinks
   assets: Assets
-  chatConversations: ChatConversations
-  chatMessages: ChatMessages
   chunkEmbeddings: ChunkEmbeddings
   contentChunks: ContentChunks
   documentInteractions: DocumentInteractions

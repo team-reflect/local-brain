@@ -31,8 +31,8 @@ product, not a Tauri desktop app, and contradicts the stated library direction.
 - `apps/desktop/src/surfaces/settings.tsx` — sections general / AI providers / database /
   skills / diagnostics. Diagnostics hardcodes `['semantic search', 'off (lexical fallback)']`.
   Settings read/write via react-query hooks in `apps/desktop/src/lib/queries/settings.ts`.
-- `apps/cli` — **separate Rust** lexical search/ask (`commands/read.rs`); model via `curl`.
-  Out of scope for semantic for MVP (stays lexical fallback).
+- `apps/cli` — **separate Rust** lexical search (`commands/read.rs`). Out of scope for
+  semantic for MVP (stays lexical fallback).
 
 ## Design decisions (Local-Brain-shaped)
 

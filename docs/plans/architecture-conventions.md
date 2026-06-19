@@ -61,8 +61,6 @@ Durable tables:
 - evidence_refs
 - tags
 - taggings
-- chat_conversations
-- chat_messages
 - settings
 
 ## Reflect Open Patterns To Reuse
@@ -89,7 +87,7 @@ and app-managed assets are durable user data, not a disposable projection.
 ## Code Organization
 
 Per-record business logic lives in `packages/core/src/domains/<domain>/` (people,
-organizations, projects, tasks, documents, interactions, memories, chat,
+organizations, projects, tasks, documents, interactions, memories,
 settings, relations, relationships, brains, citations, maintenance). Cross-cutting
 engines sit beside it at the package root: `retrieval/`, `extraction/`, `ingest/`,
 `ai/`, `reports/`, `graph/`, `search/`, `embeddings/`, plus the `db/`, `ipc/`, and
@@ -170,7 +168,6 @@ locations:
 - Tasks
 - Network tabs and detail records
 - Projects and project detail
-- Ask conversations
 - Settings sections
 
 Back/forward, focus restore, selected detail panes, command-palette actions, and future
@@ -255,9 +252,9 @@ drain it later. Do not introduce a local HTTP server unless a native inbox canno
 - FTS5 is the first search path.
 - Embeddings are additive and should degrade cleanly to lexical search.
 - `content_chunks` is derived from documents and interactions.
-- One `retrieve()` API should serve search, Ask, daily reports, graph context, and CLI
+- One `retrieve()` API should serve search, daily reports, graph context, and CLI
   reads.
-- Ask should cite chunks and open the owning document or interaction.
+- Evidence citations should open the owning document or interaction.
 
 Local embeddings should follow Reflect Open's pattern when enabled: `fastembed` in Rust,
 off the UI thread, with vectors stored in `sqlite-vec`, model/runtime recorded for
@@ -273,7 +270,6 @@ or jump to brain settings). Below it the navigation is:
 - Tasks
 - Network
 - Projects
-- Ask
 - Settings
 
 Network contains Graph, People, and Organizations. Graph is the default Network tab.
@@ -331,7 +327,7 @@ apps/cli              Rust `brain` CLI sidecar
 packages/core         TS actions, product policy, retrieval, extraction, AI orchestration
 packages/db           Kysely schema/types + IPC dialect
 packages/ui           optional shared React components
-packages/prompts      extraction and Ask prompt contracts
+packages/prompts      extraction prompt contracts
 crates/brain-schema   SQLite migrations, open/migrate helpers, schema version
 crates/brain-native   optional shared Rust native primitives
 skills/               local agent skill

@@ -1,7 +1,7 @@
 -- Local Brain launch schema (see docs/launch-schema.md).
 --
 -- A personal CRM with first-class people, organizations, projects, tasks,
--- interactions, documents, hidden atomic memories, tags, AI chat, and settings.
+-- interactions, documents, hidden atomic memories, tags, and settings.
 -- SQLite is the durable source of truth; only content_chunks and the FTS tables
 -- are derived and rebuildable.
 --
@@ -202,11 +202,11 @@ CREATE TABLE memory_links (
 );
 
 ----------------------------------------------------------------------
--- evidence_refs  (memory/task/chat answer -> exact chunk)
+-- evidence_refs  (memory/task -> exact chunk)
 ----------------------------------------------------------------------
 CREATE TABLE evidence_refs (
   id           TEXT PRIMARY KEY,
-  subject_type TEXT NOT NULL CHECK (subject_type IN ('memory', 'task', 'chat_message')),
+  subject_type TEXT NOT NULL CHECK (subject_type IN ('memory', 'task')),
   subject_id   TEXT NOT NULL,
   chunk_id     TEXT NOT NULL REFERENCES content_chunks (id) ON DELETE CASCADE,
   quote_start  INTEGER,
@@ -235,26 +235,6 @@ CREATE TABLE taggings (
   record_id   TEXT NOT NULL,
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   UNIQUE (tag_id, record_type, record_id)
-);
-
-----------------------------------------------------------------------
--- chat (Ask conversations + answer history)
-----------------------------------------------------------------------
-CREATE TABLE chat_conversations (
-  id          TEXT PRIMARY KEY,
-  title       TEXT,
-  created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  archived_at TEXT
-);
-
-CREATE TABLE chat_messages (
-  id              TEXT PRIMARY KEY,
-  conversation_id TEXT NOT NULL REFERENCES chat_conversations (id) ON DELETE CASCADE,
-  role            TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
-  content         TEXT NOT NULL,
-  model           TEXT,
-  created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 ----------------------------------------------------------------------
@@ -444,8 +424,6 @@ CREATE INDEX idx_evidence_chunk ON evidence_refs (chunk_id);
 
 CREATE INDEX idx_taggings_tag ON taggings (tag_id);
 CREATE INDEX idx_taggings_record ON taggings (record_type, record_id);
-
-CREATE INDEX idx_chat_messages_conversation ON chat_messages (conversation_id);
 
 ----------------------------------------------------------------------
 -- FTS5 over document/interaction text and derived chunks (Plan 02 step 4).

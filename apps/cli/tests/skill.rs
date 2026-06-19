@@ -18,7 +18,6 @@ const DOCUMENTED: &[&[&str]] = &[
     &["add", "task"],
     &["remember"],
     &["search"],
-    &["ask"],
     &["show"],
     &["today"],
     &["report", "daily"],

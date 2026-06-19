@@ -25,11 +25,10 @@ Run against a clean brain root (e.g. `BRAIN_ROOT=$(mktemp -d)`).
 - [ ] Import a document and an interaction (paste + file path).
 - [ ] Extraction: with a AI provider set, a meeting yields people/org/task/memory;
       without, capture still works (extraction no-ops).
-- [ ] Browse Today, Tasks, Network (Graph/People/Orgs), Projects, and Ask.
+- [ ] Browse Today, Tasks, Network (Graph/People/Orgs), and Projects.
 - [ ] Search (⌘K) finds records by name and full text.
-- [ ] Ask returns a cited answer (model configured) or cited evidence (not).
 - [ ] Citations open the exact document/interaction.
-- [ ] `brain` CLI works with the app closed: `add`, `search`, `ask`, `today`,
+- [ ] `brain` CLI works with the app closed: `add`, `search`, `today`,
       `report daily`, `tasks plan-day`, `relationships followups`, `graph`, `show`.
 - [ ] A Codex daily automation updates records and produces a report + todo list.
 - [ ] `brain doctor` / Settings → Diagnostics report setup clearly.
@@ -39,7 +38,7 @@ Run against a clean brain root (e.g. `BRAIN_ROOT=$(mktemp -d)`).
 - [x] Visible keyboard focus ring on all interactive elements (`:focus-visible`,
       keyboard-only via globals.css).
 - [x] `prefers-reduced-motion` honored (animations/transitions reduced).
-- [x] Command palette, Ask, Settings, sidebar are keyboard-operable (typed routes
+- [x] Command palette, Settings, sidebar are keyboard-operable (typed routes
       + central keymap; ⌘K palette with arrow-key nav).
 - [ ] Manual VoiceOver pass on the primary surfaces (recommended before public alpha).
 
@@ -70,7 +69,7 @@ stay off the UI thread when added.
       provider status is surfaced in Settings → AI providers and Diagnostics.
 - [x] External payloads are minimal: only retrieved cited chunks, assembled
       through one checked helper.
-- [x] Every factual Ask answer persists `evidence_refs` that open the source.
+- [x] Extracted memories and tasks persist `evidence_refs` that open the source.
 - [x] CSP restricts `connect-src` to the known provider hosts.
 
 ## Signing / notarization checklist (deferred for alpha)

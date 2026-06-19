@@ -19,7 +19,7 @@ or approved local database access.
   `brain` CLI calls.
 - Preserve provenance directly on documents, interactions, tasks, memories, and
   evidence references.
-- Prefer cited answers over uncited summaries.
+- Prefer cited records and evidence over uncited summaries.
 - Never invent context. Add uncertain details as low-confidence memories or skip them.
 
 ## Example Commands
@@ -50,7 +50,6 @@ Query records:
 
 ```bash
 brain search "revised budget"
-brain ask "What did I promise Maya last week?"
 brain today --json
 brain report daily --json
 brain tasks plan-day --json

@@ -42,7 +42,7 @@ and row-level sensitivity labels.
 3. Add keychain integration for AI provider keys.
 4. Add model boundary settings:
    - selected provider/model
-   - diagnostics showing whether Ask can run
+   - diagnostics showing whether model-backed extraction can run
 5. Add diagnostics:
    - brain root, database path, asset directory path, and migration status
    - FTS/vector availability

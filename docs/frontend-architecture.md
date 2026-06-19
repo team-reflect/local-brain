@@ -35,11 +35,11 @@ main.tsx → App.tsx
    Tauri's `invoke`. snake_case from SQLite/Rust is normalized to camelCase here so
    the rest of the app speaks one casing. Zod validates at this boundary.
 2. **Domain logic (`@local-brain/core`).** Shared with the CLI. Surfaces call core
-   functions (`ask`, `listConversations`, `getModelStatus`, …) rather than issuing
+   functions (`listTasks`, `searchRecords`, `getModelStatus`, …) rather than issuing
    raw SQL.
 3. **Query hooks (`lib/queries/*`).** TanStack Query wrappers — one module per
-   concern (`brains`, `chat`, `records`, `search`, `settings`, `embeddings`,
-   `corrections`, `ingest`). Surfaces consume hooks (`useActiveBrain`, `useAsk`,
+   concern (`brains`, `records`, `search`, `settings`, `embeddings`,
+   `corrections`, `ingest`). Surfaces consume hooks (`useActiveBrain`,
    `useEmbeddingsStatus`, …); mutations invalidate the query keys they affect.
    Re-exported through `lib/queries/index.ts`.
 4. **Surfaces (`surfaces/*`)** and **components (`components/*`)** render. Surfaces
@@ -57,7 +57,8 @@ to the bridge, and the bridge never imports React.
 - Strict TypeScript: no `any` / `as any`. Prefer deriving prop types from data
   (`NonNullable<ReturnType<typeof useX>['data']>`) over restating shapes.
 - Hooks discipline: never call hooks conditionally; gate on data after the hooks
-  run. Watch for stale closures in effects (e.g. the Ask scroll-pin ref pattern).
+  run. Watch for stale closures in effects, especially event listeners and async
+  mutations that close over route or query state.
 
 ## Overlays and primitives
 
@@ -70,7 +71,7 @@ Escape / outside-click dismissal for free — a hand-rolled scrim does not.
   `brain-dialog`, `command-palette`). Controlled via `open` + `onOpenChange`; map
   `onOpenChange(false)` to your `onClose`. Provide a `DialogTitle` (wrap in
   `VisuallyHidden` if it should not show) so the dialog has an accessible name.
-- **Anchored transient menus** → `Popover` (brain color picker, Ask history).
+- **Anchored transient menus** → `Popover` (brain color picker).
 - **Action menus** → `DropdownMenu` (brain switcher).
 
 In-repo primitives (`components/button.tsx`, `badge.tsx`) and shared class strings
