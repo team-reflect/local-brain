@@ -72,14 +72,14 @@ describe('GraphSurface', () => {
     renderWithProviders(<GraphSurface showHeader={false} />)
 
     expect(screen.getByRole('group', { name: 'Graph node filters' })).toBeDefined()
-    const people = screen.getByRole('checkbox', { name: 'People' }) as HTMLInputElement
-    expect(people.checked).toBe(true)
+    const people = screen.getByRole('checkbox', { name: 'People' })
+    expect(people.getAttribute('aria-checked')).toBe('true')
     expect(screen.getByText('Ada Lovelace')).toBeDefined()
     expect(screen.getByText('Analytical Engines')).toBeDefined()
 
     fireEvent.click(people)
 
-    expect(people.checked).toBe(false)
+    expect(people.getAttribute('aria-checked')).toBe('false')
     expect(screen.queryByText('Ada Lovelace')).toBeNull()
     expect(screen.getByText('Analytical Engines')).toBeDefined()
   })

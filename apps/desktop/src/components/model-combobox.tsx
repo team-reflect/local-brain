@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { AiModelOption } from '@local-brain/core'
-import { controlClass } from '../lib/ui'
+import { Input } from './ui/input'
 
 /**
  * Reflect-style model picker: choose from the curated provider list, while still
@@ -22,13 +22,13 @@ export function ModelCombobox({
   const listId = `${id}-options`
   return (
     <>
-      <input
+      <Input
         id={id}
         list={listId}
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
-        className={`${controlClass} font-mono text-xs`}
+        className="font-mono text-xs"
       />
       <datalist id={listId}>
         {models.map((model) => (

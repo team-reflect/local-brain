@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import type { Task } from '@local-brain/core'
 import { StatusBadge } from '../components/badge'
+import { Checkbox } from '../components/ui/checkbox'
 import { DataList, type Column } from '../components/data-list'
 import { EmptyState } from '../components/empty-state'
 import { cn } from '../lib/utils'
@@ -22,13 +23,11 @@ export function TasksSurface(): ReactNode {
       header: '',
       className: 'w-8',
       render: (task) => (
-        <input
-          type="checkbox"
+        <Checkbox
           checked={task.status === 'done'}
           onClick={(event) => event.stopPropagation()}
-          onChange={() => complete.mutate(task.id)}
+          onCheckedChange={() => complete.mutate(task.id)}
           aria-label={`Complete ${task.title}`}
-          className="size-3.5 accent-[hsl(var(--primary))]"
         />
       ),
     },

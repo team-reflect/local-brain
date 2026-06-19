@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import type { Graph, GraphNodeKind } from '@local-brain/core'
+import { Checkbox } from '../components/ui/checkbox'
 import { EmptyState } from '../components/empty-state'
 import { Loading } from '../components/loading'
 import { PageHead } from '../components/page-head'
@@ -276,11 +277,10 @@ export function GraphSurface({ showHeader = true }: { showHeader?: boolean } = {
                 key={kind}
                 className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
               >
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={visibleKinds.has(kind)}
-                  onChange={() => toggleKind(kind)}
-                  className="size-3 accent-[hsl(var(--primary))]"
+                  onCheckedChange={() => toggleKind(kind)}
+                  aria-label={KIND_LABEL[kind]}
                 />
                 <span
                   aria-hidden="true"

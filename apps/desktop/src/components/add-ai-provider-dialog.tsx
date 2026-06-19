@@ -5,11 +5,14 @@ import {
   validateApiKey,
   type AiProviderId,
 } from '@local-brain/core'
-import { controlClass, sectionLabel } from '../lib/ui'
+import { sectionLabel } from '../lib/ui'
 import type { NewAiProvider } from '../lib/queries'
 import { Alert } from './alert'
 import { Button } from './button'
+import { Checkbox } from './ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
+import { Input } from './ui/input'
+import { NativeSelect } from './ui/native-select'
 import { ModelCombobox } from './model-combobox'
 
 export function AddAiProviderDialog({
@@ -94,18 +97,17 @@ export function AddAiProviderDialog({
         >
           <label className="flex flex-col gap-1">
             <span className={sectionLabel}>Provider</span>
-            <select
+            <NativeSelect
               value={provider}
               disabled={submitting}
               onChange={(event) => changeProvider(event.target.value as AiProviderId)}
-              className={controlClass}
             >
               {AI_PROVIDERS.map((candidate) => (
                 <option key={candidate.id} value={candidate.id}>
                   {candidate.label}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </label>
 
           <label className="flex flex-col gap-1">
@@ -124,7 +126,7 @@ export function AddAiProviderDialog({
 
           <label className="flex flex-col gap-1">
             <span className={sectionLabel}>API key</span>
-            <input
+            <Input
               type="password"
               autoComplete="off"
               spellCheck={false}
@@ -136,17 +138,15 @@ export function AddAiProviderDialog({
                 setUnverified(false)
               }}
               placeholder={selectedProvider.keyPlaceholder}
-              className={`${controlClass} font-mono text-xs`}
+              className="font-mono text-xs"
             />
           </label>
 
           <label className="flex items-center gap-2 text-sm text-foreground">
-            <input
-              type="checkbox"
-              className="accent-primary"
+            <Checkbox
               checked={isDefault}
               disabled={submitting}
-              onChange={(event) => setIsDefault(event.target.checked)}
+              onCheckedChange={(checked) => setIsDefault(checked === true)}
             />
             Use as the default provider
           </label>

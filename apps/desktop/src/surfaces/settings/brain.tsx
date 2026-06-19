@@ -3,10 +3,11 @@ import { Check, ChevronsUpDown, SquareArrowOutUpRight } from 'lucide-react'
 import { BrainSwatch } from '../../components/brain-swatch'
 import { Button } from '../../components/button'
 import { Section } from '../../components/section'
+import { Input } from '../../components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover'
 import { BRAIN_COLOR_OPTIONS } from '../../lib/brain-colors'
 import { cn } from '../../lib/utils'
-import { controlClass, sectionLabel } from '../../lib/ui'
+import { sectionLabel } from '../../lib/ui'
 import {
   useActiveBrain,
   useRenameBrain,
@@ -51,13 +52,12 @@ export function BrainSettings(): ReactNode {
 
             <BrainField label="Name">
               <div className="flex items-center gap-2">
-                <input
+                <Input
                   value={nameValue}
                   onChange={(event) => setNameDraft(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') saveName()
                   }}
-                  className={controlClass}
                 />
                 <Button
                   variant="outline"
