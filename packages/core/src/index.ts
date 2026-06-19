@@ -63,7 +63,16 @@ export {
 } from './domains/projects/setters'
 
 // Tasks
-export { listTasks, getTask, type Task, type ListTasksOptions } from './domains/tasks/getters'
+export {
+  listTasks,
+  getTask,
+  listTaskAssignees,
+  listAllTaskAssignees,
+  TASK_PERSON_ROLE_ASSIGNEE,
+  type Task,
+  type ListTasksOptions,
+  type TaskAssignee,
+} from './domains/tasks/getters'
 export {
   createTask,
   updateTask,

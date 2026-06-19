@@ -23,6 +23,8 @@ export interface BriefTask {
   projectId: string | null
   /** `overdue` | `today` | `soon` | `scheduled` | `open` */
   bucket: TaskBucket
+  /** People responsible for doing the task (role='assignee'). */
+  assignees: { id: string; name: string }[]
 }
 
 export type TaskBucket = 'overdue' | 'today' | 'soon' | 'scheduled' | 'open'
@@ -80,7 +82,11 @@ function bucketFor(task: { dueAt: string | null; scheduledFor: string | null }, 
   return 'open'
 }
 
-function toBriefTask(task: Task, bucket: TaskBucket): BriefTask {
+function toBriefTask(
+  task: Task,
+  bucket: TaskBucket,
+  assignees: { id: string; name: string }[],
+): BriefTask {
   return {
     id: task.id,
     title: task.title,
@@ -90,6 +96,7 @@ function toBriefTask(task: Task, bucket: TaskBucket): BriefTask {
     priority: task.priority,
     projectId: task.projectId,
     bucket,
+    assignees,
   }
 }
 
@@ -99,7 +106,7 @@ export async function getDailyBrief(options: DailyBriefOptions = {}): Promise<Da
   const soonDays = options.soonDays ?? 7
   const recentLimit = options.recentLimit ?? 5
 
-  const [openTasks, interactions] = await Promise.all([
+  const [openTasks, interactions, assigneeRows] = await Promise.all([
     db
       .selectFrom('tasks')
       .selectAll()
@@ -114,7 +121,22 @@ export async function getDailyBrief(options: DailyBriefOptions = {}): Promise<Da
       .orderBy('occurredAt', 'desc')
       .limit(recentLimit)
       .execute(),
+    db
+      .selectFrom('taskPeople')
+      .innerJoin('people', 'people.id', 'taskPeople.personId')
+      .where('taskPeople.role', '=', 'assignee')
+      .where('people.archivedAt', 'is', null)
+      .select(['taskPeople.taskId', 'taskPeople.personId as id', 'people.fullName as name'])
+      .execute(),
   ])
+
+  // Build a map of taskId → [{id, name}] for assignees
+  const assigneeMap = new Map<string, { id: string; name: string }[]>()
+  for (const row of assigneeRows) {
+    const list = assigneeMap.get(row.taskId) ?? []
+    list.push({ id: row.id, name: row.name })
+    assigneeMap.set(row.taskId, list)
+  }
 
   const overdue: BriefTask[] = []
   const today: BriefTask[] = []
@@ -123,7 +145,8 @@ export async function getDailyBrief(options: DailyBriefOptions = {}): Promise<Da
   for (const task of openTasks) {
     if (TERMINAL.has(task.status)) continue
     const bucket = bucketFor(task, now, soonDays)
-    const brief = toBriefTask(task, bucket)
+    const assignees = assigneeMap.get(task.id) ?? []
+    const brief = toBriefTask(task, bucket, assignees)
     if (bucket === 'overdue') overdue.push(brief)
     else if (bucket === 'today') today.push(brief)
     else if (bucket === 'soon') soon.push(brief)

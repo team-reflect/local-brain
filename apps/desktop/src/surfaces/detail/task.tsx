@@ -29,7 +29,14 @@ export function TaskDetail({ id }: { id: string }): ReactNode {
           {links.data ? (
             <>
               <LinkedRecords title="Project" records={links.data.projects} onUnlink={onUnlink} />
-              <LinkedRecords title="People" records={links.data.people} onUnlink={onUnlink} />
+              {links.data.assignees.length > 0 ? (
+                <LinkedRecords title="Assigned to" records={links.data.assignees} onUnlink={onUnlink} />
+              ) : null}
+              <LinkedRecords
+                title="People"
+                records={links.data.people.filter((p) => p.subtitle !== 'assignee')}
+                onUnlink={onUnlink}
+              />
               <LinkedRecords title="Documents" records={links.data.documents} onUnlink={onUnlink} />
               <LinkedRecords title="Interactions" records={links.data.interactions} onUnlink={onUnlink} />
             </>

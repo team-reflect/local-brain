@@ -19,6 +19,7 @@ pub struct AddTaskArgs<'a> {
     pub project_id: Option<String>,
     pub links: Vec<LinkRef>,
     pub evidence: Vec<EvidenceRef>,
+    pub assignee_ids: Vec<String>,
 }
 
 pub fn add_task(conn: &mut Connection, json: bool, args: AddTaskArgs) -> Result<(), CliError> {
@@ -81,10 +82,21 @@ pub fn add_task(conn: &mut Connection, json: bool, args: AddTaskArgs) -> Result<
             }
         }
     }
+    for assignee_id in &args.assignee_ids {
+        tx.execute(
+            "INSERT INTO task_people (id, task_id, person_id, role) VALUES (?1,?2,?3,'assignee')",
+            params![new_id(), id, assignee_id],
+        )?;
+    }
     insert_evidence_refs(&tx, "task", &id, &args.evidence)?;
     tx.commit()?;
     if json {
-        print_json(&json!({ "kind": "task", "id": id, "evidence": args.evidence.len() }))
+        print_json(&json!({
+            "kind": "task",
+            "id": id,
+            "evidence": args.evidence.len(),
+            "assigneeCount": args.assignee_ids.len(),
+        }))
     } else {
         println!("task {id}");
         Ok(())

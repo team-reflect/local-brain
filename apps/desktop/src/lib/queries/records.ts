@@ -18,6 +18,7 @@ import {
   getSelf,
   getTask,
   getTaskLinks,
+  listAllTaskAssignees,
   listInteractionParticipants,
   listInteractions,
   listOrganizations,
@@ -123,6 +124,23 @@ export function useArchiveTask() {
   return useMutation({
     mutationFn: (id: string) => archiveTask(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+  })
+}
+
+/** All task assignees across all tasks. Returns a Map<taskId, {id, name}[]> when loaded. */
+export function useAllTaskAssignees() {
+  return useQuery({
+    queryKey: ['task-assignees'],
+    queryFn: () => listAllTaskAssignees(),
+    select: (rows) => {
+      const map = new Map<string, { taskId: string; personId: string; personName: string }[]>()
+      for (const row of rows) {
+        const list = map.get(row.taskId) ?? []
+        list.push(row)
+        map.set(row.taskId, list)
+      }
+      return map
+    },
   })
 }
 

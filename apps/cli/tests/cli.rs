@@ -2381,6 +2381,135 @@ fn search_finds_added_records_by_full_text() {
 }
 
 #[test]
+fn add_task_with_assignee_creates_role_row_and_json_includes_assignee_count() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let person = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Dana Scully",
+            "--email",
+            "dana@example.com",
+        ],
+    );
+    let person_id = person["id"].as_str().unwrap();
+
+    let task = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "task",
+            "--title",
+            "Send the deck",
+            "--assignee",
+            person_id,
+        ],
+    );
+    assert_eq!(task["kind"], "task");
+    assert_eq!(task["assigneeCount"], 1);
+    let task_id = task["id"].as_str().unwrap();
+
+    let conn = Connection::open(&db).unwrap();
+    let (role, linked_person_id): (String, String) = conn
+        .query_row(
+            "SELECT role, person_id FROM task_people WHERE task_id = ?1",
+            [task_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(role, "assignee");
+    assert_eq!(linked_person_id, person_id);
+}
+
+#[test]
+fn plan_day_json_includes_assignees() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let person = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Dana Scully",
+            "--email",
+            "dana@example.com",
+        ],
+    );
+    let person_id = person["id"].as_str().unwrap();
+
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "task",
+            "--title",
+            "Send the deck",
+            "--assignee",
+            person_id,
+        ],
+    );
+
+    let plan = run_json(&db, &["--json", "tasks", "plan-day"]);
+    let tasks = plan["tasks"].as_array().unwrap();
+    assert_eq!(tasks.len(), 1);
+    let assignees = tasks[0]["assignees"].as_array().unwrap();
+    assert_eq!(assignees.len(), 1);
+    assert_eq!(assignees[0]["name"], "Dana Scully");
+    assert_eq!(assignees[0]["id"], person_id);
+}
+
+#[test]
+fn today_json_includes_assignees() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let person = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Robin Spencer",
+            "--email",
+            "robin@example.com",
+        ],
+    );
+    let person_id = person["id"].as_str().unwrap();
+
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "task",
+            "--title",
+            "Review the proposal",
+            "--assignee",
+            person_id,
+        ],
+    );
+
+    let today = run_json(&db, &["--json", "today"]);
+    // Collect all tasks from all buckets
+    let open = today["tasks"]["open"].as_array().unwrap();
+    let task = open
+        .iter()
+        .find(|t| t["title"] == "Review the proposal")
+        .unwrap();
+    let assignees = task["assignees"].as_array().unwrap();
+    assert_eq!(assignees.len(), 1);
+    assert_eq!(assignees[0]["name"], "Robin Spencer");
+}
+
+#[test]
 fn plan_day_buckets_overdue_first() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
