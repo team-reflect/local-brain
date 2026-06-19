@@ -583,6 +583,34 @@ fn add_project_dedupes_by_source_identity_and_name() {
 }
 
 #[test]
+fn add_project_links_task_through_task_project_id() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let task = run_json(
+        &db,
+        &["--json", "add", "task", "--title", "Draft launch brief"],
+    );
+    let task_link = format!("task:{}", task["id"].as_str().unwrap());
+
+    let project = run_json(
+        &db,
+        &[
+            "--json", "add", "project", "--name", "Apollo", "--link", &task_link,
+        ],
+    );
+
+    let conn = Connection::open(&db).unwrap();
+    let project_id: String = conn
+        .query_row(
+            "SELECT project_id FROM tasks WHERE id = ?1",
+            [task["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(project_id, project["id"].as_str().unwrap());
+}
+
+#[test]
 fn add_interaction_keeps_message_and_thread_external_ids_separate() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
@@ -2453,14 +2481,6 @@ fn add_task_links_to_origin_interaction_and_project() {
         )
         .unwrap();
     assert_eq!(task_interactions, 1);
-    let project_tasks: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM project_tasks WHERE task_id = ?1 AND project_id = ?2",
-            (task_id, project["id"].as_str().unwrap()),
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(project_tasks, 1);
     let evidence_refs: i64 = conn
         .query_row(
             "SELECT COUNT(*)

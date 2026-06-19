@@ -14,13 +14,16 @@ import {
   createDocument,
   createInteraction,
   createPerson,
+  createProject,
   createTask,
   getDocument,
   getGraph,
   getInteraction,
   getPerson,
   getPersonLinks,
+  getProjectLinks,
   getSelf,
+  getTaskLinks,
   ingestDocument,
   ingestInteraction,
   listDocuments,
@@ -87,6 +90,17 @@ describe('core domain actions (real SQLite round-trip)', () => {
     expect(ids).toContain(openTask)
     expect(ids).not.toContain(doneTask)
     expect(ids).not.toContain(archivedTask)
+  })
+
+  it('shows project tasks through the canonical task project_id', async () => {
+    const projectId = await createProject({ name: 'Apollo' })
+    const taskId = await createTask({ title: 'Draft launch brief', projectId })
+
+    const projectLinks = await getProjectLinks(projectId)
+    expect(projectLinks.tasks.map((task) => task.title)).toEqual(['Draft launch brief'])
+
+    const taskLinks = await getTaskLinks(taskId)
+    expect(taskLinks.projects.map((project) => project.title)).toEqual(['Apollo'])
   })
 
   it('rolls the whole interaction back when a participant FK is invalid', async () => {

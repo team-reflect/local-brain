@@ -21,7 +21,7 @@ pub const SUPPORT_DIRNAME: &str = ".local-brain";
 
 /// Bumped whenever a migration is appended below. Asserted against the applied
 /// `user_version` in tests so the constant can never drift from the list.
-pub const LATEST_SCHEMA_VERSION: usize = 8;
+pub const LATEST_SCHEMA_VERSION: usize = 9;
 
 /// The canonical filesystem layout for one Local Brain root directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +57,9 @@ static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
         M::up(include_str!("../migrations/0006_import_identity.sql")),
         M::up(include_str!("../migrations/0007_remove_chat.sql")),
         M::up(include_str!("../migrations/0008_asset_search.sql")),
+        M::up(include_str!(
+            "../migrations/0009_remove_duplicate_project_links.sql"
+        )),
     ])
 });
 
@@ -338,6 +341,69 @@ mod tests {
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
         assert_eq!(version, LATEST_SCHEMA_VERSION as i64);
+    }
+
+    #[test]
+    fn migration_0009_backfills_project_tasks_before_drop() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE tasks (
+              id TEXT PRIMARY KEY,
+              project_id TEXT
+            );
+            CREATE TABLE project_tasks (
+              id TEXT PRIMARY KEY,
+              project_id TEXT NOT NULL,
+              task_id TEXT NOT NULL,
+              created_at TEXT NOT NULL
+            );
+            CREATE TABLE document_projects (id TEXT PRIMARY KEY);
+            CREATE TABLE interaction_projects (id TEXT PRIMARY KEY);
+
+            INSERT INTO tasks (id, project_id) VALUES ('task-empty', NULL);
+            INSERT INTO tasks (id, project_id) VALUES ('task-kept', 'project-existing');
+            INSERT INTO project_tasks (id, project_id, task_id, created_at)
+              VALUES ('link-1', 'project-backfilled', 'task-empty', '2026-01-01T00:00:00.000Z');
+            INSERT INTO project_tasks (id, project_id, task_id, created_at)
+              VALUES ('link-2', 'project-ignored', 'task-kept', '2026-01-01T00:00:00.000Z');
+            ",
+        )
+        .unwrap();
+
+        conn.execute_batch(include_str!(
+            "../migrations/0009_remove_duplicate_project_links.sql"
+        ))
+        .unwrap();
+
+        let backfilled: String = conn
+            .query_row(
+                "SELECT project_id FROM tasks WHERE id = 'task-empty'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(backfilled, "project-backfilled");
+
+        let kept: String = conn
+            .query_row(
+                "SELECT project_id FROM tasks WHERE id = 'task-kept'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(kept, "project-existing");
+
+        for table in ["project_tasks", "document_projects", "interaction_projects"] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 0, "{table} should be dropped");
+        }
     }
 
     #[test]

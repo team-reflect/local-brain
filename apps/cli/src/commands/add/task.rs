@@ -1,5 +1,7 @@
 //! `brain add task` — create a task and wire its links: people, organizations,
-//! projects, documents, and interactions go through their typed join tables.
+//! documents, and interactions go through typed join tables. A task's project is
+//! the direct `tasks.project_id` association because launch tasks belong to at
+//! most one project.
 
 use rusqlite::{params, Connection};
 use serde_json::json;
@@ -36,8 +38,6 @@ pub fn add_task(conn: &mut Connection, json: bool, args: AddTaskArgs) -> Result<
         "INSERT INTO tasks (id, title, status, due_at, project_id) VALUES (?1,?2,?3,?4,?5)",
         params![id, args.title, args.status, args.due_at, args.project_id],
     )?;
-    // Keep the denormalized `project_id` filled for read paths while also
-    // writing the typed join rows that preserve evidence and graph edges.
     for link in &args.links {
         match link.kind {
             LinkKind::Person => {
@@ -56,10 +56,6 @@ pub fn add_task(conn: &mut Connection, json: bool, args: AddTaskArgs) -> Result<
                 tx.execute(
                     "UPDATE tasks SET project_id = ?1 WHERE id = ?2",
                     params![link.id, id],
-                )?;
-                tx.execute(
-                    "INSERT OR IGNORE INTO project_tasks (id, project_id, task_id) VALUES (?1,?2,?3)",
-                    params![new_id(), link.id, id],
                 )?;
             }
             LinkKind::Task => {
