@@ -89,7 +89,11 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
         setHydratedConversationId(chatId)
         navigate({ kind: 'ask', conversationId: chatId })
       }
-      await sendMessage({ text, messageId: createChatId() })
+      await sendMessage({
+        id: createChatId(),
+        role: 'user',
+        parts: [{ type: 'text', text }],
+      })
       void queryClient.invalidateQueries({ queryKey: ['chat-conversations'] })
       void queryClient.invalidateQueries({ queryKey: ['chat-messages', chatId] })
     } catch {
