@@ -21,8 +21,8 @@ are.
 
 1. A local agent, daily automation, or user adds a document or interaction.
 2. Local Brain stores the readable content directly in SQLite.
-3. AI extracts useful tasks, people, organizations, projects, and hidden atomic
-   memories.
+3. AI extracts useful tasks, people, organizations, existing project links, and hidden
+   atomic memories.
 4. Agents read from the brain to produce daily reports, todo lists, and briefings.
 5. The UI lets the user browse, correct, inspect, and demonstrate the brain.
 
@@ -39,8 +39,8 @@ interaction.
 - **Organizations:** companies, schools, teams, vendors, clubs, government bodies, and
   other groups.
 - **Affiliations:** time-bound links between people and organizations.
-- **Projects:** areas of active or archived work, from professional deals to home
-  projects or travel planning.
+- **Projects:** manually curated areas of active or archived work, from professional
+  deals to home projects or travel planning.
 - **Tasks:** commitments, follow-ups, reminders, waiting items, and scheduled actions.
 - **Graph:** a derived visual map of the user's brain, with the user at the center and
   connected people, organizations, projects, tasks, documents, interactions, and

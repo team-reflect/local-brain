@@ -14,9 +14,11 @@ import { z } from 'zod'
  *
  * Entities are connected by local string `ref`s rather than database ids,
  * because the model produces this graph before any rows exist. `applyExtraction`
- * resolves every ref to a real (existing-or-new) id during apply. Refs share one
- * namespace across people / organizations / projects / tasks, so a memory
- * subject or a task link can name any of them by ref alone.
+ * resolves refs during apply. People and organizations may resolve to existing or
+ * new ids; projects only resolve to manually created existing rows, and misses
+ * become suggestions. Refs share one namespace across people / organizations /
+ * projects / tasks, so a memory subject or a task link can name any of them by ref
+ * alone.
  */
 
 /** Memory categories (mirrors `memories.kind`; see the launch schema). */

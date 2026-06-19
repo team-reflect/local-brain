@@ -9,6 +9,7 @@ import {
   archiveMemory,
   createInteraction,
   createPerson,
+  createProject,
   db,
   execute,
   getMemory,
@@ -70,6 +71,7 @@ describe('05b correction setters (real SQLite)', () => {
 
   it('unlinks a task from its project by clearing tasks.project_id (order-independent)', async () => {
     const doc = await ingestDocument({ title: 'Plan', bodyText: 'Apollo needs a kickoff.' })
+    await createProject({ name: 'Apollo' })
     await applyExtraction(
       { recordType: 'document', recordId: doc.id },
       parseExtractionResult({

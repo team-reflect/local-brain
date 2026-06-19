@@ -1,7 +1,7 @@
-//! `brain add project` — create or reuse a durable project/context cluster.
-//! Projects are first-class agent targets: imports can link recurring Gmail
-//! threads, Granola meetings, tasks, people, and documents to the same ongoing
-//! context instead of flattening everything into tags.
+//! `brain add project` — create or reuse a manually curated durable project.
+//! Imports can link recurring Gmail threads, Granola meetings, tasks, people, and
+//! documents to an existing project, but they should not create project rows from
+//! inferred source topics.
 
 use rusqlite::{params, Connection};
 use serde_json::json;

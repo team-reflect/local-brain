@@ -24,9 +24,9 @@ interactions as first-class records and hidden atomic memories.
 2. Should tasks support recurrence in launch, or only one-off due/scheduled dates?
 3. Should `content_chunks` stay limited to documents and interactions?
 
-Resolved for launch: projects stay first-class and flat. Tags are not pseudo-projects,
-and visible subtasks/project hierarchy are deferred until real usage proves they are
-needed.
+Resolved for launch: projects stay first-class, flat, and manually created. Tags are
+not pseudo-projects, imports must not auto-create project topic buckets, and visible
+subtasks/project hierarchy are deferred until real usage proves they are needed.
 
 ## AI
 

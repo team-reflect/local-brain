@@ -34,8 +34,8 @@ demonstration.
 
 ## Phase 4 - Extraction
 
-- Extract candidate people, organizations, projects, tasks, and hidden atomic memories
-  from documents and interactions.
+- Extract candidate people, organizations, existing project links, tasks, and hidden
+  atomic memories from documents and interactions.
 - Link extracted records back to their evidence.
 - Apply high-confidence changes directly.
 - Let users correct extracted data from visible detail pages instead of forcing a
@@ -73,7 +73,8 @@ demonstration.
 ## Launch Criteria
 
 - A user can add a meeting transcript, email body, note, or reference document.
-- The app extracts useful tasks, people, organizations, projects, and memories.
+- The app extracts useful tasks, people, organizations, existing project links, and
+  memories.
 - The user can browse by Today, Tasks, Network, and Projects.
 - The user can inspect a graph view centered on themselves.
 - The user can relaunch into the most recent brain folder.

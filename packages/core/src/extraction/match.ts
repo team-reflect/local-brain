@@ -5,12 +5,13 @@ import type { ExtractedOrganization, ExtractedPerson, ExtractedProject } from '.
 /**
  * Deterministic merge/upsert matching (Plan 05 step 4).
  *
- * Extraction proposes people, organizations, and projects that may already
+ * Extraction proposes people, organizations, and project links that may already
  * exist. These pure matchers decide whether a proposed entity should reuse an
  * existing row (so a meeting transcript updates the same person instead of
- * spawning a duplicate) or create a new one. No model is involved — matching is
- * exact-key first, then normalized-name, which is conservative on purpose:
- * fuzzy/embedding matching is a deliberate follow-up.
+ * spawning a duplicate). The apply layer owns creation policy; projects are
+ * match-only because users create them deliberately. No model is involved —
+ * matching is exact-key first, then normalized-name, which is conservative on
+ * purpose: fuzzy/embedding matching is a deliberate follow-up.
  *
  * The field normalizers it matches on now live in `../text/normalize` so the
  * write boundary (domain validators) and the matcher fold identical keys; they
