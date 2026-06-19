@@ -19,7 +19,9 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use serde_json::json;
 
-use commands::{add, graph as graph_cmd, parse_links, read, report, resolve_text, source};
+use commands::{
+    add, graph as graph_cmd, parse_links, read, report, resolve_optional_text, resolve_text, source,
+};
 use error::CliError;
 use output::{diag, print_json};
 
@@ -238,10 +240,10 @@ struct AddInteractionArgs {
     /// Provider URL for the original record.
     #[arg(long)]
     original_url: Option<String>,
-    /// Readable body text. Use --text-file for large bodies.
+    /// Optional readable body text. Use --text-file for large bodies.
     #[arg(long)]
     text: Option<String>,
-    /// File containing body text, or '-' to read stdin.
+    /// Optional file containing body text, or '-' to read stdin.
     #[arg(long, value_name = "PATH")]
     text_file: Option<PathBuf>,
     /// Typed link to an existing record, e.g. person:01ABC or project:01XYZ.
@@ -250,6 +252,9 @@ struct AddInteractionArgs {
     /// Raw unresolved participant, e.g. attendee:Alice <alice@example.com>.
     #[arg(long = "participant", value_name = "ROLE:NAME <EMAIL>")]
     participants: Vec<String>,
+    /// Participant row for the user's own self person, e.g. attendee:You <you@example.com>.
+    #[arg(long = "self-participant", value_name = "ROLE:NAME <EMAIL>")]
+    self_participants: Vec<String>,
     /// Force a new record even if content or external identity already matches.
     #[arg(long)]
     allow_duplicate: bool,
@@ -502,9 +507,10 @@ fn run(cli: Cli) -> Result<(), CliError> {
                         source_slug: a.source.as_deref(),
                         external_id: a.external_id.as_deref(),
                         original_url: a.original_url.as_deref(),
-                        body: resolve_text(a.text.as_deref(), a.text_file.as_deref())?,
+                        body: resolve_optional_text(a.text.as_deref(), a.text_file.as_deref())?,
                         links: parse_links(&a.links)?,
                         raw_participants: a.participants.iter().map(String::as_str).collect(),
+                        self_participants: a.self_participants.iter().map(String::as_str).collect(),
                         allow_duplicate: a.allow_duplicate,
                     },
                 ),
@@ -610,16 +616,6 @@ fn run(cli: Cli) -> Result<(), CliError> {
     }
 }
 
-fn resolve_optional_text(
-    text: Option<&str>,
-    text_file: Option<&std::path::Path>,
-) -> Result<Option<String>, CliError> {
-    match (text, text_file) {
-        (None, None) => Ok(None),
-        _ => resolve_text(text, text_file).map(Some),
-    }
-}
-
 /// `brain doctor` — environment and database health.
 fn doctor(storage: &db::StoragePaths, json: bool) -> Result<(), CliError> {
     let db_path = &storage.database_path;
@@ -709,7 +705,7 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
             "Reuse and link existing people, organizations, projects, and tasks when possible.",
             "Preserve provider provenance with --source, --external-id, and --original-url.",
             "Do not create people for every raw sender or attendee; preserve unresolved handles with --participant.",
-            "Use --text-file or --text-file - for large text bodies.",
+            "Use --text-file or --text-file - for large text bodies; structured calendar events may omit body text.",
         ],
         "commands": {
             "status": {
@@ -741,14 +737,17 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
                 "useFor": ["reference notes", "PDF text", "webpages", "receipts", "long-form material"],
             },
             "addInteraction": {
-                "usage": "brain --json add interaction --kind <kind> --title <title> (--text <text>|--text-file <path|->) [--occurred-at <iso>] [--ended-at <iso>] [--location <label>] [--source <slug> --external-id <id>] [--original-url <url>] [--participant 'role:Name <email>'...] [--link kind:id...]",
+                "usage": "brain --json add interaction --kind <kind> --title <title> [--text <text>|--text-file <path|->] [--occurred-at <iso>] [--ended-at <iso>] [--location <label>] [--source <slug> --external-id <id>] [--original-url <url>] [--participant 'role:Name <email>'...] [--self-participant 'role:Name <email>'...] [--link kind:id...]",
                 "kinds": ["note", "meeting", "call", "email", "message", "event"],
+                "bodyText": "Optional for structured calendar events; title or body text is still required.",
+                "kindGuidance": "Use event for travel, lodging, reservations, reminders, and all-day schedule blocks even if they have attendees. Use meeting for people-centered appointments.",
                 "calendarMapping": {
                     "start": "--occurred-at",
                     "end": "--ended-at",
                     "venueOrAddress": "--location",
                     "providerUrl": "--original-url",
                     "attendees": "--participant",
+                    "selfAttendees": "--self-participant",
                     "knownPeople": "--link person:<id> or matching participant email",
                     "notes": "Only source-specific leftovers that do not have typed fields.",
                 },
@@ -788,7 +787,7 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
         "examples": [
             {
                 "name": "calendarEvent",
-                "command": "brain --json add interaction --kind meeting --title 'Calendar: Stay at Louma' --occurred-at 2026-07-09 --ended-at 2026-07-12 --location 'Louma Country Shepherds Hut' --source google_calendar --external-id 3p20rd --original-url 'https://www.google.com/calendar/event?eid=...' --participant 'organizer:Alice Wyatt <alice@example.com>' --text-file event.txt",
+                "command": "brain --json add interaction --kind event --title 'Calendar: Stay at Louma' --occurred-at 2026-07-09 --ended-at 2026-07-12 --location 'Louma Country Shepherds Hut' --source google_calendar --external-id 3p20rd --original-url 'https://www.google.com/calendar/event?eid=...' --participant 'organizer:Alice Wyatt <alice@example.com>' --self-participant 'attendee:You <alex@example.com>'",
             },
             {
                 "name": "email",

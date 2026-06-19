@@ -179,6 +179,14 @@ fn contract_reports_agent_cli_contract() {
         contract["commands"]["addInteraction"]["calendarMapping"]["end"],
         "--ended-at"
     );
+    assert_eq!(
+        contract["commands"]["addInteraction"]["calendarMapping"]["selfAttendees"],
+        "--self-participant"
+    );
+    assert!(contract["commands"]["addInteraction"]["usage"]
+        .as_str()
+        .unwrap()
+        .contains("[--text <text>|--text-file <path|->]"));
     assert!(contract["writeRules"]
         .as_array()
         .unwrap()
@@ -911,6 +919,190 @@ fn add_interaction_stores_calendar_fields_and_resolves_known_participants() {
         )
         .unwrap();
     assert_eq!(unresolved_visitor, 1);
+}
+
+#[test]
+fn add_interaction_allows_structured_calendar_event_without_body() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "event",
+            "--title",
+            "Calendar: Hotel stay",
+            "--occurred-at",
+            "2026-07-09",
+            "--ended-at",
+            "2026-07-12",
+            "--location",
+            "Louma Country Shepherd's Hut",
+            "--source",
+            "google_calendar",
+            "--external-id",
+            "calendar-event-no-body",
+        ],
+    );
+    assert_eq!(first["isDuplicate"], false);
+    assert_eq!(first["chunkCount"], 0);
+
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "event",
+            "--title",
+            "Calendar: Hotel stay",
+            "--occurred-at",
+            "2026-07-09",
+            "--ended-at",
+            "2026-07-12",
+            "--location",
+            "Louma Country Shepherd's Hut",
+            "--source",
+            "google_calendar",
+            "--external-id",
+            "calendar-event-no-body",
+            "--original-url",
+            "https://www.google.com/calendar/event?eid=calendar-event-no-body",
+        ],
+    );
+    assert_eq!(second["isDuplicate"], true);
+    assert_eq!(second["id"], first["id"]);
+
+    let conn = Connection::open(&db).unwrap();
+    let (body_text, content_hash, chunks, original_url): (
+        Option<String>,
+        Option<String>,
+        i64,
+        Option<String>,
+    ) = conn
+        .query_row(
+            "SELECT body_text,
+                    content_hash,
+                    (SELECT COUNT(*) FROM content_chunks WHERE record_type = 'interaction' AND record_id = interactions.id),
+                    original_url
+             FROM interactions
+             WHERE id = ?1",
+            [first["id"].as_str().unwrap()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(body_text, None);
+    assert_eq!(content_hash, None);
+    assert_eq!(chunks, 0);
+    assert_eq!(
+        original_url.as_deref(),
+        Some("https://www.google.com/calendar/event?eid=calendar-event-no-body")
+    );
+}
+
+#[test]
+fn add_interaction_self_participant_links_self_and_dedupes_roles() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    run_json(&db, &["--json", "status"]);
+    let conn = Connection::open(&db).unwrap();
+    conn.execute(
+        "INSERT INTO people (id, full_name, is_self) VALUES ('self-test', 'You', 1)",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    let interaction = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Calendar: Self marked",
+            "--source",
+            "google_calendar",
+            "--external-id",
+            "calendar-self-1",
+            "--self-participant",
+            "organizer:You <alex@maccaw.org>",
+            "--self-participant",
+            "attendee:You <alex@maccaw.org>",
+        ],
+    );
+    let id = interaction["id"].as_str().unwrap();
+
+    let conn = Connection::open(&db).unwrap();
+    let (rows, role, handle, normalized_handle, display_name, source_id): (
+        i64,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = conn
+        .query_row(
+            "SELECT COUNT(*), role, handle, normalized_handle, display_name, source_id
+             FROM interaction_participants
+             WHERE interaction_id = ?1 AND person_id = ?2",
+            (id, "self-test"),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(rows, 1);
+    assert_eq!(role.as_deref(), Some("organizer"));
+    assert_eq!(handle.as_deref(), Some("alex@maccaw.org"));
+    assert_eq!(normalized_handle.as_deref(), Some("alex@maccaw.org"));
+    assert_eq!(display_name.as_deref(), Some("You"));
+    assert_eq!(source_id.as_deref(), Some("source_google_calendar"));
+}
+
+#[test]
+fn add_interaction_self_participant_requires_self_row() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    run_json(&db, &["--json", "status"]);
+    let conn = Connection::open(&db).unwrap();
+    conn.execute("DELETE FROM people WHERE is_self = 1", [])
+        .unwrap();
+    drop(conn);
+
+    let out = run(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--title",
+            "Calendar: No self",
+            "--self-participant",
+            "attendee:You <alex@example.com>",
+        ],
+    );
+    assert!(!out.status.success());
+    assert!(out.stdout.is_empty());
+    let error: Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "runtime");
+    assert!(error["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("--self-participant requires an active self person"));
 }
 
 #[test]

@@ -71,7 +71,13 @@ fn skill_doc_exists_and_covers_the_nouns() {
         "skill must teach agents to discover the CLI contract"
     );
     assert!(
-        text.contains("--ended-at") && text.contains("google_calendar"),
+        text.contains("--ended-at")
+            && text.contains("google_calendar")
+            && text.contains("--self-participant"),
         "skill must teach structured calendar imports"
+    );
+    assert!(
+        text.contains("Use `event`") && text.contains("travel, lodging"),
+        "skill must teach event-vs-meeting calendar guidance"
     );
 }
