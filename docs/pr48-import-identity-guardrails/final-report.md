@@ -309,4 +309,46 @@ before the fix (`left: 2, right: 1` primary emails); it passes after.
 | `cargo test -p brain-cli` | 21 unit + 28 integration + 2 skill — all pass (incl. 1 new primary-handle test) |
 | `cargo fmt -p brain-cli` | clean |
 | `cargo clippy -p brain-cli --all-targets` | no new warnings; only the pre-existing `large_enum_variant` in `main.rs` (untouched) |
+
+## Follow-up: Bugbot re-review on head `bb9cf9d` (1 fresh issue)
+
+Cursor Bugbot re-reviewed head `bb9cf9d47397ec7c7a53e054ca33278295250c23` and
+flagged one new current-head issue, fixed in commit
+**`5d5532956ccc37b7896421a212935548eebc089d`**.
+
+### Duplicate import skips URL refresh — BUGBOT 82b9d5f2 (comment 3439881613)
+`apps/cli/src/commands/add.rs` — `insert_external_identity`'s
+`ON CONFLICT (source_id, kind, external_id) DO UPDATE` only ran when the stored
+`entity_id` differed from the incoming one (the archived re-point branch). A
+duplicate person/interaction import that resolves to the **same active** record
+therefore skipped the update entirely, so a new `--original-url` never refreshed
+`external_identities.url` — including filling a previously *null* URL.
+
+Fix: the `ON CONFLICT` `WHERE` now has a second branch — same active entity
+(`entity_id = excluded.entity_id`) **plus** a non-null `excluded.url` that differs
+from the stored value (`url IS NULL OR url <> excluded.url`) — which also triggers
+the update. The `SET` clause now writes `url = COALESCE(excluded.url,
+external_identities.url)` so a URL-less re-import never clobbers an existing URL
+with `NULL`. The archived re-point branch and its active-record protection are
+unchanged.
+
+Coverage: `add.rs` unit test
+`add_person_reimport_refreshes_external_identity_url_on_same_active_record` —
+asserts the first import leaves the URL null, a re-import with a URL fills it, a
+re-import with a changed URL refreshes it, and a URL-less re-import preserves the
+stored value. Confirmed to fail before the fix (`left: None, right:
+Some("https://example.com/robin")`) and pass after. The pre-existing repoint tests
+(`add_person_reimport_after_archive_repoints_external_identity`,
+`add_person_reimport_does_not_clobber_active_external_identity`) still pass.
+
+### Verification (run at head `5d55329`)
+
+| Command | Result |
+|---------|--------|
+| `cargo fmt -p brain-cli -- --check` | clean |
+| `cargo test -p brain-cli` | 22 unit + 28 integration + 2 skill — all pass (incl. the new URL-refresh test) |
+| `cargo clippy -p brain-cli --all-targets` | no new warnings; only the pre-existing `large_enum_variant` in `main.rs` (untouched) |
+
+The new test was independently confirmed to fail against the pre-fix source and
+pass after. No JS was touched. Bugbot has not yet re-reviewed head `5d55329`.
 </content>
