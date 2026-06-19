@@ -37,6 +37,9 @@ path resolution, sidecar bundling, installation checks.
   then contact handles, then normalized name.
 - Email/calendar interactions can preserve unresolved raw participants without creating
   people.
+- Transcript imports must be followed by an analysis pass that writes a summary, links
+  participants/high-signal mentioned people, associates projects, and creates explicit
+  follow-up tasks with interaction evidence.
 - Agents can search records and produce cited reports from document or interaction
   chunks.
 - stdout carries data only; diagnostics and warnings go to stderr.
@@ -85,7 +88,7 @@ path resolution, sidecar bundling, installation checks.
    - `brain add interaction --kind email --source gmail --external-kind thread --external-id ... --summary ... --participant ...`
    - `brain add project --name ... --source agent --external-kind cluster --external-id ...`
    - `brain add asset --file ... --link person:... --role avatar`
-   - `brain add task --title ...`
+   - `brain add task --title ... --link interaction:... --link project:...`
    - `brain remember --kind fact --claim ... --link person:...`
 6. Add read/query commands:
    - `brain search "..."`
@@ -146,6 +149,7 @@ path resolution, sidecar bundling, installation checks.
 - An agent can add a reference note as a document.
 - An agent can add an avatar, image, or attachment as a linked asset.
 - An agent can add a task linked to a person/project.
+- An agent can add transcript-derived tasks linked back to their source interaction.
 - An agent can generate a daily report and todo list from the terminal.
 - An agent can list relationship follow-ups from the terminal.
 - An agent can query the user-centered graph as JSON.

@@ -31,6 +31,9 @@ storage.
   separately.
 - Projects are first-class import targets. Link to existing projects before creating
   one; auto-create a project only for repeated or high-signal ongoing contexts.
+- Transcript import is not complete at capture: run a post-analysis pass that generates
+  a summary, links participants and high-signal mentioned people, links or creates the
+  project context, and extracts explicit follow-up tasks.
 - Reference files, plans, notes, webpages, receipts, and specs are documents.
 - Original path, URL, external ID, and content hash are optional metadata on the
   document or interaction.
@@ -74,13 +77,19 @@ storage.
 10. Store readable text on `documents.body_text` or `interactions.body_text`.
 11. Generate `content_chunks` inside the same transaction.
 12. Trigger extraction jobs from newly created or changed records.
-13. Show imported documents, interactions, and linked assets in relevant detail pages.
-14. Leave a seam for a future typed ingestion inbox:
+13. Run transcript post-analysis for meeting/call imports:
+    - summary separate from raw transcript body
+    - participant and high-signal people links
+    - project links or conservative project creation
+    - explicit tasks linked to the source interaction
+    - stable transcript-backed memories
+14. Show imported documents, interactions, and linked assets in relevant detail pages.
+15. Leave a seam for a future typed ingestion inbox:
     - app or external helper writes an envelope atomically
     - Local Brain drains it on launch or file event
     - raw record is saved before any enrichment
     - enrichment retries without blocking capture
-15. Add provider-shaped import adapters that still write provider-neutral records:
+16. Add provider-shaped import adapters that still write provider-neutral records:
     - Gmail: search/filter noise, group by thread, preserve message participants, use
       external identity kind `thread` or `message`
     - Granola: always fetch raw transcripts as interaction body text, store AI notes or
@@ -105,6 +114,8 @@ storage.
   requiring the user to manually file every record.
 - Granola meeting imports preserve raw transcripts as durable evidence, even when a
   summary is also stored.
+- Transcript imports create or update graph context: people, projects, explicit
+  follow-up tasks, and stable memories are linked back to the source interaction.
 
 ## Tests or Verification
 

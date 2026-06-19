@@ -45,7 +45,8 @@ brain add interaction --kind email --title "Everlywell Integration" --text-file 
 brain add interaction --kind meeting --title "Granola: Northwind kickoff" --text-file transcript.txt --summary "Kickoff decisions and follow-ups." --source granola --external-id meeting-123 --replace-body --json
 brain add project --name "Kitchen remodel" --summary "Budget, contractor, and cabinet decision context." --source agent --external-kind cluster --external-id kitchen-remodel --json
 brain add asset --file maya.jpg --link person:maya --role avatar
-brain add task --title "Send Maya the revised budget" --project "Kitchen remodel"
+brain add task --title "Send Maya the revised budget" --link project:<id>
+brain add task --title "Send cardiologist shortlist to Dr. Vargas" --link interaction:<id> --link project:<id> --link person:<id> --json
 brain remember --kind decision --claim "Maya approved the revised budget range" --link person:maya
 ```
 
@@ -139,6 +140,10 @@ When importing Granola meetings:
 - Re-import an existing meeting with the same `--source granola --external-id` and
   `--replace-body` when the transcript becomes available or changes, so search chunks
   are regenerated from the raw transcript.
+- Before the import is considered complete, run post-analysis: link participants and
+  high-signal mentioned people, link or create the project context, write explicit
+  follow-up tasks linked back to `interaction:<id>`, and store only transcript-backed
+  memories.
 
 When adding an asset:
 

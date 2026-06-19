@@ -113,6 +113,10 @@ brain add document --title "Pricing model v2" --text "..." --json
 brain add task --title "Send the proposal" --due-at 2026-07-01 \
   --link person:<id> --link project:<id> --json
 
+# A transcript follow-up task linked back to the source interaction:
+brain add task --title "Send cardiologist shortlist to Dr. Vargas" \
+  --link interaction:<id> --link project:<id> --link person:<id> --json
+
 # A durable fact about someone (a memory, with provenance):
 brain remember --kind decision --claim "Agreed to a Q3 pilot" --link person:<id> --json
 ```
@@ -150,6 +154,22 @@ External fetchers such as `gws` read upstream systems, then call `brain`:
 7. Preserve raw participant handles with `--participant` instead of creating people
    for every address seen in an email or calendar event.
 
+## Transcript post-analysis
+
+Every imported transcript must get an immediate enrichment pass:
+
+1. Generate or preserve a concise `summary` separate from the raw transcript body.
+2. Link participants and high-signal mentioned people. Prefer existing people by email
+   or exact name; create a new person only when the transcript/title gives a clear
+   durable identity.
+3. Link the interaction to existing projects, or create a project only for an ongoing
+   context with repeated/high-signal evidence.
+4. Extract explicit follow-up tasks and link each task to the source
+   `interaction:<id>`, relevant `project:<id>`, and owner/contact `person:<id>` when
+   known.
+5. Store atomic memories only for stable facts, decisions, preferences, commitments,
+   or risks that are directly supported by the transcript.
+
 ## Import source rules
 
 - **Gmail:** search narrowly, skip obvious machine/noise messages, group recurring
@@ -158,6 +178,7 @@ External fetchers such as `gws` read upstream systems, then call `brain`:
   it is available. Store Granola's AI note/summary in `--summary`, never as a
   replacement for the transcript. On re-import, use `--replace-body` with the same
   `--source granola --external-id <meeting-id>` so chunks match the current transcript.
+  Then run transcript post-analysis before considering the import done.
 - **Contacts:** use trusted contact imports (`brain add person`) with source-backed
   stable ids. Page/stream contacts; do not export a giant one-shot blob. Import names,
   emails, phones, org/title, and stable ids for launch; skip notes, addresses, and
@@ -167,7 +188,8 @@ External fetchers such as `gws` read upstream systems, then call `brain`:
 
 1. `brain changes --since <yesterday> --json` — see what moved.
 2. `brain today --json` — overdue/today tasks, recent interactions, reconnects.
-3. For each new transcript/note the user gives you: `brain add interaction …`.
+3. For each new transcript/note the user gives you: `brain add interaction …`, then
+   run transcript post-analysis.
 4. `brain relationships followups --json` — surface stale relationships.
 5. Produce a brief from `brain report daily` + `brain tasks plan-day`.
 

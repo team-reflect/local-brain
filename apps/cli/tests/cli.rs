@@ -1665,6 +1665,74 @@ fn show_task_returns_camelcase_fields() {
 }
 
 #[test]
+fn add_task_links_to_origin_interaction_and_project() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let interaction = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Transcript",
+            "--text",
+            "Discussed a follow-up task.",
+        ],
+    );
+    let project = run_json(
+        &db,
+        &["--json", "add", "project", "--name", "Transcript Follow-up"],
+    );
+    let interaction_link = format!("interaction:{}", interaction["id"].as_str().unwrap());
+    let project_link = format!("project:{}", project["id"].as_str().unwrap());
+    let task = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "task",
+            "--title",
+            "Do the follow-up",
+            "--link",
+            &interaction_link,
+            "--link",
+            &project_link,
+        ],
+    );
+    let task_id = task["id"].as_str().unwrap();
+    let conn = Connection::open(&db).unwrap();
+    let (project_id, origin_interaction_id): (String, String) = conn
+        .query_row(
+            "SELECT project_id, origin_interaction_id FROM tasks WHERE id = ?1",
+            [task_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(project_id, project["id"].as_str().unwrap());
+    assert_eq!(origin_interaction_id, interaction["id"].as_str().unwrap());
+
+    let task_interactions: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM task_interactions WHERE task_id = ?1 AND interaction_id = ?2",
+            (task_id, interaction["id"].as_str().unwrap()),
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(task_interactions, 1);
+    let project_tasks: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM project_tasks WHERE task_id = ?1 AND project_id = ?2",
+            (task_id, project["id"].as_str().unwrap()),
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(project_tasks, 1);
+}
+
+#[test]
 fn today_and_changes_emit_valid_json() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);

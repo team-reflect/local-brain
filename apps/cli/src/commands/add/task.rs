@@ -1,5 +1,5 @@
-//! `brain add task` — create a task and wire its links: people/organizations go
-//! through join tables, a project link sets the `tasks.project_id` column.
+//! `brain add task` — create a task and wire its links: people, organizations,
+//! projects, documents, and interactions go through their typed join tables.
 
 use rusqlite::{params, Connection};
 use serde_json::json;
@@ -24,7 +24,8 @@ pub fn add_task(conn: &mut Connection, json: bool, args: AddTaskArgs) -> Result<
         "INSERT INTO tasks (id, title, status, due_at, project_id) VALUES (?1,?2,?3,?4,?5)",
         params![id, args.title, args.status, args.due_at, args.project_id],
     )?;
-    // Person/organization links go through task join tables; project via column above.
+    // Keep the denormalized `project_id` filled for read paths while also
+    // writing the typed join rows that preserve evidence and graph edges.
     for link in &args.links {
         match link.kind {
             LinkKind::Person => {
@@ -44,16 +45,31 @@ pub fn add_task(conn: &mut Connection, json: bool, args: AddTaskArgs) -> Result<
                     "UPDATE tasks SET project_id = ?1 WHERE id = ?2",
                     params![link.id, id],
                 )?;
+                tx.execute(
+                    "INSERT OR IGNORE INTO project_tasks (id, project_id, task_id) VALUES (?1,?2,?3)",
+                    params![new_id(), link.id, id],
+                )?;
             }
             LinkKind::Task => {
                 return Err(CliError::Runtime(
                     "a task cannot link to another task".into(),
                 ));
             }
-            LinkKind::Document | LinkKind::Interaction => {
-                return Err(CliError::Runtime(
-                    "a task can only link to people, organizations, or projects".into(),
-                ));
+            LinkKind::Document => {
+                tx.execute(
+                    "INSERT OR IGNORE INTO task_documents (id, task_id, document_id) VALUES (?1,?2,?3)",
+                    params![new_id(), id, link.id],
+                )?;
+            }
+            LinkKind::Interaction => {
+                tx.execute(
+                    "UPDATE tasks SET origin_interaction_id = COALESCE(origin_interaction_id, ?1) WHERE id = ?2",
+                    params![link.id, id],
+                )?;
+                tx.execute(
+                    "INSERT OR IGNORE INTO task_interactions (id, task_id, interaction_id) VALUES (?1,?2,?3)",
+                    params![new_id(), id, link.id],
+                )?;
             }
         }
     }
