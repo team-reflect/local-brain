@@ -22,6 +22,8 @@ pub struct AddInteractionArgs<'a> {
     pub title: Option<&'a str>,
     pub kind: &'a str,
     pub occurred_at: Option<&'a str>,
+    pub ended_at: Option<&'a str>,
+    pub location: Option<&'a str>,
     pub source_slug: Option<&'a str>,
     pub external_id: Option<&'a str>,
     pub original_url: Option<&'a str>,
@@ -82,14 +84,24 @@ fn enrich_duplicate_interaction(
              original_url = CASE
                WHEN (original_url IS NULL OR trim(original_url) = '') AND ?2 IS NOT NULL
                THEN ?2 ELSE original_url END,
+             ended_at = CASE
+               WHEN (ended_at IS NULL OR trim(ended_at) = '') AND ?3 IS NOT NULL
+               THEN ?3 ELSE ended_at END,
+             location = CASE
+               WHEN (location IS NULL OR trim(location) = '') AND ?4 IS NOT NULL
+               THEN ?4 ELSE location END,
              updated_at = CASE
                WHEN ((external_id IS NULL OR trim(external_id) = '') AND ?1 IS NOT NULL)
                  OR ((original_url IS NULL OR trim(original_url) = '') AND ?2 IS NOT NULL)
+                 OR ((ended_at IS NULL OR trim(ended_at) = '') AND ?3 IS NOT NULL)
+                 OR ((location IS NULL OR trim(location) = '') AND ?4 IS NOT NULL)
                THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE updated_at END
-         WHERE id = ?3",
+         WHERE id = ?5",
         params![
             normalize_optional(args.external_id),
             normalize_optional(args.original_url),
+            normalize_optional(args.ended_at),
+            normalize_optional(args.location),
             id,
         ],
     )?;
@@ -225,13 +237,49 @@ fn insert_raw_participants(
                 continue;
             }
         }
+        let person_id = match participant.normalized_handle.as_deref() {
+            Some(handle) if handle.contains('@') => find_person_by_email(conn, handle)?,
+            _ => None,
+        };
+        if let Some(handle) = participant.normalized_handle.as_deref() {
+            let changed = conn.execute(
+                "UPDATE interaction_participants
+                 SET person_id = CASE
+                       WHEN person_id IS NULL AND ?4 IS NOT NULL THEN ?4 ELSE person_id END,
+                     handle = CASE
+                       WHEN (handle IS NULL OR trim(handle) = '') AND ?5 IS NOT NULL
+                       THEN ?5 ELSE handle END,
+                     display_name = CASE
+                       WHEN (display_name IS NULL OR trim(display_name) = '') AND ?6 IS NOT NULL
+                       THEN ?6 ELSE display_name END,
+                     source_id = CASE
+                       WHEN source_id IS NULL AND ?7 IS NOT NULL THEN ?7 ELSE source_id END
+                 WHERE interaction_id = ?1
+                   AND normalized_handle = ?2
+                   AND COALESCE(role, '') = ?3
+                   AND (?4 IS NULL OR person_id IS NULL OR person_id = ?4)",
+                params![
+                    interaction_id,
+                    handle,
+                    participant.role,
+                    person_id.as_deref(),
+                    participant.handle,
+                    participant.display_name,
+                    source_id,
+                ],
+            )?;
+            if changed > 0 {
+                continue;
+            }
+        }
         let changed = conn.execute(
             "INSERT OR IGNORE INTO interaction_participants
-             (id, interaction_id, role, handle, normalized_handle, display_name, source_id)
-             VALUES (?1,?2,?3,?4,?5,?6,?7)",
+             (id, interaction_id, person_id, role, handle, normalized_handle, display_name, source_id)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
             params![
                 new_id(),
                 interaction_id,
+                person_id.as_deref(),
                 participant.role,
                 participant.handle,
                 participant.normalized_handle,
@@ -239,9 +287,64 @@ fn insert_raw_participants(
                 source_id,
             ],
         )?;
+        if changed == 0 {
+            if let Some(person_id) = person_id.as_deref() {
+                conn.execute(
+                    "UPDATE interaction_participants
+                     SET role = CASE
+                           WHEN (role IS NULL OR trim(role) = '') AND ?3 IS NOT NULL
+                           THEN ?3 ELSE role END,
+                         handle = CASE
+                           WHEN (handle IS NULL OR trim(handle) = '') AND ?4 IS NOT NULL
+                           THEN ?4 ELSE handle END,
+                         normalized_handle = CASE
+                           WHEN (normalized_handle IS NULL OR trim(normalized_handle) = '') AND ?5 IS NOT NULL
+                           THEN ?5 ELSE normalized_handle END,
+                         display_name = CASE
+                           WHEN (display_name IS NULL OR trim(display_name) = '') AND ?6 IS NOT NULL
+                           THEN ?6 ELSE display_name END,
+                         source_id = CASE
+                           WHEN source_id IS NULL AND ?7 IS NOT NULL THEN ?7 ELSE source_id END
+                     WHERE interaction_id = ?1
+                       AND person_id = ?2",
+                    params![
+                        interaction_id,
+                        person_id,
+                        participant.role,
+                        participant.handle,
+                        participant.normalized_handle,
+                        participant.display_name,
+                        source_id,
+                    ],
+                )?;
+            }
+        }
         inserted += changed;
     }
     Ok(inserted)
+}
+
+fn find_person_by_email(
+    conn: &Connection,
+    normalized_email: &str,
+) -> Result<Option<String>, CliError> {
+    let id = conn
+        .query_row(
+            "SELECT p.id
+             FROM people p
+             LEFT JOIN person_emails pe ON pe.person_id = p.id
+             WHERE p.archived_at IS NULL
+               AND (
+                 lower(p.primary_email) = ?1
+                 OR pe.normalized_email = ?1
+               )
+             ORDER BY p.created_at ASC
+             LIMIT 1",
+            params![normalized_email],
+            |row| row.get::<_, String>(0),
+        )
+        .ok();
+    Ok(id)
 }
 
 pub fn add_interaction(
@@ -292,14 +395,16 @@ pub fn add_interaction(
     let tx = conn.transaction()?;
     tx.execute(
         "INSERT INTO interactions
-         (id, kind, title, body_text, occurred_at, external_id, original_url, content_hash)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+         (id, kind, title, body_text, occurred_at, ended_at, location, external_id, original_url, content_hash)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
         params![
             id,
             args.kind,
             title,
             body,
-            args.occurred_at,
+            normalize_optional(args.occurred_at),
+            normalize_optional(args.ended_at),
+            normalize_optional(args.location),
             normalize_optional(args.external_id),
             normalize_optional(args.original_url),
             hash
@@ -367,6 +472,8 @@ mod tests {
             title: Some("Subject"),
             kind: "note",
             occurred_at: None,
+            ended_at: None,
+            location: None,
             source_slug: Some("manual"),
             external_id,
             original_url: None,

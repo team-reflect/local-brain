@@ -11,6 +11,7 @@ const DOCUMENTED: &[&[&str]] = &[
     &["status"],
     &["path"],
     &["doctor"],
+    &["contract"],
     &["add", "person"],
     &["add", "asset"],
     &["add", "document"],
@@ -64,5 +65,13 @@ fn skill_doc_exists_and_covers_the_nouns() {
     assert!(
         text.contains("stdout is data"),
         "skill must teach the stdout/stderr contract"
+    );
+    assert!(
+        text.contains("brain --json contract") || text.contains("brain contract --json"),
+        "skill must teach agents to discover the CLI contract"
+    );
+    assert!(
+        text.contains("--ended-at") && text.contains("google_calendar"),
+        "skill must teach structured calendar imports"
     );
 }

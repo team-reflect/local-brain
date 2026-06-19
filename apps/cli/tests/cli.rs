@@ -169,6 +169,49 @@ fn brain_root_env_derives_standard_folder_layout() {
 }
 
 #[test]
+fn contract_reports_agent_cli_contract() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let contract = run_json(&db, &["--json", "contract"]);
+    assert_eq!(contract["name"], "brain");
+    assert_eq!(contract["output"]["stdout"], "data only");
+    assert_eq!(
+        contract["commands"]["addInteraction"]["calendarMapping"]["end"],
+        "--ended-at"
+    );
+    assert!(contract["writeRules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|rule| rule
+            .as_str()
+            .unwrap()
+            .contains("typed fields over burying structure")));
+}
+
+#[test]
+fn json_errors_are_machine_readable_on_stderr() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let out = run(&db, &["--json", "add", "interaction", "--text", "   "]);
+    assert!(!out.status.success());
+    assert!(out.stdout.is_empty(), "errors must not write to stdout");
+    let error: Value = serde_json::from_slice(&out.stderr).unwrap_or_else(|e| {
+        panic!(
+            "stderr was not JSON ({e}): {}",
+            String::from_utf8_lossy(&out.stderr)
+        )
+    });
+    assert_eq!(error["ok"], false);
+    assert_eq!(error["error"]["kind"], "runtime");
+    assert_eq!(error["error"]["exitCode"], 1);
+    assert!(error["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("title or body"));
+}
+
+#[test]
 fn add_dedupes_identical_content() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
@@ -743,6 +786,209 @@ fn add_interaction_dedupes_by_source_and_preserves_raw_participants() {
     assert_eq!(row.0, None);
     assert_eq!(row.1.as_deref(), Some("robin@example.com"));
     assert_eq!(row.2.as_deref(), Some("Robin Spencer"));
+}
+
+#[test]
+fn add_interaction_stores_calendar_fields_and_resolves_known_participants() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let alice = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Alice Wyatt",
+            "--email",
+            "alice@example.com",
+        ],
+    );
+    let alice_id = alice["id"].as_str().unwrap();
+
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Calendar: Stay at Louma",
+            "--occurred-at",
+            "2026-07-09",
+            "--text",
+            "Calendar: primary\nStatus: confirmed",
+            "--source",
+            "google_calendar",
+            "--external-id",
+            "calendar-event-1",
+            "--participant",
+            "organizer:Alice Wyatt <ALICE@example.com>",
+            "--participant",
+            "attendee:Visitor <visitor@example.com>",
+        ],
+    );
+    assert_eq!(first["isDuplicate"], false);
+
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Calendar: Stay at Louma",
+            "--occurred-at",
+            "2026-07-09",
+            "--ended-at",
+            "2026-07-12",
+            "--location",
+            "Louma Country Shepherd's Hut",
+            "--text",
+            "Calendar: primary\nStatus: confirmed\nEnd: 2026-07-12",
+            "--source",
+            "google_calendar",
+            "--external-id",
+            "calendar-event-1",
+            "--original-url",
+            "https://www.google.com/calendar/event?eid=calendar-event-1",
+            "--participant",
+            "organizer:Alice Wyatt <alice@example.com>",
+        ],
+    );
+    assert_eq!(second["isDuplicate"], true);
+    assert_eq!(second["id"], first["id"]);
+
+    let conn = Connection::open(&db).unwrap();
+    let (occurred_at, ended_at, location, original_url): (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = conn
+        .query_row(
+            "SELECT occurred_at, ended_at, location, original_url
+             FROM interactions
+             WHERE id = ?1",
+            [first["id"].as_str().unwrap()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(occurred_at.as_deref(), Some("2026-07-09"));
+    assert_eq!(ended_at.as_deref(), Some("2026-07-12"));
+    assert_eq!(location.as_deref(), Some("Louma Country Shepherd's Hut"));
+    assert_eq!(
+        original_url.as_deref(),
+        Some("https://www.google.com/calendar/event?eid=calendar-event-1")
+    );
+
+    let linked_alice: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM interaction_participants
+             WHERE interaction_id = ?1
+               AND person_id = ?2
+               AND normalized_handle = 'alice@example.com'",
+            (first["id"].as_str().unwrap(), alice_id),
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(linked_alice, 1);
+
+    let unresolved_visitor: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM interaction_participants
+             WHERE interaction_id = ?1
+               AND person_id IS NULL
+               AND normalized_handle = 'visitor@example.com'",
+            [first["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(unresolved_visitor, 1);
+}
+
+#[test]
+fn add_interaction_reimport_resolves_existing_raw_participant() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Calendar: Dinner",
+            "--text",
+            "Calendar body",
+            "--source",
+            "google_calendar",
+            "--external-id",
+            "calendar-event-2",
+            "--participant",
+            "attendee:Alice Wyatt <alice@example.com>",
+        ],
+    );
+
+    let alice = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Alice Wyatt",
+            "--email",
+            "alice@example.com",
+        ],
+    );
+    let alice_id = alice["id"].as_str().unwrap();
+
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Calendar: Dinner",
+            "--text",
+            "Calendar body",
+            "--source",
+            "google_calendar",
+            "--external-id",
+            "calendar-event-2",
+            "--participant",
+            "attendee:Alice Wyatt <alice@example.com>",
+        ],
+    );
+    assert_eq!(second["isDuplicate"], true);
+    assert_eq!(second["id"], first["id"]);
+
+    let conn = Connection::open(&db).unwrap();
+    let (participant_rows, linked_rows): (i64, i64) = conn
+        .query_row(
+            "SELECT COUNT(*),
+                    SUM(CASE WHEN person_id = ?2 THEN 1 ELSE 0 END)
+             FROM interaction_participants
+             WHERE interaction_id = ?1
+               AND normalized_handle = 'alice@example.com'",
+            (first["id"].as_str().unwrap(), alice_id),
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(participant_rows, 1);
+    assert_eq!(linked_rows, 1);
 }
 
 #[test]

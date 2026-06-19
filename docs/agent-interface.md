@@ -22,6 +22,10 @@ or approved local database access.
   `brain` CLI calls.
 - Preserve provenance directly on documents, interactions, tasks, memories, and
   evidence references.
+- Treat `brain --json contract` as the discoverable source of truth for command shapes,
+  link syntax, source identity rules, exit codes, and import mappings.
+- In `--json` mode, parse command failures from JSON on stderr:
+  `{ ok: false, error: { kind, message, exitCode } }`.
 - Prefer cited records and evidence over uncited summaries.
 - Never invent context. Add uncertain details as low-confidence memories or skip them.
 
@@ -30,6 +34,7 @@ or approved local database access.
 Status and diagnostics:
 
 ```bash
+brain --json contract
 brain status
 brain doctor --json
 brain path
@@ -121,8 +126,18 @@ When importing emails or calendar events:
 
 - Store readable body text as an interaction.
 - Pass provider identity through generic `--source` and `--external-id`.
+- For calendar events, map structured fields onto the interaction before notes:
+  `--occurred-at` for start, `--ended-at` for end, `--location` for venue or
+  address, and `--original-url` for the provider event URL.
+- Use `--kind meeting` for people-centered calendar items and `--kind event` for
+  travel, reservations, reminders, and all-day schedule blocks.
+- Link known people with `--link person:<id>` when the importer has already resolved
+  them. Raw participant email handles that match existing people are also resolved by
+  the CLI.
 - Preserve raw unresolved participants with repeatable `--participant` values such as
   `from:Robin Spencer <robin@example.com>`; do not create people for every handle.
+- Keep notes for source-specific details that do not have typed Local Brain fields,
+  not as the primary storage for start/end/location/attendee data.
 - Store binary attachments through `brain add asset --link interaction:<id>`.
 
 When adding an asset:

@@ -23,6 +23,14 @@ impl CliError {
             CliError::NoDatabase(_) => 4,
         }
     }
+
+    pub fn kind(&self) -> &'static str {
+        match self {
+            CliError::Runtime(_) => "runtime",
+            CliError::NotFound(_) => "not_found",
+            CliError::NoDatabase(_) => "no_database",
+        }
+    }
 }
 
 impl std::fmt::Display for CliError {
