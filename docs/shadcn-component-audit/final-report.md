@@ -87,4 +87,6 @@ git diff --check origin/master...HEAD          → no whitespace issues
 
 ## PR
 
-_URL to be filled after push._
+https://github.com/maccman/local-brain/pull/69
+
+Head: `453a3f5` — feat: adopt shadcn/ui primitives for form controls
