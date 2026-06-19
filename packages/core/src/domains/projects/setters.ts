@@ -1,26 +1,25 @@
 import type { Projects } from '@local-brain/db'
 import { db } from '../../db/client'
 import { execute } from '../../db/commands'
-import { newId } from '../../db/id'
-import type { NewRecord, RecordPatch } from '../../db/records'
+import {
+  archiveRecord,
+  insertRecord,
+  updateRecord,
+  type NewRecord,
+  type RecordPatch,
+} from '../../db/records'
 import { nowIso } from '../../db/time'
+import { validateNewProject, validateProjectPatch } from './validators'
 
 export type NewProject = NewRecord<Projects>
 export type ProjectPatch = RecordPatch<Projects>
 
-export async function createProject(input: NewProject): Promise<string> {
-  const id = newId()
-  await execute(db.insertInto('projects').values({ ...input, id }))
-  return id
+export function createProject(input: NewProject): Promise<string> {
+  return insertRecord('projects', validateNewProject(input))
 }
 
 export function updateProject(id: string, patch: ProjectPatch): Promise<number> {
-  return execute(
-    db
-      .updateTable('projects')
-      .set({ ...patch, updatedAt: nowIso() })
-      .where('id', '=', id),
-  )
+  return updateRecord('projects', id, validateProjectPatch(patch))
 }
 
 /** Mark a project completed (status + completion date). */
@@ -34,10 +33,5 @@ export function completeProject(id: string, completedOn = nowIso()): Promise<num
 }
 
 export function archiveProject(id: string): Promise<number> {
-  return execute(
-    db
-      .updateTable('projects')
-      .set({ archivedAt: nowIso(), updatedAt: nowIso() })
-      .where('id', '=', id),
-  )
+  return archiveRecord('projects', id)
 }

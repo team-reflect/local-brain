@@ -1,4 +1,14 @@
 export { type AppError, type AppErrorKind, isAppError, toAppError } from './errors'
+export { ValidationError, requireText } from './validation'
+// Field normalization shared by the write boundary, extraction matching, and the
+// CLI's Rust twin.
+export {
+  normalizeName,
+  normalizeEmail,
+  normalizeDomain,
+  squish,
+  trimToNull,
+} from './text/normalize'
 export { type IpcBridge, setBridge, getBridge } from './ipc/bridge'
 export { call } from './ipc/invoke'
 export { appVersion, type AppInfo } from './ipc/commands'
@@ -415,9 +425,6 @@ export {
   type MemorySubject,
 } from './extraction/contracts'
 export {
-  normalizeName,
-  normalizeEmail,
-  normalizeDomain,
   matchPerson,
   matchOrganization,
   matchProject,

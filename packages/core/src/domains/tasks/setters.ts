@@ -1,26 +1,25 @@
 import type { Tasks } from '@local-brain/db'
 import { db } from '../../db/client'
 import { execute } from '../../db/commands'
-import { newId } from '../../db/id'
-import type { NewRecord, RecordPatch } from '../../db/records'
+import {
+  archiveRecord,
+  insertRecord,
+  updateRecord,
+  type NewRecord,
+  type RecordPatch,
+} from '../../db/records'
 import { nowIso } from '../../db/time'
+import { validateNewTask, validateTaskPatch } from './validators'
 
 export type NewTask = NewRecord<Tasks>
 export type TaskPatch = RecordPatch<Tasks>
 
-export async function createTask(input: NewTask): Promise<string> {
-  const id = newId()
-  await execute(db.insertInto('tasks').values({ ...input, id }))
-  return id
+export function createTask(input: NewTask): Promise<string> {
+  return insertRecord('tasks', validateNewTask(input))
 }
 
 export function updateTask(id: string, patch: TaskPatch): Promise<number> {
-  return execute(
-    db
-      .updateTable('tasks')
-      .set({ ...patch, updatedAt: nowIso() })
-      .where('id', '=', id),
-  )
+  return updateRecord('tasks', id, validateTaskPatch(patch))
 }
 
 /** Mark a task done (status + completion timestamp). */
@@ -34,10 +33,5 @@ export function completeTask(id: string, completedAt = nowIso()): Promise<number
 }
 
 export function archiveTask(id: string): Promise<number> {
-  return execute(
-    db
-      .updateTable('tasks')
-      .set({ archivedAt: nowIso(), updatedAt: nowIso() })
-      .where('id', '=', id),
-  )
+  return archiveRecord('tasks', id)
 }

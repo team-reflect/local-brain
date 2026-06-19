@@ -1,35 +1,26 @@
 import type { Organizations } from '@local-brain/db'
-import { db } from '../../db/client'
-import { execute } from '../../db/commands'
-import { newId } from '../../db/id'
-import type { NewRecord, RecordPatch } from '../../db/records'
-import { nowIso } from '../../db/time'
+import {
+  archiveRecord,
+  insertRecord,
+  updateRecord,
+  type NewRecord,
+  type RecordPatch,
+} from '../../db/records'
+import { validateNewOrganization, validateOrganizationPatch } from './validators'
 
 export type NewOrganization = NewRecord<Organizations>
 export type OrganizationPatch = RecordPatch<Organizations>
 
 /** Create an organization and return its generated id. */
-export async function createOrganization(input: NewOrganization): Promise<string> {
-  const id = newId()
-  await execute(db.insertInto('organizations').values({ ...input, id }))
-  return id
+export function createOrganization(input: NewOrganization): Promise<string> {
+  return insertRecord('organizations', validateNewOrganization(input))
 }
 
 export function updateOrganization(id: string, patch: OrganizationPatch): Promise<number> {
-  return execute(
-    db
-      .updateTable('organizations')
-      .set({ ...patch, updatedAt: nowIso() })
-      .where('id', '=', id),
-  )
+  return updateRecord('organizations', id, validateOrganizationPatch(patch))
 }
 
 /** Soft-delete: archive rather than remove, so links and history survive. */
 export function archiveOrganization(id: string): Promise<number> {
-  return execute(
-    db
-      .updateTable('organizations')
-      .set({ archivedAt: nowIso(), updatedAt: nowIso() })
-      .where('id', '=', id),
-  )
+  return archiveRecord('organizations', id)
 }
