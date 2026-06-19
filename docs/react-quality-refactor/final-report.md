@@ -8,7 +8,8 @@ bridge, TanStack Query hooks, named exports, strict TS, Vitest DOM suite), so th
 pass targeted a few high-leverage seams instead of broad churn.
 
 - **Branch:** `codex/local-brain-react-quality-refactor`
-- **Head SHA:** pending parent verification after merge with latest `master`
+- **Verified merge SHA:** `6b3e75c` (latest-master merge resolution; any later
+  tip commit is report metadata only)
 - **Base:** `origin/master` @ `f2828f2`; merged with current `origin/master` @
   `dd602e9`
 - **PR:** https://github.com/maccman/local-brain/pull/54 (non-draft, open)
@@ -49,15 +50,16 @@ dropped that obsolete change and kept the still-valid Dialog/settings/docs work.
 | Check | Result |
 |-------|--------|
 | `git diff --check` | clean |
-| `pnpm check` (typecheck + oxlint + vitest) | passed before upstream merge; parent re-run pending |
-| `pnpm --filter @local-brain/desktop build` | passed before upstream merge; parent re-run pending |
-| `pnpm --filter @local-brain/desktop sidecar` | passed before upstream merge; parent re-run pending |
+| `pnpm check` (typecheck + oxlint + vitest) | pass after `dd602e9` merge — core 189, db 4, desktop 76, skills no tests |
+| `pnpm --filter @local-brain/desktop build` | pass after `dd602e9` merge — 2247 modules; existing Vite warnings only |
+| `pnpm --filter @local-brain/desktop sidecar` | pass after `dd602e9` merge — staged `brain-aarch64-apple-darwin` |
 
 New DOM tests retained after the upstream merge: command-palette closes on
 Escape; command-palette renders nothing while closed.
 
-No Rust/native source was modified, so `cargo` checks were not required (the
-sidecar step compiles the CLI as a build artifact and succeeded).
+No Rust/native source was modified by this refactor. The latest-master merge
+brings upstream Rust changes into the branch history, and the sidecar step
+successfully compiled the CLI build artifact.
 
 ## Behavior changes
 
@@ -77,3 +79,6 @@ Everything else is visually and behaviorally equivalent.
   static/dynamic dual-import warnings for `lib/ai/install-model.ts`. These predate
   this work and were left as-is to keep the pass focused; code-splitting is a
   reasonable follow-up.
+- During parent review, `master` advanced with PR #52 removing Ask / LLM chat.
+  The branch was merged with current `master`; the obsolete Ask-history change was
+  dropped and the still-valid Dialog/settings/docs work was kept.
