@@ -60,6 +60,12 @@ Implementation conventions:
   hosted Local Brain model proxy for MVP.
 - Store model keys, credentials, and integration secrets in the OS keychain, not in
   SQLite, markdown, Git, logs, or local config files.
+- Keep the CLI provider-neutral. It should expose typed Local Brain operations and
+  generic source/external identity fields, but it should not know about `gws`, Gmail,
+  Granola, Google Contacts, Apple Contacts, or any other upstream connector API. Codex
+  or the user's import agent owns fetching, provider-specific filtering, pagination,
+  transcript retrieval, credential handling, and translating source records into
+  generic `brain` CLI calls.
 - Keep the UI keyboard-friendly, sparse, and oriented around browsing, correction,
   inspection, Ask, and demonstration. Do not add surfaces that compete with the
   agent-operated workflow.
