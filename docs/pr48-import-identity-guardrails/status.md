@@ -1,6 +1,20 @@
 # PR #48 Bugbot fixes — status
 
-State: **all four findings fixed, tested, and verified locally. Ready to push.**
+State: **all four original findings + one follow-up fixed, tested, and verified locally.**
+
+## Follow-up (fresh current-head Bugbot finding)
+
+| BUGBOT | Finding | Fix | Tests | Commit |
+|--------|---------|-----|-------|--------|
+| `0116a927` (comment `3439779341`) | Route phrase skips stripped names | `assess_person_import` now only pushes `route_phrase` when the route-stripped name does **not** independently read like a capitalized person name. `Robin Spencer via LinkedIn` → `Robin Spencer` is created; `noreply via Mailchimp` → `noreply` is still skipped | `add.rs` unit tests (`route_phrase_strips_to_usable_person_name`, `assess_creates_person_after_stripping_route_phrase`, `assess_skips_route_phrase_noise`) + integration `add_person_from_email_strips_route_phrase_and_creates_person` | `ac5e88f6f070481f5ad4e7452bc89c7fc0bd6d6e` |
+
+Verification (run at head `ac5e88f`): `git diff --check` clean, `cargo fmt -p brain-cli -- --check` clean, `cargo clippy -p brain-cli --all-targets` no new warnings (only the pre-existing `large_enum_variant`), `cargo test -p brain-cli` = 16 unit + 26 integration + 2 skill all pass. No JS touched.
+
+> Bugbot must re-run against the pushed head before this finding is settled.
+
+## Original four findings
+
+State: **all four findings fixed, tested, and verified locally.**
 
 | # | Finding | Fix | Tests |
 |---|---------|-----|-------|

@@ -13,6 +13,12 @@
 > Bugbot must re-run against the pushed head before this PR is considered
 > settled. The parent watcher should poll Bugbot for the re-review.
 
+## Follow-up: fresh Bugbot finding on head `f72c9f9`
+
+Bugbot's re-review of `f72c9f9` completed NEUTRAL but posted one new
+current-head issue (bug `0116a927-927c-4788-b4f0-1a408b419cc9`, review comment
+`3439779341`), addressed in the commit on top of `f72c9f9`. See finding #5.
+
 ## Files changed (commit 39d74ff)
 
 | File | Change |
@@ -88,6 +94,25 @@ and relationship recompute now runs only over the participants actually inserted
 Coverage: `setters.test.ts` — drops identity-less participants, keeps+normalizes
 valid ones, keeps a personId-only participant.
 
+### 5. Route phrase skips stripped names — BUGBOT 0116a927 (head f72c9f9)
+`assess_person_import` always pushed the `route_phrase` reason code whenever the
+display name contained a routing marker (` via `, ` from `, ` at `), even though
+`normalize_untrusted_name` had already stripped the marker to a clean name. As a
+result legitimate senders like `Robin Spencer via LinkedIn` normalized to a
+usable `Robin Spencer` but were still skipped with no person created.
+
+Fix: the `route_phrase` reason is now only pushed when the residual name does
+*not* independently read like a capitalized person name
+(`has_route_phrase && !looks_like_capitalized_person_name(&normalized_name)`).
+Stripped real names flow through the normal guardrails and create a person, while
+noise such as `noreply via Mailchimp` → `noreply` is still flagged and skipped.
+
+Coverage: `add.rs` unit tests `route_phrase_strips_to_usable_person_name`,
+`assess_creates_person_after_stripping_route_phrase` (covers ` via `/` from `/
+` at ` variants), and the negative `assess_skips_route_phrase_noise`; plus the
+pre-existing integration test
+`add_person_from_email_strips_route_phrase_and_creates_person`.
+
 ## Verification commands & results (run at head 39d74ff)
 
 | Command | Result |
@@ -114,4 +139,12 @@ valid ones, keeps a personId-only participant.
   to honor the "no unrelated refactors" constraint.
 - Bugbot has not yet re-reviewed the pushed head; this report reflects local
   verification only.
+
+## Follow-up verification (finding #5, run after the f72c9f9 re-review)
+
+| Command | Result |
+|---------|--------|
+| `cargo fmt --check` (in `apps/cli`) | clean |
+| `cargo clippy --all-targets` (in `apps/cli`) | no new warnings; only the pre-existing `large_enum_variant` in `main.rs` (untouched, out of scope) |
+| `cargo test` (in `apps/cli`) | 16 unit + 26 integration + 2 skill — all pass (incl. 3 new route_phrase unit tests) |
 </content>
