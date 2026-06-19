@@ -20,8 +20,8 @@ export function useEnsureSeed(): void {
     void seedDemoData()
       .then(async (result) => {
         if (!result.seeded) return
-        // Derive relationship hints (last interaction, reconnect, strength) from
-        // the seeded interactions/tasks so Today's reconnect list is populated.
+        // Derive relationship hints (last interaction and strength) from the
+        // seeded interactions/tasks.
         await recomputeAllRelationships()
         void queryClient.invalidateQueries()
       })

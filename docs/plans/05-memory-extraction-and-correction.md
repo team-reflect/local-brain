@@ -61,7 +61,6 @@ detail pages.
    - fix citation/evidence link
 9. Update relationship-intelligence hints from interactions and tasks:
    - last interaction date
-   - reconnect suggestions
    - relationship strength as a deterministic SELECT-only projection
    - important dates
 10. Add extraction job status on the imported record or job table if needed for UI
@@ -77,7 +76,7 @@ detail pages.
 - There is no mandatory extraction review inbox.
 - The system avoids obvious duplicates for people, organizations, and tasks, and avoids
   auto-created project topic buckets.
-- Relationship follow-up hints update after relevant interactions.
+- Relationship recency and strength update after relevant interactions.
 
 ## Tests or Verification
 

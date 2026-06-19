@@ -51,9 +51,7 @@ CREATE TABLE people (
   location                TEXT,
   is_self                 INTEGER NOT NULL DEFAULT 0 CHECK (is_self IN (0, 1)),
   relationship_strength   INTEGER,
-  reconnect_interval_days INTEGER,
   last_interaction_at     TEXT,
-  next_reconnect_at       TEXT,
   important_dates_json    TEXT,
   summary                 TEXT,
   notes                   TEXT,
@@ -391,7 +389,6 @@ CREATE TABLE task_interactions (
 -- At most one self person row.
 CREATE UNIQUE INDEX idx_people_self ON people (is_self) WHERE is_self = 1;
 CREATE INDEX idx_people_full_name ON people (full_name);
-CREATE INDEX idx_people_next_reconnect ON people (next_reconnect_at) WHERE archived_at IS NULL;
 CREATE INDEX idx_people_last_interaction ON people (last_interaction_at) WHERE archived_at IS NULL;
 CREATE INDEX idx_people_current_org ON people (current_organization_id);
 

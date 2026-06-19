@@ -42,9 +42,7 @@ Key columns:
 - `primary_phone`
 - `location`
 - `is_self`
-- `reconnect_interval_days`
 - `last_interaction_at`
-- `next_reconnect_at`
 - `important_dates_json`
 - `summary`
 - `notes`
@@ -551,11 +549,9 @@ interactions, tasks, affiliations, projects, and memories.
 Launch should support:
 
 - recency through `people.last_interaction_at`
-- cadence through `people.reconnect_interval_days` and `people.next_reconnect_at`
 - strength through the SELECT-only `relationship_strengths` view
 - important dates through `people.important_dates_json`
-- prompts for Today: people to follow up with, stale relationships, upcoming important
-  dates, and relationship-linked waiting items
+- prompts for Today: upcoming important dates and relationship-linked waiting items
 
 These hints feed agents and UI. Network strength must be calculated deterministically
 from durable interactions and tasks at read time, not set as third-party writable

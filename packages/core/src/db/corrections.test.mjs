@@ -23,7 +23,6 @@ import {
   listMemories,
   listMemoriesForRecord,
   listPeople,
-  listReconnectSuggestions,
   listTasks,
   parseExtractionResult,
   recomputeAllRelationships,
@@ -183,8 +182,8 @@ describe('05b relationship intelligence recompute (real SQLite)', () => {
     installSqliteBridge(sqlite)
   })
 
-  it('derives last-interaction, next-reconnect, and strength from interactions', async () => {
-    const personId = await createPerson({ fullName: 'Ada Lovelace', reconnectIntervalDays: 30 })
+  it('derives last-interaction and strength from interactions', async () => {
+    const personId = await createPerson({ fullName: 'Ada Lovelace' })
     await createInteraction(
       { kind: 'meeting', title: 'Older sync', occurredAt: '2026-03-01T10:00:00.000Z' },
       [{ personId }],
@@ -198,7 +197,6 @@ describe('05b relationship intelligence recompute (real SQLite)', () => {
     await recomputeRelationshipIntelligence(personId, { asOf: '2026-06-01T00:00:00.000Z' })
     const person = await getPerson(personId)
     expect(person?.lastInteractionAt).toBe('2026-05-20T10:00:00.000Z')
-    expect(person?.nextReconnectAt).toBe('2026-06-19T10:00:00.000Z')
     // 2 recent interactions (+2), last seen 12d ago (+3) -> score 5 -> bucket 3.
     expect(person?.relationshipStrength).toBe(3)
   })
@@ -229,7 +227,6 @@ describe('05b relationship intelligence recompute (real SQLite)', () => {
     const person = await getPerson(personId)
     expect(person?.relationshipStrength).toBeNull()
     expect(person?.lastInteractionAt).toBeNull()
-    expect(person?.nextReconnectAt).toBeNull()
   })
 
   it('does not expose a writable people.relationship_strength column', async () => {
@@ -240,38 +237,8 @@ describe('05b relationship intelligence recompute (real SQLite)', () => {
     ).toThrow(/relationship_strength/)
   })
 
-  it('surfaces overdue people as reconnect suggestions, most overdue first', async () => {
-    const a = await createPerson({ fullName: 'Far Overdue', reconnectIntervalDays: 7 })
-    const b = await createPerson({ fullName: 'Just Due', reconnectIntervalDays: 7 })
-    await createInteraction({ kind: 'call', title: 'a', occurredAt: '2026-01-01T00:00:00.000Z' }, [
-      { personId: a },
-    ])
-    await createInteraction({ kind: 'call', title: 'b', occurredAt: '2026-05-25T00:00:00.000Z' }, [
-      { personId: b },
-    ])
-    await recomputeAllRelationships({ asOf: '2026-06-01T00:00:00.000Z' })
-
-    const suggestions = await listReconnectSuggestions({ asOf: '2026-06-01T00:00:00.000Z' })
-    expect(suggestions.map((s) => s.fullName)).toEqual(['Far Overdue', 'Just Due'])
-    expect(suggestions[0].overdueDays).toBeGreaterThan(suggestions[1].overdueDays)
-  })
-
-  it('computes reconnect strength using the same asOf as overdue filtering', async () => {
-    const personId = await createPerson({ fullName: 'Boundary Contact', reconnectIntervalDays: 7 })
-    await createInteraction({ kind: 'call', title: 'recent enough', occurredAt: '2026-05-10T00:00:00.000Z' }, [
-      { personId },
-    ])
-    await recomputeAllRelationships({ asOf: '2026-06-01T00:00:00.000Z' })
-
-    const suggestions = await listReconnectSuggestions({ asOf: '2026-06-01T00:00:00.000Z' })
-    expect(suggestions).toHaveLength(1)
-    // As of 2026-06-01 the interaction was 22 days old: 1 interaction + 3 recency
-    // points = score 4 -> bucket 3. This should not drift with SQLite's current now.
-    expect(suggestions[0].relationshipStrength).toBe(3)
-  })
-
-  it('computes reconnect strength from the live last interaction, not the cached person hint', async () => {
-    const personId = await createPerson({ fullName: 'Archived Latest', reconnectIntervalDays: 7 })
+  it('computes strength from non-archived interactions', async () => {
+    const personId = await createPerson({ fullName: 'Archived Latest' })
     await createInteraction({ kind: 'call', title: 'old', occurredAt: '2026-01-01T00:00:00.000Z' }, [
       { personId },
     ])
@@ -287,19 +254,9 @@ describe('05b relationship intelligence recompute (real SQLite)', () => {
         .where('id', '=', latest),
     )
 
-    const suggestions = await listReconnectSuggestions({ asOf: '2026-06-01T00:00:00.000Z' })
-    expect(suggestions).toHaveLength(1)
-    expect(suggestions[0].lastInteractionAt).toBe('2026-01-01T00:00:00.000Z')
-    expect(suggestions[0].relationshipStrength).toBe(2)
-  })
-
-  it('does not suggest people who are not yet due or have no cadence', async () => {
-    await createPerson({ fullName: 'No Cadence' })
-    const future = await createPerson({ fullName: 'Recently Seen', reconnectIntervalDays: 90 })
-    await createInteraction({ kind: 'call', title: 'r', occurredAt: '2026-05-30T00:00:00.000Z' }, [
-      { personId: future },
-    ])
     await recomputeAllRelationships({ asOf: '2026-06-01T00:00:00.000Z' })
-    expect(await listReconnectSuggestions({ asOf: '2026-06-01T00:00:00.000Z' })).toHaveLength(0)
+    const person = await getPerson(personId)
+    expect(person?.lastInteractionAt).toBe('2026-01-01T00:00:00.000Z')
+    expect(person?.relationshipStrength).toBe(2)
   })
 })

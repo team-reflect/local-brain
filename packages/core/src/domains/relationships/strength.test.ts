@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addDays, daysBetween, nextReconnectAt, relationshipStrength } from './strength'
+import { addDays, daysBetween, relationshipStrength } from './strength'
 
 describe('relationship strength math', () => {
   it('returns null when there is no signal at all', () => {
@@ -26,12 +26,6 @@ describe('relationship strength math', () => {
   it('still scores collaboration when there are no interactions', () => {
     // openTasks alone is a signal, so strength is not null.
     expect(relationshipStrength({ recentInteractions: 0, daysSinceLast: null, openTasks: 2 })).toBe(2)
-  })
-
-  it('computes next reconnect from the last interaction and cadence', () => {
-    expect(nextReconnectAt('2026-04-01T00:00:00.000Z', 30)).toBe('2026-05-01T00:00:00.000Z')
-    expect(nextReconnectAt(null, 30)).toBeNull()
-    expect(nextReconnectAt('2026-04-01T00:00:00.000Z', null)).toBeNull()
   })
 
   it('does whole-day date math in UTC', () => {

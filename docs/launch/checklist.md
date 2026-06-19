@@ -29,7 +29,7 @@ Run against a clean brain root (e.g. `BRAIN_ROOT=$(mktemp -d)`).
 - [ ] Search (⌘K) finds records by name and full text.
 - [ ] Citations open the exact document/interaction.
 - [ ] `brain` CLI works with the app closed: `add`, `search`, `today`,
-      `report daily`, `tasks plan-day`, `relationships followups`, `graph`, `show`.
+      `report daily`, `tasks plan-day`, `graph`, `show`.
 - [ ] A Codex daily automation updates records and produces a report + todo list.
 - [ ] `brain doctor` / Settings → Diagnostics report setup clearly.
 

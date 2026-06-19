@@ -94,7 +94,7 @@ indexes are rebuildable.
    - active tasks by due date and status
    - projects by status
    - people and organizations by name
-   - people by reconnect date and last interaction date
+   - people by last interaction date
    - interactions by occurred date
    - documents by authored/created date
    - assets by content hash and storage path
@@ -151,8 +151,8 @@ indexes are rebuildable.
 - The app can create, read, update, and archive each durable record type through IPC.
 - The app can attach, read, archive, and relink asset files without storing binary bytes
   in SQLite.
-- People support relationship-intelligence hints for recency, cadence, and important
-  dates; network strength is exposed as a deterministic read-only SQL projection.
+- People support relationship-intelligence hints for recency and important dates;
+  network strength is exposed as a deterministic read-only SQL projection.
 - FTS can search document and interaction text.
 - Derived chunk data can be rebuilt from durable records.
 - Schema docs match [Launch Schema](../launch-schema.md).
