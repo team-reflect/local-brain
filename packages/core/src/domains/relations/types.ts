@@ -14,6 +14,7 @@ export type RecordKind =
   | 'task'
   | 'document'
   | 'interaction'
+  | 'asset'
   | 'memory'
 
 export interface LinkedRecord {

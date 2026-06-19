@@ -69,6 +69,11 @@ enum Command {
         #[command(subcommand)]
         what: SourceCommand,
     },
+    /// Manage existing assets.
+    Asset {
+        #[command(subcommand)]
+        what: AssetCommand,
+    },
     /// Full-text search across your records.
     Search(SearchArgs),
     /// Today's brief: tasks, recent interactions, reconnects.
@@ -172,6 +177,12 @@ struct AddAssetArgs {
     original_filename: Option<String>,
     #[arg(long)]
     original_url: Option<String>,
+    #[arg(long)]
+    text: Option<String>,
+    #[arg(long, value_name = "PATH")]
+    text_file: Option<PathBuf>,
+    #[arg(long, default_value = "manual")]
+    text_source: String,
     #[arg(long, default_value = "attachment")]
     role: String,
     #[arg(long)]
@@ -296,6 +307,32 @@ enum SourceCommand {
     Ensure(EnsureSourceArgs),
 }
 
+#[derive(Subcommand)]
+enum AssetCommand {
+    /// Manage searchable text for an existing asset.
+    Text {
+        #[command(subcommand)]
+        what: AssetTextCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum AssetTextCommand {
+    /// Set or replace searchable text for an existing asset.
+    Set(AssetTextSetArgs),
+}
+
+#[derive(Parser)]
+struct AssetTextSetArgs {
+    asset_id: String,
+    #[arg(long)]
+    text: Option<String>,
+    #[arg(long, value_name = "PATH")]
+    text_file: Option<PathBuf>,
+    #[arg(long, default_value = "manual")]
+    source: String,
+}
+
 #[derive(Parser)]
 struct EnsureSourceArgs {
     #[arg(long)]
@@ -398,6 +435,8 @@ fn run(cli: Cli) -> Result<(), CliError> {
                         mime_type: a.mime_type.as_deref(),
                         original_filename: a.original_filename.as_deref(),
                         original_url: a.original_url.as_deref(),
+                        text: resolve_optional_text(a.text.as_deref(), a.text_file.as_deref())?,
+                        text_source: &a.text_source,
                         role: &a.role,
                         caption: a.caption.as_deref(),
                         links: parse_links(&a.links)?,
@@ -442,6 +481,20 @@ fn run(cli: Cli) -> Result<(), CliError> {
                         links: parse_links(&a.links)?,
                     },
                 ),
+            }
+        }
+        Command::Asset { what } => {
+            let mut conn = db::open(&db_path)?;
+            match what {
+                AssetCommand::Text { what } => match what {
+                    AssetTextCommand::Set(a) => add::set_asset_text(
+                        &mut conn,
+                        json,
+                        &a.asset_id,
+                        &resolve_text(a.text.as_deref(), a.text_file.as_deref())?,
+                        &a.source,
+                    ),
+                },
             }
         }
         Command::Remember(a) => {
@@ -516,6 +569,16 @@ fn run(cli: Cli) -> Result<(), CliError> {
             let conn = db::open_existing(&db_path)?;
             graph_cmd::graph(&conn, json)
         }
+    }
+}
+
+fn resolve_optional_text(
+    text: Option<&str>,
+    text_file: Option<&std::path::Path>,
+) -> Result<Option<String>, CliError> {
+    match (text, text_file) {
+        (None, None) => Ok(None),
+        _ => resolve_text(text, text_file).map(Some),
     }
 }
 

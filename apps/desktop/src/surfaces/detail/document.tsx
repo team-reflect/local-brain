@@ -54,6 +54,7 @@ export function DocumentDetail({ id }: { id: string }): ReactNode {
               <LinkedRecords title="Projects" records={links.data.projects} onUnlink={onUnlink} />
               <LinkedRecords title="Interactions" records={links.data.interactions} onUnlink={onUnlink} />
               <LinkedRecords title="Tasks" records={links.data.tasks} onUnlink={onUnlink} />
+              <LinkedRecords title="Assets" records={links.data.assets} onUnlink={onUnlink} />
             </>
           ) : null}
           <CitationList

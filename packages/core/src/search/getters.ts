@@ -1,3 +1,4 @@
+import { sql } from 'kysely'
 import { db } from '../db/client'
 import type { LinkedRecord, RecordKind } from '../domains/relations/types'
 import { toLikePattern } from '../retrieval/match-query'
@@ -5,8 +6,8 @@ import { toLikePattern } from '../retrieval/match-query'
 /**
  * A lightweight, navigational quick-search for the command palette: case-
  * insensitive substring matching over the names/titles of the main record
- * types, returned as {@link LinkedRecord}s. This is deliberately simple —
- * full-text search and ranked retrieval (FTS5/embeddings) belong to Plan 06.
+ * types, returned as {@link LinkedRecord}s. This is deliberately simple; the
+ * ranked search surface uses FTS-backed `globalSearch`.
  */
 
 const PER_KIND = 5
@@ -21,7 +22,7 @@ export async function quickSearch(query: string, perKind = PER_KIND): Promise<Li
   const like = toLikePattern(query)
   if (!like) return []
 
-  const [people, organizations, projects, tasks, documents, interactions] = await Promise.all([
+  const [people, organizations, projects, tasks, documents, interactions, assets] = await Promise.all([
     db
       .selectFrom('people')
       .where('archivedAt', 'is', null)
@@ -70,6 +71,23 @@ export async function quickSearch(query: string, perKind = PER_KIND): Promise<Li
       .limit(perKind)
       .select(['id', 'title', 'kind'])
       .execute(),
+    sql<{ id: string; title: string | null; subtitle: string | null }>`
+      SELECT id AS "id",
+             COALESCE(NULLIF(trim(original_filename), ''), storage_path) AS "title",
+             COALESCE(NULLIF(trim(mime_type), ''), NULLIF(trim(kind), '')) AS "subtitle"
+      FROM assets
+      WHERE archived_at IS NULL
+        AND (
+          original_filename LIKE ${like} ESCAPE '\\'
+          OR storage_path LIKE ${like} ESCAPE '\\'
+          OR mime_type LIKE ${like} ESCAPE '\\'
+          OR kind LIKE ${like} ESCAPE '\\'
+        )
+      ORDER BY title ASC
+      LIMIT ${perKind}
+    `
+      .execute(db)
+      .then((r) => r.rows),
   ])
 
   return [
@@ -79,5 +97,6 @@ export async function quickSearch(query: string, perKind = PER_KIND): Promise<Li
     ...tasks.map((row) => link('task', row.id, row.title, row.status)),
     ...documents.map((row) => link('document', row.id, row.title, row.kind)),
     ...interactions.map((row) => link('interaction', row.id, row.title, row.kind)),
+    ...assets.map((row) => link('asset', row.id, row.title, row.subtitle)),
   ]
 }

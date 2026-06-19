@@ -18,6 +18,7 @@ daily report/todo retrieval, and model boundary settings for extraction.
 
 - FTS5 is the first search path.
 - Embeddings are additive and optional until packaging and speed are proven.
+- Global search ranks visible records, including assets.
 - Retrieval ranks visible records and chunks from documents and interactions.
 - One `retrieve()` API serves daily reports, graph context, search enrichment, and CLI
   reads.
@@ -45,6 +46,7 @@ daily report/todo retrieval, and model boundary settings for extraction.
    - tasks
    - documents
    - interactions
+   - assets
 2. Add a command/search palette:
    - Cmd/Ctrl+K opens instantly
    - empty query shows recent/active records and useful commands
@@ -59,7 +61,8 @@ daily report/todo retrieval, and model boundary settings for extraction.
    - open Graph
    - run daily report
    - rebuild derived indexes
-4. Add FTS over `content_chunks.text` and visible record titles/names.
+4. Add FTS over `content_chunks.text`, document/interaction title/body text, and asset
+   metadata/text.
    - use `unicode61` initially
    - rank with title/name boosts where applicable
    - return snippets for chunk hits
@@ -102,6 +105,8 @@ daily report/todo retrieval, and model boundary settings for extraction.
 ## Acceptance Criteria
 
 - Global search finds records by name, title, and body text.
+- Global search finds assets by filename, MIME/kind/storage metadata, original URL,
+  link captions, linked record titles, and optional local asset text.
 - Cmd/Ctrl+K provides one keyboard-native surface for find, navigate, and command
   execution.
 - An agent can request enough structured context to generate a daily report and todo
@@ -109,6 +114,8 @@ daily report/todo retrieval, and model boundary settings for extraction.
 - Daily brief retrieval includes relationship follow-ups, stale relationships, and
   upcoming important dates.
 - Graph data can be generated from durable typed records without a separate graph table.
+- Asset search is navigational; factual report citations still come from
+  document/interaction chunks.
 - Semantic search can be unavailable while lexical search still works.
 - The app behaves clearly when no AI provider or local model is configured.
 

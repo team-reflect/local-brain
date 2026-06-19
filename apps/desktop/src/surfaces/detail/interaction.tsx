@@ -69,6 +69,7 @@ export function InteractionDetail({ id }: { id: string }): ReactNode {
               <LinkedRecords title="Organizations" records={links.data.organizations} onUnlink={onUnlink} />
               <LinkedRecords title="Documents" records={links.data.documents} onUnlink={onUnlink} />
               <LinkedRecords title="Tasks" records={links.data.tasks} onUnlink={onUnlink} />
+              <LinkedRecords title="Assets" records={links.data.assets} onUnlink={onUnlink} />
             </>
           ) : null}
         </>

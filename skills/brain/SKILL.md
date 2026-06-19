@@ -46,8 +46,9 @@ time*? → interaction. Is it *material to read/reference*? → document.
 ## Querying (read first)
 
 ```bash
-brain search "northwind partnership" --json        # full-text across all records
+brain search "northwind partnership" --json        # ranked search across records/assets
 brain show person <id> --json                       # a record + its links
+brain show asset <id> --json                        # asset metadata, text status, linked records
 brain today --json                                   # daily brief: tasks, recents, reconnects
 brain report daily --json
 brain tasks plan-day --json                          # prioritized todo list
@@ -89,6 +90,14 @@ brain add interaction --kind email --title "Intro" --text-file body.txt \
 brain add asset --file ./invoice.pdf --kind attachment \
   --mime-type application/pdf --link interaction:<id> --json
 
+# An attachment with importer-provided searchable text:
+brain add asset --file ./invoice.pdf --kind attachment \
+  --mime-type application/pdf --link interaction:<id> \
+  --text-file extracted.txt --text-source importer --json
+
+# Add or replace searchable text for an existing asset:
+brain asset text set <asset-id> --text-file - --source importer --json
+
 # A reference note (document):
 brain add document --title "Pricing model v2" --text "..." --json
 
@@ -108,6 +117,10 @@ Notes:
   dedupe by external identity, any known email handle, then normalized full name;
   assets dedupe by content hash and can still be linked to a new record. Pass
   `--allow-duplicate` only when you truly mean to re-import.
+- Asset search covers filenames, MIME/kind/storage metadata, original URLs, link
+  captions, linked record titles, and optional `asset_texts`. Text-like UTF-8 files
+  are indexed automatically; PDFs/images need importer-provided text for content
+  search until a later OCR/local extractor pass.
 - Resolve link ids by `brain search` first.
 
 ## Provider-neutral import workflow
@@ -118,7 +131,8 @@ External fetchers such as `gws` read upstream systems, then call `brain`:
 2. Import likely-human contacts with `brain add person` when the source is trusted,
    or `brain add person-from-email` for untrusted sender/display-name pairs.
 3. Import readable email bodies as `brain add interaction --kind email`.
-4. Import original attachments with `brain add asset --link interaction:<id>`.
+4. Import original attachments with `brain add asset --link interaction:<id>`, passing
+   extracted plain text with `--text-file`/`--text-source importer` when available.
 5. Preserve raw participant handles with `--participant` instead of creating people
    for every address seen in an email or calendar event.
 

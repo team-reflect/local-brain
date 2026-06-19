@@ -15,6 +15,9 @@ or approved local database access.
 - Store readable imported text in SQLite through the CLI.
 - Store binary assets through CLI file import so SQLite can record metadata and typed
   links while bytes stay in the app-managed `assets/` directory.
+- Store asset-derived plain text in `asset_texts` when an importer already has it.
+  Text-like UTF-8 files can be indexed locally; PDFs/images remain metadata-searchable
+  until a later OCR/local extraction pass.
 - Keep imports provider-neutral: upstream tools translate source records into generic
   `brain` CLI calls.
 - Preserve provenance directly on documents, interactions, tasks, memories, and
@@ -42,7 +45,9 @@ brain add document --title "Kitchen remodel notes" --text-file notes.md
 brain add interaction --kind meeting --title "Call with Maya" --text-file transcript.txt
 brain add interaction --kind email --title "Email from Maya" --text-file body.txt --source gmail --external-id msg-123 --participant "from:Maya Chen <maya@example.com>" --json
 brain add asset --file maya.jpg --link person:maya --role avatar
-brain add task --title "Send Maya the revised budget" --project "Kitchen remodel"
+brain add asset --file invoice.pdf --link interaction:email-id --text-file extracted.txt --text-source importer --json
+brain asset text set asset-id --text-file - --source importer --json
+brain add task --title "Send Maya the revised budget" --link project:kitchen-remodel
 brain remember --kind decision --claim "Maya approved the revised budget range" --link person:maya
 ```
 
@@ -55,6 +60,7 @@ brain report daily --json
 brain tasks plan-day --json
 brain graph --center self --json
 brain show person maya --json
+brain show asset asset-id --json
 brain show project "Kitchen remodel"
 ```
 
@@ -126,6 +132,12 @@ When adding an asset:
   screenshot, or source_file.
 - Preserve original filename, original path, URL, MIME type, size, and content hash when
   available.
+- Pass importer-provided plain text with `--text` or `--text-file` and
+  `--text-source importer` when available. Use `brain asset text set` to add text after
+  the asset already exists.
+- Do not pretend PDF/image bytes are searchable by content unless an importer or later
+  local extractor has populated asset text. Metadata, link captions, and linked record
+  titles are searchable immediately.
 
 When adding a memory:
 

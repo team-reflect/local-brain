@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   archiveTask,
   completeTask,
+  getAssetDetail,
   getDocument,
   getDocumentLinks,
   getGraph,
@@ -84,6 +85,13 @@ export function useDocument(id: string) {
   return useQuery({
     queryKey: ['document', id],
     queryFn: () => getDocument(id).then((d) => d ?? null),
+  })
+}
+
+export function useAssetDetail(id: string) {
+  return useQuery({
+    queryKey: ['asset', id],
+    queryFn: () => getAssetDetail(id).then((asset) => asset ?? null),
   })
 }
 
