@@ -52,7 +52,7 @@ brain add interaction --kind email --title "Email from Maya" --text-file body.tx
 brain add interaction --kind email --title "Everlywell Integration" --text-file digest.md --summary "Production credential setup and go-live readiness." --source gmail --external-kind thread --external-id thread-123 --json
 brain add interaction --kind meeting --title "Granola: Northwind kickoff" --text-file transcript.txt --summary "Kickoff decisions and follow-ups." --source granola --external-id meeting-123 --replace-body --json
 brain add interaction --kind event --title "Calendar: Hotel stay" --occurred-at 2026-07-09 --ended-at 2026-07-12 --location "Louma" --source google_calendar --external-id event-123 --self-participant "attendee:You <alex@example.com>" --json
-brain add project --name "Kitchen remodel" --summary "Budget, contractor, and cabinet decision context." --source agent --external-kind cluster --external-id kitchen-remodel --json
+brain add project --name "Kitchen remodel" --summary "Budget, contractor, and cabinet decision context." --json
 brain add asset --file maya.jpg --link person:maya --role avatar
 brain add asset --file invoice.pdf --link interaction:email-id --text-file extracted.txt --text-source importer --json
 brain asset text set asset-id --text-file - --source importer --json
@@ -111,9 +111,9 @@ Before adding a record:
 3. Include title, kind, date, and provenance metadata when known. For source-backed
    imports, use the correct external identity scope, such as Gmail `--external-kind
    thread` versus `message`.
-4. Link the new record to relevant people, organizations, projects, or tasks. Search
-   existing projects before creating one; auto-create projects only for repeated or
-   high-signal ongoing contexts.
+4. Link the new record to relevant people, organizations, projects, or tasks. Projects
+   are manually curated user structure: search existing projects and link clear
+   matches, but do not auto-create projects during import or extraction.
 5. When a task or memory is derived from a source record, cite the exact source chunk
    with `--evidence document:<id>#<chunk>` or `--evidence interaction:<id>#<chunk>`.
 6. Let extraction create hidden memories unless the agent has an explicit atomic claim

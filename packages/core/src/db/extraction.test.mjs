@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   applyExtraction,
   createPerson,
+  createProject,
   getInteractionLinks,
   getPersonLinks,
   getTaskLinks,
@@ -17,6 +18,7 @@ import {
   listMemories,
   listMemoriesForRecord,
   listPeople,
+  listProjects,
   listTasks,
   parseExtractionResult,
   runExtraction,
@@ -30,13 +32,14 @@ describe('05a extraction apply (real SQLite golden round-trip)', () => {
     setExtractor(null)
   })
 
-  it('turns a meeting into people, an org, a project, a task, and a cited memory', async () => {
+  it('turns a meeting into people, an org, an existing project link, a task, and a cited memory', async () => {
     const meeting = await ingestInteraction({
       kind: 'meeting',
       title: 'Northwind kickoff',
       bodyText:
         'Alex Rivera founded Northwind Labs and pitched the partnership proposal. Dana Scully attended.',
     })
+    await createProject({ name: 'Northwind Partnership', status: 'active' })
 
     // A hand-authored result standing in for model output (the contract a model
     // must produce). Refs link entities before any database ids exist.
@@ -74,7 +77,8 @@ describe('05a extraction apply (real SQLite golden round-trip)', () => {
     const summary = await applyExtraction({ recordType: 'interaction', recordId: meeting.id }, result)
     expect(summary.people.created).toBe(2)
     expect(summary.organizations.created).toBe(1)
-    expect(summary.projects.created).toBe(1)
+    expect(summary.projects.created).toBe(0)
+    expect(summary.projects.matched).toBe(1)
     expect(summary.tasks.created).toBe(1)
     expect(summary.affiliations.created).toBe(1)
     expect(summary.memories.created).toBe(1)
@@ -156,6 +160,20 @@ describe('05a extraction apply (real SQLite golden round-trip)', () => {
     expect(summary.memories.created).toBe(1)
     expect(await listMemories()).toHaveLength(1)
     expect(await listMemoriesForRecord('document', doc.id)).toHaveLength(1)
+  })
+
+  it('suggests unmatched projects instead of creating project rows', async () => {
+    const doc = await ingestDocument({ title: 'Topic note', bodyText: 'Discussed an emerging Alpha Launch.' })
+    const result = parseExtractionResult({
+      projects: [{ ref: 'pr_alpha', name: 'Alpha Launch', confidence: 0.95 }],
+    })
+
+    const summary = await applyExtraction({ recordType: 'document', recordId: doc.id }, result)
+
+    expect(summary.projects.created).toBe(0)
+    expect(summary.projects.matched).toBe(0)
+    expect(summary.suggestions.map((s) => s.label)).toEqual(['Alpha Launch'])
+    expect(await listProjects()).toHaveLength(0)
   })
 
   it('holds a task back when a referenced person or project was gated out', async () => {

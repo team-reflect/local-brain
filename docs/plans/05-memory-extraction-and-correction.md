@@ -17,7 +17,9 @@ detail pages.
 
 ## Key Decisions
 
-- Extraction writes visible records when confidence is high enough.
+- Extraction writes visible people, organizations, tasks, and memories when confidence
+  is high enough. Projects are link-only during extraction; unmatched project
+  candidates become suggestions.
 - Low-confidence extracted links can remain suggestions in the relevant detail context,
   but there is no global review queue.
 - Memories are hidden atomic claims, not a sidebar surface.
@@ -35,7 +37,7 @@ detail pages.
    - people
    - organizations
    - affiliations
-   - projects
+   - existing project links
    - tasks
    - memories
    - record links
@@ -67,13 +69,14 @@ detail pages.
 
 ## Acceptance Criteria
 
-- A meeting transcript can create or update people, organizations, tasks, projects,
-  and hidden memories.
+- A meeting transcript can create or update people, organizations, tasks, and hidden
+  memories, and can link existing projects without creating new project rows.
 - Extracted tasks and memories cite chunks from the originating document or
   interaction.
 - The user can correct wrong links from the affected detail page.
 - There is no mandatory extraction review inbox.
-- The system avoids obvious duplicates for people, organizations, and tasks.
+- The system avoids obvious duplicates for people, organizations, and tasks, and avoids
+  auto-created project topic buckets.
 - Relationship follow-up hints update after relevant interactions.
 
 ## Tests or Verification

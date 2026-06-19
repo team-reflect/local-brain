@@ -7,17 +7,16 @@ import {
   matchProject,
   type OrganizationCandidate,
   type PersonCandidate,
-  type ProjectCandidate,
 } from './match'
 import { loadAffiliationPairs } from './apply-store'
 import type { ApplyContext } from './apply-context'
 
 /**
  * Network-entity appliers for {@link applyExtraction}: people, organizations,
- * projects, and the person↔organization affiliations between them. Each resolves
- * every ref to an existing row (match) or a new one (insert + make the new row
- * matchable so two refs for the same entity collapse). Below-threshold entities
- * become suggestions and are never written.
+ * projects, and the person↔organization affiliations between them. People and
+ * organizations resolve to an existing row or a new one. Projects are manual user
+ * structure: extraction may link existing projects, but misses become suggestions
+ * and are never written. Below-threshold entities also become suggestions.
  */
 
 export function applyPeople(ctx: ApplyContext, people: ExtractionResult['people']): void {
@@ -104,21 +103,7 @@ export function applyProjects(ctx: ApplyContext, projects: ExtractionResult['pro
       ctx.summary.projects.matched++
       continue
     }
-    const id = newId()
-    ctx.inserts.projects.push(
-      db.insertInto('projects').values({
-        id,
-        name: project.name,
-        ...(project.status != null ? { status: project.status } : {}),
-        kind: project.kind ?? null,
-        summary: project.summary ?? null,
-        targetDate: project.targetDate ?? null,
-      }),
-    )
-    const candidate: ProjectCandidate = { id, name: project.name }
-    ctx.candidates.projects.push(candidate)
-    ctx.resolve(project.ref, 'project', id)
-    ctx.summary.projects.created++
+    ctx.suggest('project', project.ref, project.name, project.confidence)
   }
 }
 

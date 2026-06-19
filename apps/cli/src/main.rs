@@ -122,7 +122,7 @@ enum AddCommand {
     Document(AddDocumentArgs),
     /// Add a human interaction (meeting, call, note, …).
     Interaction(AddInteractionArgs),
-    /// Add a project/context.
+    /// Add a manually curated project.
     Project(AddProjectArgs),
     /// Add a task.
     Task(AddTaskArgs),
@@ -774,6 +774,7 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
             "Search before writing likely duplicates.",
             "Prefer typed fields over burying structure in notes/body text.",
             "Reuse and link existing people, organizations, projects, and tasks when possible.",
+            "Projects are manually curated user structure: importers may link existing projects, but must not auto-create projects from source topics.",
             "Preserve provider provenance with --source, --external-id, and --original-url.",
             "Do not create people for every raw sender or attendee; preserve unresolved handles with --participant.",
             "Use --text-file or --text-file - for large text bodies; structured calendar events may omit body text.",

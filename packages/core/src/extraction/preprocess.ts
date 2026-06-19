@@ -2,8 +2,10 @@ import { db } from '../db/client'
 import {
   loadOrganizationCandidates,
   loadPersonCandidates,
+  loadProjectCandidates,
   type OrganizationCandidate,
   type PersonCandidate,
+  type ProjectCandidate,
 } from './match'
 
 /**
@@ -49,6 +51,7 @@ export interface ExtractionContext {
   duplicateCandidates: {
     people: PersonCandidate[]
     organizations: OrganizationCandidate[]
+    projects: ProjectCandidate[]
   }
 }
 
@@ -167,9 +170,10 @@ export async function buildExtractionContext(
         ).map((row) => row.personId)
 
   const body = record.bodyText ?? ''
-  const [people, organizations] = await Promise.all([
+  const [people, organizations, projects] = await Promise.all([
     loadPersonCandidates(),
     loadOrganizationCandidates(),
+    loadProjectCandidates(),
   ])
 
   return {
@@ -178,6 +182,6 @@ export async function buildExtractionContext(
     dates: findDates(body),
     emails: findEmails(body),
     knownPersonIds,
-    duplicateCandidates: { people, organizations },
+    duplicateCandidates: { people, organizations, projects },
   }
 }

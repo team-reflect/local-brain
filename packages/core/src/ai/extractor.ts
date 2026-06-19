@@ -22,7 +22,7 @@ Return ONLY a single JSON object (no prose, no code fences) with these optional 
 - "people": { ref, fullName, preferredName?, primaryEmail?, headline?, location? }
 - "organizations": { ref, name, kind?, domain?, location? }
 - "affiliations": { personRef, organizationRef, title?, role?, isCurrent? }
-- "projects": { ref, name, status?, summary?, targetDate? }
+- "projects": { ref, name }
 - "tasks": { ref, title, description?, status?, dueAt?, projectRef?, personRefs?, evidence? }
 - "memories": { kind, claim, confidence?, subjects?: [{ ref, role? }], evidence?: [{ chunkIndex, note? }] }
 Rules:
@@ -30,6 +30,8 @@ Rules:
 - memory "kind" is one of: fact, preference, decision, commitment, instruction, risk, idea.
 - evidence "chunkIndex" must point at one of the numbered SOURCE CHUNKS below.
 - Prefer merging onto an existing candidate (reuse its exact name) over inventing duplicates.
+- Projects are manually created user structure. Only include a project when it clearly
+  matches an existing project candidate below; do not invent new project names.
 - Only include what the text supports. Omit anything you are unsure of. Empty arrays are fine.`
 
 function buildPrompt(context: ExtractionContext): string {
@@ -46,7 +48,7 @@ function buildPrompt(context: ExtractionContext): string {
   if (context.dates.length) lines.push(`Dates seen: ${context.dates.map((d) => d.value).join(', ')}`)
   if (context.emails.length) lines.push(`Emails seen: ${context.emails.join(', ')}`)
 
-  const { people, organizations } = context.duplicateCandidates
+  const { people, organizations, projects } = context.duplicateCandidates
   if (people.length) {
     lines.push('Existing people (merge onto these by name when they match):')
     for (const p of people) lines.push(`- ${p.fullName}${p.primaryEmail ? ` <${p.primaryEmail}>` : ''}`)
@@ -54,6 +56,10 @@ function buildPrompt(context: ExtractionContext): string {
   if (organizations.length) {
     lines.push('Existing organizations:')
     for (const o of organizations) lines.push(`- ${o.name}${o.domain ? ` (${o.domain})` : ''}`)
+  }
+  if (projects.length) {
+    lines.push('Existing projects (link only; do not create new projects):')
+    for (const p of projects) lines.push(`- ${p.name}`)
   }
 
   return lines.join('\n')

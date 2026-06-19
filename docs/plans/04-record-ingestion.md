@@ -29,11 +29,12 @@ storage.
   quote chains, or low-signal notification noise. Granola meeting imports are the
   exception: always store the raw transcript when it is available, with summaries kept
   separately.
-- Projects are first-class import targets. Link to existing projects before creating
-  one; auto-create a project only for repeated or high-signal ongoing contexts.
+- Projects are first-class links, but project rows are manually created user structure.
+  Imports and extraction link existing projects only; possible new projects are
+  suggestions, not automatic writes.
 - Transcript import is not complete at capture: run a post-analysis pass that generates
-  a summary, links participants and high-signal mentioned people, links or creates the
-  project context, and extracts explicit follow-up tasks.
+  a summary, links participants and high-signal mentioned people, links existing
+  projects when there is a clear match, and extracts explicit follow-up tasks.
 - Reference files, plans, notes, webpages, receipts, and specs are documents.
 - Original path, URL, external ID, and content hash are optional metadata on the
   document or interaction.
@@ -80,7 +81,7 @@ storage.
 13. Run transcript post-analysis for meeting/call imports:
     - summary separate from raw transcript body
     - participant and high-signal people links
-    - project links or conservative project creation
+    - existing project links, plus suggestions for possible new projects
     - explicit tasks linked to the source interaction with chunk evidence
     - stable transcript-backed memories with chunk evidence
 14. Show imported documents, interactions, and linked assets in relevant detail pages.
@@ -94,7 +95,7 @@ storage.
       external identity kind `thread` or `message`
     - Granola: always fetch raw transcripts as interaction body text, store AI notes or
       summaries separately, support source-backed body replacement/rechunking, and
-      infer/link projects from recurring meeting themes
+      link manually created projects when recurring meeting themes clearly match them
     - Contacts: page or stream from the native Contacts API; do not bulk export one
       giant AppleScript blob; import only names, handles, org/title, and stable ids for
       launch
@@ -110,13 +111,13 @@ storage.
   imports.
 - Chunks are generated for every imported document and interaction.
 - Imported records can be linked to people, organizations, projects, and tasks.
-- Email and meeting imports can link to or create durable project contexts without
+- Email and meeting imports can link to existing durable project contexts without
   requiring the user to manually file every record.
 - Granola meeting imports preserve raw transcripts as durable evidence, even when a
   summary is also stored.
-- Transcript imports create or update graph context: people, projects, explicit
-  follow-up tasks, and stable memories are linked back to the source interaction
-  and cited to exact chunks.
+- Transcript imports create or update graph context: people, existing projects,
+  explicit follow-up tasks, and stable memories are linked back to the source
+  interaction and cited to exact chunks.
 
 ## Tests or Verification
 

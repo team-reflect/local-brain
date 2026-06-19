@@ -38,9 +38,10 @@ operate it through the `brain` CLI — never by touching the database file direc
   "decided to ship in Q3"). `brain remember`. Memories cite their evidence.
 - **person / organization / project** — durable entities. Create people directly
   when importing contacts or when the user gives you explicit contact details.
-  Create projects when there is repeated or high-signal evidence of an ongoing
-  context; link first, create second, and keep projects flat. Link to them by id
-  with `--link person:<id>` / `--link project:<id>`.
+  Create projects only when the user explicitly asks or uses the Projects UI; imports
+  and transcript analysis may link existing projects but must not auto-create topic
+  buckets. Keep projects flat. Link to them by id with `--link person:<id>` /
+  `--link project:<id>`.
 - **source / external identity** — provider-neutral import metadata. `brain`
   knows source slugs and external ids, not provider APIs. Upstream tools translate
   Gmail, Google People, calendars, files, or other systems into generic CLI calls.
@@ -109,9 +110,9 @@ brain add interaction --kind meeting --title "Granola: Northwind kickoff" \
   --summary "Kickoff decisions and follow-ups." \
   --text-file transcript.txt --source granola --external-id meeting-123 --json
 
-# Project/context import target:
+# Manual project creation:
 brain add project --name "Everlywell Integration" --summary "PWN Labs Module go-live context." \
-  --source agent --external-kind cluster --external-id everlywell-integration --json
+  --json
 
 # Calendar event import. Put structure in typed fields, not just notes/body text:
 brain add interaction --kind event --title "Calendar: Stay at Louma" \
@@ -158,8 +159,8 @@ Notes:
 - Identical document/interaction content dedupes automatically (`isDuplicate:true`);
   source-backed interactions dedupe by `--source` + `--external-kind` +
   `--external-id` first; people dedupe by external identity, any known email handle,
-  then normalized full name; projects dedupe by external identity, then normalized name;
-  assets dedupe by content hash and can still be linked to a new record. Pass
+  then normalized full name; projects dedupe by normalized name when the user creates
+  them explicitly; assets dedupe by content hash and can still be linked to a new record. Pass
   `--allow-duplicate` only when you truly mean to re-import.
 - For source-backed interaction refreshes, pass `--replace-body` only when the upstream
   source is authoritative and the existing body should be replaced and re-chunked.
@@ -174,7 +175,8 @@ Notes:
 
 ## Provider-neutral import workflow
 
-External fetchers such as `gws` read upstream systems, then call `brain`:
+External fetchers read upstream systems, then call `brain`. The CLI stays
+provider-neutral and must not know about helper tools such as `gws`:
 
 1. Read `brain --json contract` if the command shape is unclear.
 2. Ensure a stable source slug with `brain source ensure`.
@@ -187,8 +189,9 @@ External fetchers such as `gws` read upstream systems, then call `brain`:
    setup, legal/medical boilerplate, repeated quote chains, or low-signal notification
    noise. Store a concise digest in `--summary` and pass searchable digest/body text
    through `--text-file` or `--text`.
-6. Search existing projects and link imports to them. Auto-create a project only when
-   the source shows an ongoing outcome, not just a repeated keyword.
+6. Search existing projects and link imports to them when there is a clear match.
+   Do not create projects during import or post-analysis; surface possible new
+   projects to the user as suggestions instead.
 7. Import calendar items as `brain add interaction --kind meeting|event`. Use `event`
    for travel, lodging, reservations, reminders, and all-day schedule blocks even
    when they have attendees; use `meeting` for people-centered appointments. Map
@@ -210,8 +213,9 @@ Every imported transcript must get an immediate enrichment pass:
 2. Link participants and high-signal mentioned people. Prefer existing people by email
    or exact name; create a new person only when the transcript/title gives a clear
    durable identity.
-3. Link the interaction to existing projects, or create a project only for an ongoing
-   context with repeated/high-signal evidence.
+3. Link the interaction to existing projects when there is a clear match. Do not
+   create projects during transcript analysis; note possible new projects for the user
+   instead.
 4. Extract explicit follow-up tasks and link each task to the source
    `interaction:<id>`, relevant `project:<id>`, and owner/contact `person:<id>` when
    known. Add `--evidence interaction:<id>#<chunk>` when the task is grounded in a

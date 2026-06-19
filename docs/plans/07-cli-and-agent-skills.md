@@ -25,7 +25,8 @@ path resolution, sidecar bundling, installation checks.
   running and does not use Tauri IPC.
 - Agents can add people, documents, interactions, assets, tasks, and memories with direct
   provenance.
-- Agents can add projects/context clusters, then link imports and tasks to them.
+- Agents can add projects only when the user explicitly requests a project, then link
+  imports and tasks to those manually curated projects.
 - Importers use provider-neutral `sources` and `external_identities`; no upstream API
   concepts land in `brain`.
 - Importers should use `external_identities.kind` to distinguish upstream identifier
@@ -38,8 +39,9 @@ path resolution, sidecar bundling, installation checks.
 - Email/calendar interactions can preserve unresolved raw participants without creating
   people.
 - Transcript imports must be followed by an analysis pass that writes a summary, links
-  participants/high-signal mentioned people, associates projects, and creates explicit
-  follow-up tasks and stable memories with exact interaction chunk evidence.
+  participants/high-signal mentioned people, associates existing projects when there is
+  a clear match, and creates explicit follow-up tasks and stable memories with exact
+  interaction chunk evidence.
 - Source-backed Granola imports return `postAnalysisRequired` in JSON output so agents
   can treat enrichment as part of the import contract.
 - Assets are first-class searchable records by metadata, links, and optional local
@@ -153,8 +155,8 @@ path resolution, sidecar bundling, installation checks.
   summary, then refresh that body and its chunks idempotently.
 - An agent can import a redacted email or meeting digest as `summary` plus searchable
   body text without storing unsafe raw quote chains.
-- An agent can create or reuse a project/context from imports and link interactions or
-  tasks to it.
+- An agent can create a project on explicit user instruction, and imports can link
+  interactions or tasks to existing projects without auto-creating topic buckets.
 - An agent can add a reference note as a document.
 - An agent can add an avatar, image, or attachment as a linked asset.
 - An agent can search an imported attachment by filename/link metadata and by

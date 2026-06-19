@@ -112,10 +112,10 @@ Key columns:
 
 ### `projects`
 
-Personal or professional work areas, including agent-inferred context clusters. A
-project is not a task tag: it is the durable record for an ongoing life/work thread
-that can collect people, organizations, documents, interactions, tasks, decisions, and
-memories.
+Personal or professional work areas that the user deliberately creates or approves. A
+project is not a task tag or agent-inferred topic bucket: it is the durable record for
+an ongoing life/work thread that can collect people, organizations, documents,
+interactions, tasks, decisions, and memories.
 
 Key columns:
 
@@ -135,11 +135,11 @@ Key columns:
 Suggested `status` values: `active`, `waiting`, `paused`, `done`, `archived`.
 
 Launch projects stay flat. Do not add visible subtasks or parent/child project
-hierarchy before release. Imports and extraction should prefer linking to an existing
-project before creating one; create a new project only when there is repeated or
-high-signal evidence of an ongoing outcome. Store import provenance through
-`sources`/`external_identities`, using `kind` values such as `thread`, `meeting`, or
-`cluster` when the upstream identifier is not a single record id.
+hierarchy before release. Project rows are manually created user structure. Imports
+and extraction may link existing projects when there is a clear match, but should
+surface possible new projects as suggestions rather than creating them. Store import
+provenance through `sources`/`external_identities`, using `kind` values such as
+`thread` or `meeting` when the upstream identifier is not a single record id.
 
 ### `tasks`
 
@@ -518,7 +518,8 @@ Each join table should include:
   type, storage path, original URL, link captions, linked record titles, and
   `asset_texts.text`.
 - People, organizations, projects, and tasks currently use deterministic name/title
-  matching for global search; they do not have dedicated FTS tables yet.
+  matching for global search; they do not have dedicated FTS tables yet. Extraction
+  uses project name matching only to link existing, manually created projects.
 - Vector index over `content_chunks` (`chunk_embeddings` + the `chunk_vectors` vec0
   virtual table; sqlite-vec, 384-dim cosine). Derived and rebuildable; vectors are
   generated on demand by the desktop `fastembed` runtime. See `docs/reflect-embeddings/`.

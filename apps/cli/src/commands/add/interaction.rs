@@ -470,7 +470,7 @@ fn report_interaction(
             value["postAnalysisChecklist"] = json!([
                 "summary",
                 "people",
-                "projects",
+                "existingProjectLinks",
                 "followUpTasks",
                 "stableMemories",
             ]);
@@ -484,7 +484,7 @@ fn report_interaction(
         }
         if post_analysis_required {
             eprintln!(
-                "brain: post-analysis required: summary, people, projects, follow-up tasks, stable memories"
+                "brain: post-analysis required: summary, people, existing project links, follow-up tasks, stable memories"
             );
         }
         Ok(())
