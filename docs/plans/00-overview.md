@@ -60,7 +60,7 @@ Support docs:
 - The first audience is agent-native technical users.
 - The primary operating path is local AI agents reading and writing through the CLI and
   skills.
-- The first user-visible surfaces are Today, Tasks, Network, Projects, Ask, and
+- The first user-visible surfaces are Today, Tasks, Network, Projects, and
   Settings.
 - Network contains Graph, People, and Organizations, with Graph as the default tab.
 - Document and interaction records are first-class, but top-level navigation stays

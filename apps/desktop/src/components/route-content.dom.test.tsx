@@ -21,11 +21,6 @@ describe('RouteContent', () => {
     expect(await screen.findByText('Nothing to graph yet')).toBeDefined()
   })
 
-  it('renders the Ask intro for a fresh conversation', () => {
-    renderWithProviders(<RouteContent route={{ kind: 'ask' }} />)
-    expect(screen.getByText(/Ask a question about your brain/)).toBeDefined()
-  })
-
   it('renders Settings with the general section selected by default', () => {
     renderWithProviders(<RouteContent route={{ kind: 'settings' }} />)
     expect(screen.getByRole('heading', { name: 'General' })).toBeDefined()

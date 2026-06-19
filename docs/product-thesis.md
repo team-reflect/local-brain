@@ -14,7 +14,7 @@ are.
 - Local desktop agents are becoming normal.
 - Those agents need durable user context that survives any one chat thread.
 - Users need inspectable memory, not opaque model recall.
-- SQLite, Tauri, local embeddings, and BYOK model calls make a local-first product
+- SQLite, Tauri, local embeddings, and BYOK extraction make a local-first product
   realistic.
 
 ## Core Loop
@@ -23,13 +23,12 @@ are.
 2. Local Brain stores the readable content directly in SQLite.
 3. AI extracts useful tasks, people, organizations, projects, and hidden atomic
    memories.
-4. Agents read from the brain to produce daily reports, todo lists, briefings, and
-   cited answers.
+4. Agents read from the brain to produce daily reports, todo lists, and briefings.
 5. The UI lets the user browse, correct, inspect, and demonstrate the brain.
 
 The app should not require reviewing every extraction. Corrections should happen where
 the user naturally sees a mistake: a person page, project page, task, document, or
-answer citation.
+interaction.
 
 ## Product Model
 
@@ -53,7 +52,6 @@ answer citation.
   treated as artifacts.
 - **Memories:** hidden atomic claims extracted from records: facts, preferences,
   decisions, commitments, instructions, risks, and ideas.
-- **Ask:** AI chat over the local brain with cited answers.
 - **Settings:** AI providers, local paths, diagnostics, and skill setup.
 
 ## User Experience
@@ -71,11 +69,10 @@ Top-level navigation:
 - Tasks
 - Network
 - Projects
-- Ask
 - Settings
 
 Documents and interactions are first-class data, but not top-level navigation. They
-appear inside detail pages and through search or Ask.
+appear inside detail pages and through search.
 The graph is the default Network tab, alongside People and Organizations.
 
 ## Technical Bet
@@ -88,8 +85,8 @@ knowledge and SQLite as a projection. Local Brain treats SQLite as durable knowl
 and uses exports as portability features.
 
 The most important integration is the local agent contract: a `brain` CLI and skills
-that let Codex or other agents update records, search context, ask cited questions, and
-produce recurring reports.
+that let Codex or other agents update records, search context, and produce recurring
+reports.
 
 ## Non-Goals for Launch
 

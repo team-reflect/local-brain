@@ -149,7 +149,7 @@ describe('Plan 08 destructive maintenance', () => {
     expect(await tableCount('interactions')).toBe(0)
     expect(await tableCount('contentChunks')).toBe(0)
     // A subject with no evidence returns nothing (sanity for the citations getter).
-    expect(await listCitationsForSubject('chat_message', 'nope')).toEqual([])
+    expect(await listCitationsForSubject('memory', 'nope')).toEqual([])
   })
 })
 

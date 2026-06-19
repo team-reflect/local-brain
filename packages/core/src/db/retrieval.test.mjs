@@ -1,13 +1,12 @@
 // Real-SQLite integration tests for Plan 06: FTS retrieval, global search, the
-// cited Ask pipeline + model boundary, the model-backed extractor, and the
+// model boundary, the model-backed extractor, and the
 // agent report endpoints. Uses the shared node:sqlite harness so FTS5 (bm25,
-// snippet) and the evidence_refs persistence run end to end against the actual
-// migrations. The model provider is a deterministic mock — real keys are not
-// needed to exercise the boundary contract.
+// snippet) runs end to end against the actual migrations. The model provider is
+// a deterministic mock — real keys are not needed to exercise the boundary
+// contract.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
-  ask,
   createModelExtractor,
   createTask,
   getChangesSince,
@@ -16,7 +15,6 @@ import {
   globalSearch,
   ingestDocument,
   ingestInteraction,
-  listCitationsForSubject,
   listPeople,
   planDay,
   retrieve,
@@ -87,7 +85,7 @@ describe('Plan 06 retrieval + search', () => {
   })
 })
 
-describe('Plan 06 Ask + model boundary', () => {
+describe('Plan 06 model boundary', () => {
   beforeEach(() => {
     installSqliteBridge(freshDatabase())
     setModelProvider(null)
@@ -95,32 +93,10 @@ describe('Plan 06 Ask + model boundary', () => {
   })
   afterEach(() => setModelProvider(null))
 
-  it('degrades cleanly when no provider is configured', async () => {
-    await seedCorpus()
+  it('reports unavailable when no provider is configured', async () => {
     const status = await getModelStatus()
     expect(status.canRun).toBe(false)
-    const res = await ask('Who founded Northwind Labs?')
-    expect(res.answered).toBe(false)
-    expect(res.citations).toEqual([])
-    expect(res.answer).toContain('can’t answer yet')
-    // The conversation still persisted a user + assistant turn.
-    expect(res.conversationId).toBeTruthy()
-  })
-
-  it('answers with citations and persists evidence_refs for cited sources', async () => {
-    await seedCorpus()
-    // The model cites source [1] (the proposal doc).
-    setModelProvider(mockProvider(() => 'Alex Rivera founded Northwind Labs [1].'))
-    const res = await ask('Who founded Northwind Labs?')
-    expect(res.answered).toBe(true)
-    expect(res.model).toBe('mock-1')
-    expect(res.citations.length).toBe(1)
-    expect(res.citations[0].recordType).toBe('document')
-
-    // Evidence persisted against the assistant chat message, openable to source.
-    const citations = await listCitationsForSubject('chat_message', res.messageId)
-    expect(citations.length).toBe(1)
-    expect(citations[0].sourceTitle).toBe('Northwind partnership proposal')
+    expect(status.configured).toBe(false)
   })
 
   it('can run when a provider is configured', async () => {
@@ -128,9 +104,6 @@ describe('Plan 06 Ask + model boundary', () => {
     const status = await getModelStatus()
     expect(status.configured).toBe(true)
     expect(status.canRun).toBe(true)
-    const res = await ask('anything')
-    expect(res.answered).toBe(true)
-    expect(res.answer).toBe('The provider answered.')
   })
 })
 

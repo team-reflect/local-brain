@@ -9,7 +9,7 @@ import { toMatchQuery } from './match-query'
 import { combineScore, lexicalScore, recencyScore } from './ranking'
 
 /**
- * The one shared retrieval contract (Plan 06). Ask, daily reports, graph
+ * The one shared retrieval contract (Plan 06). Daily reports, graph
  * context, search enrichment, and the CLI all call {@link retrieve} rather than
  * each building their own index access. It runs FTS5 over derived
  * `content_chunks` and ranks the hits by lexical relevance + recency + an
