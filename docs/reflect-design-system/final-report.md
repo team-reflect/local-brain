@@ -77,9 +77,9 @@ Shell & components:
   `citation-list.tsx` — quiet labels, rounded-lg frames, sans titles.
 Surfaces & detail:
 
-- `surfaces/today.tsx`, `tasks.tsx`, `network.tsx`, `projects.tsx`, `ask.tsx`,
-  `settings.tsx`, `graph.tsx` — status badges, refined filters/labels, Button/input
-  primitives, cool graph node palette.
+- `surfaces/today.tsx`, `tasks.tsx`, `network.tsx`, `projects.tsx`, `settings.tsx`,
+  `graph.tsx` — status badges, refined filters/labels, Button/input primitives, cool graph
+  node palette.
 - `surfaces/detail/task.tsx`, `detail/project.tsx` — status fields render `StatusBadge`.
 
 Docs:

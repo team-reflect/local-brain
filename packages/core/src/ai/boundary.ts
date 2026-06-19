@@ -2,7 +2,7 @@ import { getModelProvider } from './provider'
 
 /**
  * The checked model boundary. Before any external-model call, callers consult
- * {@link getModelStatus} so the UI and CLI can show exactly why Ask can or
+ * {@link getModelStatus} so the UI can show exactly why extraction can or
  * cannot run.
  *
  * A provider must be registered and report itself available (a key is present).
@@ -13,7 +13,7 @@ export interface ModelStatus {
   model: string | null
   /** A provider is registered and reports a usable credential. */
   configured: boolean
-  /** Ask/extraction can call the model. */
+  /** Extraction can call the model. */
   canRun: boolean
   /** Human-readable explanation, primarily when `canRun` is false. */
   reason: string

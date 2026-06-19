@@ -9,7 +9,7 @@
 ## Scope
 
 **In:** Tauri app shell, React routes, sidebar, global search entry, Today, Tasks,
-Network (including Graph), Projects, Ask, Settings, first-run brain folder chooser,
+Network (including Graph), Projects, Settings, first-run brain folder chooser,
 shared UI primitives, basic record detail pages.
 
 **Out:** full extraction, advanced retrieval, packaging.
@@ -22,10 +22,9 @@ shared UI primitives, basic record detail pages.
   correction, inspection, and demo.
 - Shared UI should use shadcn components themed through `globals.css`, following
   [Design System](../design-system.md).
-- Sidebar sections are Today, Tasks, Network, Projects, Ask, and Settings.
+- Sidebar sections are Today, Tasks, Network, Projects, and Settings.
 - Network has Graph, People, and Organizations tabs, with Graph as the default.
-- Documents and interactions are browsed inside related detail pages and through search
-  or Ask.
+- Documents and interactions are browsed inside related detail pages and through search.
 - Settings owns diagnostics, AI providers, local storage paths, and skill setup.
 - Startup follows Reflect Open's graph chooser: choose/open a brain folder, show recents,
   auto-open the newest recent folder on launch, and surface open failures back on the
@@ -60,7 +59,6 @@ shared UI primitives, basic record detail pages.
    - `{ kind: 'task'; id: string }`
    - `{ kind: 'document'; id: string }`
    - `{ kind: 'interaction'; id: string }`
-   - `{ kind: 'ask'; conversationId?: string }`
    - `{ kind: 'settings'; section?: string }`
 5. Add URL mappings:
    - `/today`
@@ -69,7 +67,6 @@ shared UI primitives, basic record detail pages.
    - `/network?tab=people`
    - `/network?tab=organizations`
    - `/projects`
-   - `/ask`
    - `/settings`
 6. Add route history:
    - back/forward
@@ -117,8 +114,7 @@ shared UI primitives, basic record detail pages.
     - center on the user's own person row
     - show people, organizations, projects, tasks, documents, interactions, and memories
     - open related detail pages from nodes
-16. Build Ask shell with conversation list, chat panel, and citations.
-17. Build Settings sections for AI providers, local brain storage, diagnostics, and skill
+16. Build Settings sections for AI providers, local brain storage, diagnostics, and skill
     setup.
 
 ## Acceptance Criteria
@@ -134,7 +130,6 @@ shared UI primitives, basic record detail pages.
 - A user can quickly inspect what an automation changed or cited.
 - Detail pages show linked tasks, documents, interactions, and memories where relevant.
 - People and organization detail pages can show linked avatar and logo assets.
-- Ask UI can display cited answers once Plan 06 supplies retrieval.
 - Back/forward and command-palette navigation use the typed route model.
 - Global keyboard shortcuts are registered once and covered by duplicate-binding tests.
 

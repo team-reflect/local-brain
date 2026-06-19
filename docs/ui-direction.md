@@ -29,13 +29,12 @@ Sidebar:
 
 ```text
 +------------------------------------------------------+
-| Local Brain                                      Ask  |
+| Local Brain                                           |
 +----------------------+-------------------------------+
 | Today                |                               |
 | Tasks                |  Current view                 |
 | Network              |                               |
 | Projects             |                               |
-| Ask                  |                               |
 | Settings             |                               |
 +----------------------+-------------------------------+
 ```
@@ -47,7 +46,6 @@ Top-level sections:
 - **Tasks:** all open, waiting, scheduled, and completed tasks.
 - **Network:** graph, people, and organizations, with Graph as the default tab.
 - **Projects:** active, waiting, paused, done, and archived projects.
-- **Ask:** AI chat over the local brain with citations.
 - **Settings:** the active brain's identity (name, color, location), AI providers,
   local storage paths, diagnostics, and skill setup.
 
@@ -58,7 +56,7 @@ open another brain. Do not confuse a *brain* (the container) with the Network
 **Graph** (a visualization of the records inside the current brain).
 
 Document and interaction records are browsed inside Network, Project, and Task detail
-pages, and found through global search or Ask.
+pages, and found through global search.
 
 ## Information Architecture
 
@@ -114,11 +112,6 @@ Projects
     - interactions
     - documents
     - remembered decisions and risks
-Ask
-  - chat
-  - citations
-  - linked records
-
 Settings
   - brain (identity: name, color, folder reveal)
   - AI providers
@@ -151,11 +144,10 @@ Settings
 ```text
 +----------------------+----------------------------------------------+
 | Today                | Today                                        |
-| Tasks                | Search...                              Ask   |
+| Tasks                | Search...                                    |
 | Network              +----------------------------------------------+
 | Projects             | Brief                                       |
 | Graph                |  [ ] Send proposal follow-up     Project A  |
-| Ask                  |  [ ] Book dentist appointment    Personal   |
 | Settings             |                                              |
 |                      | Relationships                               |
 |                      |  Maya - follow up on contract comments      |
@@ -178,7 +170,6 @@ Settings
 | Tasks                | [People] [Organizations]          Search... |
 | Network              +----------------------+-----------------------+
 | Projects             | Name                 | Profile               |
-| Ask                  | Maya Chen            | Maya Chen             |
 | Settings             | Jordan Lee           | Product lead at Acme  |
 |                      | Acme Corp            |                       |
 |                      |                      | Tasks                 |
@@ -192,32 +183,14 @@ Settings
 ```text
 +----------------------+----------------------------------------------+
 | Today                | Project: Home renovation                     |
-| Tasks                | Status: active                 Ask about it |
+| Tasks                | Status: active                              |
 | Network              +----------------------------------------------+
 | Projects             | Tasks | People | Interactions | Documents    |
-| Ask                  +----------------------------------------------+
 | Settings             | [ ] Confirm contractor schedule              |
 |                      | [ ] Choose bathroom tile                     |
 |                      |                                              |
 |                      | Recent interaction                           |
 |                      | Call with Alex - budget changed              |
-+----------------------+----------------------------------------------+
-```
-
-### Ask
-
-```text
-+----------------------+----------------------------------------------+
-| Today                | Ask                                          |
-| Tasks                |                                              |
-| Network              | What did I promise Maya last week?           |
-| Projects             |                                              |
-| Ask                  | You promised to send the revised budget and  |
-| Settings             | introduce her to Jordan.                     |
-|                      |                                              |
-|                      | Citations                                    |
-|                      | - Call with Maya, Jun 10                     |
-|                      | - Email to Maya, Jun 11                      |
 +----------------------+----------------------------------------------+
 ```
 
@@ -230,8 +203,8 @@ Settings
 | Network              |                 [Alex]                       |
 | Projects             |              /    |    \\                    |
 | Graph                |        Maya       Home Reno       Acme        |
-| Ask                  |       /   \\          |          /  \\       |
-| Settings             | Budget  Call   Tile task   Jordan  Contract  |
+| Settings             |       /   \\          |          /  \\       |
+|                      | Budget  Call   Tile task   Jordan  Contract  |
 |                      |                                              |
 |                      | Selected: Home Reno                          |
 |                      | Tasks | People | Interactions | Documents    |
@@ -241,7 +214,6 @@ Settings
 ## Interaction Rules
 
 - Search should be global and available from all main surfaces.
-- Ask should cite documents or interactions directly.
 - A user should be able to correct a task, person link, project link, or remembered
   fact from the detail page where it appears.
 - Graph should be a derived navigation and demonstration surface, not the storage

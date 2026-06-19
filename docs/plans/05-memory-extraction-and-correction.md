@@ -24,7 +24,7 @@ detail pages.
 - Memories link to visible records through `memory_links`.
 - Memories and extracted tasks cite evidence through `evidence_refs`.
 - Corrections happen where the user notices them: person, organization, project, task,
-  document, interaction, or Ask citation views.
+  document, or interaction views.
 
 ## Implementation Steps
 

@@ -37,7 +37,7 @@ app and contrary to `docs/plans/libraries.md` (which commits to `fastembed` + `s
 - `retrieve()` keeps its one shared contract. Semantic/hybrid embed the query, run the
   vec0 KNN (24 candidates, cosine ≤ 0.7), and blend with lexical via Reciprocal Rank Fusion
   (K=60). Any failure (no runtime, non-desktop host, embed error) degrades to lexical with
-  `semanticAvailable: false`. Ask's citations and model boundary are untouched.
+  `semanticAvailable: false`.
 
 ### Desktop UX (`apps/desktop`)
 - `EmbeddingsSync` headless coordinator (loads the model + runs automatic incremental
@@ -85,9 +85,9 @@ vec0 cosine-KNN ordering, and a real end-to-end model + KNN test (ranks by meani
 - **Packaging (Plan 09):** bundling/notarizing the ONNX runtime and the on-demand ~90MB
   model download is not done here. Until then semantic search works on a dev machine; in a
   packaged build it degrades to lexical if the runtime can't load.
-- **CLI stays lexical:** semantic is desktop-only. The CLI shares the DB (so desktop-written
-  vectors exist) but doesn't embed queries. Adding fastembed to the CLI binary is a future
-  step.
+- **CLI stays lexical:** semantic is desktop-only. The CLI shares the DB (so
+  desktop-written vectors exist) but doesn't embed queries. Adding fastembed to the CLI
+  binary is a future step.
 - **No live ingest hook:** backfill runs on enable / app start / manual rebuild; it is
   hash-skip cheap. A push-on-write trigger could be added later.
 

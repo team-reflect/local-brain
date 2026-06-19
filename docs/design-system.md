@@ -111,7 +111,7 @@ toggle yet, but the dark palette is maintained so it lands faithfully when added
 
 Indigo is the sole saturated color. It appears in: the brand mark, primary buttons,
 focus rings, the active-nav icon, the soft `accent` tint (selected/secondary
-emphasis, the Ask user bubble), and citation rules. Status badges may use small
+emphasis), and citation rules. Status badges may use small
 muted success/warning/danger tints. Do not introduce new palettes or per-screen
 color switch statements — map status colors once in `components/badge.tsx`.
 
@@ -176,11 +176,10 @@ a left indigo rule.
 User-centered node graph. Node colors come from a single cool palette (indigo self,
 blue/violet/emerald/cyan/etc.), edges and chrome use token colors.
 
-### Ask and Reports
+### Reports
 
-Conversation list + thread + composer. The user bubble uses the soft indigo `accent`;
-the assistant bubble is a bordered white card. Citations open the source document or
-interaction. Use the `Button` primitive for the composer Send action.
+Report and citation views use dense readable text with citations that open the source
+document or interaction.
 
 ## Components
 

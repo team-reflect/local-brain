@@ -10,13 +10,13 @@ demonstration.
 - Establish app layout, package boundaries, and quality commands.
 - Open a local SQLite database from Rust.
 - Let the user choose a brain folder and create `brain.sqlite` plus `assets/` inside it.
-- Render the Picardo-inspired shell with Today, Tasks, Network, Projects, Ask, and
+- Render the Picardo-inspired shell with Today, Tasks, Network, Projects, and
   Settings.
 
 ## Phase 2 - Durable Schema
 
 - Add migrations for people, organizations, affiliations, projects, tasks,
-  interactions, documents, assets, content chunks, memories, links, tags, chat, and
+  interactions, documents, assets, content chunks, memories, links, tags, and
   settings.
 - Generate TypeScript database types.
 - Add Rust-owned SQLite access and a typed IPC bridge.
@@ -52,7 +52,6 @@ demonstration.
   interactions, and documents.
 - The Network Graph tab shows a user-centered node map derived from typed records and
   links. Filters by node type, time, strength, and project are optional follow-up.
-- Ask supports cited answers over the local brain.
 - Settings owns AI providers, local storage paths, diagnostics, and skill setup.
 - The UI is optimized for quick browsing and inspection, not bulk data entry.
 
@@ -60,7 +59,7 @@ demonstration.
 
 - Ship a `brain` CLI for local agents.
 - Support adding documents, interactions, assets, tasks, and memories.
-- Support search, Ask, Today, and record lookup commands.
+- Support search, Today, and record lookup commands.
 - Support daily report and todo-list generation for Codex automations.
 - Install a local Codex skill that teaches agents how to use the CLI safely.
 
@@ -78,7 +77,6 @@ demonstration.
 - The user can browse by Today, Tasks, Network, and Projects.
 - The user can inspect a graph view centered on themselves.
 - The user can relaunch into the most recent brain folder.
-- Ask answers questions with citations to documents or interactions.
 - A local agent can add and query context through the CLI.
 - A Codex daily automation can update the brain and generate a daily report/todo list.
 - The daily report includes relationship follow-ups and stale relationships.

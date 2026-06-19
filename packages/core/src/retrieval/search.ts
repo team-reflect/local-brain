@@ -11,7 +11,7 @@ import { toLikePattern, toMatchQuery } from './match-query'
  * projects, and tasks are matched on their names/titles (no body to index).
  * Results are merged and ranked into one list.
  *
- * This is the navigational/find surface. Grounded retrieval for Ask and agents
+ * This is the navigational/find surface. Grounded retrieval for agents
  * is {@link retrieve} over `content_chunks`; both share the same FTS index and
  * ranking helpers.
  */

@@ -9,10 +9,8 @@
 
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
-  addMessage,
   archiveTask,
   completeTask,
-  createConversation,
   createDocument,
   createInteraction,
   createPerson,
@@ -27,12 +25,10 @@ import {
   ingestInteraction,
   listDocuments,
   listCitationsForSubject,
-  listConversations,
   listInteractionParticipants,
   listInteractions,
   listMemories,
   listMemoriesForRecord,
-  listMessages,
   listOrganizations,
   listPeople,
   listTasks,
@@ -172,18 +168,6 @@ describe('03b read getters (real SQLite round-trip over the seed)', () => {
     expect(await quickSearch('no-such-record-xyz')).toEqual([])
   })
 
-  it('creates a conversation, appends messages, and reads them back in order', async () => {
-    const conversationId = await createConversation('Planning')
-    await addMessage({ conversationId, role: 'user', content: 'What is due this week?' })
-    await addMessage({ conversationId, role: 'assistant', content: 'Retrieval lands in Plan 06.' })
-
-    const messages = await listMessages(conversationId)
-    expect(messages.map((m) => m.role)).toEqual(['user', 'assistant'])
-    expect(messages[0].content).toBe('What is due this week?')
-
-    const conversations = await listConversations()
-    expect(conversations.map((c) => c.title)).toEqual(['Planning'])
-  })
 })
 
 describe('04a ingestion (real SQLite round-trip)', () => {

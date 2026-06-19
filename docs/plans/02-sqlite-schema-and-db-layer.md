@@ -23,13 +23,13 @@ access, Kysely IPC bridge, seed data.
 - TypeScript product code lives in `packages/core`; React components call core actions,
   not SQL or Tauri commands directly.
 - Durable tables are typed product nouns: people, organizations, affiliations,
-  projects, tasks, interactions, documents, assets, memories, tags, chat, and settings.
+  projects, tasks, interactions, documents, assets, memories, tags, and settings.
 - Imported readable text is stored directly on documents and interactions.
 - Binary asset bytes live as app-managed files under the chosen brain root; SQLite
   stores their manifest, typed links, provenance, and deletion state.
 - The user's own profile is represented as a `people` row with `is_self`.
 - `content_chunks` is derived from documents and interactions.
-- `evidence_refs` cites exact chunks for memories, tasks, and chat answers.
+- `evidence_refs` cites exact chunks for memories and tasks.
 - No row-level sensitivity labels for launch.
 
 ## SQLite IPC Architecture
@@ -83,8 +83,6 @@ indexes are rebuildable.
    - `evidence_refs`
    - `tags`
    - `taggings`
-   - `chat_conversations`
-   - `chat_messages`
    - `settings`
 2. Add typed join tables:
    - interaction participants, organizations, and projects

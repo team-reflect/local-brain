@@ -84,42 +84,35 @@ daily-automation recipes. Core commands:
 
 ```bash
 brain search "northwind" --json
-brain ask "what did we decide about pricing?" --json
 brain today --json
 brain report daily --json
 brain tasks plan-day --json
 brain relationships followups --json
 brain graph --center self --json
-brain doctor --json     # health: schema version, model, curl
+brain doctor --json     # health: database and schema
 ```
 
-`brain ask` always returns the cited evidence it retrieved; if a model is
-configured (`ANTHROPIC_API_KEY`) it also synthesizes a cited answer. Either way,
-the answer is grounded in your documents and interactions.
+For question answering, agents combine `brain search`, `brain show`, and report
+commands, then reason over the returned records themselves. The CLI does not call
+an LLM or synthesize answers.
 
 ## Model boundaries (BYOK)
 
-Local Brain bundles no model. Ask and model-backed extraction call **your own**
-AI provider key:
+Local Brain bundles no model. Model-backed extraction calls **your own** AI provider
+key:
 
 - The desktop stores the key in the **macOS keychain** (Settings → AI providers) —
   never in app settings or the export.
-- The CLI reads `ANTHROPIC_API_KEY` from the environment.
-- With no key, the AI surface degrades cleanly: Ask shows "not configured" and
-  extraction is a no-op. Lexical (FTS5) search always works.
+- With no key, extraction is a no-op. Lexical (FTS5) search always works.
 
-External model payloads are minimal and visible: only the retrieved, cited chunks
-needed to answer are sent, assembled through one checked helper.
+External model payloads are minimal and visible: only the source text needed for
+extraction is sent through the provider boundary.
 
 ## Troubleshooting
 
 - **"no brain database" (CLI exit 4):** no database at the resolved path. Run an
   `brain add …` with `--brain <dir>`, open the app and choose a folder, or pass
   the advanced `--db` override.
-- **Ask says "not configured":** add an AI provider key (Settings → AI providers) or set
-  `ANTHROPIC_API_KEY` for the CLI.
-- **`brain ask` returns evidence but no prose:** no model configured — the cited
-  chunks are returned for your agent to reason over.
 - **Gatekeeper blocks the app:** unsigned alpha build; right-click → Open.
 - **Search finds nothing after a bulk delete:** derived indexes rebuild
   automatically after deletes; if needed, the maintenance rebuild runs on next
