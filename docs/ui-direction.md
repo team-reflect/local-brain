@@ -35,6 +35,7 @@ Sidebar:
 | Tasks                |  Current view                 |
 | Network              |                               |
 | Projects             |                               |
+| Ask                  |                               |
 | Settings             |                               |
 +----------------------+-------------------------------+
 ```
@@ -46,6 +47,7 @@ Top-level sections:
 - **Tasks:** all open, waiting, scheduled, and completed tasks.
 - **Network:** graph, people, and organizations, with Graph as the default tab.
 - **Projects:** active, waiting, paused, done, and archived projects.
+- **Ask:** grounded chat over local documents and interactions.
 - **Settings:** the active brain's identity (name, color, location), AI providers,
   local storage paths, diagnostics, and skill setup.
 
@@ -56,7 +58,7 @@ open another brain. Do not confuse a *brain* (the container) with the Network
 **Graph** (a visualization of the records inside the current brain).
 
 Document and interaction records are browsed inside Network, Project, and Task detail
-pages, and found through global search.
+pages, and found through global search or Ask.
 
 ## Information Architecture
 
@@ -111,6 +113,10 @@ Projects
     - interactions
     - documents
     - remembered decisions and risks
+Ask
+  - grounded chat
+  - durable conversations and messages
+  - request-local retrieved sources
 Settings
   - brain (identity: name, color, folder reveal)
   - AI providers
@@ -213,6 +219,8 @@ Settings
 ## Interaction Rules
 
 - Search should be global and available from all main surfaces.
+- Ask should answer from local document and interaction chunks using the configured
+  BYOK provider.
 - A user should be able to correct a task, person link, project link, or remembered
   fact from the detail page where it appears.
 - Graph should be a derived navigation and demonstration surface, not the storage

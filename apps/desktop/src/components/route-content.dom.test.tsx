@@ -27,6 +27,11 @@ describe('RouteContent', () => {
     expect(screen.getByText(/private, local-first personal CRM/)).toBeDefined()
   })
 
+  it('renders the Ask empty state for the ask route', async () => {
+    renderWithProviders(<RouteContent route={{ kind: 'ask' }} />)
+    expect(await screen.findByText('Ask your local brain')).toBeDefined()
+  })
+
   it('shows a not-found state for a missing person', async () => {
     renderWithProviders(<RouteContent route={{ kind: 'person', id: 'ghost' }} />)
     await waitFor(() => expect(screen.getByText('Person not found')).toBeDefined())

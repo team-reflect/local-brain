@@ -220,6 +220,32 @@ Key columns:
 Suggested `kind` values: `note`, `file`, `pdf`, `webpage`, `plan`, `receipt`, `text`,
 `other`.
 
+### `chat_conversations` and `chat_messages`
+
+Durable Ask history. Conversations group turns; messages store both queryable
+projection fields and the verbatim Vercel AI SDK `UIMessage` JSON used by the desktop.
+Retrieved Ask sources are request-local and are not stored as `evidence_refs`.
+
+`chat_conversations` key columns:
+
+- `id`
+- `title`
+- `created_at`
+- `updated_at`
+- `archived_at`
+
+`chat_messages` key columns:
+
+- `id`
+- `conversation_id`
+- `role`
+- `content_text`
+- `ui_message_json`
+- `model`
+- `status`
+- `error`
+- `created_at`
+
 ### `assets`
 
 App-managed binary files such as avatars, organization logos, screenshots, inline

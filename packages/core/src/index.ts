@@ -190,6 +190,25 @@ export {
   type EvidencePatch,
 } from './domains/citations/setters'
 
+// Chat (Ask)
+export {
+  listConversations,
+  getConversation,
+  listMessages,
+  type ChatConversation,
+  type ChatMessage,
+  type ChatRole,
+  type ChatStatus,
+} from './domains/chat/getters'
+export {
+  createChatId,
+  createConversation,
+  appendChatMessage,
+  archiveConversation,
+  type NewChatConversation,
+  type NewChatMessage,
+} from './domains/chat/setters'
+
 // Relationship intelligence (derived recency and strength from interactions/tasks)
 export {
   recomputeRelationshipIntelligence,
