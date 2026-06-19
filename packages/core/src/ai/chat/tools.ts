@@ -68,7 +68,7 @@ export function buildChatTools() {
       }),
       execute: async ({ status, limit }) => {
         const projects = await listProjects({
-          ...(status !== undefined ? { status } : {}),
+          ...(status !== undefined ? { status } : { activeOnly: true }),
           limit: limit ?? DEFAULT_PROJECTS_LIMIT,
         })
         return {

@@ -173,6 +173,7 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
           </div>
         ) : (
           <MessageList
+            key={chatId}
             messages={displayedMessages}
             streamingMessageId={streamingMessageId}
             showThinking={showThinking}
