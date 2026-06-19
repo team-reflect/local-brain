@@ -4,6 +4,7 @@ import { createOpenAI } from '@ai-sdk/openai'
 import {
   convertToModelMessages,
   createUIMessageStream,
+  stepCountIs,
   streamText,
   type ChatTransport,
   type LanguageModel,
@@ -13,19 +14,20 @@ import {
 import {
   aiKeySecretName,
   appendChatMessage,
+  buildChatSystemPrompt,
+  buildChatTools,
   createChatId,
   createConversation,
   defaultAiProvider,
   getConversation,
   getModelSettings,
   keychainGet,
-  retrieve,
+  listProjects,
+  nowIso,
   type AiProviderConfig,
-  type RetrievedChunk,
 } from '@local-brain/core'
 
-const MAX_SOURCES = 8
-const MAX_CHARS_PER_SOURCE = 1200
+const TOOL_STEPS = 5
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -87,31 +89,6 @@ async function resolveModel(): Promise<{ model: LanguageModel; label: string }> 
   }
 }
 
-function sourceBlock(chunks: readonly RetrievedChunk[]): string {
-  if (chunks.length === 0) return 'No local sources were retrieved.'
-  return chunks
-    .map((chunk, index) => {
-      const title = chunk.recordTitle ?? chunk.recordType
-      const text =
-        chunk.text.length > MAX_CHARS_PER_SOURCE
-          ? `${chunk.text.slice(0, MAX_CHARS_PER_SOURCE)}...`
-          : chunk.text
-      return `Source ${index + 1}: ${title} (${chunk.recordType}:${chunk.recordId}, chunk ${chunk.chunkIndex})\n${text}`
-    })
-    .join('\n\n')
-}
-
-function systemPrompt(chunks: readonly RetrievedChunk[]): string {
-  return [
-    'You are Local Brain, a private personal CRM and memory assistant.',
-    'Answer using only the local sources below and the visible conversation.',
-    'If the local sources do not support an answer, say you could not find supporting local records.',
-    'Do not use outside knowledge. Be concise and direct.',
-    '',
-    sourceBlock(chunks),
-  ].join('\n')
-}
-
 function assistantMessage(messageId: string, text: string): UIMessage {
   return {
     id: messageId,
@@ -163,6 +140,14 @@ async function persistLatestUser(conversationId: string, messages: readonly UIMe
   return text
 }
 
+async function loadChatContext(): Promise<{ system: string }> {
+  const today = nowIso().slice(0, 10)
+  const projects = await listProjects({ limit: 30 })
+  return {
+    system: buildChatSystemPrompt({ today, projects }),
+  }
+}
+
 export function createAskTransport(): ChatTransport<UIMessage> {
   return {
     async sendMessages({ trigger, chatId, messages, abortSignal }) {
@@ -177,15 +162,17 @@ export function createAskTransport(): ChatTransport<UIMessage> {
       }
 
       try {
-        const [{ model, label }, retrieval] = await Promise.all([
+        const [{ model, label }, { system }] = await Promise.all([
           resolveModel(),
-          retrieve(question, { mode: 'hybrid', limit: MAX_SOURCES }),
+          loadChatContext(),
         ])
         const result = streamText({
           model,
-          system: systemPrompt(retrieval.chunks),
+          system,
           messages: await convertToModelMessages(messages),
-          maxOutputTokens: 1024,
+          tools: buildChatTools(),
+          stopWhen: stepCountIs(TOOL_STEPS),
+          maxOutputTokens: 2048,
           temperature: 0,
           ...(abortSignal ? { abortSignal } : {}),
         })

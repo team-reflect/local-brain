@@ -4,13 +4,16 @@ import { createAskTransport } from './ask-transport'
 
 const coreMocks = vi.hoisted(() => ({
   appendChatMessage: vi.fn(),
+  buildChatSystemPrompt: vi.fn(),
+  buildChatTools: vi.fn(),
   createChatId: vi.fn(),
   createConversation: vi.fn(),
   defaultAiProvider: vi.fn(),
   getConversation: vi.fn(),
   getModelSettings: vi.fn(),
   keychainGet: vi.fn(),
-  retrieve: vi.fn(),
+  listProjects: vi.fn(),
+  nowIso: vi.fn(),
 }))
 
 const aiMocks = vi.hoisted(() => ({
@@ -21,13 +24,16 @@ const aiMocks = vi.hoisted(() => ({
 vi.mock('@local-brain/core', () => ({
   aiKeySecretName: (id: string) => `ai-api-key:${id}`,
   appendChatMessage: coreMocks.appendChatMessage,
+  buildChatSystemPrompt: coreMocks.buildChatSystemPrompt,
+  buildChatTools: coreMocks.buildChatTools,
   createChatId: coreMocks.createChatId,
   createConversation: coreMocks.createConversation,
   defaultAiProvider: coreMocks.defaultAiProvider,
   getConversation: coreMocks.getConversation,
   getModelSettings: coreMocks.getModelSettings,
   keychainGet: coreMocks.keychainGet,
-  retrieve: coreMocks.retrieve,
+  listProjects: coreMocks.listProjects,
+  nowIso: coreMocks.nowIso,
 }))
 
 vi.mock('@ai-sdk/openai', () => ({
@@ -48,8 +54,11 @@ vi.mock('ai', async (importActual) => {
     ...actual,
     convertToModelMessages: aiMocks.convertToModelMessages,
     streamText: aiMocks.streamText,
+    stepCountIs: (n: number) => ({ type: 'stepCount', stepCount: n }),
   }
 })
+
+const stubTools = { search_records: {}, list_projects: {} }
 
 const userMessage: UIMessage = {
   id: 'user-1',
@@ -64,6 +73,12 @@ describe('createAskTransport', () => {
     coreMocks.getConversation.mockResolvedValue(undefined)
     coreMocks.createConversation.mockResolvedValue('chat-1')
     coreMocks.appendChatMessage.mockResolvedValue('message-id')
+    coreMocks.nowIso.mockReturnValue('2026-06-19T10:00:00Z')
+    coreMocks.listProjects.mockResolvedValue([
+      { id: 'p1', name: 'Atlas', status: 'active', summary: null, targetDate: null, completedOn: null, archivedAt: null, createdAt: '', updatedAt: '', kind: null, notes: null, startedOn: null },
+    ])
+    coreMocks.buildChatSystemPrompt.mockReturnValue('You are Local Brain. Active projects:\n- Atlas [active]')
+    coreMocks.buildChatTools.mockReturnValue(stubTools)
     coreMocks.getModelSettings.mockResolvedValue({
       providers: [{ id: 'provider-1', provider: 'openai', model: 'gpt-5.5', keyHint: '12345' }],
       defaultProviderId: 'provider-1',
@@ -77,24 +92,6 @@ describe('createAskTransport', () => {
       keyHint: '12345',
     })
     coreMocks.keychainGet.mockResolvedValue('sk-test')
-    coreMocks.retrieve.mockResolvedValue({
-      query: 'What did Maya promise?',
-      mode: 'hybrid',
-      semanticAvailable: false,
-      chunks: [
-        {
-          chunkId: 'chunk-1',
-          text: 'Maya promised to send the revised budget.',
-          snippet: 'Maya promised...',
-          recordType: 'interaction',
-          recordId: 'interaction-1',
-          recordTitle: 'Call with Maya',
-          chunkIndex: 0,
-          score: 1,
-          lexicalScore: 1,
-        },
-      ],
-    })
     aiMocks.convertToModelMessages.mockResolvedValue([{ role: 'user', content: 'What did Maya promise?' }])
     aiMocks.streamText.mockReturnValue({
       toUIMessageStream: (options: {
@@ -116,7 +113,7 @@ describe('createAskTransport', () => {
     })
   })
 
-  it('persists the user turn, retrieves grounding chunks, streams, and persists the assistant turn', async () => {
+  it('persists the user turn, loads project context, streams with tools, and persists assistant turn', async () => {
     const transport = createAskTransport()
 
     await transport.sendMessages({
@@ -127,19 +124,31 @@ describe('createAskTransport', () => {
       abortSignal: undefined,
     })
 
+    // Project context should have been loaded
+    expect(coreMocks.listProjects).toHaveBeenCalledWith({ limit: 30 })
+    expect(coreMocks.buildChatSystemPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ today: '2026-06-19', projects: expect.any(Array) }),
+    )
+
+    // streamText should have been called with tools and the system prompt
+    expect(aiMocks.streamText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system: expect.stringContaining('Local Brain'),
+        tools: stubTools,
+        stopWhen: expect.anything(),
+      }),
+    )
+
+    // Conversation and user message persisted
     expect(coreMocks.createConversation).toHaveBeenCalledWith({
       id: 'chat-1',
       title: 'What did Maya promise?',
     })
-    expect(coreMocks.retrieve).toHaveBeenCalledWith('What did Maya promise?', { mode: 'hybrid', limit: 8 })
-    expect(aiMocks.streamText).toHaveBeenCalledWith(
-      expect.objectContaining({
-        system: expect.stringContaining('Call with Maya'),
-      }),
-    )
     expect(coreMocks.appendChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'user-1', conversationId: 'chat-1', role: 'user' }),
     )
+
+    // Assistant message persisted
     expect(coreMocks.appendChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 'assistant-1',
