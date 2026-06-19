@@ -1,11 +1,6 @@
 import type { EmbeddingsStatus } from '@local-brain/core'
 import { todayLocalDayKey } from '../../lib/queries'
 
-/** Human-readable megabytes for download/size readouts. */
-export function megabytes(bytes: number): string {
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
 /**
  * One-line semantic-search summary, shared by the Semantic search section and
  * Diagnostics so the two never drift.
