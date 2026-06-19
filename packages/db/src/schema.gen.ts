@@ -254,9 +254,7 @@ export interface People {
   primaryPhone: string | null
   location: string | null
   isSelf: Generated<number>
-  reconnectIntervalDays: number | null
   lastInteractionAt: string | null
-  nextReconnectAt: string | null
   importantDatesJson: string | null
   summary: string | null
   notes: string | null
@@ -340,7 +338,6 @@ export interface Projects {
 export interface RelationshipStrengths {
   personId: SelectOnly<string | null>
   lastInteractionAt: SelectOnly<string | null>
-  nextReconnectAt: SelectOnly<string | null>
   relationshipStrength: SelectOnly<number | null>
   recentInteractions: SelectOnly<number | null>
   daysSinceLast: SelectOnly<number | null>

@@ -124,7 +124,7 @@ When adding a person:
 - Use the generic CLI person command for explicit contact imports, regardless of source
   (Google Contacts, vCard, CSV, or manual user instruction).
 - Include stable contact fields when known: full name, preferred name, emails, phones,
-  headline, location, summary, notes, and reconnect cadence.
+  headline, location, summary, and notes.
 - Use `--source`, `--external-id`, and contact handles for idempotent import. The CLI
   resolves first by external identity, then email handle, then normalized name.
 - Use `brain add person-from-email` for untrusted sender/display-name pairs. It skips

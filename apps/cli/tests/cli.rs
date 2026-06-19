@@ -367,8 +367,6 @@ fn add_person_dedupes_and_returns_contact_fields() {
             "Austin",
             "--notes",
             "Imported from a contact export.",
-            "--reconnect-interval-days",
-            "30",
         ],
     );
     assert_eq!(first["kind"], "person");
@@ -426,7 +424,6 @@ fn add_person_dedupes_and_returns_contact_fields() {
     assert_eq!(shown["primaryPhone"], "+1 555 0100");
     assert_eq!(shown["subtitle"], "Designer");
     assert_eq!(shown["location"], "Austin");
-    assert_eq!(shown["reconnectIntervalDays"], 30);
     assert_eq!(shown["relationshipStrength"], Value::Null);
 
     let sparse = run_json(
@@ -453,8 +450,6 @@ fn add_person_dedupes_and_returns_contact_fields() {
             "Met through a contact export.",
             "--notes",
             "Prefers concise updates.",
-            "--reconnect-interval-days",
-            "14",
         ],
     );
     assert_eq!(enriched["isDuplicate"], true);
@@ -467,7 +462,6 @@ fn add_person_dedupes_and_returns_contact_fields() {
     assert_eq!(enriched_shown["location"], "New York");
     assert_eq!(enriched_shown["summary"], "Met through a contact export.");
     assert_eq!(enriched_shown["notes"], "Prefers concise updates.");
-    assert_eq!(enriched_shown["reconnectIntervalDays"], 14);
 
     let ascii_name = run_json(
         &db,

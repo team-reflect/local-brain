@@ -104,7 +104,6 @@ path resolution, sidecar bundling, installation checks.
    - `brain today`
    - `brain report daily`
    - `brain tasks plan-day`
-   - `brain relationships followups`
    - `brain changes --since ...`
    - `brain graph --center self`
    - `brain show person ...`
@@ -165,7 +164,6 @@ path resolution, sidecar bundling, installation checks.
 - An agent can add a task linked to a person/project.
 - An agent can add transcript-derived tasks linked back to their source interaction.
 - An agent can generate a daily report and todo list from the terminal.
-- An agent can list relationship follow-ups from the terminal.
 - An agent can query the user-centered graph as JSON.
 - The CLI works with the desktop app closed.
 - The CLI and desktop use the same migration/schema version.

@@ -190,20 +190,14 @@ export {
   type EvidencePatch,
 } from './domains/citations/setters'
 
-// Relationship intelligence (derived follow-up hints from interactions/tasks)
+// Relationship intelligence (derived recency and strength from interactions/tasks)
 export {
   recomputeRelationshipIntelligence,
   recomputeAllRelationships,
   type RecomputeOptions,
 } from './domains/relationships/recompute'
 export {
-  listReconnectSuggestions,
-  type ReconnectSuggestion,
-  type ReconnectOptions,
-} from './domains/relationships/getters'
-export {
   relationshipStrength,
-  nextReconnectAt,
   addDays,
   daysBetween,
   STRENGTH_WINDOW_DAYS,

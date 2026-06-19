@@ -25,7 +25,6 @@ export function PersonDetail({ id }: { id: string }): ReactNode {
               { label: 'Location', value: p.location ?? '—' },
               { label: 'Strength', value: p.relationshipStrength ?? '—' },
               { label: 'Last seen', value: p.lastInteractionAt?.slice(0, 10) ?? '—' },
-              { label: 'Reconnect by', value: p.nextReconnectAt?.slice(0, 10) ?? '—' },
             ]}
           />
           {p.summary ? <p className="text-sm text-foreground">{p.summary}</p> : null}

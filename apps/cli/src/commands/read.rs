@@ -153,10 +153,8 @@ pub fn show(conn: &Connection, json: bool, kind: &str, id: &str) -> Result<(), C
                     people.location,
                     people.summary,
                     people.notes,
-                    people.reconnect_interval_days,
                     relationship_strengths.relationship_strength,
-                    relationship_strengths.last_interaction_at,
-                    relationship_strengths.next_reconnect_at
+                    relationship_strengths.last_interaction_at
              FROM people
              LEFT JOIN relationship_strengths ON relationship_strengths.person_id = people.id
              WHERE people.id = ?1",
