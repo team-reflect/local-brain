@@ -1,11 +1,11 @@
 import {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
-  type WheelEvent as ReactWheelEvent,
 } from 'react'
 import type { Graph, GraphNodeKind } from '@local-brain/core'
 import { EmptyState } from '../components/empty-state'
@@ -126,6 +126,7 @@ export function GraphSurface({ showHeader = true }: { showHeader?: boolean } = {
     () => new Set(ALL_KINDS),
   )
   const [viewport, setViewport] = useState<GraphViewport>(DEFAULT_VIEWPORT)
+  const svgRef = useRef<SVGSVGElement | null>(null)
   const dragRef = useRef<GraphDragState | null>(null)
   const suppressNextNodeClickRef = useRef(false)
 
@@ -158,11 +159,13 @@ export function GraphSurface({ showHeader = true }: { showHeader?: boolean } = {
     })
   }
 
-  const handleWheel = useCallback(
-    (event: ReactWheelEvent<SVGSVGElement>): void => {
-      if (!layout) return
+  useEffect(() => {
+    const svg = svgRef.current
+    if (!svg || !layout) return undefined
+
+    const handleWheel = (event: WheelEvent): void => {
       event.preventDefault()
-      const cursor = clientPointToGraphPoint(event.currentTarget, layout, event.clientX, event.clientY)
+      const cursor = clientPointToGraphPoint(svg, layout, event.clientX, event.clientY)
       if (!cursor) return
       const zoomFactor = Math.exp(-event.deltaY * 0.001)
       setViewport((current) => {
@@ -174,9 +177,11 @@ export function GraphSurface({ showHeader = true }: { showHeader?: boolean } = {
           offsetY: cursor.y - (cursor.y - current.offsetY) * scaledBy,
         }
       })
-    },
-    [layout],
-  )
+    }
+
+    svg.addEventListener('wheel', handleWheel, { passive: false })
+    return () => svg.removeEventListener('wheel', handleWheel)
+  }, [layout])
 
   const handlePointerDown = useCallback((event: ReactPointerEvent<SVGSVGElement>): void => {
     if (event.button > 0) return
@@ -295,6 +300,7 @@ export function GraphSurface({ showHeader = true }: { showHeader?: boolean } = {
             </div>
           ) : (
             <svg
+              ref={svgRef}
               viewBox={`0 0 ${layout.width} ${layout.height}`}
               className="h-auto w-full cursor-grab touch-none select-none active:cursor-grabbing"
               role="img"
@@ -303,7 +309,6 @@ export function GraphSurface({ showHeader = true }: { showHeader?: boolean } = {
               onPointerMove={handlePointerMove}
               onPointerUp={finishDrag}
               onPointerCancel={finishDrag}
-              onWheel={handleWheel}
             >
               <g
                 data-testid="graph-viewport"
