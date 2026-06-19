@@ -44,6 +44,35 @@ export interface AssetLinks {
   createdAt: Generated<string>
 }
 
+export interface AssetSearch {
+  assetId: string
+  title: string
+  subtitle: string | null
+  metadataText: string | null
+  linkText: string | null
+  bodyText: string | null
+  updatedAt: Generated<string>
+}
+
+export interface AssetSearchSource {
+  assetId: SelectOnly<string | null>
+  title: SelectOnly<number | null>
+  subtitle: SelectOnly<number | null>
+  metadataText: SelectOnly<number | null>
+  linkText: SelectOnly<number | null>
+  bodyText: SelectOnly<string | null>
+  updatedAt: SelectOnly<string | null>
+}
+
+export interface AssetTexts {
+  assetId: string
+  text: string
+  textSource: Generated<string>
+  contentHash: string | null
+  createdAt: Generated<string>
+  updatedAt: Generated<string>
+}
+
 export interface Assets {
   id: string
   kind: Generated<string>
@@ -430,6 +459,9 @@ export interface Tasks {
 export interface Database {
   affiliations: Affiliations
   assetLinks: AssetLinks
+  assetSearch: AssetSearch
+  assetSearchSource: AssetSearchSource
+  assetTexts: AssetTexts
   assets: Assets
   chunkEmbeddings: ChunkEmbeddings
   contentChunks: ContentChunks

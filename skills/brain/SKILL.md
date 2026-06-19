@@ -33,9 +33,10 @@ operate it through the `brain` CLI — never by touching the database file direc
 - **memory** — a hidden atomic claim about a record ("prefers async standups",
   "decided to ship in Q3"). `brain remember`. Memories cite their evidence.
 - **person / organization / project** — durable entities. Create people directly
-  when importing contacts or when the user gives you explicit contact details;
-  otherwise let extraction discover them from documents/interactions. Link to
-  them by id with `--link person:<id>`.
+  when importing contacts or when the user gives you explicit contact details.
+  Create projects when there is repeated or high-signal evidence of an ongoing
+  context; link first, create second, and keep projects flat. Link to them by id
+  with `--link person:<id>` / `--link project:<id>`.
 - **source / external identity** — provider-neutral import metadata. `brain`
   knows source slugs and external ids, not provider APIs. Upstream tools translate
   Gmail, Google People, calendars, files, or other systems into generic CLI calls.
@@ -82,8 +83,18 @@ brain add person-from-email --full-name "Maya Chen" --email maya@example.com \
 
 # Email interaction import with unresolved raw participants preserved:
 brain add interaction --kind email --title "Intro" --text-file body.txt \
-  --source gmail --external-id msg-123 \
+  --source gmail --external-kind message --external-id msg-123 \
   --participant "from:Maya Chen <maya@example.com>" --json
+
+# Thread-level email import with a redacted digest:
+brain add interaction --kind email --title "Everlywell Integration" \
+  --summary "Production credential setup and go-live readiness." \
+  --text-file digest.md --source gmail --external-kind thread \
+  --external-id thread-123 --json
+
+# Project/context import target:
+brain add project --name "Everlywell Integration" --summary "PWN Labs Module go-live context." \
+  --source agent --external-kind cluster --external-id everlywell-integration --json
 
 # A binary attachment linked to an interaction:
 brain add asset --file ./invoice.pdf --kind attachment \
@@ -104,8 +115,9 @@ Notes:
 - Use `--text-file <path>` (or `--text-file -` for stdin) for long content; `--text`
   for short strings.
 - Identical document/interaction content dedupes automatically (`isDuplicate:true`);
-  source-backed interactions dedupe by `--source` + `--external-id` first; people
-  dedupe by external identity, any known email handle, then normalized full name;
+  source-backed interactions dedupe by `--source` + `--external-kind` +
+  `--external-id` first; people dedupe by external identity, any known email handle,
+  then normalized full name; projects dedupe by external identity, then normalized name;
   assets dedupe by content hash and can still be linked to a new record. Pass
   `--allow-duplicate` only when you truly mean to re-import.
 - Resolve link ids by `brain search` first.
@@ -117,10 +129,29 @@ External fetchers such as `gws` read upstream systems, then call `brain`:
 1. Ensure a stable source slug with `brain source ensure`.
 2. Import likely-human contacts with `brain add person` when the source is trusted,
    or `brain add person-from-email` for untrusted sender/display-name pairs.
-3. Import readable email bodies as `brain add interaction --kind email`.
-4. Import original attachments with `brain add asset --link interaction:<id>`.
-5. Preserve raw participant handles with `--participant` instead of creating people
+3. Import meaningful email conversations as `brain add interaction --kind email`.
+   Prefer thread-level digests with `--external-kind thread` for long Gmail threads.
+   Use `--external-kind message` for standalone messages.
+4. Redact or summarize when raw source text contains secrets, passwords, credential
+   setup, legal/medical boilerplate, repeated quote chains, or low-signal notification
+   noise. Store a concise digest in `--summary` and pass searchable digest/body text
+   through `--text-file` or `--text`.
+5. Search existing projects and link imports to them. Auto-create a project only when
+   the source shows an ongoing outcome, not just a repeated keyword.
+6. Import original attachments with `brain add asset --link interaction:<id>`.
+7. Preserve raw participant handles with `--participant` instead of creating people
    for every address seen in an email or calendar event.
+
+## Import source rules
+
+- **Gmail:** search narrowly, skip obvious machine/noise messages, group recurring
+  conversations by thread, and use `--external-kind thread` for thread digests.
+- **Granola:** import meeting summaries as interactions. Fetch/store transcripts only
+  when exact wording matters; otherwise summaries are usually the better context unit.
+- **Contacts:** use trusted contact imports (`brain add person`) with source-backed
+  stable ids. Page/stream contacts; do not export a giant one-shot blob. Import names,
+  emails, phones, org/title, and stable ids for launch; skip notes, addresses, and
+  photos unless explicitly requested.
 
 ## Running a daily automation
 
@@ -133,8 +164,8 @@ External fetchers such as `gws` read upstream systems, then call `brain`:
 ## What not to store
 
 - Secrets, API keys, passwords, 2FA codes.
-- Raw, unsummarized logs or whole email threads — capture the signal as a memory
-  or a short interaction summary instead.
+- Raw, unsummarized logs or whole email threads — capture the signal as a memory,
+  `--summary`, or a short interaction digest instead.
 - Speculation as fact. If you're unsure, lower the memory `--kind` (e.g. `idea`)
   or don't write it.
 

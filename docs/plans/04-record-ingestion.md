@@ -21,6 +21,14 @@ storage.
 - Imported artifacts become `documents`.
 - Human exchanges become `interactions`.
 - Email bodies and meeting/call transcripts are interactions.
+- Email import should be thread-aware. Prefer one interaction per meaningful Gmail
+  thread or conversation digest when the thread has long quoted history; use
+  message-level interactions only for genuinely standalone messages.
+- Importers may store a redacted digest/summary instead of raw body text when the source
+  contains credentials, passwords, legal/medical boilerplate, repeated quote chains, or
+  low-signal notification noise.
+- Projects are first-class import targets. Link to existing projects before creating
+  one; auto-create a project only for repeated or high-signal ongoing contexts.
 - Reference files, plans, notes, webpages, receipts, and specs are documents.
 - Original path, URL, external ID, and content hash are optional metadata on the
   document or interaction.
@@ -70,6 +78,14 @@ storage.
     - Local Brain drains it on launch or file event
     - raw record is saved before any enrichment
     - enrichment retries without blocking capture
+15. Add provider-shaped import adapters that still write provider-neutral records:
+    - Gmail: search/filter noise, group by thread, preserve message participants, use
+      external identity kind `thread` or `message`
+    - Granola: import meeting summaries as interactions, fetch transcripts only when
+      exact wording is needed, and infer/link projects from recurring meeting themes
+    - Contacts: page or stream from the native Contacts API; do not bulk export one
+      giant AppleScript blob; import only names, handles, org/title, and stable ids for
+      launch
 
 ## Acceptance Criteria
 
@@ -82,6 +98,8 @@ storage.
   imports.
 - Chunks are generated for every imported document and interaction.
 - Imported records can be linked to people, organizations, projects, and tasks.
+- Email and meeting imports can link to or create durable project contexts without
+  requiring the user to manually file every record.
 
 ## Tests or Verification
 

@@ -429,6 +429,139 @@ fn source_ensure_is_idempotent() {
 }
 
 #[test]
+fn add_project_dedupes_by_source_identity_and_name() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    run_json(
+        &db,
+        &[
+            "--json", "source", "ensure", "--slug", "gmail", "--name", "Gmail",
+        ],
+    );
+
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "project",
+            "--name",
+            "Everlywell Integration",
+            "--summary",
+            "PWN Labs Module go-live context.",
+            "--source",
+            "gmail",
+            "--external-kind",
+            "thread-cluster",
+            "--external-id",
+            "everlywell-integration",
+        ],
+    );
+    assert_eq!(first["kind"], "project");
+    assert_eq!(first["isDuplicate"], false);
+
+    let by_identity = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "project",
+            "--name",
+            "Different Name",
+            "--source",
+            "gmail",
+            "--external-kind",
+            "thread-cluster",
+            "--external-id",
+            "everlywell-integration",
+        ],
+    );
+    assert_eq!(by_identity["isDuplicate"], true);
+    assert_eq!(by_identity["id"], first["id"]);
+
+    let by_name = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "project",
+            "--name",
+            " Everlywell   Integration ",
+        ],
+    );
+    assert_eq!(by_name["isDuplicate"], true);
+    assert_eq!(by_name["id"], first["id"]);
+}
+
+#[test]
+fn add_interaction_keeps_message_and_thread_external_ids_separate() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    run_json(
+        &db,
+        &[
+            "--json", "source", "ensure", "--slug", "gmail", "--name", "Gmail",
+        ],
+    );
+
+    let message = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Message import",
+            "--summary",
+            "Message-level summary.",
+            "--text",
+            "Message-level body.",
+            "--source",
+            "gmail",
+            "--external-kind",
+            "message",
+            "--external-id",
+            "abc123",
+        ],
+    );
+    let thread = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Thread import",
+            "--summary",
+            "Thread-level summary.",
+            "--text",
+            "Thread-level body.",
+            "--source",
+            "gmail",
+            "--external-kind",
+            "thread",
+            "--external-id",
+            "abc123",
+        ],
+    );
+    assert_ne!(message["id"], thread["id"]);
+
+    let conn = Connection::open(&db).unwrap();
+    let summary: String = conn
+        .query_row(
+            "SELECT summary FROM interactions WHERE id = ?1",
+            [thread["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(summary, "Thread-level summary.");
+}
+
+#[test]
 fn add_person_stores_handles_and_external_identity() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);

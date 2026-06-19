@@ -112,6 +112,8 @@ enum AddCommand {
     Document(AddDocumentArgs),
     /// Add a human interaction (meeting, call, note, …).
     Interaction(AddInteractionArgs),
+    /// Add a project/context.
+    Project(AddProjectArgs),
     /// Add a task.
     Task(AddTaskArgs),
 }
@@ -209,10 +211,14 @@ struct AddInteractionArgs {
     occurred_at: Option<String>,
     #[arg(long)]
     source: Option<String>,
+    #[arg(long, default_value = "record")]
+    external_kind: String,
     #[arg(long)]
     external_id: Option<String>,
     #[arg(long)]
     original_url: Option<String>,
+    #[arg(long)]
+    summary: Option<String>,
     #[arg(long)]
     text: Option<String>,
     #[arg(long, value_name = "PATH")]
@@ -221,6 +227,36 @@ struct AddInteractionArgs {
     links: Vec<String>,
     #[arg(long = "participant", value_name = "ROLE:NAME <EMAIL>")]
     participants: Vec<String>,
+    #[arg(long)]
+    allow_duplicate: bool,
+}
+
+#[derive(Parser)]
+struct AddProjectArgs {
+    #[arg(long)]
+    name: String,
+    #[arg(long, default_value = "active")]
+    status: String,
+    #[arg(long)]
+    kind: Option<String>,
+    #[arg(long)]
+    summary: Option<String>,
+    #[arg(long)]
+    notes: Option<String>,
+    #[arg(long)]
+    started_on: Option<String>,
+    #[arg(long)]
+    target_date: Option<String>,
+    #[arg(long)]
+    source: Option<String>,
+    #[arg(long, default_value = "record")]
+    external_kind: String,
+    #[arg(long)]
+    external_id: Option<String>,
+    #[arg(long)]
+    original_url: Option<String>,
+    #[arg(long = "link", value_name = "KIND:ID")]
+    links: Vec<String>,
     #[arg(long)]
     allow_duplicate: bool,
 }
@@ -423,11 +459,32 @@ fn run(cli: Cli) -> Result<(), CliError> {
                         kind: &a.kind,
                         occurred_at: a.occurred_at.as_deref(),
                         source_slug: a.source.as_deref(),
+                        external_kind: &a.external_kind,
                         external_id: a.external_id.as_deref(),
                         original_url: a.original_url.as_deref(),
+                        summary: a.summary.as_deref(),
                         body: resolve_text(a.text.as_deref(), a.text_file.as_deref())?,
                         links: parse_links(&a.links)?,
                         raw_participants: a.participants.iter().map(String::as_str).collect(),
+                        allow_duplicate: a.allow_duplicate,
+                    },
+                ),
+                AddCommand::Project(a) => add::add_project(
+                    &mut conn,
+                    json,
+                    add::AddProjectArgs {
+                        name: &a.name,
+                        status: &a.status,
+                        kind: a.kind.as_deref(),
+                        summary: a.summary.as_deref(),
+                        notes: a.notes.as_deref(),
+                        started_on: a.started_on.as_deref(),
+                        target_date: a.target_date.as_deref(),
+                        source_slug: a.source.as_deref(),
+                        external_kind: &a.external_kind,
+                        external_id: a.external_id.as_deref(),
+                        original_url: a.original_url.as_deref(),
+                        links: parse_links(&a.links)?,
                         allow_duplicate: a.allow_duplicate,
                     },
                 ),

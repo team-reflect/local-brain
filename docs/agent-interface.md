@@ -41,6 +41,8 @@ brain add person-from-email --full-name "Maya Chen" --email maya@example.com --s
 brain add document --title "Kitchen remodel notes" --text-file notes.md
 brain add interaction --kind meeting --title "Call with Maya" --text-file transcript.txt
 brain add interaction --kind email --title "Email from Maya" --text-file body.txt --source gmail --external-id msg-123 --participant "from:Maya Chen <maya@example.com>" --json
+brain add interaction --kind email --title "Everlywell Integration" --text-file digest.md --summary "Production credential setup and go-live readiness." --source gmail --external-kind thread --external-id thread-123 --json
+brain add project --name "Kitchen remodel" --summary "Budget, contractor, and cabinet decision context." --source agent --external-kind cluster --external-id kitchen-remodel --json
 brain add asset --file maya.jpg --link person:maya --role avatar
 brain add task --title "Send Maya the revised budget" --project "Kitchen remodel"
 brain remember --kind decision --claim "Maya approved the revised budget range" --link person:maya
@@ -92,8 +94,12 @@ Before adding a record:
 
 1. Search for likely duplicates.
 2. Reuse existing people, organizations, projects, and tasks when possible.
-3. Include title, kind, date, and provenance metadata when known.
-4. Link the new record to relevant people, organizations, projects, or tasks.
+3. Include title, kind, date, and provenance metadata when known. For source-backed
+   imports, use the correct external identity scope, such as Gmail `--external-kind
+   thread` versus `message`.
+4. Link the new record to relevant people, organizations, projects, or tasks. Search
+   existing projects before creating one; auto-create projects only for repeated or
+   high-signal ongoing contexts.
 5. Let extraction create hidden memories unless the agent has an explicit atomic claim
    to store.
 
@@ -114,6 +120,10 @@ When adding a person:
 When importing emails or calendar events:
 
 - Store readable body text as an interaction.
+- Prefer thread-level digests for long Gmail conversations; store raw message-level
+  bodies only when the message is standalone and safe.
+- Use `--summary` for a compact redacted import summary, while still passing
+  `--text-file` or `--text` for searchable body/digest text.
 - Pass provider identity through generic `--source` and `--external-id`.
 - Preserve raw unresolved participants with repeatable `--participant` values such as
   `from:Robin Spencer <robin@example.com>`; do not create people for every handle.

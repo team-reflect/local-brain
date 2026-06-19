@@ -7,7 +7,7 @@
 use rusqlite::{params, Connection};
 
 use super::identity::{
-    find_duplicate, find_external_identity, insert_external_identity, source_id,
+    external_kind, find_duplicate, find_external_identity, insert_external_identity, source_id,
     ExternalIdentityWrite,
 };
 use super::links::{insert_chunks, insert_links};
@@ -23,8 +23,10 @@ pub struct AddInteractionArgs<'a> {
     pub kind: &'a str,
     pub occurred_at: Option<&'a str>,
     pub source_slug: Option<&'a str>,
+    pub external_kind: &'a str,
     pub external_id: Option<&'a str>,
     pub original_url: Option<&'a str>,
+    pub summary: Option<&'a str>,
     pub body: String,
     pub links: Vec<LinkRef>,
     pub raw_participants: Vec<&'a str>,
@@ -34,19 +36,21 @@ pub struct AddInteractionArgs<'a> {
 fn find_duplicate_interaction(
     conn: &Connection,
     hash: &str,
+    identity_kind: &str,
     external_id: Option<&str>,
     source_id: Option<&str>,
 ) -> Result<Option<String>, CliError> {
-    if let Some(external_id) = normalize_optional(external_id) {
-        // The source-scoped `external_identities` lookup already ran in the
-        // caller. This legacy fallback matches the denormalized
-        // `interactions.external_id` column, but it must NOT merge across
-        // sources: an external id is only unique within a source. We therefore
-        // skip any interaction that another source has already claimed, and —
-        // when this import omits a source — only match unclaimed/legacy rows.
-        let id = conn
-            .query_row(
-                "SELECT i.id FROM interactions i
+    if identity_kind == "record" {
+        if let Some(external_id) = normalize_optional(external_id) {
+            // The source-scoped `external_identities` lookup already ran in the
+            // caller. This legacy fallback matches the denormalized
+            // `interactions.external_id` column, but it must NOT merge across
+            // sources: an external id is only unique within a source. We therefore
+            // skip any interaction that another source has already claimed, and —
+            // when this import omits a source — only match unclaimed/legacy rows.
+            let id = conn
+                .query_row(
+                    "SELECT i.id FROM interactions i
                  WHERE i.archived_at IS NULL
                    AND i.external_id IS NOT NULL
                    AND i.external_id = ?1
@@ -58,12 +62,13 @@ fn find_duplicate_interaction(
                        AND (?2 IS NULL OR ei.source_id <> ?2)
                    )
                  LIMIT 1",
-                params![external_id, source_id],
-                |row| row.get::<_, String>(0),
-            )
-            .ok();
-        if id.is_some() {
-            return Ok(id);
+                    params![external_id, source_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .ok();
+            if id.is_some() {
+                return Ok(id);
+            }
         }
     }
     find_duplicate(conn, "interactions", hash)
@@ -82,14 +87,19 @@ fn enrich_duplicate_interaction(
              original_url = CASE
                WHEN (original_url IS NULL OR trim(original_url) = '') AND ?2 IS NOT NULL
                THEN ?2 ELSE original_url END,
+             summary = CASE
+               WHEN (summary IS NULL OR trim(summary) = '') AND ?3 IS NOT NULL
+               THEN ?3 ELSE summary END,
              updated_at = CASE
                WHEN ((external_id IS NULL OR trim(external_id) = '') AND ?1 IS NOT NULL)
                  OR ((original_url IS NULL OR trim(original_url) = '') AND ?2 IS NOT NULL)
+                 OR ((summary IS NULL OR trim(summary) = '') AND ?3 IS NOT NULL)
                THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE updated_at END
-         WHERE id = ?3",
+         WHERE id = ?4",
         params![
             normalize_optional(args.external_id),
             normalize_optional(args.original_url),
+            normalize_optional(args.summary),
             id,
         ],
     )?;
@@ -105,6 +115,7 @@ fn enrich_existing_interaction(
     existing: &str,
     args: &AddInteractionArgs,
     source_id: Option<&str>,
+    identity_kind: &str,
 ) -> Result<(), CliError> {
     enrich_duplicate_interaction(tx, existing, args)?;
     insert_links(tx, "interaction", existing, &args.links)?;
@@ -115,7 +126,7 @@ fn enrich_existing_interaction(
             entity_type: "interaction",
             entity_id: existing,
             source_id,
-            kind: "record",
+            kind: identity_kind,
             external_id: args.external_id,
             url: args.original_url,
             force_duplicate: false,
@@ -260,27 +271,45 @@ pub fn add_interaction(
     }
     let hash = content_hash(&body);
     let source_id = source_id(conn, args.source_slug)?;
+    let identity_kind = external_kind(args.external_kind);
     let existing_by_external = find_external_identity(
         conn,
         "interaction",
         source_id.as_deref(),
-        "record",
+        &identity_kind,
         args.external_id,
     )?;
     if let Some(existing) = existing_by_external.as_deref() {
         if !args.allow_duplicate {
             let tx = conn.transaction()?;
-            enrich_existing_interaction(&tx, existing, &args, source_id.as_deref())?;
+            enrich_existing_interaction(
+                &tx,
+                existing,
+                &args,
+                source_id.as_deref(),
+                &identity_kind,
+            )?;
             tx.commit()?;
             return report_record(json, "interaction", existing, true, 0);
         }
     }
-    let existing_by_dup =
-        find_duplicate_interaction(conn, &hash, args.external_id, source_id.as_deref())?;
+    let existing_by_dup = find_duplicate_interaction(
+        conn,
+        &hash,
+        &identity_kind,
+        args.external_id,
+        source_id.as_deref(),
+    )?;
     if let Some(existing) = existing_by_dup.as_deref() {
         if !args.allow_duplicate {
             let tx = conn.transaction()?;
-            enrich_existing_interaction(&tx, existing, &args, source_id.as_deref())?;
+            enrich_existing_interaction(
+                &tx,
+                existing,
+                &args,
+                source_id.as_deref(),
+                &identity_kind,
+            )?;
             tx.commit()?;
             return report_record(json, "interaction", existing, true, 0);
         }
@@ -292,13 +321,14 @@ pub fn add_interaction(
     let tx = conn.transaction()?;
     tx.execute(
         "INSERT INTO interactions
-         (id, kind, title, body_text, occurred_at, external_id, original_url, content_hash)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+         (id, kind, title, body_text, summary, occurred_at, external_id, original_url, content_hash)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
         params![
             id,
             args.kind,
             title,
             body,
+            normalize_optional(args.summary),
             args.occurred_at,
             normalize_optional(args.external_id),
             normalize_optional(args.original_url),
@@ -314,7 +344,7 @@ pub fn add_interaction(
             entity_type: "interaction",
             entity_id: &id,
             source_id: source_id.as_deref(),
-            kind: "record",
+            kind: &identity_kind,
             external_id: args.external_id,
             url: args.original_url,
             force_duplicate,
@@ -368,8 +398,10 @@ mod tests {
             kind: "note",
             occurred_at: None,
             source_slug: Some("manual"),
+            external_kind: "record",
             external_id,
             original_url: None,
+            summary: None,
             body: body.to_string(),
             links: vec![],
             raw_participants: vec![],

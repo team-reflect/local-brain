@@ -8,8 +8,8 @@
 //! - [`identity`] — sources, content-hash dedupe, and `external_identities`.
 //! - [`links`] — chunk + typed-link writers for documents/interactions.
 //! - [`person`] / [`person_import`] — person writes and untrusted-name guardrails.
-//! - [`asset`], [`document`], [`interaction`], [`task`], [`memory`] — one entity
-//!   per module, each with its own tests.
+//! - [`asset`], [`document`], [`interaction`], [`project`], [`task`],
+//!   [`memory`] — one entity per module, each with its own tests.
 
 mod asset;
 mod document;
@@ -19,6 +19,7 @@ mod links;
 mod memory;
 mod person;
 mod person_import;
+mod project;
 mod task;
 mod text;
 
@@ -32,6 +33,7 @@ pub use document::{add_document, AddDocumentArgs};
 pub use interaction::{add_interaction, AddInteractionArgs};
 pub use memory::{remember, RememberArgs};
 pub use person::{add_person, add_person_from_email, AddPersonArgs, AddPersonFromEmailArgs};
+pub use project::{add_project, AddProjectArgs};
 pub use task::{add_task, AddTaskArgs};
 
 /// Report a freshly-written or deduped record (document/interaction): JSON on the

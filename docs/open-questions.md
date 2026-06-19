@@ -21,9 +21,12 @@ interactions as first-class records and hidden atomic memories.
 
 1. Do we need `person_aliases` and `organization_aliases` in launch, or can matching use
    normalized names and notes first?
-2. Should projects support parent/child hierarchy in launch?
-3. Should tasks support recurrence in launch, or only one-off due/scheduled dates?
-4. Should `content_chunks` stay limited to documents and interactions?
+2. Should tasks support recurrence in launch, or only one-off due/scheduled dates?
+3. Should `content_chunks` stay limited to documents and interactions?
+
+Resolved for launch: projects stay first-class and flat. Tags are not pseudo-projects,
+and visible subtasks/project hierarchy are deferred until real usage proves they are
+needed.
 
 ## AI
 

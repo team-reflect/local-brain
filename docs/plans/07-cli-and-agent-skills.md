@@ -25,8 +25,11 @@ path resolution, sidecar bundling, installation checks.
   running and does not use Tauri IPC.
 - Agents can add people, documents, interactions, assets, tasks, and memories with direct
   provenance.
+- Agents can add projects/context clusters, then link imports and tasks to them.
 - Importers use provider-neutral `sources` and `external_identities`; no upstream API
   concepts land in `brain`.
+- Importers should use `external_identities.kind` to distinguish upstream identifier
+  scopes, for example Gmail `thread` versus `message`.
 - People can have multiple emails and phones. Imports dedupe through external identity,
   then contact handles, then normalized name.
 - Email/calendar interactions can preserve unresolved raw participants without creating
@@ -75,7 +78,8 @@ path resolution, sidecar bundling, installation checks.
    - `brain add person-from-email --full-name ... --email ...`
    - `brain add document --title ... --text-file ...`
    - `brain add interaction --kind meeting --title ... --text-file ...`
-   - `brain add interaction --kind email --source gmail --external-id ... --participant ...`
+   - `brain add interaction --kind email --source gmail --external-kind thread --external-id ... --summary ... --participant ...`
+   - `brain add project --name ... --source agent --external-kind cluster --external-id ...`
    - `brain add asset --file ... --link person:... --role avatar`
    - `brain add task --title ...`
    - `brain remember --kind fact --claim ... --link person:...`
@@ -129,6 +133,10 @@ path resolution, sidecar bundling, installation checks.
   codes.
 - An agent can import an email body as an interaction, preserve raw participant handles,
   and link attachments as assets.
+- An agent can import a redacted email or meeting digest as `summary` plus searchable
+  body text without storing unsafe raw quote chains.
+- An agent can create or reuse a project/context from imports and link interactions or
+  tasks to it.
 - An agent can add a reference note as a document.
 - An agent can add an avatar, image, or attachment as a linked asset.
 - An agent can add a task linked to a person/project.
