@@ -156,6 +156,19 @@ export interface EvidenceRefs {
   createdAt: Generated<string>
 }
 
+export interface ExternalIdentities {
+  id: string
+  entityType: string
+  entityId: string
+  sourceId: string
+  kind: Generated<string>
+  externalId: string
+  url: string | null
+  metadataJson: string | null
+  createdAt: Generated<string>
+  updatedAt: Generated<string>
+}
+
 export interface InteractionOrganizations {
   id: string
   interactionId: string
@@ -167,8 +180,12 @@ export interface InteractionOrganizations {
 export interface InteractionParticipants {
   id: string
   interactionId: string
-  personId: string
+  personId: string | null
   role: string | null
+  handle: string | null
+  normalizedHandle: string | null
+  displayName: string | null
+  sourceId: string | null
   createdAt: Generated<string>
 }
 
@@ -253,6 +270,30 @@ export interface People {
   archivedAt: string | null
 }
 
+export interface PersonEmails {
+  id: string
+  personId: string
+  email: string
+  normalizedEmail: string
+  label: string | null
+  isPrimary: Generated<number>
+  sourceId: string | null
+  createdAt: Generated<string>
+  updatedAt: Generated<string>
+}
+
+export interface PersonPhones {
+  id: string
+  personId: string
+  phone: string
+  normalizedPhone: string
+  label: string | null
+  isPrimary: Generated<number>
+  sourceId: string | null
+  createdAt: Generated<string>
+  updatedAt: Generated<string>
+}
+
 export interface ProjectDocuments {
   id: string
   projectId: string
@@ -326,6 +367,15 @@ export interface SchemaMeta {
 export interface Settings {
   key: string
   valueJson: string
+  updatedAt: Generated<string>
+}
+
+export interface Sources {
+  id: string
+  slug: string
+  name: string
+  description: string | null
+  createdAt: Generated<string>
   updatedAt: Generated<string>
 }
 
@@ -408,6 +458,7 @@ export interface Database {
   documentProjects: DocumentProjects
   documents: Documents
   evidenceRefs: EvidenceRefs
+  externalIdentities: ExternalIdentities
   interactionOrganizations: InteractionOrganizations
   interactionParticipants: InteractionParticipants
   interactionProjects: InteractionProjects
@@ -416,6 +467,8 @@ export interface Database {
   memoryLinks: MemoryLinks
   organizations: Organizations
   people: People
+  personEmails: PersonEmails
+  personPhones: PersonPhones
   projectDocuments: ProjectDocuments
   projectInteractions: ProjectInteractions
   projectOrganizations: ProjectOrganizations
@@ -425,6 +478,7 @@ export interface Database {
   relationshipStrengths: RelationshipStrengths
   schemaMeta: SchemaMeta
   settings: Settings
+  sources: Sources
   taggings: Taggings
   tags: Tags
   taskDocuments: TaskDocuments

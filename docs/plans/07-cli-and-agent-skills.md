@@ -10,8 +10,8 @@ querying, and reporting from the user's local brain.
 ## Scope
 
 **In:** `brain` CLI, JSON output, local skill docs, add/search/ask/today/report/graph
-commands, record lookup, brain-root/database/asset path resolution, sidecar bundling, installation
-checks.
+commands, provider-neutral import identity, record lookup, brain-root/database/asset
+path resolution, sidecar bundling, installation checks.
 
 **Out:** hosted API, plugin marketplace, automatic external app sync.
 
@@ -25,6 +25,12 @@ checks.
   running and does not use Tauri IPC.
 - Agents can add people, documents, interactions, assets, tasks, and memories with direct
   provenance.
+- Importers use provider-neutral `sources` and `external_identities`; no upstream API
+  concepts land in `brain`.
+- People can have multiple emails and phones. Imports dedupe through external identity,
+  then contact handles, then normalized name.
+- Email/calendar interactions can preserve unresolved raw participants without creating
+  people.
 - Agents can search and ask, but cited answers still come from document or interaction
   chunks.
 - stdout carries data only; diagnostics and warnings go to stderr.
@@ -65,8 +71,11 @@ checks.
    - `brain path`
 5. Add write commands:
    - `brain add person --full-name ... --email ...`
+   - `brain source ensure --slug ... --name ...`
+   - `brain add person-from-email --full-name ... --email ...`
    - `brain add document --title ... --text-file ...`
    - `brain add interaction --kind meeting --title ... --text-file ...`
+   - `brain add interaction --kind email --source gmail --external-id ... --participant ...`
    - `brain add asset --file ... --link person:... --role avatar`
    - `brain add task --title ...`
    - `brain remember --kind fact --claim ... --link person:...`
@@ -98,6 +107,8 @@ checks.
    - how to cite evidence
    - how to avoid duplicate records
    - how to add and link binary assets without inlining bytes into SQLite text fields
+   - how to import email text, attachments, contacts, and raw participants through
+     generic CLI commands
    - how to query before writing
    - how to run a daily automation
    - how to produce a report and todo list
@@ -114,6 +125,11 @@ checks.
 - An agent can add a meeting transcript as an interaction.
 - An agent can add an explicit contact as a person without coupling the CLI to a source
   provider.
+- An agent can import contacts idempotently with source/external identity metadata.
+- An agent can safely skip untrusted machine email senders and receive structured reason
+  codes.
+- An agent can import an email body as an interaction, preserve raw participant handles,
+  and link attachments as assets.
 - An agent can add a reference note as a document.
 - An agent can add an avatar, image, or attachment as a linked asset.
 - An agent can add a task linked to a person/project.
@@ -129,7 +145,8 @@ checks.
 ## Tests or Verification
 
 - CLI snapshot tests for JSON output.
-- CLI integration tests for add/search/ask/today/show.
+- CLI integration tests for add/search/ask/today/show, sources, contact handles,
+  external identity dedupe, guarded email senders, and raw interaction participants.
 - CLI concurrent-open test with desktop-style WAL settings.
 - Sidecar staging smoke test.
 - Skill lint/readthrough by another agent.

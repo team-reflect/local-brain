@@ -17,7 +17,17 @@ export { newId } from './db/id'
 export { nowIso } from './db/time'
 
 // People
-export { listPeople, getPerson, getSelf, type Person, type ListPeopleOptions } from './domains/people/getters'
+export {
+  listPeople,
+  getPerson,
+  getSelf,
+  listPersonEmails,
+  listPersonPhones,
+  type Person,
+  type PersonEmail,
+  type PersonPhone,
+  type ListPeopleOptions,
+} from './domains/people/getters'
 export {
   createPerson,
   updatePerson,
@@ -73,8 +83,10 @@ export {
   listInteractions,
   getInteraction,
   listInteractionParticipants,
+  listInteractionParticipantRows,
   type Interaction,
   type InteractionParticipant,
+  type InteractionParticipantRow,
   type ListInteractionsOptions,
 } from './domains/interactions/getters'
 export {
@@ -100,6 +112,16 @@ export {
   type NewOrganization,
   type OrganizationPatch,
 } from './domains/organizations/setters'
+
+// Import sources and external identities
+export {
+  listSources,
+  getSourceBySlug,
+  listExternalIdentitiesForRecord,
+  getExternalIdentity,
+  type Source,
+  type ExternalIdentity,
+} from './domains/sources/getters'
 
 // Memories
 export {

@@ -155,7 +155,9 @@ export async function buildExtractionContext(
             .select('personId')
             .where('interactionId', '=', recordId)
             .execute()
-        ).map((row) => row.personId)
+        )
+          .map((row) => row.personId)
+          .filter((personId): personId is string => personId !== null)
       : (
           await db
             .selectFrom('documentPeople')

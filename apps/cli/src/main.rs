@@ -20,7 +20,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use serde_json::json;
 
-use commands::{add, graph as graph_cmd, parse_links, read, report, resolve_text};
+use commands::{add, graph as graph_cmd, parse_links, read, report, resolve_text, source};
 use error::CliError;
 use output::{diag, print_json};
 
@@ -62,6 +62,11 @@ enum Command {
     },
     /// Add a hidden memory (atomic claim) with provenance links.
     Remember(RememberArgs),
+    /// Manage upstream source identities for imports.
+    Source {
+        #[command(subcommand)]
+        what: SourceCommand,
+    },
     /// Full-text search across your records.
     Search(SearchArgs),
     /// Ask a grounded, cited question.
@@ -99,6 +104,8 @@ enum Command {
 enum AddCommand {
     /// Add a person.
     Person(AddPersonArgs),
+    /// Safely add a person from an untrusted email/display-name pair.
+    PersonFromEmail(AddPersonFromEmailArgs),
     /// Add a binary asset file.
     Asset(AddAssetArgs),
     /// Add a reference document.
@@ -116,9 +123,9 @@ struct AddPersonArgs {
     #[arg(long)]
     preferred_name: Option<String>,
     #[arg(long)]
-    email: Option<String>,
+    email: Vec<String>,
     #[arg(long)]
-    phone: Option<String>,
+    phone: Vec<String>,
     #[arg(long)]
     headline: Option<String>,
     #[arg(long)]
@@ -130,7 +137,27 @@ struct AddPersonArgs {
     #[arg(long)]
     reconnect_interval_days: Option<i64>,
     #[arg(long)]
+    source: Option<String>,
+    #[arg(long, default_value = "contact")]
+    external_kind: String,
+    #[arg(long)]
+    external_id: Option<String>,
+    #[arg(long)]
+    original_url: Option<String>,
+    #[arg(long)]
     allow_duplicate: bool,
+}
+
+#[derive(Parser)]
+struct AddPersonFromEmailArgs {
+    #[arg(long)]
+    full_name: String,
+    #[arg(long)]
+    email: String,
+    #[arg(long)]
+    source: Option<String>,
+    #[arg(long)]
+    external_id: Option<String>,
 }
 
 #[derive(Parser)]
@@ -181,6 +208,8 @@ struct AddInteractionArgs {
     #[arg(long)]
     occurred_at: Option<String>,
     #[arg(long)]
+    source: Option<String>,
+    #[arg(long)]
     external_id: Option<String>,
     #[arg(long)]
     original_url: Option<String>,
@@ -190,6 +219,8 @@ struct AddInteractionArgs {
     text_file: Option<PathBuf>,
     #[arg(long = "link", value_name = "KIND:ID")]
     links: Vec<String>,
+    #[arg(long = "participant", value_name = "ROLE:NAME <EMAIL>")]
+    participants: Vec<String>,
     #[arg(long)]
     allow_duplicate: bool,
 }
@@ -269,6 +300,22 @@ enum RelCommand {
     Followups,
 }
 
+#[derive(Subcommand)]
+enum SourceCommand {
+    /// Ensure an upstream source exists.
+    Ensure(EnsureSourceArgs),
+}
+
+#[derive(Parser)]
+struct EnsureSourceArgs {
+    #[arg(long)]
+    slug: String,
+    #[arg(long)]
+    name: String,
+    #[arg(long)]
+    description: Option<String>,
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match run(cli) {
@@ -327,14 +374,28 @@ fn run(cli: Cli) -> Result<(), CliError> {
                     add::AddPersonArgs {
                         full_name: &a.full_name,
                         preferred_name: a.preferred_name.as_deref(),
-                        primary_email: a.email.as_deref(),
-                        primary_phone: a.phone.as_deref(),
+                        emails: a.email.iter().map(String::as_str).collect(),
+                        phones: a.phone.iter().map(String::as_str).collect(),
                         headline: a.headline.as_deref(),
                         location: a.location.as_deref(),
                         summary: a.summary.as_deref(),
                         notes: a.notes.as_deref(),
                         reconnect_interval_days: a.reconnect_interval_days,
+                        source_slug: a.source.as_deref(),
+                        external_kind: &a.external_kind,
+                        external_id: a.external_id.as_deref(),
+                        original_url: a.original_url.as_deref(),
                         allow_duplicate: a.allow_duplicate,
+                    },
+                ),
+                AddCommand::PersonFromEmail(a) => add::add_person_from_email(
+                    &mut conn,
+                    json,
+                    add::AddPersonFromEmailArgs {
+                        full_name: &a.full_name,
+                        email: &a.email,
+                        source_slug: a.source.as_deref(),
+                        external_id: a.external_id.as_deref(),
                     },
                 ),
                 AddCommand::Asset(a) => add::add_asset(
@@ -371,10 +432,12 @@ fn run(cli: Cli) -> Result<(), CliError> {
                         title: a.title.as_deref(),
                         kind: &a.kind,
                         occurred_at: a.occurred_at.as_deref(),
+                        source_slug: a.source.as_deref(),
                         external_id: a.external_id.as_deref(),
                         original_url: a.original_url.as_deref(),
                         body: resolve_text(a.text.as_deref(), a.text_file.as_deref())?,
                         links: parse_links(&a.links)?,
+                        raw_participants: a.participants.iter().map(String::as_str).collect(),
                         allow_duplicate: a.allow_duplicate,
                     },
                 ),
@@ -402,6 +465,20 @@ fn run(cli: Cli) -> Result<(), CliError> {
                     links: parse_links(&a.links)?,
                 },
             )
+        }
+        Command::Source { what } => {
+            let mut conn = db::open(&db_path)?;
+            match what {
+                SourceCommand::Ensure(a) => source::ensure(
+                    &mut conn,
+                    json,
+                    source::EnsureSourceArgs {
+                        slug: &a.slug,
+                        name: &a.name,
+                        description: a.description.as_deref(),
+                    },
+                ),
+            }
         }
 
         Command::Search(a) => {

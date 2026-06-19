@@ -7,6 +7,7 @@ pub mod add;
 pub mod graph;
 pub mod read;
 pub mod report;
+pub mod source;
 
 use std::io::Read;
 use std::path::Path;

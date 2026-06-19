@@ -1,10 +1,12 @@
 import type { Selectable } from 'kysely'
-import type { People } from '@local-brain/db'
+import type { People, PersonEmails, PersonPhones } from '@local-brain/db'
 import { db } from '../../db/client'
 
 export type Person = Selectable<People> & {
   relationshipStrength: number | null
 }
+export type PersonEmail = Selectable<PersonEmails>
+export type PersonPhone = Selectable<PersonPhones>
 
 const PERSON_SELECT = [
   'people.id as id',
@@ -67,4 +69,24 @@ export function getSelf(): Promise<Person | undefined> {
     .select(PERSON_SELECT)
     .where('people.isSelf', '=', 1)
     .executeTakeFirst()
+}
+
+export function listPersonEmails(personId: string): Promise<PersonEmail[]> {
+  return db
+    .selectFrom('personEmails')
+    .selectAll()
+    .where('personId', '=', personId)
+    .orderBy('isPrimary', 'desc')
+    .orderBy('email', 'asc')
+    .execute()
+}
+
+export function listPersonPhones(personId: string): Promise<PersonPhone[]> {
+  return db
+    .selectFrom('personPhones')
+    .selectAll()
+    .where('personId', '=', personId)
+    .orderBy('isPrimary', 'desc')
+    .orderBy('phone', 'asc')
+    .execute()
 }
