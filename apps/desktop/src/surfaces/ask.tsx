@@ -64,6 +64,10 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
   const { error, messages, sendMessage, setMessages, status } = chat
 
   useEffect(() => {
+    if (!conversationId) setHydratedConversationId(null)
+  }, [conversationId])
+
+  useEffect(() => {
     if (!conversationId || hydratedConversationId === conversationId || status !== 'ready' || !storedMessages.data) return
     setMessages(initialMessages)
     setHydratedConversationId(conversationId)
@@ -72,8 +76,9 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
   const providerClosed = modelStatus.data && !modelStatus.data.canRun ? modelStatus.data.reason : null
   const pending = status === 'submitted' || status === 'streaming'
   const conversationHydrated = !conversationId || hydratedConversationId === conversationId
-  const waitingForHydration = Boolean(conversationId && !conversationHydrated)
-  const composerPending = pending || waitingForHydration
+  const historyUnavailable = Boolean(conversationId && storedMessages.isError)
+  const waitingForHydration = Boolean(conversationId && !conversationHydrated && !historyUnavailable)
+  const composerPending = pending || waitingForHydration || historyUnavailable
 
   async function submitDraft(): Promise<void> {
     const text = draft.trim()
@@ -121,6 +126,11 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
       />
       <div className="flex min-w-0 flex-1 flex-col">
         {providerClosed ? <Alert className="mb-3">{providerClosed}</Alert> : null}
+        {historyUnavailable ? (
+          <Alert variant="error" className="mb-3">
+            Could not load this chat history.
+          </Alert>
+        ) : null}
         {showInitialLoading ? (
           <div className="flex min-h-0 flex-1 items-center justify-center">
             <Loading />
