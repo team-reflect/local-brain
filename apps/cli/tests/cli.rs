@@ -170,6 +170,39 @@ fn add_dedupes_identical_content() {
 }
 
 #[test]
+fn add_document_rejects_empty_title_and_body() {
+    // Parity with the core `validateNewDocument`: a record with neither a title
+    // nor body text is unreadable/unsearchable and is rejected before insert.
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let out = run(
+        &db,
+        &[
+            "--json", "add", "document", "--title", "   ", "--text", "   ",
+        ],
+    );
+    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty(), "errors must not write to stdout");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("title or body"));
+
+    let conn = Connection::open(&db).unwrap();
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM documents", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn add_interaction_rejects_empty_title_and_body() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let out = run(&db, &["--json", "add", "interaction", "--text", "   "]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("title or body"));
+}
+
+#[test]
 fn add_person_dedupes_and_returns_contact_fields() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);

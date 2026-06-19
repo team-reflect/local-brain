@@ -568,6 +568,14 @@ pub fn add_document(
     args: AddDocumentArgs,
 ) -> Result<(), CliError> {
     let body = normalize_text(&args.body);
+    let title = normalize_optional(args.title);
+    // Parity with the core `validateNewDocument`: both columns are nullable in
+    // SQLite, so reject a document with neither a title nor a body.
+    if title.is_none() && body.is_empty() {
+        return Err(CliError::Runtime(
+            "a document needs a title or body text".into(),
+        ));
+    }
     let hash = content_hash(&body);
     if let Some(existing) = find_duplicate(conn, "documents", &hash)? {
         if !args.allow_duplicate {
@@ -578,7 +586,7 @@ pub fn add_document(
     let tx = conn.transaction()?;
     tx.execute(
         "INSERT INTO documents (id, title, kind, body_text, content_hash) VALUES (?1,?2,?3,?4,?5)",
-        params![id, args.title, args.kind, body, hash],
+        params![id, title, normalize_optional(args.kind), body, hash],
     )?;
     let count = insert_chunks(&tx, "document", &id, &body)?;
     insert_links(&tx, "document", &id, &args.links)?;
@@ -654,6 +662,14 @@ pub fn add_interaction(
     args: AddInteractionArgs,
 ) -> Result<(), CliError> {
     let body = normalize_text(&args.body);
+    let title = normalize_optional(args.title);
+    // Parity with the core `validateNewInteraction`: reject one with neither a
+    // title nor a body.
+    if title.is_none() && body.is_empty() {
+        return Err(CliError::Runtime(
+            "an interaction needs a title or body text".into(),
+        ));
+    }
     let hash = content_hash(&body);
     if let Some(existing) = find_duplicate_interaction(conn, &hash, args.external_id)? {
         if !args.allow_duplicate {
@@ -673,7 +689,7 @@ pub fn add_interaction(
         params![
             id,
             args.kind,
-            args.title,
+            title,
             body,
             args.occurred_at,
             normalize_optional(args.external_id),
