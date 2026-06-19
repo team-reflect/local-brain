@@ -90,12 +90,12 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
   }
 
   function startNewChat(): void {
+    const nextConversationId = createChatId()
     setDraft('')
     setMessages([])
+    setDraftConversationId(nextConversationId)
     if (conversationId) {
       navigate({ kind: 'ask' })
-    } else {
-      setDraftConversationId(createChatId())
     }
   }
 
