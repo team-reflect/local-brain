@@ -60,8 +60,6 @@ Implementation conventions:
   hosted Local Brain model proxy for MVP.
 - Store model keys, credentials, and integration secrets in the OS keychain, not in
   SQLite, markdown, Git, logs, or local config files.
-- Treat data portability as a product constraint. Export and backup paths should be
-  planned alongside durable schema decisions.
 - Keep the UI keyboard-friendly, sparse, and oriented around browsing, correction,
   inspection, Ask, and demonstration. Do not add surfaces that compete with the
   agent-operated workflow.
