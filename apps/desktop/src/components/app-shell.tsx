@@ -3,7 +3,6 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
-  FolderKanban,
   ListTodo,
   Search,
   Settings,
@@ -19,6 +18,7 @@ import { BrainSwitcher } from './brain-switcher'
 import { CommandPalette } from './command-palette'
 import { FirstRun } from './first-run'
 import { RouteContent } from './route-content'
+import { SidebarProjects } from './sidebar-projects'
 import { WindowDragRegion } from './window-drag-region'
 
 interface NavItem {
@@ -32,7 +32,6 @@ const NAV: readonly NavItem[] = [
   { section: 'today', label: 'Today', icon: CalendarDays, route: { kind: 'today' } },
   { section: 'tasks', label: 'Tasks', icon: ListTodo, route: { kind: 'tasks' } },
   { section: 'network', label: 'Network', icon: Users, route: { kind: 'network', tab: 'graph' } },
-  { section: 'projects', label: 'Projects', icon: FolderKanban, route: { kind: 'projects' } },
 ]
 
 const HISTORY_BUTTON_CLASS =
@@ -82,6 +81,7 @@ export function AppShell(): ReactNode {
               </button>
             )
           })}
+          <SidebarProjects activeSection={activeSection} route={route} />
         </nav>
         <div className="mt-auto flex items-center gap-1 px-4 pt-4">
           <BrainSwitcher />
