@@ -12,9 +12,7 @@ use super::identity::{
     ExternalIdentityWrite,
 };
 use super::person_import::{assess_person_import, PersonImportAssessment};
-use super::text::{
-    normalize_email, normalize_many, normalize_name, normalize_optional, normalize_phone,
-};
+use super::text::{normalize_email, normalize_name, normalize_optional, normalize_phone};
 use crate::error::CliError;
 use crate::id::new_id;
 use crate::output::print_json;
@@ -35,13 +33,54 @@ pub struct AddPersonArgs<'a> {
     pub allow_duplicate: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EmailHandle {
+    email: String,
+    normalized: String,
+}
+
+fn normalize_email_handles<'a>(raw: impl IntoIterator<Item = &'a str>) -> Vec<EmailHandle> {
+    let mut values = Vec::new();
+    for item in raw {
+        let Some(normalized) = normalize_email(Some(item)) else {
+            continue;
+        };
+        if values
+            .iter()
+            .any(|existing: &EmailHandle| existing.normalized == normalized)
+        {
+            continue;
+        }
+        values.push(EmailHandle {
+            email: item.trim().to_string(),
+            normalized,
+        });
+    }
+    values
+}
+
+fn normalize_values<'a>(
+    raw: impl IntoIterator<Item = &'a str>,
+    normalize: fn(Option<&str>) -> Option<String>,
+) -> Vec<String> {
+    let mut values = Vec::new();
+    for item in raw {
+        if let Some(value) = normalize(Some(item)) {
+            if !values.iter().any(|existing| existing == &value) {
+                values.push(value);
+            }
+        }
+    }
+    values
+}
+
 /// Find an active person matching by any normalized email, else by normalized
 /// name (only when the candidate carries no email handle, so two distinct people
 /// who share a name but differ by email are not merged).
 fn find_duplicate_person(
     conn: &Connection,
     full_name: &str,
-    emails: &[String],
+    emails: &[EmailHandle],
 ) -> Result<Option<String>, CliError> {
     for email in emails {
         let id = conn
@@ -56,7 +95,7 @@ fn find_duplicate_person(
                    )
                  ORDER BY p.created_at ASC
                  LIMIT 1",
-                params![email],
+                params![email.normalized],
                 |row| row.get::<_, String>(0),
             )
             .ok();
@@ -143,7 +182,7 @@ fn enrich_duplicate_person(
     conn: &Connection,
     id: &str,
     args: &AddPersonArgs,
-    emails: &[String],
+    emails: &[EmailHandle],
     phones: &[String],
 ) -> Result<bool, CliError> {
     let preferred_name = normalize_optional(args.preferred_name);
@@ -153,7 +192,9 @@ fn enrich_duplicate_person(
     // leave the normalized table clean while stamping someone else's address onto
     // this person's primary_email. See email_owned_by_other.
     let primary_email = match emails.first() {
-        Some(email) if !email_owned_by_other(conn, id, email)? => Some(email.clone()),
+        Some(email) if !email_owned_by_other(conn, id, &email.normalized)? => {
+            Some(email.email.clone())
+        }
         _ => None,
     };
     let primary_phone = phones.first().cloned();
@@ -237,18 +278,19 @@ fn enrich_duplicate_person_email(
     id: &str,
     email: &str,
 ) -> Result<bool, CliError> {
-    let email = normalize_email(Some(email));
+    let normalized_email = normalize_email(Some(email));
+    let display_email = normalize_optional(Some(email));
     let current = conn.query_row(
         "SELECT primary_email FROM people WHERE id = ?1",
         params![id],
         |row| row.get::<_, Option<String>>(0),
     )?;
-    if !has_text(&email) || !is_blank(&current) {
+    if !has_text(&normalized_email) || !is_blank(&current) {
         return Ok(false);
     }
     // Mirror enrich_duplicate_person / insert_person_handles: never stamp an
     // address another active person already owns onto this blank primary_email.
-    if let Some(addr) = email.as_deref() {
+    if let Some(addr) = normalized_email.as_deref() {
         if email_owned_by_other(conn, id, addr)? {
             return Ok(false);
         }
@@ -258,7 +300,7 @@ fn enrich_duplicate_person_email(
          SET primary_email = ?1,
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
          WHERE id = ?2",
-        params![email, id],
+        params![display_email, id],
     )?;
     Ok(true)
 }
@@ -266,7 +308,7 @@ fn enrich_duplicate_person_email(
 fn insert_person_handles(
     conn: &Connection,
     person_id: &str,
-    emails: &[String],
+    emails: &[EmailHandle],
     phones: &[String],
     source_id: Option<&str>,
 ) -> Result<(), CliError> {
@@ -303,7 +345,7 @@ fn insert_person_handles(
         // could attach an address another active person already owns, breaking
         // the one-person-per-email invariant find_duplicate_person enforces.
         // Skip any email a *different* active person already holds.
-        if email_owned_by_other(conn, person_id, email)? {
+        if email_owned_by_other(conn, person_id, &email.normalized)? {
             continue;
         }
         // Compare against the denormalized primary case-insensitively: imported
@@ -311,7 +353,9 @@ fn insert_person_handles(
         // raw string equality would fail to sync the matching handle to primary.
         let is_primary_handle = !has_primary_email
             && match primary_email.as_deref() {
-                Some(primary) => normalize_email(Some(primary)).as_deref() == Some(email.as_str()),
+                Some(primary) => {
+                    normalize_email(Some(primary)).as_deref() == Some(email.normalized.as_str())
+                }
                 None => index == 0,
             };
         let is_primary = i64::from(is_primary_handle);
@@ -319,7 +363,14 @@ fn insert_person_handles(
             "INSERT OR IGNORE INTO person_emails
              (id, person_id, email, normalized_email, is_primary, source_id)
              VALUES (?1,?2,?3,?4,?5,?6)",
-            params![new_id(), person_id, email, email, is_primary, source_id],
+            params![
+                new_id(),
+                person_id,
+                &email.email,
+                &email.normalized,
+                is_primary,
+                source_id
+            ],
         )?;
     }
     let has_primary_phone: bool = conn.query_row(
@@ -364,8 +415,8 @@ pub fn add_person(conn: &mut Connection, json: bool, args: AddPersonArgs) -> Res
     if full_name.is_empty() {
         return Err(CliError::Runtime("--full-name cannot be blank".into()));
     }
-    let emails = normalize_many(args.emails.iter().copied(), normalize_email);
-    let phones = normalize_many(args.phones.iter().copied(), normalize_optional);
+    let emails = normalize_email_handles(args.emails.iter().copied());
+    let phones = normalize_values(args.phones.iter().copied(), normalize_optional);
     let source_id = source_id(conn, args.source_slug)?;
     let kind = external_kind(args.external_kind);
 
@@ -416,7 +467,9 @@ pub fn add_person(conn: &mut Connection, json: bool, args: AddPersonArgs) -> Res
     // one-person-per-email invariant the duplicate/enrichment paths enforce.
     // See email_owned_by_other.
     let primary_email = match emails.first() {
-        Some(email) if !email_owned_by_other(&tx, &id, email)? => Some(email.clone()),
+        Some(email) if !email_owned_by_other(&tx, &id, &email.normalized)? => {
+            Some(email.email.clone())
+        }
         _ => None,
     };
     tx.execute(
@@ -470,7 +523,7 @@ pub fn add_person_from_email(
         return report_person_assessment(json, None, false, false, &assessment);
     }
     let source_id = source_id(conn, args.source_slug)?;
-    let emails = vec![assessment.email.clone()];
+    let emails = normalize_email_handles([args.email]);
     let existing_by_external = find_external_identity(
         conn,
         "person",
@@ -513,7 +566,7 @@ pub fn add_person_from_email(
         params![
             id,
             &assessment.normalized_name,
-            &assessment.email,
+            emails.first().map(|email| email.email.as_str()),
             format!(
                 "Imported from untrusted email display name: {}",
                 args.full_name
@@ -749,6 +802,38 @@ mod tests {
     }
 
     #[test]
+    fn email_handles_preserve_display_value_and_store_normalized_lookup() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Robin Spencer",
+                vec!["  Robin.Spencer@Example.COM  "],
+                vec![],
+                None,
+            ),
+        )
+        .unwrap();
+        let person_id = single_person_id(&conn, "Robin Spencer");
+
+        let (primary_email, email, normalized_email): (Option<String>, String, String) = conn
+            .query_row(
+                "SELECT p.primary_email, pe.email, pe.normalized_email
+                 FROM people p
+                 JOIN person_emails pe ON pe.person_id = p.id
+                 WHERE p.id = ?1",
+                params![person_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+
+        assert_eq!(primary_email.as_deref(), Some("Robin.Spencer@Example.COM"));
+        assert_eq!(email, "Robin.Spencer@Example.COM");
+        assert_eq!(normalized_email, "robin.spencer@example.com");
+    }
+
+    #[test]
     fn legacy_denormalized_primary_blocks_handle_promotion() {
         // A legacy person can carry only the denormalized people.primary_email /
         // people.primary_phone columns with no is_primary row in person_emails /
@@ -767,7 +852,7 @@ mod tests {
         insert_person_handles(
             &conn,
             &person_id,
-            &["robin.work@example.com".to_string()],
+            &normalize_email_handles(["robin.work@example.com"]),
             &["+15550200".to_string()],
             None,
         )
@@ -816,7 +901,7 @@ mod tests {
         insert_person_handles(
             &conn,
             &person_id,
-            &["robin@example.com".to_string()],
+            &normalize_email_handles(["robin@example.com"]),
             &["+15550100100".to_string()],
             None,
         )

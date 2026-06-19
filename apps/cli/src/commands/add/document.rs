@@ -40,14 +40,51 @@ pub fn add_document(
             return report_record(json, "document", &existing, true, 0);
         }
     }
+    let body_text = if body.is_empty() {
+        None
+    } else {
+        Some(body.as_str())
+    };
     let id = new_id();
     let tx = conn.transaction()?;
     tx.execute(
         "INSERT INTO documents (id, title, kind, body_text, content_hash) VALUES (?1,?2,?3,?4,?5)",
-        params![id, title, normalize_optional(args.kind), body, hash],
+        params![id, title, normalize_optional(args.kind), body_text, hash],
     )?;
     let count = insert_chunks(&tx, "document", &id, &body)?;
     insert_links(&tx, "document", &id, &args.links)?;
     tx.commit()?;
     report_record(json, "document", &id, false, count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn title_only_document_stores_null_body_text() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+
+        add_document(
+            &mut conn,
+            true,
+            AddDocumentArgs {
+                title: Some("Project note"),
+                kind: None,
+                body: "   \n\t ".to_string(),
+                links: vec![],
+                allow_duplicate: false,
+            },
+        )
+        .unwrap();
+
+        let body_text: Option<String> = conn
+            .query_row(
+                "SELECT body_text FROM documents WHERE title = ?1",
+                params!["Project note"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(body_text, None);
+    }
 }

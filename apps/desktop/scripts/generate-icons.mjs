@@ -19,6 +19,8 @@ const tauriIconPath = path.resolve(appDir, "src-tauri/icons/icon.icns");
 const ictoolPath = "/Applications/Xcode.app/Contents/Applications/Icon Composer.app/Contents/Executables/ictool";
 const iconutilPath = "/usr/bin/iconutil";
 const sipsPath = "/usr/bin/sips";
+const isMac = process.platform === "darwin";
+const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 
 const macFinalSizes = [
   { finalSize: 16, renderSize: 14, names: ["icon_16x16.png"] },
@@ -76,13 +78,17 @@ if (!existsSync(sourcePath)) {
   throw new Error(`Missing app icon source: ${sourcePath}`);
 }
 
+// Tauri generates the cross-platform set. macOS is replaced below because the
+// platform expects a smaller rendered icon with transparent margins.
+run(pnpmCommand, ["tauri", "icon", sourcePath]);
+
+if (!isMac) {
+  process.exit(0);
+}
+
 requireFile(ictoolPath, "Install Xcode with Icon Composer.");
 requireFile(iconutilPath);
 requireFile(sipsPath);
-
-// Tauri generates the cross-platform set. macOS is replaced below because the
-// platform expects a smaller rendered icon with transparent margins.
-run("pnpm", ["tauri", "icon", sourcePath]);
 
 const tempDir = mkdtempSync(path.join(os.tmpdir(), "local-brain-icon-"));
 const iconPackagePath = path.join(tempDir, "LocalBrain.icon");

@@ -420,7 +420,7 @@ fn add_person_dedupes_and_returns_contact_fields() {
     let shown = run_json(&db, &["--json", "show", "person", id]);
     assert_eq!(shown["title"], "Maya Chen");
     assert_eq!(shown["preferredName"], "Maya");
-    assert_eq!(shown["primaryEmail"], "maya@example.com");
+    assert_eq!(shown["primaryEmail"], "MAYA@EXAMPLE.COM");
     assert_eq!(shown["primaryPhone"], "+1 555 0100");
     assert_eq!(shown["subtitle"], "Designer");
     assert_eq!(shown["location"], "Austin");
@@ -456,7 +456,7 @@ fn add_person_dedupes_and_returns_contact_fields() {
     assert_eq!(enriched["id"], sparse["id"]);
     let enriched_id = sparse["id"].as_str().unwrap();
     let enriched_shown = run_json(&db, &["--json", "show", "person", enriched_id]);
-    assert_eq!(enriched_shown["primaryEmail"], "jordan@example.com");
+    assert_eq!(enriched_shown["primaryEmail"], "JORDAN@EXAMPLE.COM");
     assert_eq!(enriched_shown["primaryPhone"], "+1 555 0200");
     assert_eq!(enriched_shown["subtitle"], "Investor");
     assert_eq!(enriched_shown["location"], "New York");
