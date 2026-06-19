@@ -13,6 +13,7 @@ import {
   archiveTask,
   completeTask,
   createConversation,
+  createDocument,
   createInteraction,
   createPerson,
   createTask,
@@ -37,6 +38,9 @@ import {
   listTasks,
   quickSearch,
   seedDemoData,
+  updateDocument,
+  updateInteraction,
+  ValidationError,
 } from '@local-brain/core'
 import { freshDatabase, installSqliteBridge } from './sqlite-harness.mjs'
 
@@ -248,5 +252,100 @@ describe('04a ingestion (real SQLite round-trip)', () => {
     ).rejects.toBeDefined()
     // Neither the document nor its chunks persisted.
     expect(await listDocuments()).toHaveLength(0)
+  })
+
+  it('rejects an ingested document whose paste is only whitespace', async () => {
+    await expect(ingestDocument({ title: '   ', bodyText: '  \n\n ' })).rejects.toBeInstanceOf(
+      ValidationError,
+    )
+    expect(await listDocuments()).toHaveLength(0)
+  })
+
+  it('keeps a title-only ingested document and stores a null body', async () => {
+    const result = await ingestDocument({ title: '  Header   only  ', bodyText: '   ' })
+    const doc = await getDocument(result.id)
+    expect(doc?.title).toBe('Header only') // squished, not just trimmed
+    expect(doc?.bodyText).toBeNull()
+    expect(result.chunkCount).toBe(0)
+  })
+
+  it('rejects an ingested interaction whose paste is only whitespace', async () => {
+    await expect(
+      ingestInteraction({ kind: 'note', title: '  ', bodyText: ' \n ' }),
+    ).rejects.toBeInstanceOf(ValidationError)
+    expect(await listInteractions()).toHaveLength(0)
+  })
+
+  it('validates a whitespace-only duplicate document instead of returning isDuplicate', async () => {
+    // A title-only document stores a null body, so its content hash is the
+    // empty-body hash. A later whitespace-only paste hashes to the same value,
+    // but must still be rejected by the write contract rather than short-circuit
+    // to { isDuplicate: true }.
+    await ingestDocument({ title: 'Header only', bodyText: '   ' })
+    await expect(ingestDocument({ title: '   ', bodyText: '  \n\n ' })).rejects.toBeInstanceOf(
+      ValidationError,
+    )
+    expect(await listDocuments()).toHaveLength(1)
+
+    // A valid duplicate (real body that already exists) still dedupes.
+    const first = await ingestDocument({ title: 'Note', bodyText: 'Same content.' })
+    const dup = await ingestDocument({ title: 'Note (again)', bodyText: 'Same content.' })
+    expect(dup.isDuplicate).toBe(true)
+    expect(dup.id).toBe(first.id)
+  })
+
+  it('validates a whitespace-only duplicate interaction instead of returning isDuplicate', async () => {
+    await ingestInteraction({ kind: 'note', title: 'Header only', bodyText: '   ' })
+    await expect(
+      ingestInteraction({ kind: 'note', title: '  ', bodyText: ' \n ' }),
+    ).rejects.toBeInstanceOf(ValidationError)
+    expect(await listInteractions()).toHaveLength(1)
+
+    // A valid duplicate (real body that already exists) still dedupes.
+    const first = await ingestInteraction({ kind: 'note', title: 'Sync', bodyText: 'Same body.' })
+    const dup = await ingestInteraction({
+      kind: 'note',
+      title: 'Sync (again)',
+      bodyText: 'Same body.',
+    })
+    expect(dup.isDuplicate).toBe(true)
+    expect(dup.id).toBe(first.id)
+  })
+
+  it('refuses an update that clears the only remaining title or body', async () => {
+    // Body-only document: clearing the body would leave it empty.
+    const bodyOnly = await createDocument({ bodyText: 'The whole story.' })
+    await expect(updateDocument(bodyOnly, { bodyText: '   ' })).rejects.toBeInstanceOf(
+      ValidationError,
+    )
+    expect((await getDocument(bodyOnly))?.bodyText).toBe('The whole story.')
+
+    // Title-only document: clearing the title would leave it empty.
+    const titleOnly = await createDocument({ title: 'Just a title' })
+    await expect(updateDocument(titleOnly, { title: '  ' })).rejects.toBeInstanceOf(ValidationError)
+    expect((await getDocument(titleOnly))?.title).toBe('Just a title')
+  })
+
+  it('allows clearing one field when the patch supplies the other', async () => {
+    const doc = await createDocument({ title: 'Old title', bodyText: 'Old body.' })
+    // Clearing the title is fine because a body remains on the row.
+    await updateDocument(doc, { title: '   ' })
+    let stored = await getDocument(doc)
+    expect(stored?.title).toBeNull()
+    expect(stored?.bodyText).toBe('Old body.')
+
+    // Clearing the body is fine when the same patch sets a title.
+    await updateDocument(doc, { title: 'Fresh title', bodyText: '  ' })
+    stored = await getDocument(doc)
+    expect(stored?.title).toBe('Fresh title')
+    expect(stored?.bodyText).toBeNull()
+  })
+
+  it('refuses an interaction update that clears its only content', async () => {
+    const interaction = await createInteraction({ kind: 'note', bodyText: 'Said hello.' })
+    await expect(
+      updateInteraction(interaction, { bodyText: '   ' }),
+    ).rejects.toBeInstanceOf(ValidationError)
+    expect((await getInteraction(interaction))?.bodyText).toBe('Said hello.')
   })
 })

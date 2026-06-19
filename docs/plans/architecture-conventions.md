@@ -88,20 +88,45 @@ and app-managed assets are durable user data, not a disposable projection.
 
 ## Code Organization
 
-Business logic belongs in `packages/core/src/actions/<domain>/`.
+Per-record business logic lives in `packages/core/src/domains/<domain>/` (people,
+organizations, projects, tasks, documents, interactions, memories, chat,
+settings, relations, relationships, brains, citations, maintenance). Cross-cutting
+engines sit beside it at the package root: `retrieval/`, `extraction/`, `ingest/`,
+`ai/`, `reports/`, `graph/`, `search/`, `embeddings/`, plus the `db/`, `ipc/`, and
+`text/` infrastructure.
 
-Use the Reflect/Picardo action vocabulary when it helps:
+Use the Reflect/Picardo action vocabulary inside a domain when it helps:
 
 - `getters.ts`: reads and view-model assembly over Kysely/IPC.
-- `setters.ts`: durable mutations, usually calling typed DB write actions.
-- `validators.ts`: zod validation and product preconditions.
-- `checkers.ts`: capability/model-boundary checks.
+- `setters.ts`: durable mutations through the shared write helpers.
+- `validators.ts`: normalization + product preconditions (see Write Boundary).
 - domain files: complex engines such as retrieval, extraction, graph assembly, or daily
   brief planning.
-- `index.ts`: public domain exports.
 
 Apply this pattern as needed, not as ceremony. A small domain can start with only
 `getters.ts` and tests.
+
+### Write Boundary
+
+Record writes go through one consistent path so agent-written data is clean
+regardless of entry point:
+
+- `text/normalize.ts` owns the field normalizers. *Match* normalizers
+  (`normalizeName` / `normalizeEmail` / `normalizeDomain`) fold case and
+  punctuation for duplicate-detection keys; *storage* normalizers (`squish`,
+  `trimToNull`) clean a value for durable storage while preserving its display
+  form. The deterministic extraction matcher re-exports the match normalizers so
+  the write boundary and matching always agree.
+- Each record domain has a `validators.ts` exporting pure
+  `validateNew<Record>` / `validate<Record>Patch` functions that normalize string
+  fields and enforce preconditions SQLite cannot (a non-empty name/title; a
+  document or interaction needs a title or body). They throw a `ValidationError`
+  (`kind: 'validation'` on the shared `AppError` contract).
+- `db/records.ts` provides the shared `insertRecord` / `updateRecord` /
+  `archiveRecord` helpers (id generation, `updated_at`/`archived_at` stamping) so
+  no domain re-implements that plumbing.
+- The `brain` CLI mirrors the storage normalizers and the same preconditions in
+  Rust (`apps/cli/src/commands/add.rs`), the documented twin of the TS boundary.
 
 React components should call core actions through hooks. They should not contain SQL,
 AI/provider logic, extraction logic, or direct Tauri `invoke` calls.

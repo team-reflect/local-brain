@@ -22,6 +22,19 @@ fn normalize_optional(raw: Option<&str>) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+/// Collapse internal whitespace runs to single spaces and trim, preserving case.
+/// The Rust twin of core `squish` (`packages/core/src/text/normalize.ts`), used
+/// for short display labels like titles so the CLI and app store them identically.
+fn squish(raw: &str) -> String {
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Normalize a title to its storage form (squish), collapsing blank to `None`.
+/// Mirrors the core `labelOrNull` used by `validateNewDocument`/`Interaction`.
+fn normalize_title(raw: Option<&str>) -> Option<String> {
+    raw.map(squish).filter(|value| !value.is_empty())
+}
+
 fn normalize_email(raw: Option<&str>) -> Option<String> {
     normalize_optional(raw).map(|value| value.to_lowercase())
 }
@@ -1433,6 +1446,14 @@ pub fn add_document(
     args: AddDocumentArgs,
 ) -> Result<(), CliError> {
     let body = normalize_text(&args.body);
+    let title = normalize_title(args.title);
+    // Parity with the core `validateNewDocument`: both columns are nullable in
+    // SQLite, so reject a document with neither a title nor a body.
+    if title.is_none() && body.is_empty() {
+        return Err(CliError::Runtime(
+            "a document needs a title or body text".into(),
+        ));
+    }
     let hash = content_hash(&body);
     if let Some(existing) = find_duplicate(conn, "documents", &hash)? {
         if !args.allow_duplicate {
@@ -1443,7 +1464,7 @@ pub fn add_document(
     let tx = conn.transaction()?;
     tx.execute(
         "INSERT INTO documents (id, title, kind, body_text, content_hash) VALUES (?1,?2,?3,?4,?5)",
-        params![id, args.title, args.kind, body, hash],
+        params![id, title, normalize_optional(args.kind), body, hash],
     )?;
     let count = insert_chunks(&tx, "document", &id, &body)?;
     insert_links(&tx, "document", &id, &args.links)?;
@@ -1655,6 +1676,14 @@ pub fn add_interaction(
     args: AddInteractionArgs,
 ) -> Result<(), CliError> {
     let body = normalize_text(&args.body);
+    let title = normalize_title(args.title);
+    // Parity with the core `validateNewInteraction`: reject one with neither a
+    // title nor a body.
+    if title.is_none() && body.is_empty() {
+        return Err(CliError::Runtime(
+            "an interaction needs a title or body text".into(),
+        ));
+    }
     let hash = content_hash(&body);
     let source_id = source_id(conn, args.source_slug)?;
     let existing_by_external = find_external_identity(
@@ -1722,7 +1751,7 @@ pub fn add_interaction(
         params![
             id,
             args.kind,
-            args.title,
+            title,
             body,
             args.occurred_at,
             normalize_optional(args.external_id),

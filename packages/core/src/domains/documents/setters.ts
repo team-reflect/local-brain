@@ -1,33 +1,27 @@
 import type { Documents } from '@local-brain/db'
-import { db } from '../../db/client'
-import { execute } from '../../db/commands'
-import { newId } from '../../db/id'
-import type { NewRecord, RecordPatch } from '../../db/records'
-import { nowIso } from '../../db/time'
+import {
+  archiveRecord,
+  assertTitleOrBody,
+  insertRecord,
+  updateRecord,
+  type NewRecord,
+  type RecordPatch,
+} from '../../db/records'
+import { validateNewDocument, validateDocumentPatch } from './validators'
 
 export type NewDocument = NewRecord<Documents>
 export type DocumentPatch = RecordPatch<Documents>
 
-export async function createDocument(input: NewDocument): Promise<string> {
-  const id = newId()
-  await execute(db.insertInto('documents').values({ ...input, id }))
-  return id
+export function createDocument(input: NewDocument): Promise<string> {
+  return insertRecord('documents', validateNewDocument(input))
 }
 
-export function updateDocument(id: string, patch: DocumentPatch): Promise<number> {
-  return execute(
-    db
-      .updateTable('documents')
-      .set({ ...patch, updatedAt: nowIso() })
-      .where('id', '=', id),
-  )
+export async function updateDocument(id: string, patch: DocumentPatch): Promise<number> {
+  const clean = validateDocumentPatch(patch)
+  await assertTitleOrBody('documents', id, clean, 'a document')
+  return updateRecord('documents', id, clean)
 }
 
 export function archiveDocument(id: string): Promise<number> {
-  return execute(
-    db
-      .updateTable('documents')
-      .set({ archivedAt: nowIso(), updatedAt: nowIso() })
-      .where('id', '=', id),
-  )
+  return archiveRecord('documents', id)
 }

@@ -29,13 +29,14 @@ fn truncate(label: Option<String>, fallback: &str) -> String {
 fn collect(
     conn: &Connection,
     sql: &str,
+    sql_params: &[&dyn rusqlite::ToSql],
     kind: &str,
     nodes: &mut Vec<Value>,
     truncated: &mut Vec<String>,
 ) -> Result<(), CliError> {
     let mut stmt = conn.prepare(sql)?;
     let rows: Vec<(String, Option<String>)> = stmt
-        .query_map([], |row| {
+        .query_map(sql_params, |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -77,14 +78,23 @@ pub fn graph(conn: &Connection, json: bool) -> Result<(), CliError> {
         nodes.push(json!({ "id": id, "kind": "self", "label": truncate(label, "You") }));
     }
 
-    let exclude_self = self_id
-        .as_ref()
-        .map(|id| format!("AND id <> '{}'", id.replace('\'', "''")))
-        .unwrap_or_default();
+    // Exclude the self row from the people nodes with a bound parameter rather
+    // than interpolating the id into the SQL string.
+    let (people_sql, people_params): (String, Vec<&dyn rusqlite::ToSql>) = match &self_id {
+        Some(id) => (
+            format!("SELECT id, full_name FROM people WHERE archived_at IS NULL AND is_self = 0 AND id <> ?1 LIMIT {NODE_CAP}"),
+            vec![id],
+        ),
+        None => (
+            format!("SELECT id, full_name FROM people WHERE archived_at IS NULL AND is_self = 0 LIMIT {NODE_CAP}"),
+            Vec::new(),
+        ),
+    };
 
     collect(
         conn,
-        &format!("SELECT id, full_name FROM people WHERE archived_at IS NULL AND is_self = 0 {exclude_self} LIMIT {NODE_CAP}"),
+        &people_sql,
+        &people_params,
         "person",
         &mut nodes,
         &mut truncated,
@@ -92,6 +102,7 @@ pub fn graph(conn: &Connection, json: bool) -> Result<(), CliError> {
     collect(
         conn,
         &format!("SELECT id, name FROM organizations WHERE archived_at IS NULL LIMIT {NODE_CAP}"),
+        &[],
         "organization",
         &mut nodes,
         &mut truncated,
@@ -99,6 +110,7 @@ pub fn graph(conn: &Connection, json: bool) -> Result<(), CliError> {
     collect(
         conn,
         &format!("SELECT id, name FROM projects WHERE archived_at IS NULL LIMIT {NODE_CAP}"),
+        &[],
         "project",
         &mut nodes,
         &mut truncated,
@@ -106,6 +118,7 @@ pub fn graph(conn: &Connection, json: bool) -> Result<(), CliError> {
     collect(
         conn,
         &format!("SELECT id, title FROM tasks WHERE archived_at IS NULL LIMIT {NODE_CAP}"),
+        &[],
         "task",
         &mut nodes,
         &mut truncated,

@@ -1,10 +1,16 @@
 import type { Interactions } from '@local-brain/db'
 import { db } from '../../db/client'
-import { batch, execute } from '../../db/commands'
+import { batch } from '../../db/commands'
 import { newId } from '../../db/id'
-import type { NewRecord, RecordPatch } from '../../db/records'
-import { nowIso } from '../../db/time'
+import {
+  archiveRecord,
+  assertTitleOrBody,
+  updateRecord,
+  type NewRecord,
+  type RecordPatch,
+} from '../../db/records'
 import { recomputeRelationshipIntelligence } from '../relationships/recompute'
+import { validateNewInteraction, validateInteractionPatch } from './validators'
 
 export type NewInteraction = NewRecord<Interactions>
 export type InteractionPatch = RecordPatch<Interactions>
@@ -95,6 +101,7 @@ export async function createInteraction(
   input: NewInteraction,
   participants: readonly InteractionParticipantInput[] = [],
 ): Promise<string> {
+  const values = validateNewInteraction(input)
   const id = newId()
   const seen = new Set<string>()
   const participantRows = participants
@@ -107,7 +114,7 @@ export async function createInteraction(
       return true
     })
   const statements = [
-    db.insertInto('interactions').values({ ...input, id }),
+    db.insertInto('interactions').values({ ...values, id }),
     ...participantRows.map((row) => db.insertInto('interactionParticipants').values(row)),
   ]
   await batch(statements)
@@ -122,20 +129,12 @@ export async function createInteraction(
   return id
 }
 
-export function updateInteraction(id: string, patch: InteractionPatch): Promise<number> {
-  return execute(
-    db
-      .updateTable('interactions')
-      .set({ ...patch, updatedAt: nowIso() })
-      .where('id', '=', id),
-  )
+export async function updateInteraction(id: string, patch: InteractionPatch): Promise<number> {
+  const clean = validateInteractionPatch(patch)
+  await assertTitleOrBody('interactions', id, clean, 'an interaction')
+  return updateRecord('interactions', id, clean)
 }
 
 export function archiveInteraction(id: string): Promise<number> {
-  return execute(
-    db
-      .updateTable('interactions')
-      .set({ archivedAt: nowIso(), updatedAt: nowIso() })
-      .where('id', '=', id),
-  )
+  return archiveRecord('interactions', id)
 }

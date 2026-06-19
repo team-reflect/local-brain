@@ -1,4 +1,5 @@
 import { db } from '../db/client'
+import { normalizeDomain, normalizeEmail, normalizeName } from '../text/normalize'
 import type { ExtractedOrganization, ExtractedPerson, ExtractedProject } from './contracts'
 
 /**
@@ -10,37 +11,13 @@ import type { ExtractedOrganization, ExtractedPerson, ExtractedProject } from '.
  * spawning a duplicate) or create a new one. No model is involved — matching is
  * exact-key first, then normalized-name, which is conservative on purpose:
  * fuzzy/embedding matching is a deliberate follow-up.
+ *
+ * The field normalizers it matches on now live in `../text/normalize` so the
+ * write boundary (domain validators) and the matcher fold identical keys; they
+ * are re-exported here for the existing `@local-brain/core` import surface.
  */
 
-/** Lowercase, collapse internal whitespace, drop surrounding punctuation. */
-export function normalizeName(name: string): string {
-  return name
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/\p{M}/gu, '') // strip combining diacritics
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-/** Normalize an email for comparison (trim + lowercase). */
-export function normalizeEmail(email: string | null | undefined): string | null {
-  if (!email) return null
-  const trimmed = email.trim().toLowerCase()
-  return trimmed.length > 0 ? trimmed : null
-}
-
-/** Normalize a domain (strip scheme, leading `www.`, trailing slash, lowercase). */
-export function normalizeDomain(domain: string | null | undefined): string | null {
-  if (!domain) return null
-  const trimmed = domain
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//, '')
-    .replace(/^www\./, '')
-    .replace(/\/.*$/, '')
-  return trimmed.length > 0 ? trimmed : null
-}
+export { normalizeDomain, normalizeEmail, normalizeName } from '../text/normalize'
 
 export interface PersonCandidate {
   id: string
