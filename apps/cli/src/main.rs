@@ -19,7 +19,9 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use serde_json::json;
 
-use commands::{add, graph as graph_cmd, parse_links, read, report, resolve_text, source};
+use commands::{
+    add, graph as graph_cmd, parse_evidence_refs, parse_links, read, report, resolve_text, source,
+};
 use error::CliError;
 use output::{diag, print_json};
 
@@ -274,6 +276,9 @@ struct AddTaskArgs {
     due_at: Option<String>,
     #[arg(long = "link", value_name = "KIND:ID")]
     links: Vec<String>,
+    /// Exact source chunk evidence, e.g. `interaction:01ABC#0`.
+    #[arg(long = "evidence", value_name = "DOCUMENT_OR_INTERACTION:ID#CHUNK")]
+    evidence: Vec<String>,
 }
 
 #[derive(Parser)]
@@ -284,6 +289,9 @@ struct RememberArgs {
     claim: String,
     #[arg(long = "link", value_name = "KIND:ID")]
     links: Vec<String>,
+    /// Exact source chunk evidence, e.g. `interaction:01ABC#0`.
+    #[arg(long = "evidence", value_name = "DOCUMENT_OR_INTERACTION:ID#CHUNK")]
+    evidence: Vec<String>,
 }
 
 #[derive(Parser)]
@@ -501,6 +509,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
                         due_at: a.due_at.as_deref(),
                         project_id: None,
                         links: parse_links(&a.links)?,
+                        evidence: parse_evidence_refs(&a.evidence)?,
                     },
                 ),
             }
@@ -514,6 +523,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
                     kind: &a.kind,
                     claim: &a.claim,
                     links: parse_links(&a.links)?,
+                    evidence: parse_evidence_refs(&a.evidence)?,
                 },
             )
         }

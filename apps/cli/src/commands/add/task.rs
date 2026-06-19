@@ -4,7 +4,8 @@
 use rusqlite::{params, Connection};
 use serde_json::json;
 
-use crate::commands::{LinkKind, LinkRef};
+use super::links::insert_evidence_refs;
+use crate::commands::{EvidenceRef, LinkKind, LinkRef};
 use crate::error::CliError;
 use crate::id::new_id;
 use crate::output::print_json;
@@ -15,6 +16,7 @@ pub struct AddTaskArgs<'a> {
     pub due_at: Option<&'a str>,
     pub project_id: Option<String>,
     pub links: Vec<LinkRef>,
+    pub evidence: Vec<EvidenceRef>,
 }
 
 pub fn add_task(conn: &mut Connection, json: bool, args: AddTaskArgs) -> Result<(), CliError> {
@@ -73,9 +75,10 @@ pub fn add_task(conn: &mut Connection, json: bool, args: AddTaskArgs) -> Result<
             }
         }
     }
+    insert_evidence_refs(&tx, "task", &id, &args.evidence)?;
     tx.commit()?;
     if json {
-        print_json(&json!({ "kind": "task", "id": id }))
+        print_json(&json!({ "kind": "task", "id": id, "evidence": args.evidence.len() }))
     } else {
         println!("task {id}");
         Ok(())

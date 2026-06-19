@@ -935,6 +935,44 @@ fn add_interaction_replace_body_updates_source_backed_record_and_chunks() {
 }
 
 #[test]
+fn granola_interaction_reports_post_analysis_requirement() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    run_json(
+        &db,
+        &[
+            "--json", "source", "ensure", "--slug", "granola", "--name", "Granola",
+        ],
+    );
+
+    let interaction = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Granola transcript",
+            "--text",
+            "Raw transcript body.",
+            "--summary",
+            "Short summary.",
+            "--source",
+            "granola",
+            "--external-id",
+            "meeting-analysis-1",
+        ],
+    );
+
+    assert_eq!(interaction["postAnalysisRequired"], true);
+    let checklist = interaction["postAnalysisChecklist"].as_array().unwrap();
+    assert!(checklist.iter().any(|item| item == "people"));
+    assert!(checklist.iter().any(|item| item == "followUpTasks"));
+}
+
+#[test]
 fn add_interaction_replace_body_rejects_empty_body() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
@@ -1687,6 +1725,7 @@ fn add_task_links_to_origin_interaction_and_project() {
         &["--json", "add", "project", "--name", "Transcript Follow-up"],
     );
     let interaction_link = format!("interaction:{}", interaction["id"].as_str().unwrap());
+    let interaction_evidence = format!("{}#0", interaction_link);
     let project_link = format!("project:{}", project["id"].as_str().unwrap());
     let task = run_json(
         &db,
@@ -1700,8 +1739,11 @@ fn add_task_links_to_origin_interaction_and_project() {
             &interaction_link,
             "--link",
             &project_link,
+            "--evidence",
+            &interaction_evidence,
         ],
     );
+    assert_eq!(task["evidence"], 1);
     let task_id = task["id"].as_str().unwrap();
     let conn = Connection::open(&db).unwrap();
     let (project_id, origin_interaction_id): (String, String) = conn
@@ -1730,6 +1772,81 @@ fn add_task_links_to_origin_interaction_and_project() {
         )
         .unwrap();
     assert_eq!(project_tasks, 1);
+    let evidence_refs: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM evidence_refs er
+             JOIN content_chunks cc ON cc.id = er.chunk_id
+             WHERE er.subject_type = 'task'
+               AND er.subject_id = ?1
+               AND cc.record_type = 'interaction'
+               AND cc.record_id = ?2
+               AND cc.chunk_index = 0",
+            (task_id, interaction["id"].as_str().unwrap()),
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(evidence_refs, 1);
+}
+
+#[test]
+fn remember_can_cite_source_interaction_chunk() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let interaction = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Transcript",
+            "--text",
+            "Alex prefers transcript-backed memories.",
+        ],
+    );
+    let interaction_link = format!("interaction:{}", interaction["id"].as_str().unwrap());
+    let interaction_evidence = format!("{}#0", interaction_link);
+
+    let memory = run_json(
+        &db,
+        &[
+            "--json",
+            "remember",
+            "--kind",
+            "preference",
+            "--claim",
+            "Alex prefers transcript-backed memories.",
+            "--link",
+            &interaction_link,
+            "--evidence",
+            &interaction_evidence,
+        ],
+    );
+
+    assert_eq!(memory["links"], 1);
+    assert_eq!(memory["evidence"], 1);
+    let conn = Connection::open(&db).unwrap();
+    let evidence_refs: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM evidence_refs er
+             JOIN content_chunks cc ON cc.id = er.chunk_id
+             WHERE er.subject_type = 'memory'
+               AND er.subject_id = ?1
+               AND cc.record_type = 'interaction'
+               AND cc.record_id = ?2
+               AND cc.chunk_index = 0",
+            (
+                memory["id"].as_str().unwrap(),
+                interaction["id"].as_str().unwrap(),
+            ),
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(evidence_refs, 1);
 }
 
 #[test]

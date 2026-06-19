@@ -4,7 +4,7 @@
 
 use rusqlite::{params, Connection};
 
-use crate::commands::{LinkKind, LinkRef};
+use crate::commands::{EvidenceRef, LinkKind, LinkRef};
 use crate::error::CliError;
 use crate::id::new_id;
 use crate::text::chunk_text;
@@ -39,6 +39,45 @@ pub(super) fn replace_chunks(
         params![record_type, record_id],
     )?;
     insert_chunks(conn, record_type, record_id, body)
+}
+
+/// Attach exact chunk evidence to a memory or task.
+pub(super) fn insert_evidence_refs(
+    conn: &Connection,
+    subject_type: &str,
+    subject_id: &str,
+    evidence: &[EvidenceRef],
+) -> Result<(), CliError> {
+    for reference in evidence {
+        let record_type = match reference.kind {
+            LinkKind::Document | LinkKind::Interaction => reference.kind.as_str(),
+            _ => {
+                return Err(CliError::Runtime(format!(
+                    "{subject_type} evidence must cite a document or interaction"
+                )));
+            }
+        };
+        let chunk_id = conn
+            .query_row(
+                "SELECT id FROM content_chunks
+                 WHERE record_type = ?1 AND record_id = ?2 AND chunk_index = ?3
+                 LIMIT 1",
+                params![record_type, reference.id, reference.chunk_index],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|_| {
+                CliError::Runtime(format!(
+                    "could not find evidence chunk {record_type}:{}#{}",
+                    reference.id, reference.chunk_index
+                ))
+            })?;
+        conn.execute(
+            "INSERT INTO evidence_refs (id, subject_type, subject_id, chunk_id)
+             VALUES (?1,?2,?3,?4)",
+            params![new_id(), subject_type, subject_id, chunk_id],
+        )?;
+    }
+    Ok(())
 }
 
 /// Insert the typed link rows for a document/interaction.

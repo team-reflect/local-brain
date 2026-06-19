@@ -39,7 +39,9 @@ path resolution, sidecar bundling, installation checks.
   people.
 - Transcript imports must be followed by an analysis pass that writes a summary, links
   participants/high-signal mentioned people, associates projects, and creates explicit
-  follow-up tasks with interaction evidence.
+  follow-up tasks and stable memories with exact interaction chunk evidence.
+- Source-backed Granola imports return `postAnalysisRequired` in JSON output so agents
+  can treat enrichment as part of the import contract.
 - Agents can search records and produce cited reports from document or interaction
   chunks.
 - stdout carries data only; diagnostics and warnings go to stderr.
@@ -88,8 +90,8 @@ path resolution, sidecar bundling, installation checks.
    - `brain add interaction --kind email --source gmail --external-kind thread --external-id ... --summary ... --participant ...`
    - `brain add project --name ... --source agent --external-kind cluster --external-id ...`
    - `brain add asset --file ... --link person:... --role avatar`
-   - `brain add task --title ... --link interaction:... --link project:...`
-   - `brain remember --kind fact --claim ... --link person:...`
+   - `brain add task --title ... --link interaction:... --link project:... --evidence interaction:...#0`
+   - `brain remember --kind fact --claim ... --link person:... --evidence interaction:...#0`
 6. Add read/query commands:
    - `brain search "..."`
    - `brain today`

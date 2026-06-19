@@ -115,10 +115,12 @@ brain add task --title "Send the proposal" --due-at 2026-07-01 \
 
 # A transcript follow-up task linked back to the source interaction:
 brain add task --title "Send cardiologist shortlist to Dr. Vargas" \
-  --link interaction:<id> --link project:<id> --link person:<id> --json
+  --link interaction:<id> --link project:<id> --link person:<id> \
+  --evidence interaction:<id>#0 --json
 
 # A durable fact about someone (a memory, with provenance):
-brain remember --kind decision --claim "Agreed to a Q3 pilot" --link person:<id> --json
+brain remember --kind decision --claim "Agreed to a Q3 pilot" \
+  --link person:<id> --link interaction:<id> --evidence interaction:<id>#0 --json
 ```
 
 Notes:
@@ -133,6 +135,9 @@ Notes:
 - For source-backed interaction refreshes, pass `--replace-body` only when the upstream
   source is authoritative and the existing body should be replaced and re-chunked.
 - Resolve link ids by `brain search` first.
+- Use `--evidence document:<id>#<chunk_index>` or
+  `--evidence interaction:<id>#<chunk_index>` when a task or memory comes from a
+  specific source chunk.
 
 ## Provider-neutral import workflow
 
@@ -166,9 +171,11 @@ Every imported transcript must get an immediate enrichment pass:
    context with repeated/high-signal evidence.
 4. Extract explicit follow-up tasks and link each task to the source
    `interaction:<id>`, relevant `project:<id>`, and owner/contact `person:<id>` when
-   known.
+   known. Add `--evidence interaction:<id>#<chunk>` when the task is grounded in a
+   specific transcript chunk.
 5. Store atomic memories only for stable facts, decisions, preferences, commitments,
-   or risks that are directly supported by the transcript.
+   or risks that are directly supported by the transcript. Link the memory to the
+   visible records it is about, and cite the transcript chunk with `--evidence`.
 
 ## Import source rules
 

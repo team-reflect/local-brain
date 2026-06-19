@@ -23,6 +23,9 @@ detail pages.
 - Memories are hidden atomic claims, not a sidebar surface.
 - Memories link to visible records through `memory_links`.
 - Memories and extracted tasks cite evidence through `evidence_refs`.
+- Agent-authored transcript memories and follow-up tasks can cite exact chunks through
+  CLI evidence refs such as `interaction:<id>#0`; model extraction uses the same
+  `evidence_refs` table.
 - Corrections happen where the user notices them: person, organization, project, task,
   document, or interaction views.
 

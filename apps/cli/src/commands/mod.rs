@@ -50,6 +50,14 @@ pub struct LinkRef {
     pub id: String,
 }
 
+/// A parsed evidence pointer, e.g. `interaction:01ABC#0`.
+#[derive(Debug, Clone)]
+pub struct EvidenceRef {
+    pub kind: LinkKind,
+    pub id: String,
+    pub chunk_index: i64,
+}
+
 /// Parse `person:01ABC` / `organization:…` / `project:…` / `task:…`.
 pub fn parse_link(raw: &str) -> Result<LinkRef, CliError> {
     let (kind, id) = raw
@@ -77,6 +85,40 @@ pub fn parse_link(raw: &str) -> Result<LinkRef, CliError> {
 
 pub fn parse_links(raw: &[String]) -> Result<Vec<LinkRef>, CliError> {
     raw.iter().map(|r| parse_link(r)).collect()
+}
+
+/// Parse `document:<id>#<chunk_index>` / `interaction:<id>#<chunk_index>`.
+pub fn parse_evidence_ref(raw: &str) -> Result<EvidenceRef, CliError> {
+    let (link, chunk) = raw.split_once('#').ok_or_else(|| {
+        CliError::Runtime(format!(
+            "invalid --evidence '{raw}' (expected document:id#chunk or interaction:id#chunk)"
+        ))
+    })?;
+    let link = parse_link(link)?;
+    if !matches!(link.kind, LinkKind::Document | LinkKind::Interaction) {
+        return Err(CliError::Runtime(format!(
+            "invalid --evidence '{raw}' (evidence must cite a document or interaction chunk)"
+        )));
+    }
+    let chunk_index = chunk.parse::<i64>().map_err(|_| {
+        CliError::Runtime(format!(
+            "invalid --evidence '{raw}' (chunk index must be an integer)"
+        ))
+    })?;
+    if chunk_index < 0 {
+        return Err(CliError::Runtime(format!(
+            "invalid --evidence '{raw}' (chunk index must be non-negative)"
+        )));
+    }
+    Ok(EvidenceRef {
+        kind: link.kind,
+        id: link.id,
+        chunk_index,
+    })
+}
+
+pub fn parse_evidence_refs(raw: &[String]) -> Result<Vec<EvidenceRef>, CliError> {
+    raw.iter().map(|r| parse_evidence_ref(r)).collect()
 }
 
 /// Resolve the body text for an `add` command from `--text` or `--text-file`

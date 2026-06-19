@@ -46,8 +46,8 @@ brain add interaction --kind meeting --title "Granola: Northwind kickoff" --text
 brain add project --name "Kitchen remodel" --summary "Budget, contractor, and cabinet decision context." --source agent --external-kind cluster --external-id kitchen-remodel --json
 brain add asset --file maya.jpg --link person:maya --role avatar
 brain add task --title "Send Maya the revised budget" --link project:<id>
-brain add task --title "Send cardiologist shortlist to Dr. Vargas" --link interaction:<id> --link project:<id> --link person:<id> --json
-brain remember --kind decision --claim "Maya approved the revised budget range" --link person:maya
+brain add task --title "Send cardiologist shortlist to Dr. Vargas" --link interaction:<id> --link project:<id> --link person:<id> --evidence interaction:<id>#0 --json
+brain remember --kind decision --claim "Maya approved the revised budget range" --link person:maya --link interaction:<id> --evidence interaction:<id>#0
 ```
 
 Query records:
@@ -102,7 +102,9 @@ Before adding a record:
 4. Link the new record to relevant people, organizations, projects, or tasks. Search
    existing projects before creating one; auto-create projects only for repeated or
    high-signal ongoing contexts.
-5. Let extraction create hidden memories unless the agent has an explicit atomic claim
+5. When a task or memory is derived from a source record, cite the exact source chunk
+   with `--evidence document:<id>#<chunk>` or `--evidence interaction:<id>#<chunk>`.
+6. Let extraction create hidden memories unless the agent has an explicit atomic claim
    to store.
 
 When adding a person:
@@ -140,10 +142,12 @@ When importing Granola meetings:
 - Re-import an existing meeting with the same `--source granola --external-id` and
   `--replace-body` when the transcript becomes available or changes, so search chunks
   are regenerated from the raw transcript.
+- Treat `postAnalysisRequired: true` in `brain add interaction --json` output as a
+  hard follow-up, not a suggestion.
 - Before the import is considered complete, run post-analysis: link participants and
   high-signal mentioned people, link or create the project context, write explicit
-  follow-up tasks linked back to `interaction:<id>`, and store only transcript-backed
-  memories.
+  follow-up tasks linked back to `interaction:<id>` with chunk evidence, and store
+  only transcript-backed memories with chunk evidence.
 
 When adding an asset:
 
@@ -158,7 +162,7 @@ When adding a memory:
 - Keep it atomic.
 - Use one of: fact, preference, decision, commitment, instruction, risk, idea.
 - Link it to visible records.
-- Add evidence when the claim came from a document or interaction.
+- Add chunk evidence when the claim came from a document or interaction.
 
 ## Skill Contract
 

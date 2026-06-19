@@ -5,17 +5,18 @@
 //! than re-created.
 
 use rusqlite::{params, Connection};
+use serde_json::json;
 
 use super::identity::{
     external_kind, find_duplicate, find_external_identity, insert_external_identity, source_id,
     ExternalIdentityWrite,
 };
 use super::links::{insert_chunks, insert_links, replace_chunks};
-use super::report_record;
 use super::text::{normalize_optional, normalize_title};
 use crate::commands::LinkRef;
 use crate::error::CliError;
 use crate::id::new_id;
+use crate::output::print_json;
 use crate::text::{content_hash, normalize_text};
 
 pub struct AddInteractionArgs<'a> {
@@ -271,6 +272,51 @@ fn insert_raw_participants(
     Ok(inserted)
 }
 
+fn requires_post_analysis(args: &AddInteractionArgs) -> bool {
+    args.source_slug
+        .is_some_and(|slug| slug.eq_ignore_ascii_case("granola"))
+}
+
+fn report_interaction(
+    json_output: bool,
+    id: &str,
+    duplicate: bool,
+    chunk_count: usize,
+    post_analysis_required: bool,
+) -> Result<(), CliError> {
+    if json_output {
+        let mut value = json!({
+            "kind": "interaction",
+            "id": id,
+            "isDuplicate": duplicate,
+            "chunkCount": chunk_count,
+        });
+        if post_analysis_required {
+            value["postAnalysisRequired"] = json!(true);
+            value["postAnalysisChecklist"] = json!([
+                "summary",
+                "people",
+                "projects",
+                "followUpTasks",
+                "stableMemories",
+            ]);
+        }
+        print_json(&value)
+    } else {
+        if duplicate {
+            println!("interaction {id} (duplicate, skipped)");
+        } else {
+            println!("interaction {id} ({chunk_count} chunks)");
+        }
+        if post_analysis_required {
+            eprintln!(
+                "brain: post-analysis required: summary, people, projects, follow-up tasks, stable memories"
+            );
+        }
+        Ok(())
+    }
+}
+
 pub fn add_interaction(
     conn: &mut Connection,
     json: bool,
@@ -318,7 +364,7 @@ pub fn add_interaction(
                 args.replace_body,
             )?;
             tx.commit()?;
-            return report_record(json, "interaction", existing, true, 0);
+            return report_interaction(json, existing, true, 0, requires_post_analysis(&args));
         }
     }
     let existing_by_dup = find_duplicate_interaction(
@@ -340,7 +386,7 @@ pub fn add_interaction(
                 false,
             )?;
             tx.commit()?;
-            return report_record(json, "interaction", existing, true, 0);
+            return report_interaction(json, existing, true, 0, requires_post_analysis(&args));
         }
     }
     // Reaching here past a match means `--allow-duplicate` forced a new record; it
@@ -380,7 +426,7 @@ pub fn add_interaction(
         },
     )?;
     tx.commit()?;
-    report_record(json, "interaction", &id, false, count)
+    report_interaction(json, &id, false, count, requires_post_analysis(&args))
 }
 
 #[cfg(test)]

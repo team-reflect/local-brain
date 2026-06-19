@@ -81,8 +81,8 @@ storage.
     - summary separate from raw transcript body
     - participant and high-signal people links
     - project links or conservative project creation
-    - explicit tasks linked to the source interaction
-    - stable transcript-backed memories
+    - explicit tasks linked to the source interaction with chunk evidence
+    - stable transcript-backed memories with chunk evidence
 14. Show imported documents, interactions, and linked assets in relevant detail pages.
 15. Leave a seam for a future typed ingestion inbox:
     - app or external helper writes an envelope atomically
@@ -115,7 +115,8 @@ storage.
 - Granola meeting imports preserve raw transcripts as durable evidence, even when a
   summary is also stored.
 - Transcript imports create or update graph context: people, projects, explicit
-  follow-up tasks, and stable memories are linked back to the source interaction.
+  follow-up tasks, and stable memories are linked back to the source interaction
+  and cited to exact chunks.
 
 ## Tests or Verification
 
