@@ -106,6 +106,21 @@ describe('AskSurface', () => {
     expect(screen.queryByLabelText('Thinking')).toBeNull()
   })
 
+  it('hides the Thinking indicator once streaming reasoning is visible', () => {
+    chatMocks.status = 'streaming'
+    chatMocks.messages = [
+      {
+        id: 'a1',
+        role: 'assistant',
+        parts: [{ type: 'reasoning', text: 'Checking local context…' }],
+      } as unknown as UIMessage,
+    ]
+    renderWithProviders(<AskSurface conversationId={undefined} />)
+
+    expect(screen.getByText('Checking local context…')).not.toBeNull()
+    expect(screen.queryByLabelText('Thinking')).toBeNull()
+  })
+
   it('shows Thinking indicator when streaming but no content yet', () => {
     chatMocks.status = 'streaming'
     chatMocks.messages = [

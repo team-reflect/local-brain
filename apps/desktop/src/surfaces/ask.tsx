@@ -49,13 +49,17 @@ function persistedMessages(messages: ChatMessage[] | undefined): UIMessage[] {
   return (messages ?? []).map(toUiMessage)
 }
 
-/** True when the streaming assistant message has any visible content (text or tool activity). */
+/** True when the streaming assistant message has any visible content. */
 function streamingMessageHasContent(message: UIMessage | undefined): boolean {
   if (!message || message.role !== 'assistant') return false
   return message.parts.some((p) => {
     const part = p as Record<string, unknown>
     const type = String(part['type'] ?? '')
-    return (type === 'text' && String(part['text'] ?? '').length > 0) || type.startsWith('tool-')
+    const text = String(part['text'] ?? '')
+    return (
+      ((type === 'text' || type === 'reasoning') && text.length > 0) ||
+      type.startsWith('tool-')
+    )
   })
 }
 
