@@ -39,6 +39,27 @@ fn normalize_email(raw: Option<&str>) -> Option<String> {
     normalize_optional(raw).map(|value| value.to_lowercase())
 }
 
+fn normalize_phone(raw: Option<&str>) -> Option<String> {
+    normalize_optional(raw)
+        .map(|value| value.chars().filter(|c| c.is_ascii_digit()).collect())
+        .filter(|value: &String| !value.is_empty())
+}
+
+fn normalize_many<'a>(
+    raw: impl IntoIterator<Item = &'a str>,
+    normalize: fn(Option<&str>) -> Option<String>,
+) -> Vec<String> {
+    let mut values = Vec::new();
+    for item in raw {
+        if let Some(value) = normalize(Some(item)) {
+            if !values.iter().any(|existing| existing == &value) {
+                values.push(value);
+            }
+        }
+    }
+    values
+}
+
 fn normalize_name(raw: &str) -> String {
     raw.to_lowercase()
         .nfkd()
@@ -54,6 +75,42 @@ fn normalize_name(raw: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn normalize_source_slug(raw: &str) -> String {
+    raw.trim().to_lowercase()
+}
+
+fn valid_email(email: &str) -> bool {
+    let Some((local, domain)) = email.split_once('@') else {
+        return false;
+    };
+    !local.trim().is_empty()
+        && !domain.trim().is_empty()
+        && domain.contains('.')
+        && !email.chars().any(char::is_whitespace)
+}
+
+fn source_id(conn: &Connection, slug: Option<&str>) -> Result<Option<String>, CliError> {
+    let Some(slug) = slug.map(normalize_source_slug).filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+    let id = conn
+        .query_row(
+            "SELECT id FROM sources WHERE slug = ?1",
+            params![slug],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|_| {
+            CliError::Runtime(format!(
+                "unknown source '{slug}' (run `brain source ensure ...`)"
+            ))
+        })?;
+    Ok(Some(id))
+}
+
+fn external_kind(raw: &str) -> String {
+    normalize_optional(Some(raw)).unwrap_or_else(|| "record".to_string())
 }
 
 fn safe_filename(raw: &str) -> String {
@@ -90,6 +147,174 @@ fn find_duplicate(conn: &Connection, table: &str, hash: &str) -> Result<Option<S
         .query_row(&sql, params![hash], |row| row.get::<_, String>(0))
         .ok();
     Ok(id)
+}
+
+/// Map an `external_identities.entity_type` to its owning table. Every typed
+/// record table carries an `archived_at` column, so callers can scope an
+/// external-id lookup to active records.
+fn entity_table(entity_type: &str) -> Option<&'static str> {
+    match entity_type {
+        "person" => Some("people"),
+        "organization" => Some("organizations"),
+        "project" => Some("projects"),
+        "task" => Some("tasks"),
+        "document" => Some("documents"),
+        "interaction" => Some("interactions"),
+        "asset" => Some("assets"),
+        _ => None,
+    }
+}
+
+fn find_external_identity(
+    conn: &Connection,
+    entity_type: &str,
+    source_id: Option<&str>,
+    kind: &str,
+    external_id: Option<&str>,
+) -> Result<Option<String>, CliError> {
+    let (Some(source_id), Some(external_id)) = (
+        source_id,
+        normalize_optional(external_id).filter(|value| !value.is_empty()),
+    ) else {
+        return Ok(None);
+    };
+    // Only treat the external identity as an active duplicate when the linked
+    // record still exists and is not archived. Other dedupe paths filter
+    // `archived_at IS NULL`; without the join here a re-import with the same
+    // --source/--external-id would enrich an archived record and report a
+    // duplicate, leaving the data off normal active lists.
+    let table = entity_table(entity_type).ok_or_else(|| {
+        CliError::Runtime(format!(
+            "unknown external identity entity type '{entity_type}'"
+        ))
+    })?;
+    let sql = format!(
+        "SELECT ei.entity_id
+         FROM external_identities ei
+         JOIN {table} t ON t.id = ei.entity_id
+         WHERE ei.entity_type = ?1
+           AND ei.source_id = ?2
+           AND ei.kind = ?3
+           AND ei.external_id = ?4
+           AND t.archived_at IS NULL
+         LIMIT 1",
+    );
+    let id = conn
+        .query_row(
+            &sql,
+            params![entity_type, source_id, kind, external_id],
+            |row| row.get::<_, String>(0),
+        )
+        .ok();
+    Ok(id)
+}
+
+struct ExternalIdentityWrite<'a> {
+    entity_type: &'a str,
+    entity_id: &'a str,
+    source_id: Option<&'a str>,
+    kind: &'a str,
+    external_id: Option<&'a str>,
+    url: Option<&'a str>,
+    /// True for `--allow-duplicate` forks: never claim or re-point an existing
+    /// identity, only insert when the (source, kind, external_id) row is free.
+    force_duplicate: bool,
+}
+
+fn insert_external_identity(
+    conn: &Connection,
+    write: ExternalIdentityWrite,
+) -> Result<(), CliError> {
+    let ExternalIdentityWrite {
+        entity_type,
+        entity_id,
+        source_id,
+        kind,
+        external_id,
+        url,
+        force_duplicate,
+    } = write;
+    let (Some(source_id), Some(external_id)) = (
+        source_id,
+        normalize_optional(external_id).filter(|value| !value.is_empty()),
+    ) else {
+        return Ok(());
+    };
+    let table = entity_table(entity_type).ok_or_else(|| {
+        CliError::Runtime(format!(
+            "unknown external identity entity type '{entity_type}'"
+        ))
+    })?;
+    // A `--allow-duplicate` import deliberately forks a *new* record even though a
+    // match exists. The unique (source_id, kind, external_id) identity already
+    // belongs to the matched record, so the new fork must never claim or re-point
+    // it: doing so would steal the mapping (and the DO UPDATE re-point branch
+    // below could fire if the matched record were archived). `DO NOTHING` keeps
+    // the identity on its current owner and still inserts cleanly when no row
+    // exists yet, instead of relying on the upsert's WHERE clause silently
+    // evaluating false (which is fragile and depends on SQLite no-op semantics).
+    let conflict_action = if force_duplicate {
+        "DO NOTHING".to_string()
+    } else {
+        // `INSERT OR IGNORE` alone is wrong on a re-import of an archived record:
+        // the unique (source_id, kind, external_id) row still points at the
+        // archived entity, so the new active record would never get an identity
+        // row and later imports would skip `find_external_identity` (which only
+        // matches active rows). The `ON CONFLICT` update therefore handles two
+        // cases:
+        //   1. Re-point the conflicting identity at the new entity, but ONLY when
+        //      the currently-referenced entity is no longer active. This mirrors
+        //      `find_external_identity`'s active-only scope and never clobbers an
+        //      identity that still maps to a live record.
+        //   2. Refresh the stored `url` when the re-import dedupes onto the SAME
+        //      active entity and carries a new/changed `--original-url`. Without
+        //      this, a duplicate import that resolves to the existing active
+        //      record would skip the update entirely and a fresh URL (including
+        //      filling a previously null one) would never land. `COALESCE` keeps a
+        //      real URL from being clobbered with NULL on a URL-less re-import.
+        format!(
+            "DO UPDATE SET
+               entity_type = excluded.entity_type,
+               entity_id = excluded.entity_id,
+               url = COALESCE(excluded.url, external_identities.url),
+               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             WHERE (
+                 external_identities.entity_id <> excluded.entity_id
+                 AND NOT EXISTS (
+                   SELECT 1 FROM {table} t
+                   WHERE t.id = external_identities.entity_id
+                     AND t.archived_at IS NULL
+                 )
+               )
+               OR (
+                 external_identities.entity_id = excluded.entity_id
+                 AND excluded.url IS NOT NULL
+                 AND (
+                   external_identities.url IS NULL
+                   OR external_identities.url <> excluded.url
+                 )
+               )"
+        )
+    };
+    let sql = format!(
+        "INSERT INTO external_identities
+           (id, entity_type, entity_id, source_id, kind, external_id, url)
+         VALUES (?1,?2,?3,?4,?5,?6,?7)
+         ON CONFLICT (source_id, kind, external_id) {conflict_action}",
+    );
+    conn.execute(
+        &sql,
+        params![
+            new_id(),
+            entity_type,
+            entity_id,
+            source_id,
+            kind,
+            external_id,
+            normalize_optional(url),
+        ],
+    )?;
+    Ok(())
 }
 
 fn insert_chunks(
@@ -174,33 +399,353 @@ fn link_table(
     Ok(table)
 }
 
+struct PersonImportAssessment {
+    normalized_name: String,
+    email: String,
+    should_create_person: bool,
+    reason_codes: Vec<&'static str>,
+}
+
+fn assess_person_import(raw_name: &str, email: &str) -> PersonImportAssessment {
+    let email = normalize_email(Some(email)).unwrap_or_default();
+    let (normalized_name, has_route_phrase) = normalize_untrusted_name(raw_name);
+    let mut reason_codes = Vec::new();
+    if !valid_email(&email) {
+        reason_codes.push("invalid_email");
+    }
+    if is_machine_email(&email) {
+        reason_codes.push("machine_email");
+    }
+    if normalized_name.is_empty() {
+        reason_codes.push("missing_name");
+    }
+    if !normalized_name.is_empty()
+        && (normalized_name.eq_ignore_ascii_case(&email)
+            || normalized_name.contains('@')
+            || normalize_email(Some(&normalized_name)).as_deref() == Some(email.as_str()))
+    {
+        reason_codes.push("email_as_name");
+    }
+    // A routing marker (" via ", " from ", " at ") was stripped from the display
+    // name. That alone is not disqualifying: senders such as
+    // "Robin Spencer via LinkedIn" normalize to a perfectly usable "Robin Spencer".
+    // Only flag it when the residual name does not independently read like a
+    // capitalized person name, so noise like "noreply via Mailchimp" -> "noreply"
+    // is still skipped.
+    if has_route_phrase && !looks_like_capitalized_person_name(&normalized_name) {
+        reason_codes.push("route_phrase");
+    }
+    if has_numeric_or_token_noise(&normalized_name) {
+        reason_codes.push("numeric_or_token_noise");
+    }
+    if !normalized_name.is_empty()
+        && !reason_codes.iter().any(|code| {
+            matches!(
+                *code,
+                "email_as_name" | "numeric_or_token_noise" | "route_phrase"
+            )
+        })
+        && !looks_like_capitalized_person_name(&normalized_name)
+    {
+        reason_codes.push("not_capitalized_first_last");
+    }
+
+    PersonImportAssessment {
+        normalized_name,
+        email,
+        should_create_person: reason_codes.is_empty(),
+        reason_codes,
+    }
+}
+
+fn normalize_untrusted_name(raw: &str) -> (String, bool) {
+    let cleaned = raw
+        .trim()
+        .trim_matches(|c: char| c == '\'' || c == '"')
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let lower = cleaned.to_lowercase();
+    let mut route_index = None;
+    for needle in [" via ", " from ", " at "] {
+        if let Some(index) = lower.rfind(needle) {
+            route_index = Some(route_index.map_or(index, |current: usize| current.min(index)));
+        }
+    }
+    let route_stripped = route_index
+        .map(|index| cleaned[..index].trim().to_string())
+        .unwrap_or(cleaned);
+    let parts: Vec<&str> = route_stripped.split(',').map(str::trim).collect();
+    // Only invert `Last, First` directory strings when both sides read like a
+    // real person name. Org/department labels such as "Acme, Sales" or
+    // "Amazon, Customer Service" keep their comma so the downstream
+    // capitalized-name guardrail rejects them instead of minting fake people.
+    let normalized = if parts.len() == 2 && is_plausible_person_comma_inversion(parts[0], parts[1])
+    {
+        format!("{} {}", parts[1], parts[0])
+    } else {
+        route_stripped
+    };
+    (normalized.trim().to_string(), route_index.is_some())
+}
+
+/// Whether `Last, First` should be inverted to `First Last`. We require the
+/// segment after the comma to look like a given name (one token, optionally a
+/// trailing initial) and reject obvious organization/role labels on either side.
+fn is_plausible_person_comma_inversion(last: &str, first: &str) -> bool {
+    let last = last.trim();
+    let first = first.trim();
+    if last.is_empty() || first.is_empty() || is_name_suffix(first) {
+        return false;
+    }
+    if last.split_whitespace().any(is_generic_role_term)
+        || first.split_whitespace().any(is_generic_role_term)
+    {
+        return false;
+    }
+    if !is_plausible_given_name_segment(first) {
+        return false;
+    }
+    looks_like_capitalized_person_name(&format!("{first} {last}"))
+}
+
+/// A `First` segment from a directory `Last, First` string: a single given name,
+/// optionally followed by a short initial like `A.`. Two full words (e.g.
+/// "Customer Service") are rejected.
+fn is_plausible_given_name_segment(first: &str) -> bool {
+    let mut words = first.split_whitespace();
+    let Some(given) = words.next() else {
+        return false;
+    };
+    if is_generic_role_term(given) {
+        return false;
+    }
+    match words.next() {
+        None => true,
+        Some(second) => words.next().is_none() && is_name_initial(second),
+    }
+}
+
+fn is_name_initial(token: &str) -> bool {
+    let core = token.trim_end_matches('.');
+    core.chars().count() == 1 && core.chars().all(char::is_alphabetic)
+}
+
+/// Generic role/department words that signal an organization mailbox rather than
+/// a personal name (e.g. "Acme, Sales"). Mirrors the generic locals used by
+/// `is_machine_email`.
+fn is_generic_role_term(word: &str) -> bool {
+    let cleaned = word
+        .trim_matches(|c: char| !c.is_alphanumeric())
+        .to_lowercase();
+    matches!(
+        cleaned.as_str(),
+        "accounting"
+            | "admin"
+            | "billing"
+            | "concierge"
+            | "contact"
+            | "customer"
+            | "department"
+            | "devs"
+            | "education"
+            | "finance"
+            | "hello"
+            | "help"
+            | "info"
+            | "marketing"
+            | "newsletter"
+            | "notifications"
+            | "ops"
+            | "operations"
+            | "registration"
+            | "sales"
+            | "service"
+            | "services"
+            | "ship"
+            | "support"
+            | "team"
+    )
+}
+
+fn is_name_suffix(raw: &str) -> bool {
+    matches!(
+        raw.trim().trim_matches('.').to_lowercase().as_str(),
+        "jr" | "sr" | "ii" | "iii" | "iv" | "md" | "m d" | "do" | "d o" | "phd" | "ph d"
+    )
+}
+
+fn is_machine_email(email: &str) -> bool {
+    if !valid_email(email) {
+        return false;
+    }
+    let (local, domain) = email.split_once('@').unwrap_or(("", ""));
+    let generic = [
+        "accounting",
+        "admin",
+        "announcements",
+        "billing",
+        "concierge",
+        "contact",
+        "customer.service",
+        "customerservice",
+        "devs",
+        "do-not-reply",
+        "donotreply",
+        "education",
+        "finance",
+        "hello",
+        "help",
+        "info",
+        "marketing",
+        "newsletter",
+        "no-reply",
+        "noreply",
+        "notifications",
+        "ops",
+        "operations",
+        "postmaster",
+        "registration",
+        "sales",
+        "ship",
+        "support",
+        "team",
+        "test",
+    ];
+    if generic.contains(&local) {
+        return true;
+    }
+    if [
+        "bounce",
+        "bounces",
+        "mailer-daemon",
+        "notification",
+        "notifications",
+        "reply",
+        "replies",
+    ]
+    .iter()
+    .any(|prefix| {
+        local == *prefix
+            || local.starts_with(&format!("{prefix}."))
+            || local.starts_with(&format!("{prefix}-"))
+            || local.starts_with(&format!("{prefix}_"))
+    }) {
+        return true;
+    }
+    if local.starts_with("no.reply")
+        || local.starts_with("no-reply")
+        || local.starts_with("noreply")
+        || local.starts_with("do-not-reply")
+        || local.starts_with("donotreply")
+    {
+        return true;
+    }
+    if [
+        "adobesign.com",
+        "docusign.net",
+        "email.pandadoc.net",
+        "facebookmail.com",
+        "info.vercel.com",
+        "login.customer.io",
+        "team.twilio.com",
+    ]
+    .contains(&domain)
+    {
+        return true;
+    }
+    if domain.ends_with(".bnc.salesforce.com") {
+        return true;
+    }
+    let compact: String = local
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+    compact.len() >= 28 && compact.chars().any(|c| c.is_ascii_digit())
+}
+
+fn has_numeric_or_token_noise(name: &str) -> bool {
+    let compact: String = name.chars().filter(|c| c.is_alphanumeric()).collect();
+    name.chars().any(|c| c.is_ascii_digit())
+        || (compact.chars().count() >= 24 && compact.chars().any(|c| c.is_ascii_digit()))
+}
+
+fn looks_like_capitalized_person_name(name: &str) -> bool {
+    let without_suffix = strip_name_suffix(name);
+    let words: Vec<&str> = without_suffix.split_whitespace().collect();
+    if words.len() < 2 || words.len() > 6 {
+        return false;
+    }
+    let particles = [
+        "de", "del", "der", "van", "von", "da", "di", "la", "le", "du",
+    ];
+    words.iter().all(|word| {
+        // A surviving comma marks an un-inverted org string (e.g. "Acme,") that
+        // normalize_untrusted_name deliberately left alone — not a person name.
+        if word.contains(',') {
+            return false;
+        }
+        let trimmed = word.trim_matches(|c: char| c == '\'' || c == '.' || c == '-');
+        if trimmed.is_empty() {
+            return false;
+        }
+        let lower = trimmed.to_lowercase();
+        if particles.contains(&lower.as_str()) {
+            return true;
+        }
+        trimmed
+            .chars()
+            .next()
+            .map(|c| c.is_uppercase())
+            .unwrap_or(false)
+    })
+}
+
+fn strip_name_suffix(name: &str) -> String {
+    let parts: Vec<&str> = name.split_whitespace().collect();
+    if let Some(last) = parts.last() {
+        if is_name_suffix(last.trim_start_matches(',')) {
+            return parts[..parts.len().saturating_sub(1)].join(" ");
+        }
+    }
+    name.to_string()
+}
+
 pub struct AddPersonArgs<'a> {
     pub full_name: &'a str,
     pub preferred_name: Option<&'a str>,
-    pub primary_email: Option<&'a str>,
-    pub primary_phone: Option<&'a str>,
+    pub emails: Vec<&'a str>,
+    pub phones: Vec<&'a str>,
     pub headline: Option<&'a str>,
     pub location: Option<&'a str>,
     pub summary: Option<&'a str>,
     pub notes: Option<&'a str>,
     pub reconnect_interval_days: Option<i64>,
+    pub source_slug: Option<&'a str>,
+    pub external_kind: &'a str,
+    pub external_id: Option<&'a str>,
+    pub original_url: Option<&'a str>,
     pub allow_duplicate: bool,
 }
 
 fn find_duplicate_person(
     conn: &Connection,
     full_name: &str,
-    primary_email: Option<&str>,
+    emails: &[String],
 ) -> Result<Option<String>, CliError> {
-    let incoming_email = normalize_email(primary_email);
-    if let Some(email) = &incoming_email {
+    for email in emails {
         let id = conn
             .query_row(
-                "SELECT id FROM people
-                 WHERE archived_at IS NULL
-                   AND primary_email IS NOT NULL
-                   AND lower(primary_email) = ?1
-                LIMIT 1",
+                "SELECT p.id
+                 FROM people p
+                 LEFT JOIN person_emails pe ON pe.person_id = p.id
+                 WHERE p.archived_at IS NULL
+                   AND (
+                     lower(p.primary_email) = ?1
+                     OR pe.normalized_email = ?1
+                   )
+                 ORDER BY p.created_at ASC
+                 LIMIT 1",
                 params![email],
                 |row| row.get::<_, String>(0),
             )
@@ -214,19 +759,32 @@ fn find_duplicate_person(
     if name.is_empty() {
         return Ok(None);
     }
-    let mut stmt =
-        conn.prepare("SELECT id, full_name, primary_email FROM people WHERE archived_at IS NULL")?;
+    let mut stmt = conn.prepare(
+        "SELECT p.id,
+                p.full_name,
+                p.primary_email,
+                EXISTS (
+                  SELECT 1 FROM person_emails pe
+                  WHERE pe.person_id = p.id
+                  LIMIT 1
+                ) AS has_email_handle
+         FROM people p
+         WHERE p.archived_at IS NULL",
+    )?;
     let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
             row.get::<_, Option<String>>(2)?,
+            row.get::<_, i64>(3)?,
         ))
     })?;
     for row in rows {
-        let (id, candidate, candidate_email) = row?;
+        let (id, candidate, candidate_email, has_email_handle) = row?;
         if normalize_name(&candidate) == name {
-            if incoming_email.is_some() && normalize_email(candidate_email.as_deref()).is_some() {
+            if !emails.is_empty()
+                && (normalize_email(candidate_email.as_deref()).is_some() || has_email_handle != 0)
+            {
                 continue;
             }
             return Ok(Some(id));
@@ -243,14 +801,52 @@ fn is_blank(value: &Option<String>) -> bool {
     !has_text(value)
 }
 
+/// Collapse a blank-or-missing string column to `None` so callers can treat an
+/// empty denormalized value the same as an absent one.
+fn blank_to_none(value: Option<String>) -> Option<String> {
+    value.filter(|text| !text.trim().is_empty())
+}
+
+/// Does a *different* active person already own this normalized email, either as
+/// their denormalized `people.primary_email` or as a `person_emails` row? Used to
+/// keep the one-person-per-email invariant when a record is resolved via external
+/// identity (which skips email-based dedupe). `email` must already be normalized
+/// (lowercased) so it matches `person_emails.normalized_email` and the lowercased
+/// denormalized primary.
+fn email_owned_by_other(conn: &Connection, person_id: &str, email: &str) -> Result<bool, CliError> {
+    let owned: bool = conn.query_row(
+        "SELECT EXISTS(
+           SELECT 1
+           FROM people p
+           LEFT JOIN person_emails pe ON pe.person_id = p.id
+           WHERE p.archived_at IS NULL
+             AND p.id <> ?2
+             AND (lower(p.primary_email) = ?1 OR pe.normalized_email = ?1)
+         )",
+        params![email, person_id],
+        |row| row.get(0),
+    )?;
+    Ok(owned)
+}
+
 fn enrich_duplicate_person(
     conn: &Connection,
     id: &str,
     args: &AddPersonArgs,
+    emails: &[String],
+    phones: &[String],
 ) -> Result<bool, CliError> {
     let preferred_name = normalize_optional(args.preferred_name);
-    let primary_email = normalize_email(args.primary_email);
-    let primary_phone = normalize_optional(args.primary_phone);
+    // Never promote an address another active person already owns into the blank
+    // denormalized people.primary_email: insert_person_handles already skips such
+    // emails for person_emails, so without this the external-id dedupe path could
+    // leave the normalized table clean while stamping someone else's address onto
+    // this person's primary_email. See email_owned_by_other.
+    let primary_email = match emails.first() {
+        Some(email) if !email_owned_by_other(conn, id, email)? => Some(email.clone()),
+        _ => None,
+    };
+    let primary_phone = phones.first().cloned();
     let headline = normalize_optional(args.headline);
     let location = normalize_optional(args.location);
     let summary = normalize_optional(args.summary);
@@ -333,21 +929,193 @@ fn enrich_duplicate_person(
     Ok(true)
 }
 
+fn enrich_duplicate_person_email(
+    conn: &Connection,
+    id: &str,
+    email: &str,
+) -> Result<bool, CliError> {
+    let email = normalize_email(Some(email));
+    let current = conn.query_row(
+        "SELECT primary_email FROM people WHERE id = ?1",
+        params![id],
+        |row| row.get::<_, Option<String>>(0),
+    )?;
+    if !has_text(&email) || !is_blank(&current) {
+        return Ok(false);
+    }
+    // Mirror enrich_duplicate_person / insert_person_handles: never stamp an
+    // address another active person already owns onto this blank primary_email.
+    if let Some(addr) = email.as_deref() {
+        if email_owned_by_other(conn, id, addr)? {
+            return Ok(false);
+        }
+    }
+    conn.execute(
+        "UPDATE people
+         SET primary_email = ?1,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE id = ?2",
+        params![email, id],
+    )?;
+    Ok(true)
+}
+
+fn insert_person_handles(
+    conn: &Connection,
+    person_id: &str,
+    emails: &[String],
+    phones: &[String],
+    source_id: Option<&str>,
+) -> Result<(), CliError> {
+    // On duplicate-person enrichment the record may already own a primary
+    // handle. Only a person that has none yet should get one promoted; otherwise
+    // a re-import that adds secondary addresses would leave the person with
+    // multiple primary emails or phones.
+    //
+    // A legacy person can record its primary *only* in the denormalized
+    // people.primary_email / people.primary_phone columns, with no is_primary
+    // row in person_emails / person_phones yet. When that column is set we must
+    // promote the handle that matches it (syncing the normalized table) rather
+    // than blindly promoting index 0, which on a re-import could mark a
+    // different, freshly imported address as primary while the denormalized
+    // column still points elsewhere. The new-person path also pre-populates the
+    // denormalized column from the first handle, so matching keeps that handle
+    // primary too.
+    let (primary_email, primary_phone): (Option<String>, Option<String>) = conn.query_row(
+        "SELECT primary_email, primary_phone FROM people WHERE id = ?1",
+        params![person_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let primary_email = blank_to_none(primary_email);
+    let primary_phone = blank_to_none(primary_phone);
+
+    let has_primary_email: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM person_emails WHERE person_id = ?1 AND is_primary = 1)",
+        params![person_id],
+        |row| row.get(0),
+    )?;
+    for (index, email) in emails.iter().enumerate() {
+        // person_emails is only unique per person_id, so without this guard a
+        // record resolved via external identity (which skips email-based dedupe)
+        // could attach an address another active person already owns, breaking
+        // the one-person-per-email invariant find_duplicate_person enforces.
+        // Skip any email a *different* active person already holds.
+        if email_owned_by_other(conn, person_id, email)? {
+            continue;
+        }
+        // Compare against the denormalized primary case-insensitively: imported
+        // emails are lowercased, but a legacy people.primary_email may not be, so
+        // raw string equality would fail to sync the matching handle to primary.
+        let is_primary_handle = !has_primary_email
+            && match primary_email.as_deref() {
+                Some(primary) => normalize_email(Some(primary)).as_deref() == Some(email.as_str()),
+                None => index == 0,
+            };
+        let is_primary = i64::from(is_primary_handle);
+        conn.execute(
+            "INSERT OR IGNORE INTO person_emails
+             (id, person_id, email, normalized_email, is_primary, source_id)
+             VALUES (?1,?2,?3,?4,?5,?6)",
+            params![new_id(), person_id, email, email, is_primary, source_id],
+        )?;
+    }
+    let has_primary_phone: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM person_phones WHERE person_id = ?1 AND is_primary = 1)",
+        params![person_id],
+        |row| row.get(0),
+    )?;
+    for (index, phone) in phones.iter().enumerate() {
+        // Match the denormalized primary by its digit-only form: a legacy
+        // people.primary_phone can be stored with different formatting than the
+        // imported handle, so raw string equality would miss the same number and
+        // never sync it to is_primary.
+        let is_primary_handle = !has_primary_phone
+            && match primary_phone.as_deref() {
+                Some(primary) => {
+                    let normalized_primary = normalize_phone(Some(primary));
+                    normalized_primary.is_some()
+                        && normalized_primary == normalize_phone(Some(phone))
+                }
+                None => index == 0,
+            };
+        let is_primary = i64::from(is_primary_handle);
+        conn.execute(
+            "INSERT OR IGNORE INTO person_phones
+             (id, person_id, phone, normalized_phone, is_primary, source_id)
+             VALUES (?1,?2,?3,?4,?5,?6)",
+            params![
+                new_id(),
+                person_id,
+                phone,
+                normalize_phone(Some(phone)).unwrap_or_else(|| phone.clone()),
+                is_primary,
+                source_id,
+            ],
+        )?;
+    }
+    Ok(())
+}
+
 pub fn add_person(conn: &mut Connection, json: bool, args: AddPersonArgs) -> Result<(), CliError> {
     let full_name = args.full_name.trim();
     if full_name.is_empty() {
         return Err(CliError::Runtime("--full-name cannot be blank".into()));
     }
-    if let Some(existing) = find_duplicate_person(conn, full_name, args.primary_email)? {
+    let emails = normalize_many(args.emails.iter().copied(), normalize_email);
+    let phones = normalize_many(args.phones.iter().copied(), normalize_optional);
+    let source_id = source_id(conn, args.source_slug)?;
+    let kind = external_kind(args.external_kind);
+
+    let existing_by_external = find_external_identity(
+        conn,
+        "person",
+        source_id.as_deref(),
+        &kind,
+        args.external_id,
+    )?;
+    let existing = existing_by_external.or(find_duplicate_person(conn, full_name, &emails)?);
+    // True when we fall through to the new-record path *despite* a match existing,
+    // i.e. `--allow-duplicate` forced a fork. The new record must not steal the
+    // matched record's external identity.
+    let force_duplicate = existing.is_some() && args.allow_duplicate;
+    if let Some(existing) = existing {
         if !args.allow_duplicate {
-            enrich_duplicate_person(conn, &existing, &args)?;
+            // Apply the handle, enrichment, and external-identity writes as one
+            // transaction so a late failure cannot leave a half-updated record,
+            // matching the new-person and duplicate-interaction paths.
+            let tx = conn.transaction()?;
+            insert_person_handles(&tx, &existing, &emails, &phones, source_id.as_deref())?;
+            enrich_duplicate_person(&tx, &existing, &args, &emails, &phones)?;
+            insert_external_identity(
+                &tx,
+                ExternalIdentityWrite {
+                    entity_type: "person",
+                    entity_id: &existing,
+                    source_id: source_id.as_deref(),
+                    kind: &kind,
+                    external_id: args.external_id,
+                    url: args.original_url,
+                    force_duplicate: false,
+                },
+            )?;
+            tx.commit()?;
             return report_person(json, &existing, true);
         }
     }
 
     let id = new_id();
-    let email = normalize_email(args.primary_email);
     let tx = conn.transaction()?;
+    // Never stamp an address another active person already owns onto the new
+    // record's denormalized people.primary_email: insert_person_handles skips
+    // such emails for person_emails, so without this guard a --allow-duplicate
+    // fork (or any new-person path) could show a stolen address on
+    // people.primary_email with no matching person_emails row, breaking the
+    // one-person-per-email invariant the duplicate/enrichment paths enforce.
+    // See email_owned_by_other.
+    let primary_email = match emails.first() {
+        Some(email) if !email_owned_by_other(&tx, &id, email)? => Some(email.clone()),
+        _ => None,
+    };
     tx.execute(
         "INSERT INTO people (
            id, full_name, preferred_name, primary_email, primary_phone, headline,
@@ -357,8 +1125,8 @@ pub fn add_person(conn: &mut Connection, json: bool, args: AddPersonArgs) -> Res
             id,
             full_name,
             normalize_optional(args.preferred_name),
-            email,
-            normalize_optional(args.primary_phone),
+            primary_email,
+            phones.first(),
             normalize_optional(args.headline),
             normalize_optional(args.location),
             normalize_optional(args.summary),
@@ -366,8 +1134,105 @@ pub fn add_person(conn: &mut Connection, json: bool, args: AddPersonArgs) -> Res
             args.reconnect_interval_days,
         ],
     )?;
+    insert_person_handles(&tx, &id, &emails, &phones, source_id.as_deref())?;
+    insert_external_identity(
+        &tx,
+        ExternalIdentityWrite {
+            entity_type: "person",
+            entity_id: &id,
+            source_id: source_id.as_deref(),
+            kind: &kind,
+            external_id: args.external_id,
+            url: args.original_url,
+            force_duplicate,
+        },
+    )?;
     tx.commit()?;
     report_person(json, &id, false)
+}
+
+pub struct AddPersonFromEmailArgs<'a> {
+    pub full_name: &'a str,
+    pub email: &'a str,
+    pub source_slug: Option<&'a str>,
+    pub external_id: Option<&'a str>,
+}
+
+pub fn add_person_from_email(
+    conn: &mut Connection,
+    json: bool,
+    args: AddPersonFromEmailArgs,
+) -> Result<(), CliError> {
+    let assessment = assess_person_import(args.full_name, args.email);
+    if !assessment.should_create_person {
+        return report_person_assessment(json, None, false, false, &assessment);
+    }
+    let source_id = source_id(conn, args.source_slug)?;
+    let emails = vec![assessment.email.clone()];
+    let existing_by_external = find_external_identity(
+        conn,
+        "person",
+        source_id.as_deref(),
+        "contact",
+        args.external_id,
+    )?;
+    let existing = existing_by_external.or(find_duplicate_person(
+        conn,
+        &assessment.normalized_name,
+        &emails,
+    )?);
+    if let Some(existing) = existing {
+        // Same atomicity guarantee as add_person's duplicate path: handle,
+        // enrichment, and external-identity writes commit together or not at all.
+        let tx = conn.transaction()?;
+        insert_person_handles(&tx, &existing, &emails, &[], source_id.as_deref())?;
+        enrich_duplicate_person_email(&tx, &existing, &assessment.email)?;
+        insert_external_identity(
+            &tx,
+            ExternalIdentityWrite {
+                entity_type: "person",
+                entity_id: &existing,
+                source_id: source_id.as_deref(),
+                kind: "contact",
+                external_id: args.external_id,
+                url: None,
+                force_duplicate: false,
+            },
+        )?;
+        tx.commit()?;
+        return report_person_assessment(json, Some(&existing), false, true, &assessment);
+    }
+
+    let id = new_id();
+    let tx = conn.transaction()?;
+    tx.execute(
+        "INSERT INTO people (id, full_name, primary_email, notes)
+         VALUES (?1,?2,?3,?4)",
+        params![
+            id,
+            &assessment.normalized_name,
+            &assessment.email,
+            format!(
+                "Imported from untrusted email display name: {}",
+                args.full_name
+            ),
+        ],
+    )?;
+    insert_person_handles(&tx, &id, &emails, &[], source_id.as_deref())?;
+    insert_external_identity(
+        &tx,
+        ExternalIdentityWrite {
+            entity_type: "person",
+            entity_id: &id,
+            source_id: source_id.as_deref(),
+            kind: "contact",
+            external_id: args.external_id,
+            url: None,
+            force_duplicate: false,
+        },
+    )?;
+    tx.commit()?;
+    report_person_assessment(json, Some(&id), true, false, &assessment)
 }
 
 pub struct AddAssetArgs<'a> {
@@ -611,10 +1476,12 @@ pub struct AddInteractionArgs<'a> {
     pub title: Option<&'a str>,
     pub kind: &'a str,
     pub occurred_at: Option<&'a str>,
+    pub source_slug: Option<&'a str>,
     pub external_id: Option<&'a str>,
     pub original_url: Option<&'a str>,
     pub body: String,
     pub links: Vec<LinkRef>,
+    pub raw_participants: Vec<&'a str>,
     pub allow_duplicate: bool,
 }
 
@@ -622,16 +1489,30 @@ fn find_duplicate_interaction(
     conn: &Connection,
     hash: &str,
     external_id: Option<&str>,
+    source_id: Option<&str>,
 ) -> Result<Option<String>, CliError> {
     if let Some(external_id) = normalize_optional(external_id) {
+        // The source-scoped `external_identities` lookup already ran in the
+        // caller. This legacy fallback matches the denormalized
+        // `interactions.external_id` column, but it must NOT merge across
+        // sources: an external id is only unique within a source. We therefore
+        // skip any interaction that another source has already claimed, and —
+        // when this import omits a source — only match unclaimed/legacy rows.
         let id = conn
             .query_row(
-                "SELECT id FROM interactions
-                 WHERE archived_at IS NULL
-                   AND external_id IS NOT NULL
-                   AND external_id = ?1
+                "SELECT i.id FROM interactions i
+                 WHERE i.archived_at IS NULL
+                   AND i.external_id IS NOT NULL
+                   AND i.external_id = ?1
+                   AND NOT EXISTS (
+                     SELECT 1 FROM external_identities ei
+                     WHERE ei.entity_type = 'interaction'
+                       AND ei.entity_id = i.id
+                       AND ei.kind = 'record'
+                       AND (?2 IS NULL OR ei.source_id <> ?2)
+                   )
                  LIMIT 1",
-                params![external_id],
+                params![external_id, source_id],
                 |row| row.get::<_, String>(0),
             )
             .ok();
@@ -669,6 +1550,126 @@ fn enrich_duplicate_interaction(
     Ok(())
 }
 
+#[derive(Debug)]
+struct RawParticipant {
+    role: String,
+    handle: Option<String>,
+    normalized_handle: Option<String>,
+    display_name: Option<String>,
+}
+
+fn parse_raw_participant(raw: &str) -> Result<Option<RawParticipant>, CliError> {
+    let Some(value) = normalize_optional(Some(raw)) else {
+        return Ok(None);
+    };
+    let (role, payload) = value
+        .split_once(':')
+        .map(|(role, payload)| (role.trim(), payload.trim()))
+        .unwrap_or(("participant", value.as_str()));
+    let role = normalize_optional(Some(role)).unwrap_or_else(|| "participant".to_string());
+    let payload = normalize_optional(Some(payload)).ok_or_else(|| {
+        CliError::Runtime(format!("--participant '{raw}' is missing a name or handle"))
+    })?;
+
+    let (display_name, handle) =
+        if let (Some(start), Some(end)) = (payload.rfind('<'), payload.rfind('>')) {
+            if start < end {
+                (
+                    normalize_optional(Some(&payload[..start])),
+                    normalize_optional(Some(&payload[start + 1..end])),
+                )
+            } else {
+                (Some(payload.clone()), None)
+            }
+        } else if payload.contains('@') {
+            (None, normalize_optional(Some(&payload)))
+        } else {
+            (Some(payload.clone()), None)
+        };
+
+    let normalized_handle = handle.as_deref().map(|handle| {
+        if handle.contains('@') {
+            handle.to_lowercase()
+        } else {
+            handle.to_string()
+        }
+    });
+    // Empty angle brackets (e.g. `from:<>`) leave no usable identity. Without a
+    // display name or handle the row would violate the interaction_participants
+    // CHECK (person_id OR normalized_handle OR display_name), so reject it with
+    // the same error used for an entirely missing payload.
+    if display_name.is_none() && normalized_handle.is_none() {
+        return Err(CliError::Runtime(format!(
+            "--participant '{raw}' is missing a name or handle"
+        )));
+    }
+    Ok(Some(RawParticipant {
+        role,
+        handle,
+        normalized_handle,
+        display_name,
+    }))
+}
+
+fn insert_raw_participants(
+    conn: &Connection,
+    interaction_id: &str,
+    source_id: Option<&str>,
+    participants: &[&str],
+) -> Result<usize, CliError> {
+    let mut inserted = 0;
+    for raw in participants {
+        let Some(participant) = parse_raw_participant(raw)? else {
+            continue;
+        };
+        // Defensive guard: never write a row that fails the migration 0006
+        // CHECK, even if a future parser change loses this invariant.
+        if participant.normalized_handle.is_none() && participant.display_name.is_none() {
+            continue;
+        }
+        // Migration 0006 only enforces uniqueness for participants that carry a
+        // normalized_handle. Name-only participants (e.g. `from:Casey Jordan <>`)
+        // have no covering unique index, so INSERT OR IGNORE would append a new
+        // identical row on every duplicate interaction re-import. Match the
+        // handle index semantics (interaction_id, identity, COALESCE(role, ''))
+        // with an explicit existence check before inserting.
+        if participant.normalized_handle.is_none() {
+            let already_present = conn
+                .query_row(
+                    "SELECT 1 FROM interaction_participants
+                     WHERE interaction_id = ?1
+                       AND normalized_handle IS NULL
+                       AND display_name = ?2
+                       AND COALESCE(role, '') = ?3
+                     LIMIT 1",
+                    params![interaction_id, participant.display_name, participant.role],
+                    |_| Ok(()),
+                )
+                .ok()
+                .is_some();
+            if already_present {
+                continue;
+            }
+        }
+        let changed = conn.execute(
+            "INSERT OR IGNORE INTO interaction_participants
+             (id, interaction_id, role, handle, normalized_handle, display_name, source_id)
+             VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            params![
+                new_id(),
+                interaction_id,
+                participant.role,
+                participant.handle,
+                participant.normalized_handle,
+                participant.display_name,
+                source_id,
+            ],
+        )?;
+        inserted += changed;
+    }
+    Ok(inserted)
+}
+
 pub fn add_interaction(
     conn: &mut Connection,
     json: bool,
@@ -684,15 +1685,63 @@ pub fn add_interaction(
         ));
     }
     let hash = content_hash(&body);
-    if let Some(existing) = find_duplicate_interaction(conn, &hash, args.external_id)? {
+    let source_id = source_id(conn, args.source_slug)?;
+    let existing_by_external = find_external_identity(
+        conn,
+        "interaction",
+        source_id.as_deref(),
+        "record",
+        args.external_id,
+    )?;
+    if let Some(existing) = existing_by_external.as_deref() {
         if !args.allow_duplicate {
             let tx = conn.transaction()?;
-            enrich_duplicate_interaction(&tx, &existing, &args)?;
-            insert_links(&tx, "interaction", &existing, &args.links)?;
+            enrich_duplicate_interaction(&tx, existing, &args)?;
+            insert_links(&tx, "interaction", existing, &args.links)?;
+            insert_raw_participants(&tx, existing, source_id.as_deref(), &args.raw_participants)?;
+            insert_external_identity(
+                &tx,
+                ExternalIdentityWrite {
+                    entity_type: "interaction",
+                    entity_id: existing,
+                    source_id: source_id.as_deref(),
+                    kind: "record",
+                    external_id: args.external_id,
+                    url: args.original_url,
+                    force_duplicate: false,
+                },
+            )?;
             tx.commit()?;
-            return report_record(json, "interaction", &existing, true, 0);
+            return report_record(json, "interaction", existing, true, 0);
         }
     }
+    let existing_by_dup =
+        find_duplicate_interaction(conn, &hash, args.external_id, source_id.as_deref())?;
+    if let Some(existing) = existing_by_dup.as_deref() {
+        if !args.allow_duplicate {
+            let tx = conn.transaction()?;
+            enrich_duplicate_interaction(&tx, existing, &args)?;
+            insert_links(&tx, "interaction", existing, &args.links)?;
+            insert_raw_participants(&tx, existing, source_id.as_deref(), &args.raw_participants)?;
+            insert_external_identity(
+                &tx,
+                ExternalIdentityWrite {
+                    entity_type: "interaction",
+                    entity_id: existing,
+                    source_id: source_id.as_deref(),
+                    kind: "record",
+                    external_id: args.external_id,
+                    url: args.original_url,
+                    force_duplicate: false,
+                },
+            )?;
+            tx.commit()?;
+            return report_record(json, "interaction", existing, true, 0);
+        }
+    }
+    // Reaching here past a match means `--allow-duplicate` forced a new record; it
+    // must not steal the matched interaction's external identity.
+    let force_duplicate = existing_by_external.is_some() || existing_by_dup.is_some();
     let id = new_id();
     let tx = conn.transaction()?;
     tx.execute(
@@ -712,6 +1761,19 @@ pub fn add_interaction(
     )?;
     let count = insert_chunks(&tx, "interaction", &id, &body)?;
     insert_links(&tx, "interaction", &id, &args.links)?;
+    insert_raw_participants(&tx, &id, source_id.as_deref(), &args.raw_participants)?;
+    insert_external_identity(
+        &tx,
+        ExternalIdentityWrite {
+            entity_type: "interaction",
+            entity_id: &id,
+            source_id: source_id.as_deref(),
+            kind: "record",
+            external_id: args.external_id,
+            url: args.original_url,
+            force_duplicate,
+        },
+    )?;
     tx.commit()?;
     report_record(json, "interaction", &id, false, count)
 }
@@ -853,6 +1915,32 @@ fn report_person(json: bool, id: &str, duplicate: bool) -> Result<(), CliError> 
     }
 }
 
+fn report_person_assessment(
+    json: bool,
+    id: Option<&str>,
+    created: bool,
+    duplicate: bool,
+    assessment: &PersonImportAssessment,
+) -> Result<(), CliError> {
+    if json {
+        print_json(&json!({
+            "kind": "person",
+            "id": id,
+            "created": created,
+            "isDuplicate": duplicate,
+            "normalizedName": assessment.normalized_name,
+            "reasonCodes": assessment.reason_codes,
+        }))
+    } else {
+        match id {
+            Some(id) if duplicate => println!("person {id} (duplicate, skipped)"),
+            Some(id) => println!("person {id}"),
+            None => println!("person skipped: {}", assessment.reason_codes.join(", ")),
+        }
+        Ok(())
+    }
+}
+
 fn report_asset(json: bool, id: &str, duplicate: bool, linked: usize) -> Result<(), CliError> {
     if json {
         print_json(&json!({
@@ -868,5 +1956,1135 @@ fn report_asset(json: bool, id: &str, duplicate: bool, linked: usize) -> Result<
             println!("asset {id} (linked {linked})");
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn comma_inverts_plausible_person_names() {
+        // Classic directory "Last, First" forms become "First Last".
+        assert_eq!(normalize_untrusted_name("Smith, John").0, "John Smith");
+        assert_eq!(normalize_untrusted_name("Doe, Jane A.").0, "Jane A. Doe");
+        assert_eq!(
+            normalize_untrusted_name("van der Berg, Maria").0,
+            "Maria van der Berg"
+        );
+    }
+
+    #[test]
+    fn comma_keeps_org_labels_intact() {
+        // Org/department labels must NOT be reversed into fake people.
+        assert_eq!(normalize_untrusted_name("Acme, Sales").0, "Acme, Sales");
+        assert_eq!(
+            normalize_untrusted_name("Amazon, Customer Service").0,
+            "Amazon, Customer Service"
+        );
+    }
+
+    #[test]
+    fn org_comma_labels_are_not_person_names() {
+        // The downstream guardrail rejects the un-inverted comma strings, so no
+        // person is minted for them.
+        assert!(!looks_like_capitalized_person_name("Acme, Sales"));
+        assert!(!looks_like_capitalized_person_name(
+            "Amazon, Customer Service"
+        ));
+        // A real inverted person name still passes.
+        assert!(looks_like_capitalized_person_name("John Smith"));
+    }
+
+    #[test]
+    fn assess_skips_org_comma_labels() {
+        let acme = assess_person_import("Acme, Sales", "person@example.com");
+        assert!(!acme.should_create_person);
+        assert!(acme.reason_codes.contains(&"not_capitalized_first_last"));
+
+        let amazon = assess_person_import("Amazon, Customer Service", "buyer@example.com");
+        assert!(!amazon.should_create_person);
+        assert!(amazon.reason_codes.contains(&"not_capitalized_first_last"));
+    }
+
+    #[test]
+    fn assess_creates_plausible_inverted_person() {
+        let person = assess_person_import("Smith, John", "john@example.com");
+        assert_eq!(person.normalized_name, "John Smith");
+        assert!(person.should_create_person, "{:?}", person.reason_codes);
+    }
+
+    #[test]
+    fn route_phrase_strips_to_usable_person_name() {
+        // A routing marker is stripped, leaving a clean person name.
+        let (name, had_route) = normalize_untrusted_name("Robin Spencer via LinkedIn");
+        assert_eq!(name, "Robin Spencer");
+        assert!(had_route);
+    }
+
+    #[test]
+    fn assess_creates_person_after_stripping_route_phrase() {
+        // Legitimate senders whose display name carries a routing marker must
+        // still create a person once the marker is removed.
+        for raw in [
+            "Robin Spencer via LinkedIn",
+            "Robin Spencer from Acme",
+            "Robin Spencer at LinkedIn",
+        ] {
+            let person = assess_person_import(raw, "robin@example.com");
+            assert_eq!(person.normalized_name, "Robin Spencer", "{raw}");
+            assert!(
+                person.should_create_person,
+                "{raw} reason_codes: {:?}",
+                person.reason_codes
+            );
+            assert!(
+                !person.reason_codes.contains(&"route_phrase"),
+                "{raw} should not be flagged route_phrase: {:?}",
+                person.reason_codes
+            );
+        }
+    }
+
+    #[test]
+    fn assess_skips_route_phrase_noise() {
+        // When stripping the routing marker leaves something that is not a
+        // capitalized person name, the import is still skipped and flagged.
+        let noise = assess_person_import("noreply via Mailchimp", "sender@example.com");
+        assert!(!noise.should_create_person);
+        assert!(
+            noise.reason_codes.contains(&"route_phrase"),
+            "{:?}",
+            noise.reason_codes
+        );
+    }
+
+    #[test]
+    fn parse_participant_rejects_empty_brackets() {
+        let err = parse_raw_participant("from:<>").unwrap_err();
+        assert!(matches!(err, CliError::Runtime(_)));
+        let err = parse_raw_participant("from: <>").unwrap_err();
+        assert!(matches!(err, CliError::Runtime(_)));
+    }
+
+    #[test]
+    fn parse_participant_keeps_named_and_handled() {
+        // A display name alone is enough to satisfy the CHECK.
+        let named = parse_raw_participant("from:Name <>").unwrap().unwrap();
+        assert_eq!(named.display_name.as_deref(), Some("Name"));
+        assert!(named.normalized_handle.is_none());
+
+        let handled = parse_raw_participant("from:Robin <robin@example.com>")
+            .unwrap()
+            .unwrap();
+        assert_eq!(handled.display_name.as_deref(), Some("Robin"));
+        assert_eq!(
+            handled.normalized_handle.as_deref(),
+            Some("robin@example.com")
+        );
+    }
+
+    #[test]
+    fn parse_participant_skips_blank() {
+        assert!(parse_raw_participant("   ").unwrap().is_none());
+    }
+
+    fn person_args<'a>(
+        full_name: &'a str,
+        emails: Vec<&'a str>,
+        phones: Vec<&'a str>,
+        external_id: Option<&'a str>,
+    ) -> AddPersonArgs<'a> {
+        AddPersonArgs {
+            full_name,
+            preferred_name: None,
+            emails,
+            phones,
+            headline: None,
+            location: None,
+            summary: None,
+            notes: None,
+            reconnect_interval_days: None,
+            source_slug: Some("manual"),
+            external_kind: "contact",
+            external_id,
+            original_url: None,
+            allow_duplicate: false,
+        }
+    }
+
+    fn single_person_id(conn: &Connection, full_name: &str) -> String {
+        conn.query_row(
+            "SELECT id FROM people WHERE full_name = ?1 LIMIT 1",
+            params![full_name],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn add_person_duplicate_path_rolls_back_on_late_failure() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // Seed the active person via the new-person path (no external id yet).
+        add_person(
+            &mut conn,
+            true,
+            person_args("Robin Spencer", vec!["robin@example.com"], vec![], None),
+        )
+        .unwrap();
+        let person_id = single_person_id(&conn, "Robin Spencer");
+
+        // Force the final duplicate-path write (insert_external_identity) to fail
+        // by removing its table. The earlier source-scoped lookup degrades to
+        // "no match" gracefully, so the duplicate is still detected by email.
+        conn.execute("DROP TABLE external_identities", []).unwrap();
+
+        let result = add_person(
+            &mut conn,
+            true,
+            // A new phone handle is written before the failing step.
+            person_args(
+                "Robin Spencer",
+                vec!["robin@example.com"],
+                vec!["+1 555 0103"],
+                Some("ext-1"),
+            ),
+        );
+        assert!(result.is_err(), "expected the missing-table write to error");
+
+        let phone_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM person_phones WHERE person_id = ?1",
+                params![person_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            phone_count, 0,
+            "duplicate-path handle write must roll back when a later step fails"
+        );
+    }
+
+    #[test]
+    fn duplicate_enrichment_keeps_single_primary_handle() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // New-person path: the first email and phone must be promoted to primary.
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Robin Spencer",
+                vec!["robin@example.com"],
+                vec!["+1 555 0100"],
+                None,
+            ),
+        )
+        .unwrap();
+        let person_id = single_person_id(&conn, "Robin Spencer");
+
+        let primary_emails = |conn: &Connection| -> i64 {
+            conn.query_row(
+                "SELECT COUNT(*) FROM person_emails WHERE person_id = ?1 AND is_primary = 1",
+                params![person_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        let primary_phones = |conn: &Connection| -> i64 {
+            conn.query_row(
+                "SELECT COUNT(*) FROM person_phones WHERE person_id = ?1 AND is_primary = 1",
+                params![person_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            primary_emails(&conn),
+            1,
+            "new person gets one primary email"
+        );
+        assert_eq!(
+            primary_phones(&conn),
+            1,
+            "new person gets one primary phone"
+        );
+
+        // Duplicate enrichment: a re-import that only adds secondary addresses
+        // must not promote the new rows to primary. The brand-new address is
+        // listed *first* so the batch's index-0 slot is a genuinely new row
+        // (the buggy `index == 0` rule would flag it primary); the existing
+        // primary trails it so the duplicate still resolves to this person.
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Robin Spencer",
+                vec!["robin.work@example.com", "robin@example.com"],
+                vec!["+1 555 0200", "+1 555 0100"],
+                None,
+            ),
+        )
+        .unwrap();
+
+        let email_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM person_emails WHERE person_id = ?1",
+                params![person_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let phone_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM person_phones WHERE person_id = ?1",
+                params![person_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(email_count, 2, "secondary email row was added");
+        assert_eq!(phone_count, 2, "secondary phone row was added");
+        assert_eq!(
+            primary_emails(&conn),
+            1,
+            "duplicate enrichment must not create a second primary email"
+        );
+        assert_eq!(
+            primary_phones(&conn),
+            1,
+            "duplicate enrichment must not create a second primary phone"
+        );
+    }
+
+    #[test]
+    fn legacy_denormalized_primary_blocks_handle_promotion() {
+        // A legacy person can carry only the denormalized people.primary_email /
+        // people.primary_phone columns with no is_primary row in person_emails /
+        // person_phones yet. Importing a new handle for such a person must not
+        // promote it to primary, or the is_primary flag would point somewhere
+        // other than the denormalized primary columns still record.
+        let conn = brain_schema::open_in_memory().unwrap();
+        let person_id = new_id();
+        conn.execute(
+            "INSERT INTO people (id, full_name, primary_email, primary_phone)
+             VALUES (?1, 'Robin Spencer', 'robin@example.com', '+15550100')",
+            params![person_id],
+        )
+        .unwrap();
+
+        insert_person_handles(
+            &conn,
+            &person_id,
+            &["robin.work@example.com".to_string()],
+            &["+15550200".to_string()],
+            None,
+        )
+        .unwrap();
+
+        let primary_emails: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM person_emails WHERE person_id = ?1 AND is_primary = 1",
+                params![person_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let primary_phones: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM person_phones WHERE person_id = ?1 AND is_primary = 1",
+                params![person_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            primary_emails, 0,
+            "legacy denormalized primary_email must block promoting the imported email"
+        );
+        assert_eq!(
+            primary_phones, 0,
+            "legacy denormalized primary_phone must block promoting the imported phone"
+        );
+    }
+
+    #[test]
+    fn legacy_denormalized_primary_syncs_to_handle_despite_formatting() {
+        // The denormalized columns can carry a differently-cased email or a
+        // differently-formatted phone than the imported (normalized) handles.
+        // Promotion must match on the normalized form so the same address/number
+        // gets is_primary = 1, keeping person_emails / person_phones in sync with
+        // the legacy people.primary_email / people.primary_phone columns.
+        let conn = brain_schema::open_in_memory().unwrap();
+        let person_id = new_id();
+        conn.execute(
+            "INSERT INTO people (id, full_name, primary_email, primary_phone)
+             VALUES (?1, 'Robin Spencer', 'Robin@Example.COM', '+1 (555) 010-0100')",
+            params![person_id],
+        )
+        .unwrap();
+
+        insert_person_handles(
+            &conn,
+            &person_id,
+            &["robin@example.com".to_string()],
+            &["+15550100100".to_string()],
+            None,
+        )
+        .unwrap();
+
+        let primary_email: Option<String> = conn
+            .query_row(
+                "SELECT email FROM person_emails
+                 WHERE person_id = ?1 AND is_primary = 1",
+                params![person_id],
+                |row| row.get(0),
+            )
+            .ok();
+        assert_eq!(
+            primary_email.as_deref(),
+            Some("robin@example.com"),
+            "case-insensitive primary_email match must sync the handle to primary"
+        );
+
+        let primary_phone: Option<String> = conn
+            .query_row(
+                "SELECT phone FROM person_phones
+                 WHERE person_id = ?1 AND is_primary = 1",
+                params![person_id],
+                |row| row.get(0),
+            )
+            .ok();
+        assert_eq!(
+            primary_phone.as_deref(),
+            Some("+15550100100"),
+            "differently-formatted primary_phone must still sync the handle to primary"
+        );
+    }
+
+    #[test]
+    fn external_identity_dedupe_does_not_steal_another_persons_email() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // Alice owns alice@example.com (external id ext-alice).
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Alice Owner",
+                vec!["alice@example.com"],
+                vec![],
+                Some("ext-alice"),
+            ),
+        )
+        .unwrap();
+        let alice_id = single_person_id(&conn, "Alice Owner");
+
+        // Bob is a separate active person carrying external id ext-bob.
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Bob Other",
+                vec!["bob@example.com"],
+                vec![],
+                Some("ext-bob"),
+            ),
+        )
+        .unwrap();
+        let bob_id = single_person_id(&conn, "Bob Other");
+
+        // Re-import ext-bob (resolves to Bob via external identity, skipping
+        // email-based dedupe) but supplying Alice's email. Bob must not absorb an
+        // address another active person already owns.
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Bob Other",
+                vec!["alice@example.com"],
+                vec![],
+                Some("ext-bob"),
+            ),
+        )
+        .unwrap();
+
+        let bob_has_alice_email: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM person_emails
+                 WHERE person_id = ?1 AND normalized_email = 'alice@example.com'",
+                params![bob_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            bob_has_alice_email, 0,
+            "external-id dedupe must not attach an email owned by another person"
+        );
+
+        // The one-person-per-email invariant still holds: a single active person
+        // owns alice@example.com, and it is Alice.
+        let owners: i64 = conn
+            .query_row(
+                "SELECT COUNT(DISTINCT p.id)
+                 FROM people p
+                 LEFT JOIN person_emails pe ON pe.person_id = p.id
+                 WHERE p.archived_at IS NULL
+                   AND (lower(p.primary_email) = 'alice@example.com'
+                        OR pe.normalized_email = 'alice@example.com')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(owners, 1, "exactly one active person may own the email");
+        assert_ne!(alice_id, bob_id, "Alice and Bob are distinct people");
+    }
+
+    #[test]
+    fn add_person_reimport_after_archive_repoints_external_identity() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // First import: an active person carrying external id "ext-1".
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Robin Spencer",
+                vec!["robin@example.com"],
+                vec![],
+                Some("ext-1"),
+            ),
+        )
+        .unwrap();
+        let archived_id = single_person_id(&conn, "Robin Spencer");
+        conn.execute(
+            "UPDATE people SET archived_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+            params![archived_id],
+        )
+        .unwrap();
+
+        // Re-import the same external id with a distinct name/email so neither the
+        // external-identity lookup (archived) nor the name/email fallback matches.
+        // A fresh active person must be created.
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Robin Spencer Reborn",
+                vec!["robin.reborn@example.com"],
+                vec![],
+                Some("ext-1"),
+            ),
+        )
+        .unwrap();
+        let active_id = single_person_id(&conn, "Robin Spencer Reborn");
+        assert_ne!(active_id, archived_id, "expected a brand new active person");
+
+        // The single (source, kind, external_id) identity row must now point at
+        // the new active record, not the archived one.
+        let identity_target: String = conn
+            .query_row(
+                "SELECT entity_id FROM external_identities
+                 WHERE entity_type = 'person' AND kind = 'contact' AND external_id = 'ext-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            identity_target, active_id,
+            "archived re-import must re-point the external identity to the active record"
+        );
+
+        // A later import with the same external id now dedupes onto the active
+        // record instead of creating a third person.
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Totally Different Name",
+                vec!["different@example.com"],
+                vec![],
+                Some("ext-1"),
+            ),
+        )
+        .unwrap();
+        let active_people: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM people WHERE archived_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            active_people, 1,
+            "external-id dedupe must reuse the active record after a re-point"
+        );
+    }
+
+    #[test]
+    fn add_person_reimport_does_not_clobber_active_external_identity() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // Two distinct active people; only the first owns external id "ext-1".
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Alice Owner",
+                vec!["alice@example.com"],
+                vec![],
+                Some("ext-1"),
+            ),
+        )
+        .unwrap();
+        let owner_id = single_person_id(&conn, "Alice Owner");
+
+        // Re-importing "ext-1" while the owner is still active must dedupe onto the
+        // owner and leave the identity row untouched (never re-point to anyone).
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Alice Owner",
+                vec!["alice@example.com"],
+                vec![],
+                Some("ext-1"),
+            ),
+        )
+        .unwrap();
+        let identity_target: String = conn
+            .query_row(
+                "SELECT entity_id FROM external_identities
+                 WHERE entity_type = 'person' AND kind = 'contact' AND external_id = 'ext-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            identity_target, owner_id,
+            "an active external identity must not be re-pointed on re-import"
+        );
+    }
+
+    #[test]
+    fn add_person_reimport_refreshes_external_identity_url_on_same_active_record() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // First import: an active person carrying external id "ext-1" but no URL.
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Robin Spencer",
+                vec!["robin@example.com"],
+                vec![],
+                Some("ext-1"),
+            ),
+        )
+        .unwrap();
+        let person_id = single_person_id(&conn, "Robin Spencer");
+        let stored_url: Option<String> = conn
+            .query_row(
+                "SELECT url FROM external_identities
+                 WHERE entity_type = 'person' AND kind = 'contact' AND external_id = 'ext-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored_url, None, "first import should leave the URL null");
+
+        // Re-import the same external id (dedupes onto the same active person) now
+        // carrying an original URL. The duplicate path must fill the null URL.
+        add_person(
+            &mut conn,
+            true,
+            AddPersonArgs {
+                original_url: Some("https://example.com/robin"),
+                ..person_args(
+                    "Robin Spencer",
+                    vec!["robin@example.com"],
+                    vec![],
+                    Some("ext-1"),
+                )
+            },
+        )
+        .unwrap();
+        let same_person = single_person_id(&conn, "Robin Spencer");
+        assert_eq!(same_person, person_id, "re-import must dedupe, not fork");
+        let filled_url: Option<String> = conn
+            .query_row(
+                "SELECT url FROM external_identities
+                 WHERE entity_type = 'person' AND kind = 'contact' AND external_id = 'ext-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            filled_url.as_deref(),
+            Some("https://example.com/robin"),
+            "duplicate re-import must fill a previously null external-identity URL"
+        );
+
+        // A later re-import with a changed URL must refresh the stored value.
+        add_person(
+            &mut conn,
+            true,
+            AddPersonArgs {
+                original_url: Some("https://example.com/robin-updated"),
+                ..person_args(
+                    "Robin Spencer",
+                    vec!["robin@example.com"],
+                    vec![],
+                    Some("ext-1"),
+                )
+            },
+        )
+        .unwrap();
+        let refreshed_url: Option<String> = conn
+            .query_row(
+                "SELECT url FROM external_identities
+                 WHERE entity_type = 'person' AND kind = 'contact' AND external_id = 'ext-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            refreshed_url.as_deref(),
+            Some("https://example.com/robin-updated"),
+            "duplicate re-import must refresh a changed external-identity URL"
+        );
+
+        // A URL-less re-import must not clobber the stored URL back to null.
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Robin Spencer",
+                vec!["robin@example.com"],
+                vec![],
+                Some("ext-1"),
+            ),
+        )
+        .unwrap();
+        let preserved_url: Option<String> = conn
+            .query_row(
+                "SELECT url FROM external_identities
+                 WHERE entity_type = 'person' AND kind = 'contact' AND external_id = 'ext-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            preserved_url.as_deref(),
+            Some("https://example.com/robin-updated"),
+            "a URL-less re-import must not clobber an existing external-identity URL"
+        );
+    }
+
+    #[test]
+    fn add_person_from_email_duplicate_path_rolls_back_on_late_failure() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // Seed an active person with a blank primary email so the duplicate path
+        // performs a visible enrichment that should also roll back.
+        add_person(
+            &mut conn,
+            true,
+            person_args("Robin Spencer", vec![], vec![], None),
+        )
+        .unwrap();
+        let person_id = single_person_id(&conn, "Robin Spencer");
+
+        conn.execute("DROP TABLE external_identities", []).unwrap();
+
+        let result = add_person_from_email(
+            &mut conn,
+            true,
+            AddPersonFromEmailArgs {
+                full_name: "Robin Spencer",
+                email: "robin@example.com",
+                source_slug: Some("gmail"),
+                external_id: Some("msg-1"),
+            },
+        );
+        assert!(result.is_err(), "expected the missing-table write to error");
+
+        let (primary_email, email_handles): (Option<String>, i64) = conn
+            .query_row(
+                "SELECT p.primary_email,
+                        (SELECT COUNT(*) FROM person_emails pe WHERE pe.person_id = p.id)
+                 FROM people p WHERE p.id = ?1",
+                params![person_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            primary_email, None,
+            "duplicate-path enrichment must roll back when a later step fails"
+        );
+        assert_eq!(
+            email_handles, 0,
+            "duplicate-path handle write must roll back when a later step fails"
+        );
+    }
+
+    fn interaction_args<'a>(
+        body: &str,
+        external_id: Option<&'a str>,
+        allow_duplicate: bool,
+    ) -> AddInteractionArgs<'a> {
+        AddInteractionArgs {
+            title: Some("Subject"),
+            kind: "note",
+            occurred_at: None,
+            source_slug: Some("manual"),
+            external_id,
+            original_url: None,
+            body: body.to_string(),
+            links: vec![],
+            raw_participants: vec![],
+            allow_duplicate,
+        }
+    }
+
+    #[test]
+    fn external_identity_dedupe_does_not_enrich_blank_primary_with_owned_email() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // Alice owns alice@example.com (external id ext-alice).
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Alice Owner",
+                vec!["alice@example.com"],
+                vec![],
+                Some("ext-alice"),
+            ),
+        )
+        .unwrap();
+
+        // Bob is a separate active person carrying external id ext-bob but, crucially,
+        // a *blank* denormalized primary_email so the enrichment path is live.
+        add_person(
+            &mut conn,
+            true,
+            person_args("Bob Other", vec![], vec![], Some("ext-bob")),
+        )
+        .unwrap();
+        let bob_id = single_person_id(&conn, "Bob Other");
+
+        // Re-import ext-bob (resolves to Bob via external identity, skipping
+        // email-based dedupe) supplying Alice's address. insert_person_handles
+        // already refuses the owned email; the denormalized enrichment path must
+        // refuse it too, or people.primary_email gets stamped with Alice's address
+        // while person_emails stays clean.
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Bob Other",
+                vec!["alice@example.com"],
+                vec![],
+                Some("ext-bob"),
+            ),
+        )
+        .unwrap();
+
+        let bob_primary: Option<String> = conn
+            .query_row(
+                "SELECT primary_email FROM people WHERE id = ?1",
+                params![bob_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            bob_primary, None,
+            "blank primary_email must not be enriched with an email another active person owns"
+        );
+
+        // The denormalized column and the normalized table stay consistent: a
+        // single active person owns alice@example.com.
+        let owners: i64 = conn
+            .query_row(
+                "SELECT COUNT(DISTINCT p.id)
+                 FROM people p
+                 LEFT JOIN person_emails pe ON pe.person_id = p.id
+                 WHERE p.archived_at IS NULL
+                   AND (lower(p.primary_email) = 'alice@example.com'
+                        OR pe.normalized_email = 'alice@example.com')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(owners, 1, "exactly one active person may own the email");
+    }
+
+    #[test]
+    fn add_person_from_email_does_not_enrich_blank_primary_with_owned_email() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // Alice owns alice@example.com.
+        add_person(
+            &mut conn,
+            true,
+            person_args("Alice Owner", vec!["alice@example.com"], vec![], None),
+        )
+        .unwrap();
+
+        // Bob: an active person with a blank primary_email and a Gmail-sourced
+        // external identity, so an add_person_from_email re-import resolves to him
+        // via external identity (skipping email-based dedupe) and exercises
+        // enrich_duplicate_person_email.
+        let bob_id = new_id();
+        conn.execute(
+            "INSERT INTO people (id, full_name) VALUES (?1, 'Bob Other')",
+            params![bob_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO external_identities
+               (id, entity_type, entity_id, source_id, kind, external_id)
+             VALUES (?1, 'person', ?2, 'source_gmail', 'contact', 'msg-bob')",
+            params![new_id(), bob_id],
+        )
+        .unwrap();
+
+        add_person_from_email(
+            &mut conn,
+            true,
+            AddPersonFromEmailArgs {
+                full_name: "Bob Other",
+                email: "alice@example.com",
+                source_slug: Some("gmail"),
+                external_id: Some("msg-bob"),
+            },
+        )
+        .unwrap();
+
+        let bob_primary: Option<String> = conn
+            .query_row(
+                "SELECT primary_email FROM people WHERE id = ?1",
+                params![bob_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            bob_primary, None,
+            "email-import enrichment must not stamp an owned email onto a blank primary_email"
+        );
+        let bob_has_alice_email: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM person_emails
+                 WHERE person_id = ?1 AND normalized_email = 'alice@example.com'",
+                params![bob_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            bob_has_alice_email, 0,
+            "email-import dedupe must not attach an email owned by another person"
+        );
+    }
+
+    #[test]
+    fn allow_duplicate_person_does_not_steal_external_identity() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // First import: an active person owning external id ext-1.
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Robin Spencer",
+                vec!["robin@example.com"],
+                vec![],
+                Some("ext-1"),
+            ),
+        )
+        .unwrap();
+        let original_id = single_person_id(&conn, "Robin Spencer");
+
+        // A forced duplicate import for the *same* external id must succeed (the
+        // identity insert must not error on the unique-constraint conflict) and
+        // must leave the identity pointing at the original active record.
+        add_person(
+            &mut conn,
+            true,
+            AddPersonArgs {
+                allow_duplicate: true,
+                ..person_args(
+                    "Robin Spencer",
+                    vec!["robin.alt@example.com"],
+                    vec![],
+                    Some("ext-1"),
+                )
+            },
+        )
+        .unwrap();
+
+        let active_people: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM people WHERE archived_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            active_people, 2,
+            "allow-duplicate must fork a second record"
+        );
+
+        let identity_rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM external_identities
+                 WHERE kind = 'contact' AND external_id = 'ext-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            identity_rows, 1,
+            "the unique external identity stays a single row"
+        );
+        let identity_target: String = conn
+            .query_row(
+                "SELECT entity_id FROM external_identities
+                 WHERE kind = 'contact' AND external_id = 'ext-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            identity_target, original_id,
+            "a forced duplicate must not steal the original record's external identity"
+        );
+    }
+
+    #[test]
+    fn allow_duplicate_fork_does_not_set_owned_primary_email() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // Alice: an active person who owns alice@example.com.
+        add_person(
+            &mut conn,
+            true,
+            person_args("Alice Smith", vec!["alice@example.com"], vec![], None),
+        )
+        .unwrap();
+        let original_id = single_person_id(&conn, "Alice Smith");
+
+        // A forced duplicate that re-imports Alice's address forks a new record.
+        // insert_person_handles skips the owned email for person_emails, so the
+        // new people.primary_email must not be stamped with it either — otherwise
+        // the fork shows a stolen address with no matching person_emails row.
+        add_person(
+            &mut conn,
+            true,
+            AddPersonArgs {
+                allow_duplicate: true,
+                ..person_args("Alice Smith", vec!["alice@example.com"], vec![], None)
+            },
+        )
+        .unwrap();
+
+        let fork_id: String = conn
+            .query_row(
+                "SELECT id FROM people WHERE archived_at IS NULL AND id <> ?1",
+                params![original_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        let fork_primary_email: Option<String> = conn
+            .query_row(
+                "SELECT primary_email FROM people WHERE id = ?1",
+                params![fork_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            fork_primary_email, None,
+            "a forced duplicate must not stamp an owned email onto its primary_email"
+        );
+
+        // The skipped email must leave no person_emails row on the fork, keeping
+        // the one-person-per-email invariant intact.
+        let fork_email_rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM person_emails WHERE person_id = ?1",
+                params![fork_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            fork_email_rows, 0,
+            "the owned email is skipped, so the fork holds no person_emails row"
+        );
+
+        // Alice still solely owns the address.
+        let owners: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM people p
+                 LEFT JOIN person_emails pe ON pe.person_id = p.id
+                 WHERE p.archived_at IS NULL
+                   AND (lower(p.primary_email) = 'alice@example.com'
+                        OR pe.normalized_email = 'alice@example.com')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            owners, 1,
+            "alice@example.com must stay owned by exactly one person"
+        );
+    }
+
+    #[test]
+    fn allow_duplicate_interaction_does_not_steal_external_identity() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // First import: an interaction owning external id int-1.
+        add_interaction(
+            &mut conn,
+            true,
+            interaction_args("first body", Some("int-1"), false),
+        )
+        .unwrap();
+        let original_id: String = conn
+            .query_row(
+                "SELECT entity_id FROM external_identities
+                 WHERE entity_type = 'interaction' AND external_id = 'int-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        // A forced duplicate (distinct body, so find_duplicate_interaction would
+        // not match on content) for the same external id must succeed and leave
+        // the identity on the original interaction.
+        add_interaction(
+            &mut conn,
+            true,
+            interaction_args("a totally different body", Some("int-1"), true),
+        )
+        .unwrap();
+
+        let interaction_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM interactions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            interaction_count, 2,
+            "allow-duplicate must fork a second interaction"
+        );
+        let identity_rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM external_identities
+                 WHERE entity_type = 'interaction' AND external_id = 'int-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            identity_rows, 1,
+            "the unique external identity stays a single row"
+        );
+        let identity_target: String = conn
+            .query_row(
+                "SELECT entity_id FROM external_identities
+                 WHERE entity_type = 'interaction' AND external_id = 'int-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            identity_target, original_id,
+            "a forced duplicate must not steal the original interaction's external identity"
+        );
     }
 }

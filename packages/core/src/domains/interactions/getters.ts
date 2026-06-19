@@ -1,9 +1,10 @@
 import type { Selectable } from 'kysely'
-import type { Interactions, People } from '@local-brain/db'
+import type { InteractionParticipants, Interactions, People } from '@local-brain/db'
 import { db } from '../../db/client'
 
 export type Interaction = Selectable<Interactions>
 export type InteractionParticipant = Selectable<People>
+export type InteractionParticipantRow = Selectable<InteractionParticipants>
 
 export interface ListInteractionsOptions {
   includeArchived?: boolean
@@ -36,5 +37,17 @@ export function listInteractionParticipants(
     .innerJoin('interactionParticipants', 'interactionParticipants.personId', 'people.id')
     .where('interactionParticipants.interactionId', '=', interactionId)
     .selectAll('people')
+    .execute()
+}
+
+/** Raw participant rows, including unresolved imported handles with no person row. */
+export function listInteractionParticipantRows(
+  interactionId: string,
+): Promise<InteractionParticipantRow[]> {
+  return db
+    .selectFrom('interactionParticipants')
+    .selectAll()
+    .where('interactionId', '=', interactionId)
+    .orderBy('createdAt', 'asc')
     .execute()
 }
