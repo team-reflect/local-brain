@@ -62,11 +62,12 @@ export async function applyTasks(ctx: ApplyContext, tasks: ExtractionResult['tas
     ctx.resolve(task.ref, 'task', id)
     ctx.summary.tasks.created++
 
-    // Insert assignees with role='assignee'; track their ids to dedup personRefs.
+    // Insert assignees with role='assignee'; track their person ids to dedup
+    // both duplicate refs within assigneeRefs and overlap with personRefs.
     const assigneePersonIds = new Set<string>()
     for (const assigneeRef of task.assigneeRefs) {
       const person = ctx.resolved.get(assigneeRef)
-      if (person?.type === 'person') {
+      if (person?.type === 'person' && !assigneePersonIds.has(person.id)) {
         assigneePersonIds.add(person.id)
         ctx.inserts.links.push(
           db.insertInto('taskPeople').values({

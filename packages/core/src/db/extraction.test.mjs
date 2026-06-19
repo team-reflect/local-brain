@@ -321,6 +321,43 @@ describe('05a extraction apply (real SQLite golden round-trip)', () => {
     expect(await listTasks()).toHaveLength(0)
   })
 
+  it('deduplicates duplicate assignee refs resolving to the same person', async () => {
+    // A model may emit the same ref twice in assigneeRefs, or two refs that
+    // merge-resolve to the same person. Either way, only one task_people row
+    // with role='assignee' should be written.
+    const doc = await ingestDocument({ title: 'Dupe assignee', bodyText: 'Alex twice.' })
+    const existingId = await createPerson({ fullName: 'Alex Rivera', primaryEmail: 'alex@example.com' })
+    const result = parseExtractionResult({
+      // Two refs that resolve to the same person via email merge.
+      people: [
+        { ref: 'p_alex1', fullName: 'Alex Rivera', primaryEmail: 'alex@example.com' },
+        { ref: 'p_alex2', fullName: 'Alex R.',     primaryEmail: 'alex@example.com' },
+      ],
+      tasks: [
+        {
+          ref: 't_do',
+          title: 'Send it twice',
+          assigneeRefs: ['p_alex1', 'p_alex2'], // both resolve to same DB row
+        },
+      ],
+    })
+
+    const summary = await applyExtraction({ recordType: 'document', recordId: doc.id }, result)
+    expect(summary.tasks.created).toBe(1)
+    expect(summary.people.matched).toBe(2) // both refs matched existing row
+
+    const task = (await listTasks())[0]
+    const taskLinks = await getTaskLinks(task.id)
+    expect(taskLinks.assignees).toHaveLength(1)
+    expect(taskLinks.assignees[0].title).toBe('Alex Rivera')
+    expect(taskLinks.people).toHaveLength(1) // only one task_people row total
+
+    // listTaskAssignees helper also returns exactly one row
+    const assignees = await listTaskAssignees(task.id)
+    expect(assignees).toHaveLength(1)
+    expect(assignees[0].personId).toBe(existingId)
+  })
+
   it('validates assigneeRefs must be person refs', () => {
     const result = parseExtractionResult({
       organizations: [{ ref: 'org1', name: 'Acme' }],

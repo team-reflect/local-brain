@@ -2427,6 +2427,64 @@ fn add_task_with_assignee_creates_role_row_and_json_includes_assignee_count() {
 }
 
 #[test]
+fn add_task_assignee_and_person_link_same_person_yields_one_assignee_row() {
+    // --link person:X and --assignee X for the same person must not create two
+    // task_people rows. The assignee row (role='assignee') wins.
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let person = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Dana Scully",
+            "--email",
+            "dana@example.com",
+        ],
+    );
+    let person_id = person["id"].as_str().unwrap();
+    let link_arg = format!("person:{person_id}");
+
+    let task = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "task",
+            "--title",
+            "Send the deck",
+            "--link",
+            &link_arg,
+            "--assignee",
+            person_id,
+        ],
+    );
+    assert_eq!(task["assigneeCount"], 1);
+    let task_id = task["id"].as_str().unwrap();
+
+    let conn = Connection::open(&db).unwrap();
+    let row_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM task_people WHERE task_id = ?1",
+            [task_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(row_count, 1, "expected exactly one task_people row");
+
+    let role: String = conn
+        .query_row(
+            "SELECT role FROM task_people WHERE task_id = ?1",
+            [task_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(role, "assignee");
+}
+
+#[test]
 fn plan_day_json_includes_assignees() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
