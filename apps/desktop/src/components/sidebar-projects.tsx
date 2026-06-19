@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { ChevronDown, FolderKanban, Plus } from 'lucide-react'
+import { FolderClosed, FolderOpen, Plus } from 'lucide-react'
 import type { Project } from '@local-brain/core'
 import { useProjects } from '../lib/queries'
 import { cn } from '../lib/utils'
@@ -18,6 +18,7 @@ export function SidebarProjects({ activeSection, route }: SidebarProjectsProps):
   const [open, setOpen] = useState(true)
   const [createOpen, setCreateOpen] = useState(false)
   const active = activeSection === 'projects'
+  const ProjectsIcon = open ? FolderOpen : FolderClosed
 
   function openProject(project: Project): void {
     navigate({ kind: 'project', id: project.id })
@@ -37,14 +38,8 @@ export function SidebarProjects({ activeSection, route }: SidebarProjectsProps):
           onClick={() => setOpen((current) => !current)}
           className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium"
         >
-          <FolderKanban className={cn('size-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} />
+          <ProjectsIcon className={cn('size-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} />
           <span className="min-w-0 flex-1 truncate">Projects</span>
-          <ChevronDown
-            className={cn(
-              'size-3.5 shrink-0 text-muted-foreground transition-transform',
-              open ? 'rotate-0' : '-rotate-90',
-            )}
-          />
         </button>
         <button
           type="button"

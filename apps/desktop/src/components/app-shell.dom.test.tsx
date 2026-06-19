@@ -83,11 +83,15 @@ describe('AppShell', () => {
     render(<AppShell />)
 
     const projects = screen.getByRole('button', { name: /Projects/ })
+    expect(projects.querySelectorAll('svg')).toHaveLength(1)
+    expect(projects.querySelector('svg')?.classList.contains('lucide-folder-open')).toBe(true)
     expect(screen.getByRole('button', { name: 'Apollo' })).toBeDefined()
 
     fireEvent.click(projects)
 
     expect(projects.getAttribute('aria-expanded')).toBe('false')
+    expect(projects.querySelectorAll('svg')).toHaveLength(1)
+    expect(projects.querySelector('svg')?.classList.contains('lucide-folder-closed')).toBe(true)
     expect(screen.queryByRole('button', { name: 'Apollo' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Create project' })).toBeDefined()
   })
