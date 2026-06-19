@@ -17,10 +17,56 @@ export interface InteractionParticipantInput {
   sourceId?: string
 }
 
+function normalizeText(value: string | undefined): string | undefined {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : undefined
+}
+
 function normalizeHandle(handle: string | undefined): string | undefined {
   const trimmed = handle?.trim()
   if (!trimmed) return undefined
   return trimmed.includes('@') ? trimmed.toLowerCase() : trimmed
+}
+
+interface ParticipantRow {
+  id: string
+  interactionId: string
+  personId?: string
+  role?: string
+  handle?: string
+  normalizedHandle?: string
+  displayName?: string
+  sourceId?: string
+}
+
+/**
+ * Build the insert values for one participant, normalizing handle/display name.
+ * Returns undefined when the row would carry no identity (no personId, handle,
+ * or display name), since migration 0006's CHECK requires at least one of
+ * person_id / normalized_handle / display_name to be present.
+ */
+function buildParticipantRow(
+  interactionId: string,
+  participant: InteractionParticipantInput,
+): ParticipantRow | undefined {
+  const personId = normalizeText(participant.personId)
+  const role = normalizeText(participant.role)
+  const handle = normalizeText(participant.handle)
+  const normalizedHandle = normalizeHandle(participant.handle)
+  const displayName = normalizeText(participant.displayName)
+  if (personId === undefined && normalizedHandle === undefined && displayName === undefined) {
+    return undefined
+  }
+  return {
+    id: newId(),
+    interactionId,
+    ...(personId !== undefined ? { personId } : {}),
+    ...(role !== undefined ? { role } : {}),
+    ...(handle !== undefined ? { handle } : {}),
+    ...(normalizedHandle !== undefined ? { normalizedHandle } : {}),
+    ...(displayName !== undefined ? { displayName } : {}),
+    ...(participant.sourceId !== undefined ? { sourceId: participant.sourceId } : {}),
+  }
 }
 
 /**
@@ -33,29 +79,20 @@ export async function createInteraction(
   participants: readonly InteractionParticipantInput[] = [],
 ): Promise<string> {
   const id = newId()
+  const participantRows = participants
+    .map((participant) => buildParticipantRow(id, participant))
+    .filter((row): row is ParticipantRow => row !== undefined)
   const statements = [
     db.insertInto('interactions').values({ ...input, id }),
-    ...participants.map((participant) =>
-      db.insertInto('interactionParticipants').values({
-        id: newId(),
-        interactionId: id,
-        ...(participant.personId !== undefined ? { personId: participant.personId } : {}),
-        ...(participant.role !== undefined ? { role: participant.role } : {}),
-        ...(participant.handle !== undefined ? { handle: participant.handle } : {}),
-        ...(normalizeHandle(participant.handle) !== undefined
-          ? { normalizedHandle: normalizeHandle(participant.handle) }
-          : {}),
-        ...(participant.displayName !== undefined ? { displayName: participant.displayName } : {}),
-        ...(participant.sourceId !== undefined ? { sourceId: participant.sourceId } : {}),
-      }),
-    ),
+    ...participantRows.map((row) => db.insertInto('interactionParticipants').values(row)),
   ]
   await batch(statements)
   // Relationship hints update after a relevant interaction (Plan 05 step 9).
   // Runs after the interaction transaction commits so the recompute sees it.
-  for (const participant of participants) {
-    if (participant.personId !== undefined) {
-      await recomputeRelationshipIntelligence(participant.personId)
+  // Only the participants actually inserted (with a real personId) count.
+  for (const row of participantRows) {
+    if (row.personId !== undefined) {
+      await recomputeRelationshipIntelligence(row.personId)
     }
   }
   return id

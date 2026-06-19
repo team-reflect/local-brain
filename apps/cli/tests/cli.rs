@@ -837,6 +837,253 @@ fn add_interaction_dedupes_by_external_id_and_enriches_provenance() {
 }
 
 #[test]
+fn add_interaction_external_id_dedupe_is_source_scoped() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    // Same upstream id under different sources must stay distinct: external ids
+    // are only unique within a source.
+    let gmail = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Gmail message",
+            "--text",
+            "Body from the Gmail copy.",
+            "--source",
+            "gmail",
+            "--external-id",
+            "shared-id-1",
+        ],
+    );
+    assert_eq!(gmail["isDuplicate"], false);
+
+    let zoom = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Zoom meeting",
+            "--text",
+            "A completely different Zoom transcript.",
+            "--source",
+            "zoom",
+            "--external-id",
+            "shared-id-1",
+        ],
+    );
+    assert_eq!(zoom["isDuplicate"], false, "zoom must not merge into gmail");
+    assert_ne!(zoom["id"], gmail["id"]);
+
+    // An import that omits --source must not merge into either claimed record.
+    let sourceless = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "note",
+            "--title",
+            "Sourceless",
+            "--text",
+            "Yet another body with the same external id.",
+            "--external-id",
+            "shared-id-1",
+        ],
+    );
+    assert_eq!(sourceless["isDuplicate"], false);
+    assert_ne!(sourceless["id"], gmail["id"]);
+    assert_ne!(sourceless["id"], zoom["id"]);
+
+    let conn = Connection::open(&db).unwrap();
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM interactions WHERE external_id = 'shared-id-1'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 3);
+}
+
+#[test]
+fn add_interaction_external_id_dedupe_matches_within_same_source() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "First",
+            "--text",
+            "First body.",
+            "--source",
+            "gmail",
+            "--external-id",
+            "same-source-1",
+        ],
+    );
+    assert_eq!(first["isDuplicate"], false);
+
+    // Different body, same source + external id → still the same record.
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "First (re-import)",
+            "--text",
+            "A slightly different body for the same Gmail message.",
+            "--source",
+            "gmail",
+            "--external-id",
+            "same-source-1",
+        ],
+    );
+    assert_eq!(second["isDuplicate"], true);
+    assert_eq!(second["id"], first["id"]);
+}
+
+#[test]
+fn add_interaction_rejects_empty_bracket_participant() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    // `from:<>` carries no usable identity and would violate the
+    // interaction_participants CHECK; the command must fail cleanly instead.
+    let out = run(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Broken participant",
+            "--text",
+            "Body with a bad participant.",
+            "--participant",
+            "from:<>",
+        ],
+    );
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("missing a name or handle"),
+        "unexpected stderr: {stderr}"
+    );
+
+    let conn = Connection::open(&db).unwrap();
+    let interactions: i64 = conn
+        .query_row("SELECT COUNT(*) FROM interactions", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(interactions, 0, "interaction must roll back");
+    let participants: i64 = conn
+        .query_row("SELECT COUNT(*) FROM interaction_participants", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(participants, 0);
+}
+
+#[test]
+fn add_interaction_keeps_name_only_participant() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    // A display name with empty brackets is still a valid participant.
+    let interaction = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Name only",
+            "--text",
+            "Body with a name-only participant.",
+            "--participant",
+            "from:Casey Jordan <>",
+        ],
+    );
+    let id = interaction["id"].as_str().unwrap();
+    let conn = Connection::open(&db).unwrap();
+    let (handle, display_name): (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT handle, display_name FROM interaction_participants
+             WHERE interaction_id = ?1 AND role = 'from'",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(handle, None);
+    assert_eq!(display_name.as_deref(), Some("Casey Jordan"));
+}
+
+#[test]
+fn add_person_from_email_skips_org_comma_labels() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    // "Acme, Sales" / "Amazon, Customer Service" must not be inverted into fake
+    // people.
+    for name in ["Acme, Sales", "Amazon, Customer Service"] {
+        let skipped = run_json(
+            &db,
+            &[
+                "--json",
+                "add",
+                "person-from-email",
+                "--full-name",
+                name,
+                "--email",
+                "team@example.com",
+            ],
+        );
+        assert_eq!(skipped["id"], Value::Null, "{name} should be skipped");
+        let codes = skipped["reasonCodes"].as_array().unwrap();
+        assert!(
+            codes.iter().any(|c| c == "not_capitalized_first_last"),
+            "{name} reasonCodes: {codes:?}"
+        );
+    }
+
+    // A genuine "Last, First" directory entry is still inverted and created.
+    let created = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person-from-email",
+            "--full-name",
+            "Rivera, Sam",
+            "--email",
+            "sam@example.com",
+        ],
+    );
+    assert_eq!(created["normalizedName"], "Sam Rivera");
+    assert!(created["id"].is_string());
+}
+
+#[test]
 fn search_finds_added_records_by_full_text() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);

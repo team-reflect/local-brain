@@ -350,12 +350,96 @@ fn normalize_untrusted_name(raw: &str) -> (String, bool) {
         .map(|index| cleaned[..index].trim().to_string())
         .unwrap_or(cleaned);
     let parts: Vec<&str> = route_stripped.split(',').map(str::trim).collect();
-    let normalized = if parts.len() == 2 && !is_name_suffix(parts[1]) {
+    // Only invert `Last, First` directory strings when both sides read like a
+    // real person name. Org/department labels such as "Acme, Sales" or
+    // "Amazon, Customer Service" keep their comma so the downstream
+    // capitalized-name guardrail rejects them instead of minting fake people.
+    let normalized = if parts.len() == 2 && is_plausible_person_comma_inversion(parts[0], parts[1])
+    {
         format!("{} {}", parts[1], parts[0])
     } else {
         route_stripped
     };
     (normalized.trim().to_string(), route_index.is_some())
+}
+
+/// Whether `Last, First` should be inverted to `First Last`. We require the
+/// segment after the comma to look like a given name (one token, optionally a
+/// trailing initial) and reject obvious organization/role labels on either side.
+fn is_plausible_person_comma_inversion(last: &str, first: &str) -> bool {
+    let last = last.trim();
+    let first = first.trim();
+    if last.is_empty() || first.is_empty() || is_name_suffix(first) {
+        return false;
+    }
+    if last.split_whitespace().any(is_generic_role_term)
+        || first.split_whitespace().any(is_generic_role_term)
+    {
+        return false;
+    }
+    if !is_plausible_given_name_segment(first) {
+        return false;
+    }
+    looks_like_capitalized_person_name(&format!("{first} {last}"))
+}
+
+/// A `First` segment from a directory `Last, First` string: a single given name,
+/// optionally followed by a short initial like `A.`. Two full words (e.g.
+/// "Customer Service") are rejected.
+fn is_plausible_given_name_segment(first: &str) -> bool {
+    let mut words = first.split_whitespace();
+    let Some(given) = words.next() else {
+        return false;
+    };
+    if is_generic_role_term(given) {
+        return false;
+    }
+    match words.next() {
+        None => true,
+        Some(second) => words.next().is_none() && is_name_initial(second),
+    }
+}
+
+fn is_name_initial(token: &str) -> bool {
+    let core = token.trim_end_matches('.');
+    core.chars().count() == 1 && core.chars().all(char::is_alphabetic)
+}
+
+/// Generic role/department words that signal an organization mailbox rather than
+/// a personal name (e.g. "Acme, Sales"). Mirrors the generic locals used by
+/// `is_machine_email`.
+fn is_generic_role_term(word: &str) -> bool {
+    let cleaned = word
+        .trim_matches(|c: char| !c.is_alphanumeric())
+        .to_lowercase();
+    matches!(
+        cleaned.as_str(),
+        "accounting"
+            | "admin"
+            | "billing"
+            | "concierge"
+            | "contact"
+            | "customer"
+            | "department"
+            | "devs"
+            | "education"
+            | "finance"
+            | "hello"
+            | "help"
+            | "info"
+            | "marketing"
+            | "newsletter"
+            | "notifications"
+            | "ops"
+            | "operations"
+            | "registration"
+            | "sales"
+            | "service"
+            | "services"
+            | "ship"
+            | "support"
+            | "team"
+    )
 }
 
 fn is_name_suffix(raw: &str) -> bool {
@@ -470,6 +554,11 @@ fn looks_like_capitalized_person_name(name: &str) -> bool {
         "de", "del", "der", "van", "von", "da", "di", "la", "le", "du",
     ];
     words.iter().all(|word| {
+        // A surviving comma marks an un-inverted org string (e.g. "Acme,") that
+        // normalize_untrusted_name deliberately left alone — not a person name.
+        if word.contains(',') {
+            return false;
+        }
         let trimmed = word.trim_matches(|c: char| c == '\'' || c == '.' || c == '-');
         if trimmed.is_empty() {
             return false;
@@ -1131,16 +1220,30 @@ fn find_duplicate_interaction(
     conn: &Connection,
     hash: &str,
     external_id: Option<&str>,
+    source_id: Option<&str>,
 ) -> Result<Option<String>, CliError> {
     if let Some(external_id) = normalize_optional(external_id) {
+        // The source-scoped `external_identities` lookup already ran in the
+        // caller. This legacy fallback matches the denormalized
+        // `interactions.external_id` column, but it must NOT merge across
+        // sources: an external id is only unique within a source. We therefore
+        // skip any interaction that another source has already claimed, and —
+        // when this import omits a source — only match unclaimed/legacy rows.
         let id = conn
             .query_row(
-                "SELECT id FROM interactions
-                 WHERE archived_at IS NULL
-                   AND external_id IS NOT NULL
-                   AND external_id = ?1
+                "SELECT i.id FROM interactions i
+                 WHERE i.archived_at IS NULL
+                   AND i.external_id IS NOT NULL
+                   AND i.external_id = ?1
+                   AND NOT EXISTS (
+                     SELECT 1 FROM external_identities ei
+                     WHERE ei.entity_type = 'interaction'
+                       AND ei.entity_id = i.id
+                       AND ei.kind = 'record'
+                       AND (?2 IS NULL OR ei.source_id <> ?2)
+                   )
                  LIMIT 1",
-                params![external_id],
+                params![external_id, source_id],
                 |row| row.get::<_, String>(0),
             )
             .ok();
@@ -1178,6 +1281,7 @@ fn enrich_duplicate_interaction(
     Ok(())
 }
 
+#[derive(Debug)]
 struct RawParticipant {
     role: String,
     handle: Option<String>,
@@ -1221,6 +1325,15 @@ fn parse_raw_participant(raw: &str) -> Result<Option<RawParticipant>, CliError> 
             handle.to_string()
         }
     });
+    // Empty angle brackets (e.g. `from:<>`) leave no usable identity. Without a
+    // display name or handle the row would violate the interaction_participants
+    // CHECK (person_id OR normalized_handle OR display_name), so reject it with
+    // the same error used for an entirely missing payload.
+    if display_name.is_none() && normalized_handle.is_none() {
+        return Err(CliError::Runtime(format!(
+            "--participant '{raw}' is missing a name or handle"
+        )));
+    }
     Ok(Some(RawParticipant {
         role,
         handle,
@@ -1240,6 +1353,11 @@ fn insert_raw_participants(
         let Some(participant) = parse_raw_participant(raw)? else {
             continue;
         };
+        // Defensive guard: never write a row that fails the migration 0006
+        // CHECK, even if a future parser change loses this invariant.
+        if participant.normalized_handle.is_none() && participant.display_name.is_none() {
+            continue;
+        }
         let changed = conn.execute(
             "INSERT OR IGNORE INTO interaction_participants
              (id, interaction_id, role, handle, normalized_handle, display_name, source_id)
@@ -1292,7 +1410,9 @@ pub fn add_interaction(
             return report_record(json, "interaction", &existing, true, 0);
         }
     }
-    if let Some(existing) = find_duplicate_interaction(conn, &hash, args.external_id)? {
+    if let Some(existing) =
+        find_duplicate_interaction(conn, &hash, args.external_id, source_id.as_deref())?
+    {
         if !args.allow_duplicate {
             let tx = conn.transaction()?;
             enrich_duplicate_interaction(&tx, &existing, &args)?;
@@ -1522,5 +1642,91 @@ fn report_asset(json: bool, id: &str, duplicate: bool, linked: usize) -> Result<
             println!("asset {id} (linked {linked})");
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn comma_inverts_plausible_person_names() {
+        // Classic directory "Last, First" forms become "First Last".
+        assert_eq!(normalize_untrusted_name("Smith, John").0, "John Smith");
+        assert_eq!(normalize_untrusted_name("Doe, Jane A.").0, "Jane A. Doe");
+        assert_eq!(
+            normalize_untrusted_name("van der Berg, Maria").0,
+            "Maria van der Berg"
+        );
+    }
+
+    #[test]
+    fn comma_keeps_org_labels_intact() {
+        // Org/department labels must NOT be reversed into fake people.
+        assert_eq!(normalize_untrusted_name("Acme, Sales").0, "Acme, Sales");
+        assert_eq!(
+            normalize_untrusted_name("Amazon, Customer Service").0,
+            "Amazon, Customer Service"
+        );
+    }
+
+    #[test]
+    fn org_comma_labels_are_not_person_names() {
+        // The downstream guardrail rejects the un-inverted comma strings, so no
+        // person is minted for them.
+        assert!(!looks_like_capitalized_person_name("Acme, Sales"));
+        assert!(!looks_like_capitalized_person_name(
+            "Amazon, Customer Service"
+        ));
+        // A real inverted person name still passes.
+        assert!(looks_like_capitalized_person_name("John Smith"));
+    }
+
+    #[test]
+    fn assess_skips_org_comma_labels() {
+        let acme = assess_person_import("Acme, Sales", "person@example.com");
+        assert!(!acme.should_create_person);
+        assert!(acme.reason_codes.contains(&"not_capitalized_first_last"));
+
+        let amazon = assess_person_import("Amazon, Customer Service", "buyer@example.com");
+        assert!(!amazon.should_create_person);
+        assert!(amazon.reason_codes.contains(&"not_capitalized_first_last"));
+    }
+
+    #[test]
+    fn assess_creates_plausible_inverted_person() {
+        let person = assess_person_import("Smith, John", "john@example.com");
+        assert_eq!(person.normalized_name, "John Smith");
+        assert!(person.should_create_person, "{:?}", person.reason_codes);
+    }
+
+    #[test]
+    fn parse_participant_rejects_empty_brackets() {
+        let err = parse_raw_participant("from:<>").unwrap_err();
+        assert!(matches!(err, CliError::Runtime(_)));
+        let err = parse_raw_participant("from: <>").unwrap_err();
+        assert!(matches!(err, CliError::Runtime(_)));
+    }
+
+    #[test]
+    fn parse_participant_keeps_named_and_handled() {
+        // A display name alone is enough to satisfy the CHECK.
+        let named = parse_raw_participant("from:Name <>").unwrap().unwrap();
+        assert_eq!(named.display_name.as_deref(), Some("Name"));
+        assert!(named.normalized_handle.is_none());
+
+        let handled = parse_raw_participant("from:Robin <robin@example.com>")
+            .unwrap()
+            .unwrap();
+        assert_eq!(handled.display_name.as_deref(), Some("Robin"));
+        assert_eq!(
+            handled.normalized_handle.as_deref(),
+            Some("robin@example.com")
+        );
+    }
+
+    #[test]
+    fn parse_participant_skips_blank() {
+        assert!(parse_raw_participant("   ").unwrap().is_none());
     }
 }
