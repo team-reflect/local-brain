@@ -862,22 +862,31 @@ fn insert_person_handles(
     phones: &[String],
     source_id: Option<&str>,
 ) -> Result<(), CliError> {
+    // On duplicate-person enrichment the record may already own a primary
+    // handle. Only the first handle of a person that has none yet should be
+    // promoted to primary; otherwise a re-import that adds secondary addresses
+    // would leave the person with multiple primary emails or phones.
+    let has_primary_email: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM person_emails WHERE person_id = ?1 AND is_primary = 1)",
+        params![person_id],
+        |row| row.get(0),
+    )?;
     for (index, email) in emails.iter().enumerate() {
+        let is_primary = i64::from(index == 0 && !has_primary_email);
         conn.execute(
             "INSERT OR IGNORE INTO person_emails
              (id, person_id, email, normalized_email, is_primary, source_id)
              VALUES (?1,?2,?3,?4,?5,?6)",
-            params![
-                new_id(),
-                person_id,
-                email,
-                email,
-                if index == 0 { 1 } else { 0 },
-                source_id,
-            ],
+            params![new_id(), person_id, email, email, is_primary, source_id],
         )?;
     }
+    let has_primary_phone: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM person_phones WHERE person_id = ?1 AND is_primary = 1)",
+        params![person_id],
+        |row| row.get(0),
+    )?;
     for (index, phone) in phones.iter().enumerate() {
+        let is_primary = i64::from(index == 0 && !has_primary_phone);
         conn.execute(
             "INSERT OR IGNORE INTO person_phones
              (id, person_id, phone, normalized_phone, is_primary, source_id)
@@ -887,7 +896,7 @@ fn insert_person_handles(
                 person_id,
                 phone,
                 normalize_phone(Some(phone)).unwrap_or_else(|| phone.clone()),
-                if index == 0 { 1 } else { 0 },
+                is_primary,
                 source_id,
             ],
         )?;
@@ -1945,6 +1954,92 @@ mod tests {
         assert_eq!(
             phone_count, 0,
             "duplicate-path handle write must roll back when a later step fails"
+        );
+    }
+
+    #[test]
+    fn duplicate_enrichment_keeps_single_primary_handle() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // New-person path: the first email and phone must be promoted to primary.
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Robin Spencer",
+                vec!["robin@example.com"],
+                vec!["+1 555 0100"],
+                None,
+            ),
+        )
+        .unwrap();
+        let person_id = single_person_id(&conn, "Robin Spencer");
+
+        let primary_emails = |conn: &Connection| -> i64 {
+            conn.query_row(
+                "SELECT COUNT(*) FROM person_emails WHERE person_id = ?1 AND is_primary = 1",
+                params![person_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        let primary_phones = |conn: &Connection| -> i64 {
+            conn.query_row(
+                "SELECT COUNT(*) FROM person_phones WHERE person_id = ?1 AND is_primary = 1",
+                params![person_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            primary_emails(&conn),
+            1,
+            "new person gets one primary email"
+        );
+        assert_eq!(
+            primary_phones(&conn),
+            1,
+            "new person gets one primary phone"
+        );
+
+        // Duplicate enrichment: a re-import that only adds secondary addresses
+        // must not promote the new rows to primary.
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Robin Spencer",
+                vec!["robin@example.com", "robin.work@example.com"],
+                vec!["+1 555 0100", "+1 555 0200"],
+                None,
+            ),
+        )
+        .unwrap();
+
+        let email_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM person_emails WHERE person_id = ?1",
+                params![person_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let phone_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM person_phones WHERE person_id = ?1",
+                params![person_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(email_count, 2, "secondary email row was added");
+        assert_eq!(phone_count, 2, "secondary phone row was added");
+        assert_eq!(
+            primary_emails(&conn),
+            1,
+            "duplicate enrichment must not create a second primary email"
+        );
+        assert_eq!(
+            primary_phones(&conn),
+            1,
+            "duplicate enrichment must not create a second primary phone"
         );
     }
 

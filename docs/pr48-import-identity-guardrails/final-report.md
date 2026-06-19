@@ -273,4 +273,36 @@ person rows key on `(interactionId, personId)`, handle rows on
 | `pnpm --filter @local-brain/core exec vitest run src/domains/interactions/setters.test.ts` | 5/5 pass (incl. 2 new dedupe tests) |
 | `pnpm --filter @local-brain/core typecheck` | clean |
 | `pnpm exec oxlint packages/core/src/domains/interactions` | clean |
+
+## Follow-up: Bugbot NEUTRAL re-review on head `71bbff6` (1 fresh issue)
+
+Cursor Bugbot re-reviewed head `71bbff6fa865c4b9000f5d9267f51e697b3a525d` and
+flagged one new current-head issue, fixed in this follow-up.
+
+### Duplicate import marks primary handles — BUGBOT 5b5ef2e7 (comment 3439870954)
+`apps/cli/src/commands/add.rs` — `insert_person_handles` always wrote the first
+email/phone of each incoming batch with `is_primary = 1` based on loop index
+alone. On duplicate-person enrichment, a re-import that adds only secondary
+addresses still flagged the new row as primary, so one person could accumulate
+multiple primary emails or phones.
+
+Fix: before each loop, `insert_person_handles` now checks whether the person
+already owns a primary handle (`SELECT EXISTS(... AND is_primary = 1)`). A handle
+is promoted to primary only when it is the first of the batch **and** the person
+has no existing primary of that kind. New-person creation (which has no prior
+handles) still marks its first email/phone primary; duplicate enrichment leaves
+the established primary untouched.
+
+Coverage: `add.rs` unit test `duplicate_enrichment_keeps_single_primary_handle`
+seeds a new person (asserting exactly one primary email and one primary phone),
+re-imports the same person with an added secondary email and phone, then asserts
+both secondary rows were added while the primary counts stay at exactly one.
+
+### Verification (run before commit)
+
+| Command | Result |
+|---------|--------|
+| `cargo test -p brain-cli` | 21 unit + 28 integration + 2 skill — all pass (incl. 1 new primary-handle test) |
+| `cargo fmt -p brain-cli` | clean |
+| `cargo clippy -p brain-cli --all-targets` | no new warnings; only the pre-existing `large_enum_variant` in `main.rs` (untouched) |
 </content>
