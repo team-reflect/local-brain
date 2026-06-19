@@ -6,7 +6,11 @@
 
 ## PR
 
-TBD (will be updated after `gh pr create`)
+https://github.com/maccman/local-brain/pull/73
+
+## Head SHA
+
+`1d36d51be316dab22c1a1035be1ad9618ebad6f5`
 
 ## Summary
 
