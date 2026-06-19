@@ -1,11 +1,12 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { isAppError, type BrainInfo } from '@local-brain/core'
-import { controlClass, sectionLabel } from '../lib/ui'
+import { sectionLabel } from '../lib/ui'
 import { useCreateBrain, useOpenBrain } from '../lib/queries'
 import { pickBrainToCreate, pickBrainToOpen } from '../lib/native-dialog'
 import { Alert } from './alert'
 import { Button } from './button'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
+import { Input } from './ui/input'
 
 export type BrainDialogMode = 'create' | 'open'
 
@@ -103,24 +104,23 @@ export function BrainDialog({
           {isCreate ? (
             <label className="flex flex-col gap-1">
               <span className={sectionLabel}>Name (optional)</span>
-              <input
+              <Input
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 placeholder="Work brain"
-                className={controlClass}
               />
             </label>
           ) : null}
           <label className="flex flex-col gap-1">
             <span className={sectionLabel}>Brain folder</span>
             <div className="flex items-center gap-2">
-              <input
+              <Input
                 ref={inputRef}
                 value={rootPath}
                 onChange={(event) => setRootPath(event.target.value)}
                 placeholder="/Users/you/Brains/Work"
                 spellCheck={false}
-                className={`${controlClass} flex-1 font-mono text-xs`}
+                className="flex-1 font-mono text-xs"
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') void submit()
                 }}
