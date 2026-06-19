@@ -71,10 +71,13 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
 
   const providerClosed = modelStatus.data && !modelStatus.data.canRun ? modelStatus.data.reason : null
   const pending = status === 'submitted' || status === 'streaming'
+  const conversationHydrated = !conversationId || hydratedConversationId === conversationId
+  const waitingForHydration = Boolean(conversationId && !conversationHydrated)
+  const composerPending = pending || waitingForHydration
 
   async function submitDraft(): Promise<void> {
     const text = draft.trim()
-    if (!text || pending) return
+    if (!text || composerPending) return
     setDraft('')
     try {
       if (!conversationId) {
@@ -105,9 +108,8 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
     }
   }
 
-  const conversationHydrated = !conversationId || hydratedConversationId === conversationId
-  const displayedMessages = conversationHydrated ? messages : initialMessages
-  const showInitialLoading = Boolean(conversationId && !conversationHydrated && storedMessages.isLoading)
+  const displayedMessages = conversationHydrated ? messages : []
+  const showInitialLoading = waitingForHydration
 
   return (
     <div className="flex h-full min-h-0">
@@ -127,7 +129,7 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
           <MessageList messages={displayedMessages} pending={pending} />
         )}
         {error ? <Alert variant="error" className="mx-auto mb-3 w-full max-w-2xl">{error.message}</Alert> : null}
-        <Composer draft={draft} setDraft={setDraft} pending={pending} onSubmit={onSubmit} />
+        <Composer draft={draft} setDraft={setDraft} pending={composerPending} onSubmit={onSubmit} />
       </div>
     </div>
   )
