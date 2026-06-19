@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Search } from 'lucide-react'
+import { VisuallyHidden } from 'radix-ui'
 import { listCommands } from '../lib/commands/registry'
 import type { CommandContext } from '../lib/commands/types'
 import { useGlobalSearch } from '../lib/queries'
 import { routeForRecord } from '../routing/route'
+import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 
 interface PaletteItem {
   key: string
@@ -90,17 +92,12 @@ export function CommandPalette({
   const items = useMemo(() => [...commandItems, ...recordItems], [commandItems, recordItems])
   const activeIndex = Math.min(selected, Math.max(items.length - 1, 0))
 
-  if (!open) return null
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-foreground/25 pt-[12vh] backdrop-blur-[1px]"
-      onClick={onClose}
-    >
-      <div
-        className="w-[36rem] max-w-[90vw] overflow-hidden rounded-xl border border-border bg-popover shadow-[0_8px_28px_rgba(2,6,23,0.16)]"
-        onClick={(event) => event.stopPropagation()}
-      >
+    <Dialog open={open} onOpenChange={(next) => (next ? undefined : onClose())}>
+      <DialogContent className="w-[36rem]" aria-label="Search records or run a command">
+        <VisuallyHidden.Root>
+          <DialogTitle>Command palette</DialogTitle>
+        </VisuallyHidden.Root>
         <div className="flex items-center gap-2.5 border-b border-border px-4">
           <Search className="size-4 shrink-0 text-muted-foreground" />
           <input
@@ -109,9 +106,7 @@ export function CommandPalette({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                onClose()
-              } else if (event.key === 'ArrowDown') {
+              if (event.key === 'ArrowDown') {
                 event.preventDefault()
                 setSelected((index) => Math.min(index + 1, items.length - 1))
               } else if (event.key === 'ArrowUp') {
@@ -146,8 +141,8 @@ export function CommandPalette({
             </>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 

@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { isAppError, type BrainInfo } from '@local-brain/core'
 import { controlClass, sectionLabel } from '../lib/ui'
 import { useCreateBrain, useOpenBrain } from '../lib/queries'
 import { pickBrainToCreate, pickBrainToOpen } from '../lib/native-dialog'
 import { Alert } from './alert'
 import { Button } from './button'
+import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 
 export type BrainDialogMode = 'create' | 'open'
 
@@ -33,21 +34,16 @@ export function BrainDialog({
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Reset and focus whenever the dialog (re)opens.
+  // Reset whenever the dialog (re)opens for a (new) mode. Radix handles focus
+  // trapping and restore; we steer initial focus to the path field below.
   const [openedFor, setOpenedFor] = useState<BrainDialogMode | null>(null)
   if (open && openedFor !== mode) {
     setOpenedFor(mode)
     setRootPath('')
     setName('')
     setError(null)
-  }
-  useEffect(() => {
-    if (open) inputRef.current?.focus()
-  }, [open, mode])
-
-  if (!open) {
-    if (openedFor !== null) setOpenedFor(null)
-    return null
+  } else if (!open && openedFor !== null) {
+    setOpenedFor(null)
   }
 
   const busy = createBrain.isPending || openBrain.isPending
@@ -85,23 +81,18 @@ export function BrainDialog({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-foreground/25 pt-[12vh] backdrop-blur-[1px]"
-      onClick={onClose}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
+    <Dialog open={open} onOpenChange={(next) => (next ? undefined : onClose())}>
+      <DialogContent
+        className="w-[32rem]"
         aria-label={isCreate ? 'New brain' : 'Open another brain'}
-        className="flex w-[32rem] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-[0_8px_28px_rgba(2,6,23,0.16)]"
-        onClick={(event) => event.stopPropagation()}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') onClose()
+        onOpenAutoFocus={(event) => {
+          event.preventDefault()
+          inputRef.current?.focus()
         }}
       >
-        <div className="border-b border-border px-4 py-2.5 text-sm font-semibold">
+        <DialogTitle className="border-b border-border px-4 py-2.5">
           {isCreate ? 'New brain' : 'Open another brain'}
-        </div>
+        </DialogTitle>
         <div className="flex flex-col gap-3 px-4 py-3">
           {error ? <Alert variant="error">{error}</Alert> : null}
           <p className="text-xs text-muted-foreground">
@@ -148,7 +139,7 @@ export function BrainDialog({
             {isCreate ? 'Create brain' : 'Open brain'}
           </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }
