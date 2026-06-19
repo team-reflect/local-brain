@@ -28,7 +28,6 @@ pub struct AddPersonArgs<'a> {
     pub location: Option<&'a str>,
     pub summary: Option<&'a str>,
     pub notes: Option<&'a str>,
-    pub reconnect_interval_days: Option<i64>,
     pub source_slug: Option<&'a str>,
     pub external_kind: &'a str,
     pub external_id: Option<&'a str>,
@@ -162,11 +161,10 @@ fn enrich_duplicate_person(
     let location = normalize_optional(args.location);
     let summary = normalize_optional(args.summary);
     let notes = normalize_optional(args.notes);
-    let reconnect_interval_days = args.reconnect_interval_days;
 
     let current = conn.query_row(
         "SELECT preferred_name, primary_email, primary_phone, headline, location,
-                summary, notes, reconnect_interval_days
+                summary, notes
          FROM people
          WHERE id = ?1",
         params![id],
@@ -179,7 +177,6 @@ fn enrich_duplicate_person(
                 row.get::<_, Option<String>>(4)?,
                 row.get::<_, Option<String>>(5)?,
                 row.get::<_, Option<String>>(6)?,
-                row.get::<_, Option<i64>>(7)?,
             ))
         },
     )?;
@@ -190,8 +187,7 @@ fn enrich_duplicate_person(
         || (has_text(&headline) && is_blank(&current.3))
         || (has_text(&location) && is_blank(&current.4))
         || (has_text(&summary) && is_blank(&current.5))
-        || (has_text(&notes) && is_blank(&current.6))
-        || (reconnect_interval_days.is_some() && current.7.is_none());
+        || (has_text(&notes) && is_blank(&current.6));
 
     if !changed {
         return Ok(false);
@@ -220,11 +216,8 @@ fn enrich_duplicate_person(
              notes = CASE
                WHEN (notes IS NULL OR trim(notes) = '') AND ?7 IS NOT NULL
                THEN ?7 ELSE notes END,
-             reconnect_interval_days = CASE
-               WHEN reconnect_interval_days IS NULL AND ?8 IS NOT NULL
-               THEN ?8 ELSE reconnect_interval_days END,
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-         WHERE id = ?9",
+         WHERE id = ?8",
         params![
             preferred_name,
             primary_email,
@@ -233,7 +226,6 @@ fn enrich_duplicate_person(
             location,
             summary,
             notes,
-            reconnect_interval_days,
             id,
         ],
     )?;
@@ -430,8 +422,8 @@ pub fn add_person(conn: &mut Connection, json: bool, args: AddPersonArgs) -> Res
     tx.execute(
         "INSERT INTO people (
            id, full_name, preferred_name, primary_email, primary_phone, headline,
-           location, summary, notes, reconnect_interval_days
-         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+           location, summary, notes
+         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
         params![
             id,
             full_name,
@@ -442,7 +434,6 @@ pub fn add_person(conn: &mut Connection, json: bool, args: AddPersonArgs) -> Res
             normalize_optional(args.location),
             normalize_optional(args.summary),
             normalize_optional(args.notes),
-            args.reconnect_interval_days,
         ],
     )?;
     insert_person_handles(&tx, &id, &emails, &phones, source_id.as_deref())?;
@@ -608,7 +599,6 @@ mod tests {
             location: None,
             summary: None,
             notes: None,
-            reconnect_interval_days: None,
             source_slug: Some("manual"),
             external_kind: "contact",
             external_id,

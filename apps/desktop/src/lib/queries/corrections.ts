@@ -4,7 +4,6 @@ import {
   listCitationsForSubject,
   listEvidenceFromDocument,
   listMemoriesForRecord,
-  listReconnectSuggestions,
   removeEvidenceRef,
   unlinkMemoryFromRecord,
   unlinkRecords,
@@ -14,9 +13,9 @@ import {
 
 /**
  * Memories, citations, and the Plan 05b correction mutations (unlink a record,
- * archive/unlink a memory, remove a wrong citation), plus relationship-intelligence
- * reads. Corrections touch links/memories that fan out across many detail pages,
- * the graph, and Today, so they invalidate broadly.
+ * archive/unlink a memory, remove a wrong citation). Corrections touch
+ * links/memories that fan out across many detail pages, the graph, and Today,
+ * so they invalidate broadly.
  */
 
 export function useMemoriesForRecord(recordType: string, recordId: string) {
@@ -83,12 +82,5 @@ export function useRemoveEvidenceRef() {
   return useMutation({
     mutationFn: (id: string) => removeEvidenceRef(id),
     onSuccess: () => queryClient.invalidateQueries(),
-  })
-}
-
-export function useReconnectSuggestions(limit?: number) {
-  return useQuery({
-    queryKey: ['reconnect-suggestions', limit ?? null],
-    queryFn: () => listReconnectSuggestions(limit !== undefined ? { limit } : {}),
   })
 }

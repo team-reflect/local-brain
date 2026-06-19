@@ -81,7 +81,7 @@ enum Command {
     },
     /// Full-text search across your records.
     Search(SearchArgs),
-    /// Today's brief: tasks, recent interactions, reconnects.
+    /// Today's brief: tasks and recent interactions.
     Today,
     /// Generate a report.
     Report {
@@ -92,11 +92,6 @@ enum Command {
     Tasks {
         #[command(subcommand)]
         what: TasksCommand,
-    },
-    /// Relationship helpers.
-    Relationships {
-        #[command(subcommand)]
-        what: RelCommand,
     },
     /// Records created/updated since a timestamp.
     Changes(ChangesArgs),
@@ -146,8 +141,6 @@ struct AddPersonArgs {
     summary: Option<String>,
     #[arg(long)]
     notes: Option<String>,
-    #[arg(long)]
-    reconnect_interval_days: Option<i64>,
     #[arg(long)]
     source: Option<String>,
     #[arg(long, default_value = "contact")]
@@ -367,12 +360,6 @@ enum TasksCommand {
 }
 
 #[derive(Subcommand)]
-enum RelCommand {
-    /// People due (or overdue) for a reconnect.
-    Followups,
-}
-
-#[derive(Subcommand)]
 enum SourceCommand {
     /// Ensure an upstream source exists.
     Ensure(EnsureSourceArgs),
@@ -495,7 +482,6 @@ fn run(cli: Cli) -> Result<(), CliError> {
                         location: a.location.as_deref(),
                         summary: a.summary.as_deref(),
                         notes: a.notes.as_deref(),
-                        reconnect_interval_days: a.reconnect_interval_days,
                         source_slug: a.source.as_deref(),
                         external_kind: &a.external_kind,
                         external_id: a.external_id.as_deref(),
@@ -662,12 +648,6 @@ fn run(cli: Cli) -> Result<(), CliError> {
             let conn = db::open_existing(&db_path)?;
             match what {
                 TasksCommand::PlanDay { limit } => report::plan_day(&conn, json, limit),
-            }
-        }
-        Command::Relationships { what } => {
-            let conn = db::open_existing(&db_path)?;
-            match what {
-                RelCommand::Followups => report::followups(&conn, json),
             }
         }
         Command::Changes(a) => {
@@ -837,15 +817,11 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
             },
             "today": {
                 "usage": "brain --json today",
-                "returns": "tasks, recentInteractions, reconnect suggestions, and counts",
+                "returns": "tasks, recentInteractions, and counts",
             },
             "tasksPlanDay": {
                 "usage": "brain --json tasks plan-day --limit 25",
                 "returns": "prioritized open task list",
-            },
-            "relationshipsFollowups": {
-                "usage": "brain --json relationships followups",
-                "returns": "people due for reconnect",
             },
             "changes": {
                 "usage": "brain --json changes --since <iso> --limit 50",
@@ -870,7 +846,6 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
                 "commands": [
                     "brain --json today",
                     "brain --json tasks plan-day --limit 25",
-                    "brain --json relationships followups",
                 ],
             },
         ],

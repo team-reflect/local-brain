@@ -28,9 +28,9 @@ Current product shape:
   person, organization, project, and task detail pages, and through search or Ask.
 - The UI is still important, but mainly for quick browsing, correction, inspection,
   and demonstrating the power of the user's local brain.
-- Relationship intelligence is part of the product model: recency, reconnect cadence,
-  relationship strength, important dates, and follow-up suggestions should feed Today
-  and daily reports.
+- Relationship intelligence is part of the product model: recency, relationship
+  strength, important dates, and task-linked context should feed Today and daily
+  reports.
 - Memories are hidden atomic claims linked to visible records and cited through
   evidence references.
 - Provenance lives directly on documents, interactions, memories, tasks, and evidence

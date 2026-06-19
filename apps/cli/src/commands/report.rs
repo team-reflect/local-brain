@@ -1,5 +1,5 @@
 //! Reporting/automation commands: `brain today`, `brain report daily`,
-//! `brain tasks plan-day`, `brain relationships followups`, `brain changes`.
+//! `brain tasks plan-day`, `brain changes`.
 //! These mirror the app's `reports/` endpoints so a daily automation produces
 //! the same structured context from the terminal as the Today surface shows.
 
@@ -89,32 +89,6 @@ fn soon_cutoff(conn: &Connection, days: i64) -> Result<String, CliError> {
     )?)
 }
 
-fn reconnect_suggestions(conn: &Connection) -> Result<Vec<Value>, CliError> {
-    let mut stmt = conn.prepare(
-        "SELECT people.id,
-                people.full_name,
-                relationship_strengths.relationship_strength,
-                relationship_strengths.last_interaction_at,
-                relationship_strengths.next_reconnect_at
-         FROM relationship_strengths
-         INNER JOIN people ON people.id = relationship_strengths.person_id
-         WHERE people.is_self = 0 AND people.archived_at IS NULL
-           AND relationship_strengths.next_reconnect_at IS NOT NULL
-           AND relationship_strengths.next_reconnect_at <= strftime('%Y-%m-%dT%H:%M:%fZ','now')
-         ORDER BY relationship_strengths.next_reconnect_at ASC",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok(json!({
-            "id": row.get::<_, String>(0)?,
-            "fullName": row.get::<_, String>(1)?,
-            "relationshipStrength": row.get::<_, Option<i64>>(2)?,
-            "lastInteractionAt": row.get::<_, Option<String>>(3)?,
-            "nextReconnectAt": row.get::<_, Option<String>>(4)?,
-        }))
-    })?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(CliError::from)
-}
-
 fn recent_interactions(conn: &Connection, limit: i64) -> Result<Vec<Value>, CliError> {
     let mut stmt = conn.prepare(
         "SELECT id, title, kind, occurred_at FROM interactions
@@ -147,17 +121,14 @@ fn daily_brief(conn: &Connection) -> Result<Value, CliError> {
             _ => open.push(value),
         }
     }
-    let reconnect = reconnect_suggestions(conn)?;
     Ok(json!({
         "date": today,
         "tasks": { "overdue": overdue, "today": due_today, "soon": soon, "open": open },
         "recentInteractions": recent_interactions(conn, 5)?,
-        "reconnect": reconnect,
         "counts": {
             "openTasks": tasks.len(),
             "overdueTasks": overdue.len(),
             "dueToday": due_today.len(),
-            "reconnectDue": reconnect.len(),
         },
     }))
 }
@@ -200,11 +171,6 @@ pub fn plan_day(conn: &Connection, json: bool, limit: usize) -> Result<(), CliEr
         .map(|t| task_json(t, bucket_for(t, &today, &cutoff)))
         .collect();
     emit(json, &json!({ "tasks": plan }))
-}
-
-pub fn followups(conn: &Connection, json: bool) -> Result<(), CliError> {
-    let reconnect = reconnect_suggestions(conn)?;
-    emit(json, &json!({ "followups": reconnect }))
 }
 
 /// `brain changes --since <iso>` — records created/updated at or after a timestamp.

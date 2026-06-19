@@ -41,7 +41,7 @@ questions needing Alex.
   Plan 01 scaffold into the full agent contract: a standalone Rust binary that opens SQLite
   directly (no Tauri IPC), with `add document|interaction|task`, `remember`, `search`, `ask`
   (grounded — always returns cited evidence; synthesizes + persists when a model is configured),
-  `today`, `report daily`, `tasks plan-day`, `relationships followups`, `changes`, `graph`,
+  `today`, `report daily`, `tasks plan-day`, `changes`, `graph`,
   `show`, and `status/path/doctor`. Stable `--json` camelCase, typed exit codes, stdout=data /
   stderr=diagnostics. ULID + normalize/chunk/SHA-256 ports keep CLI writes byte-compatible with
   app writes. Sidecar wired (`bundle.externalBin` + `pnpm sidecar` before dev/build) and staged.
@@ -76,11 +76,11 @@ questions needing Alex.
   `packages/core` (memories: `updateMemory`/`archiveMemory`/`unlink|linkMemoryToRecord`;
   typed links: one undirected `unlinkRecords` over a 15-relation registry; evidence:
   `updateEvidenceRef`/`removeEvidenceRef`) plus relationship-intelligence recompute
-  (`relationships/`: pure `strength.ts`, `recompute.ts` deriving last-interaction/reconnect/
-  strength from interactions+tasks, `listReconnectSuggestions`). Recompute runs after a
-  relevant interaction (create/ingest/apply) and on first-run seed. The shared detail-page
-  components gained in-place Unlink/Archive/Remove affordances; Today gained a **Reconnect**
-  section. No model behavior; all derivation is a deterministic projection (DEC-13).
+  (`relationships/`: pure `strength.ts`, `recompute.ts` deriving last-interaction/strength
+  from interactions+tasks). Recompute runs after a relevant interaction (create/ingest/apply)
+  and on first-run seed. The shared detail-page components gained in-place
+  Unlink/Archive/Remove affordances. No model behavior; all derivation is a deterministic
+  projection (DEC-13).
   `pnpm check` (109 tests) + Vite build green, PR open. **Plan 05 complete** (05a + 05b);
   Plan 06 registers the model-backed extractor through the BYOK boundary.
 - **Active branch:** `codex/local-brain-05b-corrections` (base `…-05a-extraction-engine`).
@@ -143,7 +143,7 @@ questions needing Alex.
     `remember` (memory + memory_links), `search` (FTS over docs/interactions + name LIKE),
     `ask` (grounded — retrieves cited chunks; with `ANTHROPIC_API_KEY` synthesizes via `curl` and
     persists a conversation + evidence_refs; without, returns `answered:false` + evidence for the
-    calling agent), `today`/`report daily`/`tasks plan-day`/`relationships followups`/`changes`/
+    calling agent), `today`/`report daily`/`tasks plan-day`/`changes`/
     `graph --center self`/`show`, plus `status`/`path`/`doctor`. Stable `--json` camelCase, typed
     exit codes (0/1/3/4), stdout=data / stderr=diagnostics.
   - **Model boundary:** `model.rs` — key from `ANTHROPIC_API_KEY` (never settings), HTTP via
@@ -172,7 +172,7 @@ questions needing Alex.
   closed, `answered:false`), the model-backed `createModelExtractor()` (prompts the contract,
   parses JSON, feeds the 05a apply seam), and a concrete `createAnthropicProvider`.
 - **Reports (`packages/core/src/reports`):** `getDailyBrief` (bucketed overdue/today/soon/open
-  tasks + recent interactions + reconnects + counts), `planDay`, `getWaitingItems`,
+  tasks + recent interactions + counts), `planDay`, `getWaitingItems`,
   `getChangesSince`.
 - **Settings store (`packages/core/src/domains/settings`):** typed key/value over the `settings`
   table (`getSetting`/`setSetting`/`listSettings`) for provider and app settings.
@@ -205,28 +205,22 @@ questions needing Alex.
   - `strength.ts` — pure date math (`daysBetween`/`addDays`) + a transparent 1–5
     `relationshipStrength` (frequency + recency + shared open tasks), returning `null` when
     there is no signal.
-  - `recompute.ts` — `recomputeRelationshipIntelligence` derives `last_interaction_at`,
-    `next_reconnect_at` from interactions/cadence; `recomputeAllRelationships` for
-    bulk/first-run. Wired to run after a relevant interaction
+  - `recompute.ts` — `recomputeRelationshipIntelligence` derives `last_interaction_at`
+    from interactions; `recomputeAllRelationships` for bulk/first-run. Wired to run after a relevant interaction
     (`createInteraction`, `ingestInteraction`, and `applyExtraction` on an interaction source).
-  - `getters.ts` — `listReconnectSuggestions` reads the derived `next_reconnect_at` column and
-    joins the SELECT-only `relationship_strengths` SQL view.
-  - **DEC-13:** strength is select-only, not writable SQLite state; `reconnect_interval_days`
-    stays a user input; `important_dates_json` is **not** derived (no schema field supplies
+  - **DEC-13:** strength is select-only, not writable SQLite state; `important_dates_json`
+    is **not** derived (no schema field supplies
     dates) — left for a later data source, as Plan 05 step 9 permits.
 - **UI (`apps/desktop`):** shared `LinkedRecords` / `MemoryList` / `CitationList` gained
   Unlink / Archive / Remove affordances, wired through all six detail pages (incl. interaction
-  participants); person detail shows the derived "Reconnect by"; Today gained a **Reconnect**
-  section. New hooks `useUnlinkFrom`/`useUnlinkRecord`/`useArchiveMemory`/`useUnlinkMemory`/
-  `useRemoveEvidenceRef`/`useReconnectSuggestions` invalidate broadly; `useEnsureSeed`
-  recomputes after first-run seed. The seed's kickoff interaction date was moved earlier so
-  the demo shows a real overdue reconnect.
+  participants). New hooks `useUnlinkFrom`/`useUnlinkRecord`/`useArchiveMemory`/
+  `useUnlinkMemory`/`useRemoveEvidenceRef` invalidate broadly; `useEnsureSeed`
+  recomputes after first-run seed.
 - **Verification:** `pnpm check` ✓ — typecheck + oxlint (clean) + **109 tests** (72 core:
   +7 `strength` unit tests, +10 real-SQLite corrections/recompute round-trips — unlink an
   affiliation / a task↔project / a document link, edit+unlink+archive a memory, fix+remove a
-  citation, derive last-interaction/reconnect/strength, count shared open tasks, preserve a
-  no-signal manual strength, ordered reconnect suggestions, and the not-due/no-cadence case;
-  4 db; 33 desktop: +2 correction-affordance render tests, +1 Today reconnect render test).
+  citation, derive last-interaction/strength, count shared open tasks, and preserve a
+  no-signal manual strength; 4 db; 33 desktop: +2 correction-affordance render tests).
   `pnpm --filter @local-brain/desktop build` ✓ (2057 modules). No Rust this layer. `git diff
   --check` ✓.
 

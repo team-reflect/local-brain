@@ -1,6 +1,6 @@
 ---
 name: brain
-description: Read from and write to the user's Local Brain — a private, local-first personal CRM and knowledge base stored in SQLite. Use this whenever the user asks you to remember a person/meeting/note/task, look something up about their network or work, produce a daily brief or todo list, or surface who they should reconnect with. All access is through the `brain` CLI.
+description: Read from and write to the user's Local Brain — a private, local-first personal CRM and knowledge base stored in SQLite. Use this whenever the user asks you to remember a person/meeting/note/task, look something up about their network or work, or produce a daily brief or todo list. All access is through the `brain` CLI.
 ---
 
 # Local Brain agent skill
@@ -56,10 +56,9 @@ brain contract --json                              # machine-readable CLI contra
 brain search "northwind partnership" --json        # ranked search across records/assets
 brain show person <id> --json                       # a record + its links
 brain show asset <id> --json                        # asset metadata, text status, linked records
-brain today --json                                   # daily brief: tasks, recents, reconnects
+brain today --json                                   # daily brief: tasks and recents
 brain report daily --json
 brain tasks plan-day --json                          # prioritized todo list
-brain relationships followups --json                 # who is due for a reconnect
 brain changes --since 2026-06-01T00:00:00Z --json    # what changed since a time
 brain graph --center self --json                     # the user-centered graph
 ```
@@ -241,11 +240,10 @@ Every imported transcript must get an immediate enrichment pass:
 ## Running a daily automation
 
 1. `brain changes --since <yesterday> --json` — see what moved.
-2. `brain today --json` — overdue/today tasks, recent interactions, reconnects.
+2. `brain today --json` — overdue/today tasks and recent interactions.
 3. For each new transcript/note the user gives you: `brain add interaction …`, then
    run transcript post-analysis.
-4. `brain relationships followups --json` — surface stale relationships.
-5. Produce a brief from `brain report daily` + `brain tasks plan-day`.
+4. Produce a brief from `brain report daily` + `brain tasks plan-day`.
 
 ## What not to store
 

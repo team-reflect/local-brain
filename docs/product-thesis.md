@@ -34,8 +34,8 @@ interaction.
 
 - **People:** contacts, collaborators, friends, family, service providers, and anyone
   else the user may need to remember.
-- **Relationship intelligence:** recency, cadence, strength, important dates, and
-  follow-up suggestions derived from interactions and tasks.
+- **Relationship intelligence:** recency, strength, important dates, and task-linked
+  context derived from interactions and tasks.
 - **Organizations:** companies, schools, teams, vendors, clubs, government bodies, and
   other groups.
 - **Affiliations:** time-bound links between people and organizations.

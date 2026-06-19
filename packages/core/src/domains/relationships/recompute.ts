@@ -2,24 +2,20 @@ import { db } from '../../db/client'
 import { execute } from '../../db/commands'
 import { nowIso } from '../../db/time'
 import type { PersonPatch } from '../people/setters'
-import { nextReconnectAt } from './strength'
 
 /**
  * Relationship-intelligence recompute (Plan 05 step 9). Derives a person's
- * follow-up hints — last-interaction date and next-reconnect date — purely from
- * their interactions and reconnect cadence, then writes them onto the `people`
- * row. This is deterministic projection, not AI: it only summarizes data the
- * user already has.
+ * last-interaction date purely from their interactions, then writes it onto the
+ * `people` row. This is deterministic projection, not AI: it only summarizes
+ * data the user already has.
  *
  * Fields it owns:
  * - `last_interaction_at`: the most recent dated interaction (null if none).
- * - `next_reconnect_at`: last interaction + the person's reconnect cadence.
  *
- * It never touches `reconnect_interval_days` (a user-set cadence input) or
- * `important_dates_json` (no field in the current schema supplies birthdays /
- * anniversaries to derive — see the build notes). Relationship strength is a
- * SELECT-only SQL view (`relationship_strengths`), so no agent can persist an
- * arbitrary value onto a person row.
+ * It never touches `important_dates_json` (no field in the current schema
+ * supplies birthdays / anniversaries to derive — see the build notes).
+ * Relationship strength is a SELECT-only SQL view (`relationship_strengths`),
+ * so no agent can persist an arbitrary value onto a person row.
  */
 
 export interface RecomputeOptions {
@@ -36,7 +32,7 @@ export async function recomputeRelationshipIntelligence(
 
   const person = await db
     .selectFrom('people')
-    .select(['id', 'reconnectIntervalDays'])
+    .select(['id'])
     .where('id', '=', personId)
     .where('isSelf', '=', 0)
     .executeTakeFirst()
@@ -55,7 +51,6 @@ export async function recomputeRelationshipIntelligence(
 
   const patch: PersonPatch = {
     lastInteractionAt,
-    nextReconnectAt: nextReconnectAt(lastInteractionAt, person.reconnectIntervalDays),
     updatedAt: asOf,
   }
 

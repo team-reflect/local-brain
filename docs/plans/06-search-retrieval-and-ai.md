@@ -106,7 +106,6 @@ Ask conversations, daily report/todo retrieval, and model boundary settings.
    - todo list
    - changed records since timestamp
    - waiting items
-   - relationship follow-ups
 11. Add graph data endpoint:
    - centered on the user's own person row
    - returns typed nodes and weighted edges
@@ -122,8 +121,8 @@ Ask conversations, daily report/todo retrieval, and model boundary settings.
   conversations survive relaunch.
 - An agent can request enough structured context to generate a daily report and todo
   list.
-- Daily brief retrieval includes relationship follow-ups, stale relationships, and
-  upcoming important dates.
+- Daily brief retrieval includes relationship-linked waiting items, recent
+  interactions, and upcoming important dates.
 - Graph data can be generated from durable typed records without a separate graph table.
 - Asset search is navigational; factual report citations still come from
   document/interaction chunks.

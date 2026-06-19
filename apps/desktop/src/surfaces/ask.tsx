@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { useChat } from '@ai-sdk/react'
 import { Plus, Send } from 'lucide-react'
 import { z } from 'zod'
@@ -40,7 +40,9 @@ function persistedMessages(messages: ChatMessage[] | undefined): UIMessage[] {
 }
 
 export function AskSurface({ conversationId }: { conversationId: string | undefined }): ReactNode {
-  const [activeId] = useState(() => conversationId ?? createChatId())
+  const routeConversationId = conversationId ?? null
+  const lastRouteConversationId = useRef(routeConversationId)
+  const [activeId, setActiveId] = useState(() => conversationId ?? createChatId())
   const storedMessages = useMessages(conversationId)
   const conversations = useConversations()
   const modelStatus = useModelStatus()
@@ -60,6 +62,23 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
     },
   })
   const { error, messages, sendMessage, setMessages, status } = chat
+
+  useEffect(() => {
+    const previousRouteConversationId = lastRouteConversationId.current
+    lastRouteConversationId.current = routeConversationId
+
+    if (conversationId) {
+      setActiveId(conversationId)
+      if (conversationId !== activeId) setMessages([])
+      return
+    }
+
+    if (previousRouteConversationId) {
+      setActiveId(createChatId())
+      setMessages([])
+      setDraft('')
+    }
+  }, [activeId, conversationId, routeConversationId, setMessages])
 
   useEffect(() => {
     if (storedMessages.data && status === 'ready') setMessages(persistedMessages(storedMessages.data))
@@ -87,22 +106,35 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
     await submitDraft()
   }
 
+  function startNewChat(): void {
+    setDraft('')
+    setMessages([])
+    if (conversationId) {
+      navigate({ kind: 'ask' })
+    } else {
+      setActiveId(createChatId())
+    }
+  }
+
+  const displayedMessages = conversationId && storedMessages.data && messages.length === 0 ? initialMessages : messages
+  const showInitialLoading = Boolean(conversationId && storedMessages.isLoading && messages.length === 0)
+
   return (
     <div className="flex h-full min-h-0">
       <ConversationRail
         activeId={conversationId}
         conversations={conversations.data ?? []}
-        onNew={() => navigate({ kind: 'ask' })}
+        onNew={startNewChat}
         onOpen={(id) => navigate({ kind: 'ask', conversationId: id })}
       />
       <div className="flex min-w-0 flex-1 flex-col">
         {providerClosed ? <Alert className="mb-3">{providerClosed}</Alert> : null}
-        {storedMessages.isLoading && conversationId ? (
+        {showInitialLoading ? (
           <div className="flex min-h-0 flex-1 items-center justify-center">
             <Loading />
           </div>
         ) : (
-          <MessageList messages={messages} pending={pending} />
+          <MessageList messages={displayedMessages} pending={pending} />
         )}
         {error ? <Alert variant="error" className="mx-auto mb-3 w-full max-w-2xl">{error.message}</Alert> : null}
         <Composer draft={draft} setDraft={setDraft} pending={pending} onSubmit={onSubmit} />

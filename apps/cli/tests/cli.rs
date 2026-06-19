@@ -367,8 +367,6 @@ fn add_person_dedupes_and_returns_contact_fields() {
             "Austin",
             "--notes",
             "Imported from a contact export.",
-            "--reconnect-interval-days",
-            "30",
         ],
     );
     assert_eq!(first["kind"], "person");
@@ -426,7 +424,6 @@ fn add_person_dedupes_and_returns_contact_fields() {
     assert_eq!(shown["primaryPhone"], "+1 555 0100");
     assert_eq!(shown["subtitle"], "Designer");
     assert_eq!(shown["location"], "Austin");
-    assert_eq!(shown["reconnectIntervalDays"], 30);
     assert_eq!(shown["relationshipStrength"], Value::Null);
 
     let sparse = run_json(
@@ -453,8 +450,6 @@ fn add_person_dedupes_and_returns_contact_fields() {
             "Met through a contact export.",
             "--notes",
             "Prefers concise updates.",
-            "--reconnect-interval-days",
-            "14",
         ],
     );
     assert_eq!(enriched["isDuplicate"], true);
@@ -467,7 +462,6 @@ fn add_person_dedupes_and_returns_contact_fields() {
     assert_eq!(enriched_shown["location"], "New York");
     assert_eq!(enriched_shown["summary"], "Met through a contact export.");
     assert_eq!(enriched_shown["notes"], "Prefers concise updates.");
-    assert_eq!(enriched_shown["reconnectIntervalDays"], 14);
 
     let ascii_name = run_json(
         &db,
@@ -580,6 +574,34 @@ fn add_project_dedupes_by_source_identity_and_name() {
     );
     assert_eq!(by_name["isDuplicate"], true);
     assert_eq!(by_name["id"], first["id"]);
+}
+
+#[test]
+fn add_project_links_task_through_task_project_id() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let task = run_json(
+        &db,
+        &["--json", "add", "task", "--title", "Draft launch brief"],
+    );
+    let task_link = format!("task:{}", task["id"].as_str().unwrap());
+
+    let project = run_json(
+        &db,
+        &[
+            "--json", "add", "project", "--name", "Apollo", "--link", &task_link,
+        ],
+    );
+
+    let conn = Connection::open(&db).unwrap();
+    let project_id: String = conn
+        .query_row(
+            "SELECT project_id FROM tasks WHERE id = ?1",
+            [task["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(project_id, project["id"].as_str().unwrap());
 }
 
 #[test]
@@ -2453,14 +2475,6 @@ fn add_task_links_to_origin_interaction_and_project() {
         )
         .unwrap();
     assert_eq!(task_interactions, 1);
-    let project_tasks: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM project_tasks WHERE task_id = ?1 AND project_id = ?2",
-            (task_id, project["id"].as_str().unwrap()),
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(project_tasks, 1);
     let evidence_refs: i64 = conn
         .query_row(
             "SELECT COUNT(*)

@@ -58,4 +58,62 @@ describe('SettingsSurface (Plan 08)', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Backfill now' })).toBeDefined())
     expect(screen.getByRole('button', { name: 'Rebuild index' })).toBeDefined()
   })
+
+  it('shows byte-level semantic model download progress', async () => {
+    installFakeBridge({
+      respond: (command) => {
+        if (command === 'embed_status') {
+          return { status: 'loading', progress: { downloaded: 45_000_000, total: 90_000_000 } }
+        }
+        return undefined
+      },
+      query: (sql, params) => {
+        if (sql.includes('settings')) {
+          const key = params[0]
+          if (key === 'embeddings.enabled') return [{ valueJson: 'true' }]
+          return []
+        }
+        if (sql.includes('chunk_embeddings')) return [{ count: 0 }]
+        if (/count/i.test(sql)) return [{ count: 3 }]
+        return []
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="search" />)
+
+    const bar = await screen.findByRole('progressbar', {
+      name: 'Semantic search model download',
+    })
+    expect(bar.getAttribute('aria-valuenow')).toBe('50')
+    expect(screen.getByText('Downloading the model — 45 MB of 90 MB')).toBeDefined()
+  })
+
+  it('shows an indeterminate semantic model preparation state before byte counts arrive', async () => {
+    installFakeBridge({
+      respond: (command) => {
+        if (command === 'embed_status') {
+          return { status: 'loading' }
+        }
+        return undefined
+      },
+      query: (sql, params) => {
+        if (sql.includes('settings')) {
+          const key = params[0]
+          if (key === 'embeddings.enabled') return [{ valueJson: 'true' }]
+          return []
+        }
+        if (sql.includes('chunk_embeddings')) return [{ count: 0 }]
+        if (/count/i.test(sql)) return [{ count: 3 }]
+        return []
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="search" />)
+
+    const bar = await screen.findByRole('progressbar', {
+      name: 'Semantic search model download',
+    })
+    expect(bar.getAttribute('aria-valuenow')).toBeNull()
+    expect(screen.getByText('Preparing the model...')).toBeDefined()
+  })
 })

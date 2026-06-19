@@ -1,10 +1,18 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from 'react'
 import type { Graph, GraphNodeKind } from '@local-brain/core'
 import { EmptyState } from '../components/empty-state'
 import { Loading } from '../components/loading'
 import { PageHead } from '../components/page-head'
 import { useGraph } from '../lib/queries'
-import { layoutGraph, type PositionedNode } from './graph-layout'
+import { layoutGraph, type GraphLayout, type PositionedNode } from './graph-layout'
 import type { Route } from '../routing/route'
 import { useRouter } from '../routing/router'
 
@@ -32,6 +40,28 @@ const KIND_LABEL: Record<GraphNodeKind, string> = {
 }
 
 const ALL_KINDS = Object.keys(KIND_LABEL) as GraphNodeKind[]
+const DEFAULT_VIEWPORT = { offsetX: 0, offsetY: 0, scale: 1 }
+const MIN_ZOOM = 0.45
+const MAX_ZOOM = 3
+const DRAG_CLICK_THRESHOLD = 3
+
+interface GraphViewport {
+  offsetX: number
+  offsetY: number
+  scale: number
+}
+
+interface GraphDragState {
+  pointerId: number
+  clientX: number
+  clientY: number
+  totalDistance: number
+}
+
+interface GraphPoint {
+  x: number
+  y: number
+}
 
 function routeForNode(node: PositionedNode): Route | null {
   switch (node.kind) {
@@ -57,12 +87,48 @@ function clip(label: string): string {
   return label.length > 22 ? `${label.slice(0, 21)}…` : label
 }
 
+function clampZoom(scale: number): number {
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale))
+}
+
+function clientPointToGraphPoint(
+  svg: SVGSVGElement,
+  layout: Pick<GraphLayout, 'width' | 'height'>,
+  clientX: number,
+  clientY: number,
+): GraphPoint | null {
+  const rect = svg.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return null
+  return {
+    x: ((clientX - rect.left) / rect.width) * layout.width,
+    y: ((clientY - rect.top) / rect.height) * layout.height,
+  }
+}
+
+function clientDeltaToGraphDelta(
+  svg: SVGSVGElement,
+  layout: Pick<GraphLayout, 'width' | 'height'>,
+  deltaX: number,
+  deltaY: number,
+): GraphPoint | null {
+  const rect = svg.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return null
+  return {
+    x: (deltaX / rect.width) * layout.width,
+    y: (deltaY / rect.height) * layout.height,
+  }
+}
+
 export function GraphSurface({ showHeader = true }: { showHeader?: boolean } = {}): ReactNode {
   const { navigate } = useRouter()
   const graph = useGraph()
   const [visibleKinds, setVisibleKinds] = useState<ReadonlySet<GraphNodeKind>>(
     () => new Set(ALL_KINDS),
   )
+  const [viewport, setViewport] = useState<GraphViewport>(DEFAULT_VIEWPORT)
+  const svgRef = useRef<SVGSVGElement | null>(null)
+  const dragRef = useRef<GraphDragState | null>(null)
+  const suppressNextNodeClickRef = useRef(false)
 
   const presentKinds = useMemo(() => {
     if (!graph.data) return [] as GraphNodeKind[]
@@ -92,6 +158,101 @@ export function GraphSurface({ showHeader = true }: { showHeader?: boolean } = {
       return next
     })
   }
+
+  useEffect(() => {
+    const svg = svgRef.current
+    if (!svg || !layout) return undefined
+
+    const handleWheel = (event: WheelEvent): void => {
+      event.preventDefault()
+      const cursor = clientPointToGraphPoint(svg, layout, event.clientX, event.clientY)
+      if (!cursor) return
+      const zoomFactor = Math.exp(-event.deltaY * 0.001)
+      setViewport((current) => {
+        const nextScale = clampZoom(current.scale * zoomFactor)
+        const scaledBy = nextScale / current.scale
+        return {
+          scale: nextScale,
+          offsetX: cursor.x - (cursor.x - current.offsetX) * scaledBy,
+          offsetY: cursor.y - (cursor.y - current.offsetY) * scaledBy,
+        }
+      })
+    }
+
+    svg.addEventListener('wheel', handleWheel, { passive: false })
+    return () => svg.removeEventListener('wheel', handleWheel)
+  }, [layout])
+
+  const handlePointerDown = useCallback((event: ReactPointerEvent<SVGSVGElement>): void => {
+    if (event.button > 0) return
+    dragRef.current = {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      totalDistance: 0,
+    }
+    if (typeof event.currentTarget.setPointerCapture === 'function') {
+      event.currentTarget.setPointerCapture(event.pointerId)
+    }
+  }, [])
+
+  const handlePointerMove = useCallback(
+    (event: ReactPointerEvent<SVGSVGElement>): void => {
+      if (!layout) return
+      const drag = dragRef.current
+      if (!drag || drag.pointerId !== event.pointerId) return
+      const clientDeltaX = event.clientX - drag.clientX
+      const clientDeltaY = event.clientY - drag.clientY
+      if (clientDeltaX === 0 && clientDeltaY === 0) return
+      const graphDelta = clientDeltaToGraphDelta(
+        event.currentTarget,
+        layout,
+        clientDeltaX,
+        clientDeltaY,
+      )
+      if (!graphDelta) return
+      dragRef.current = {
+        pointerId: drag.pointerId,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        totalDistance:
+          drag.totalDistance + Math.hypot(Math.abs(clientDeltaX), Math.abs(clientDeltaY)),
+      }
+      event.preventDefault()
+      setViewport((current) => ({
+        ...current,
+        offsetX: current.offsetX + graphDelta.x,
+        offsetY: current.offsetY + graphDelta.y,
+      }))
+    },
+    [layout],
+  )
+
+  const finishDrag = useCallback((event: ReactPointerEvent<SVGSVGElement>): void => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    if (drag.totalDistance > DRAG_CLICK_THRESHOLD) {
+      suppressNextNodeClickRef.current = true
+      window.setTimeout(() => {
+        suppressNextNodeClickRef.current = false
+      }, 0)
+    }
+    if (typeof event.currentTarget.releasePointerCapture === 'function') {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    dragRef.current = null
+  }, [])
+
+  const handleNodeClick = useCallback(
+    (route: Route): void => {
+      if (suppressNextNodeClickRef.current) {
+        suppressNextNodeClickRef.current = false
+        return
+      }
+      navigate(route)
+    },
+    [navigate],
+  )
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-4">
@@ -139,45 +300,55 @@ export function GraphSurface({ showHeader = true }: { showHeader?: boolean } = {
             </div>
           ) : (
             <svg
+              ref={svgRef}
               viewBox={`0 0 ${layout.width} ${layout.height}`}
-              className="h-auto w-full"
+              className="h-auto w-full cursor-grab touch-none select-none active:cursor-grabbing"
               role="img"
               aria-label="User-centered knowledge graph"
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={finishDrag}
+              onPointerCancel={finishDrag}
             >
-              <g stroke="hsl(var(--border))" strokeWidth={1}>
-                {layout.edges.map((edge, index) => (
-                  <line
-                    key={`${edge.source.id}-${edge.target.id}-${index}`}
-                    x1={edge.source.x}
-                    y1={edge.source.y}
-                    x2={edge.target.x}
-                    y2={edge.target.y}
-                    strokeOpacity={0.5}
-                  />
-                ))}
-              </g>
-              {layout.nodes.map((node) => {
-                const route = routeForNode(node)
-                return (
-                  <g
-                    key={node.id}
-                    transform={`translate(${node.x} ${node.y})`}
-                    className={route ? 'cursor-pointer' : undefined}
-                    onClick={route ? () => navigate(route) : undefined}
-                  >
-                    <circle r={node.radius} fill={KIND_COLOR[node.kind]} />
-                    <text
-                      x={0}
-                      y={node.radius + 12}
-                      textAnchor="middle"
-                      className="fill-foreground"
-                      fontSize={11}
+              <g
+                data-testid="graph-viewport"
+                transform={`translate(${viewport.offsetX} ${viewport.offsetY}) scale(${viewport.scale})`}
+              >
+                <g stroke="hsl(var(--border))" strokeWidth={1}>
+                  {layout.edges.map((edge, index) => (
+                    <line
+                      key={`${edge.source.id}-${edge.target.id}-${index}`}
+                      x1={edge.source.x}
+                      y1={edge.source.y}
+                      x2={edge.target.x}
+                      y2={edge.target.y}
+                      strokeOpacity={0.5}
+                    />
+                  ))}
+                </g>
+                {layout.nodes.map((node) => {
+                  const route = routeForNode(node)
+                  return (
+                    <g
+                      key={node.id}
+                      transform={`translate(${node.x} ${node.y})`}
+                      className={route ? 'cursor-pointer' : undefined}
+                      onClick={route ? () => handleNodeClick(route) : undefined}
                     >
-                      {clip(node.label)}
-                    </text>
-                  </g>
-                )
-              })}
+                      <circle r={node.radius} fill={KIND_COLOR[node.kind]} />
+                      <text
+                        x={0}
+                        y={node.radius + 12}
+                        textAnchor="middle"
+                        className="fill-foreground"
+                        fontSize={11}
+                      >
+                        {clip(node.label)}
+                      </text>
+                    </g>
+                  )
+                })}
+              </g>
             </svg>
           )}
         </div>

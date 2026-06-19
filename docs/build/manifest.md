@@ -294,20 +294,17 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
   - **Relationship intelligence (`relationships/`):** `strength.ts` (pure, unit-tested date
     math + the transparent 1–5 strength formula), `recompute.ts`
     (`recomputeRelationshipIntelligence` / `recomputeAllRelationships` — derive
-    `last_interaction_at` and `next_reconnect_at` from interactions/cadence), and
-    `getters.ts` (`listReconnectSuggestions`, joining the SELECT-only
-    `relationship_strengths` view). Recompute runs incrementally after a relevant
+    `last_interaction_at` from interactions). Recompute runs incrementally after a relevant
     interaction (create/ingest/apply) and in bulk on first-run seed. See **DEC-13** for what
     it owns and why important dates are deferred.
   - **UI (`apps/desktop`):** the shared `LinkedRecords`, `MemoryList`, and `CitationList`
     gained in-place correction affordances (Unlink / Archive / Remove), wired through all six
-    detail pages; person detail shows the derived "Reconnect by" field; Today gained a
-    **Reconnect** section over `listReconnectSuggestions`. New TanStack hooks
+    detail pages. New TanStack hooks
     (`useUnlinkFrom`, `useUnlinkRecord`, `useArchiveMemory`, `useUnlinkMemory`,
-    `useRemoveEvidenceRef`, `useReconnectSuggestions`) invalidate broadly.
+    `useRemoveEvidenceRef`) invalidate broadly.
 - **Verification:** `pnpm check` ✓ — typecheck + oxlint (clean) + **109 tests** (72 core:
   +7 strength unit, +10 real-SQLite corrections/recompute round-trips; 4 db; 33 desktop: +2
-  correction-affordance render tests, +1 Today reconnect render test). `pnpm --filter
+  correction-affordance render tests). `pnpm --filter
   @local-brain/desktop build` ✓ (2057 modules). `cargo check --workspace` n/a (no Rust this
   layer). `git diff --check` ✓.
 - **Caveats:** `important_dates_json` is not derived (no schema field supplies dates — DEC-13).
@@ -327,8 +324,8 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
     `citedSubset`, the cited `ask()` pipeline (persists evidence_refs per cited source on the
     assistant chat message), the model-backed `createModelExtractor()` feeding the 05a seam,
     and a concrete `createAnthropicProvider`.
-  - `reports/` — agent endpoints: `getDailyBrief` (bucketed tasks + recent interactions +
-    reconnects), `planDay`, `getWaitingItems`, `getChangesSince`.
+  - `reports/` — agent endpoints: `getDailyBrief` (bucketed tasks + recent interactions),
+    `planDay`, `getWaitingItems`, `getChangesSince`.
   - **Desktop:** Ask rewritten to the real cited pipeline (answer + source list that opens the
     owning document/interaction; honest closed-boundary banner); the command palette upgraded
     to FTS `globalSearch`; Settings → Model shows the live boundary status; Diagnostics shows
@@ -358,7 +355,7 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
     `model.rs` (BYOK boundary via `ANTHROPIC_API_KEY` + `curl`, degrades when absent), and
     `commands/` — `add document|interaction|task`, `remember`, `search`, `ask` (grounded:
     always returns cited evidence; synthesizes + persists a conversation/evidence_refs when a
-    model is configured), `today`, `report daily`, `tasks plan-day`, `relationships followups`,
+    model is configured), `today`, `report daily`, `tasks plan-day`,
     `changes --since`, `graph --center self`, `show`, plus `status`/`path`/`doctor`. Stable
     `--json` camelCase contracts; typed exit codes (0/1/3/4).
   - **Sidecar:** `tauri.conf.json` gains `bundle.externalBin: ["binaries/brain"]` and the

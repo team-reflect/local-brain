@@ -33,7 +33,7 @@ describe('IpcDialect', () => {
     const db = createDb(runner)
     await db
       .selectFrom('people')
-      .select(['id', 'fullName', 'isSelf', 'nextReconnectAt'])
+      .select(['id', 'fullName', 'isSelf', 'lastInteractionAt'])
       .where('isSelf', '=', 1)
       .orderBy('lastInteractionAt', 'desc')
       .execute()
@@ -42,7 +42,6 @@ describe('IpcDialect', () => {
     expect(sql).toContain('"people"')
     expect(sql).toContain('"full_name"')
     expect(sql).toContain('"is_self"')
-    expect(sql).toContain('"next_reconnect_at"')
     expect(sql).toContain('"last_interaction_at"')
     expect(calls[0]?.params).toEqual([1])
   })

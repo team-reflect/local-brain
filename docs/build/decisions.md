@@ -124,7 +124,7 @@ None at this checkpoint.
     `Extractor` seam is wired into the ingest queue but **no extractor is registered by
     default**, so `runExtraction` is a safe no-op until a model adapter exists.
   - **05b:** correction flows (step 8 — unlink/edit/archive, fix citations) + relationship
-    intelligence (step 9 — last-interaction/reconnect/strength/important-dates recompute),
+    intelligence (step 9 — last-interaction/strength/important-dates recompute),
     which are deterministic but UI/setter-heavy and read more cleanly as their own layer.
   - **Plan 06:** registers the real BYOK model-backed `Extractor` (and enrichment of matched
     records) through the same checked model boundary, plus golden tests over live output.
@@ -135,12 +135,9 @@ None at this checkpoint.
 
 ### DEC-13 — Relationship intelligence is derived; strength is select-only; important dates deferred
 - **What it derives (Plan 05b step 9).** `recomputeRelationshipIntelligence(personId)` is a
-  deterministic projection over a person's interactions — no model. It owns two `people`
-  columns:
+  deterministic projection over a person's interactions — no model. It owns one `people`
+  column:
   - `last_interaction_at` = the most recent dated, non-archived interaction (null if none).
-  - `next_reconnect_at` = `last_interaction_at + reconnect_interval_days` (null if either is
-    missing). `reconnect_interval_days` itself is a **user-set cadence input** and is never
-    overwritten.
   Relationship strength is not a durable `people` column. It is exposed through the
   SELECT-only `relationship_strengths` SQL view as a transparent 1–5 score (frequency +
   recency + shared open tasks; see `strength.ts`), so agents and third-party SQLite clients
@@ -148,9 +145,7 @@ None at this checkpoint.
 - **When it runs.** Incrementally after a relevant interaction is created
   (`createInteraction`, `ingestInteraction`, and `applyExtraction` on an interaction source
   refresh the affected participants), and in bulk via `recomputeAllRelationships()` (used on
-  first-run seeding and as a manual refresh). Reconnect suggestions are then a fast read of
-  the derived `next_reconnect_at` column plus the `relationship_strengths` view
-  (`listReconnectSuggestions`).
+  first-run seeding and as a manual refresh).
 - **Important dates are deferred.** The schema has an `important_dates_json` column but no
   field (birthday, anniversary, calendar event) that supplies dates to derive — calendar
   sync is explicitly out of Plan 05's scope. So recompute **does not touch**

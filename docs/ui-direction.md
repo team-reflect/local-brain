@@ -42,8 +42,8 @@ Sidebar:
 
 Top-level sections:
 
-- **Today:** AI daily brief with agenda, due tasks, waiting items, relationship
-  follow-ups, recent changes, and suggested next actions.
+- **Today:** AI daily brief with agenda, due tasks, waiting items, recent changes,
+  relationship-linked context, and suggested next actions.
 - **Tasks:** all open, waiting, scheduled, and completed tasks.
 - **Network:** graph, people, and organizations, with Graph as the default tab.
 - **Projects:** active, waiting, paused, done, and archived projects.
@@ -67,7 +67,6 @@ Today
   - AI daily brief
   - due and scheduled tasks
   - waiting items
-  - people to follow up with
   - recent interactions
   - active project changes
 
@@ -155,9 +154,9 @@ Settings
 | Projects             | Brief                                       |
 | Graph                |  [ ] Send proposal follow-up     Project A  |
 | Settings             |                                              |
-|                      | Relationships                               |
-|                      |  Maya - follow up on contract comments      |
-|                      |  Jordan - no interaction in 21 days         |
+|                      | Relationship context                        |
+|                      |  Maya - waiting on contract comments        |
+|                      |  Jordan - mentioned in product sync         |
 |                      |                                              |
 |                      | Waiting                                      |
 |                      |  Waiting on Maya - contract comments         |

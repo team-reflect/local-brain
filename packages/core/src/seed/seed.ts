@@ -65,7 +65,6 @@ export async function seedDemoData(): Promise<SeedResult> {
       preferredName: 'Alex',
       headline: 'Founder, Northwind Labs',
       primaryEmail: 'alex@northwind.example',
-      reconnectIntervalDays: 30,
       currentOrganizationId: orgId,
     }),
     db.insertInto('people').values({

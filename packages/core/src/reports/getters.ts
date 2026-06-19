@@ -1,6 +1,5 @@
 import { db } from '../db/client'
 import { nowIso } from '../db/time'
-import { listReconnectSuggestions, type ReconnectSuggestion } from '../domains/relationships/getters'
 import type { Task } from '../domains/tasks/getters'
 
 /**
@@ -45,12 +44,10 @@ export interface DailyBrief {
     open: BriefTask[]
   }
   recentInteractions: BriefInteraction[]
-  reconnect: ReconnectSuggestion[]
   counts: {
     openTasks: number
     overdueTasks: number
     dueToday: number
-    reconnectDue: number
   }
 }
 
@@ -96,13 +93,13 @@ function toBriefTask(task: Task, bucket: TaskBucket): BriefTask {
   }
 }
 
-/** Assemble the daily brief: bucketed open tasks, recent interactions, reconnects. */
+/** Assemble the daily brief: bucketed open tasks and recent interactions. */
 export async function getDailyBrief(options: DailyBriefOptions = {}): Promise<DailyBrief> {
   const now = options.now ?? new Date()
   const soonDays = options.soonDays ?? 7
   const recentLimit = options.recentLimit ?? 5
 
-  const [openTasks, interactions, reconnect] = await Promise.all([
+  const [openTasks, interactions] = await Promise.all([
     db
       .selectFrom('tasks')
       .selectAll()
@@ -117,7 +114,6 @@ export async function getDailyBrief(options: DailyBriefOptions = {}): Promise<Da
       .orderBy('occurredAt', 'desc')
       .limit(recentLimit)
       .execute(),
-    listReconnectSuggestions({ asOf: now.toISOString() }),
   ])
 
   const overdue: BriefTask[] = []
@@ -144,12 +140,10 @@ export async function getDailyBrief(options: DailyBriefOptions = {}): Promise<Da
       kind: i.kind,
       occurredAt: i.occurredAt,
     })),
-    reconnect,
     counts: {
       openTasks: openTasks.length,
       overdueTasks: overdue.length,
       dueToday: today.length,
-      reconnectDue: reconnect.length,
     },
   }
 }

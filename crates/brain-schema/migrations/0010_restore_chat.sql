@@ -1,4 +1,4 @@
--- 0009_restore_chat.sql
+-- 0010_restore_chat.sql
 --
 -- Restore Ask/chat as a durable product surface. Chat citations are not evidence
 -- refs: messages keep their AI SDK UIMessage JSON plus queryable projection

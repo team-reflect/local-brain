@@ -14,8 +14,8 @@ interactions as first-class records and hidden atomic memories.
    integration exists?
 5. How dense should the first Graph view be: beautiful demo surface, practical
    navigation surface, or both?
-6. Which relationship-intelligence signals are worth showing in Today: stale
-   relationships, important dates, recent changes, or explicit reconnect cadence?
+6. Which relationship-intelligence signals are worth showing in Today: important
+   dates, recent changes, relationship-linked waiting items, or project context?
 
 ## Schema
 

@@ -87,7 +87,6 @@ brain search "northwind" --json
 brain today --json
 brain report daily --json
 brain tasks plan-day --json
-brain relationships followups --json
 brain graph --center self --json
 brain doctor --json     # health: database and schema
 ```

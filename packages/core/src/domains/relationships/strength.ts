@@ -61,15 +61,3 @@ export function relationshipStrength(signals: RelationshipSignals): number | nul
   if (score >= 2) return 2
   return 1
 }
-
-/**
- * When to next reach out: the last interaction plus the person's reconnect
- * cadence. Null when either input is missing — no cadence, no suggestion.
- */
-export function nextReconnectAt(
-  lastInteractionAt: string | null,
-  reconnectIntervalDays: number | null,
-): string | null {
-  if (lastInteractionAt === null || reconnectIntervalDays === null) return null
-  return addDays(lastInteractionAt, reconnectIntervalDays)
-}

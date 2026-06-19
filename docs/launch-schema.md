@@ -42,9 +42,7 @@ Key columns:
 - `primary_phone`
 - `location`
 - `is_self`
-- `reconnect_interval_days`
 - `last_interaction_at`
-- `next_reconnect_at`
 - `important_dates_json`
 - `summary`
 - `notes`
@@ -164,6 +162,9 @@ Key columns:
 
 Suggested `status` values: `open`, `waiting`, `scheduled`, `done`, `canceled`,
 `archived`.
+
+`project_id` is the canonical project association for launch. A task belongs to at
+most one project.
 
 ### `interactions`
 
@@ -456,16 +457,12 @@ Use explicit typed join tables where they make the UI faster and clearer:
 - `interaction_participants`: people in an interaction plus unresolved raw handles from
   imports (`person_id` can be null when `handle` or `display_name` is preserved).
 - `interaction_organizations`: organizations involved in an interaction.
-- `interaction_projects`: projects discussed in an interaction.
 - `project_people`: people linked to a project.
 - `project_organizations`: organizations linked to a project.
 - `project_documents`: documents linked to a project.
 - `project_interactions`: interactions linked to a project.
-- `project_tasks`: tasks linked to a project when the task's direct `project_id` is
-  not enough for cross-project work.
 - `document_people`: people mentioned by or related to a document.
 - `document_organizations`: organizations mentioned by or related to a document.
-- `document_projects`: projects related to a document.
 - `document_interactions`: interactions that explain, produced, or reference a
   document.
 - `task_people`: people linked to a task.
@@ -577,11 +574,9 @@ interactions, tasks, affiliations, projects, and memories.
 Launch should support:
 
 - recency through `people.last_interaction_at`
-- cadence through `people.reconnect_interval_days` and `people.next_reconnect_at`
 - strength through the SELECT-only `relationship_strengths` view
 - important dates through `people.important_dates_json`
-- prompts for Today: people to follow up with, stale relationships, upcoming important
-  dates, and relationship-linked waiting items
+- prompts for Today: upcoming important dates and relationship-linked waiting items
 
 These hints feed agents and UI. Network strength must be calculated deterministically
 from durable interactions and tasks at read time, not set as third-party writable

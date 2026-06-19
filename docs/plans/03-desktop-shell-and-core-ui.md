@@ -104,8 +104,8 @@ shared UI primitives, basic record detail pages.
    - due tasks
    - scheduled tasks
    - waiting items
-   - relationship follow-ups
    - recent interactions
+   - relationship-linked context
    - active project updates
 12. Build Tasks with status filters and inline completion.
 13. Build Network tables and detail pages.

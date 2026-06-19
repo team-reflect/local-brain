@@ -44,7 +44,7 @@ demonstration.
 ## Phase 5 - Core UI
 
 - Today shows an AI daily brief with due tasks, scheduled items, waiting items,
-  relationship follow-ups, recent interactions, and active project changes.
+  recent interactions, relationship-linked context, and active project changes.
 - Tasks supports filtering, sorting, editing, and linked evidence.
 - Network supports Graph, People, and Organizations tabs plus detail pages, with Graph
   as the default tab.
@@ -82,6 +82,7 @@ demonstration.
 - The user can relaunch into the most recent brain folder.
 - A local agent can add and query context through the CLI.
 - A Codex daily automation can update the brain and generate a daily report/todo list.
-- The daily report includes relationship follow-ups and stale relationships.
+- The daily report includes tasks, recent interactions, active projects, and cited
+  relationship context where relevant.
 - Settings shows the brain root, local database path, asset directory path, and
   diagnostics.

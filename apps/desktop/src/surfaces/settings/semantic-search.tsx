@@ -8,7 +8,8 @@ import {
   useRebuildEmbeddings,
   useSetEmbeddingsEnabled,
 } from '../../lib/queries'
-import { describeLastBackfill, megabytes } from './format'
+import { describeLastBackfill } from './format'
+import { ModelDownloadProgress } from './model-download-progress'
 
 export function SemanticSearchSettings(): ReactNode {
   const query = useEmbeddingsStatus()
@@ -21,11 +22,6 @@ export function SemanticSearchSettings(): ReactNode {
 
   const indexedPct =
     status && status.totalChunks > 0 ? Math.round((status.indexed / status.totalChunks) * 100) : 0
-  const downloadPct =
-    runtime?.status === 'loading' && runtime.progress && runtime.progress.total > 0
-      ? Math.round((runtime.progress.downloaded / runtime.progress.total) * 100)
-      : null
-
   return (
     <Section title="Semantic search">
       <div className="flex flex-col gap-3 text-sm">
@@ -48,22 +44,7 @@ export function SemanticSearchSettings(): ReactNode {
         ) : null}
 
         {status?.enabled && runtime?.status === 'loading' ? (
-          <div className="flex flex-col gap-1.5">
-            <div className="text-xs text-muted-foreground">
-              {runtime.progress
-                ? `Downloading the model — ${megabytes(runtime.progress.downloaded)} of ${megabytes(runtime.progress.total)}`
-                : 'Preparing the model…'}
-            </div>
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">
-              <div
-                className={cn(
-                  'h-full rounded-full bg-primary transition-[width]',
-                  downloadPct === null && 'w-1/3 animate-pulse',
-                )}
-                style={downloadPct === null ? undefined : { width: `${downloadPct}%` }}
-              />
-            </div>
-          </div>
+          <ModelDownloadProgress progress={runtime.progress} />
         ) : null}
 
         {status?.enabled && runtime?.status === 'failed' ? (

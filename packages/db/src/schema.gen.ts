@@ -153,14 +153,6 @@ export interface DocumentPeople {
   createdAt: Generated<string>
 }
 
-export interface DocumentProjects {
-  id: string
-  documentId: string
-  projectId: string
-  role: string | null
-  createdAt: Generated<string>
-}
-
 export interface Documents {
   id: string
   kind: string | null
@@ -218,14 +210,6 @@ export interface InteractionParticipants {
   normalizedHandle: string | null
   displayName: string | null
   sourceId: string | null
-  createdAt: Generated<string>
-}
-
-export interface InteractionProjects {
-  id: string
-  interactionId: string
-  projectId: string
-  role: string | null
   createdAt: Generated<string>
 }
 
@@ -290,9 +274,7 @@ export interface People {
   primaryPhone: string | null
   location: string | null
   isSelf: Generated<number>
-  reconnectIntervalDays: number | null
   lastInteractionAt: string | null
-  nextReconnectAt: string | null
   importantDatesJson: string | null
   summary: string | null
   notes: string | null
@@ -358,14 +340,6 @@ export interface ProjectPeople {
   createdAt: Generated<string>
 }
 
-export interface ProjectTasks {
-  id: string
-  projectId: string
-  taskId: string
-  role: string | null
-  createdAt: Generated<string>
-}
-
 export interface Projects {
   id: string
   name: string
@@ -384,7 +358,6 @@ export interface Projects {
 export interface RelationshipStrengths {
   personId: SelectOnly<string | null>
   lastInteractionAt: SelectOnly<string | null>
-  nextReconnectAt: SelectOnly<string | null>
   relationshipStrength: SelectOnly<number | null>
   recentInteractions: SelectOnly<number | null>
   daysSinceLast: SelectOnly<number | null>
@@ -490,13 +463,11 @@ export interface Database {
   documentInteractions: DocumentInteractions
   documentOrganizations: DocumentOrganizations
   documentPeople: DocumentPeople
-  documentProjects: DocumentProjects
   documents: Documents
   evidenceRefs: EvidenceRefs
   externalIdentities: ExternalIdentities
   interactionOrganizations: InteractionOrganizations
   interactionParticipants: InteractionParticipants
-  interactionProjects: InteractionProjects
   interactions: Interactions
   memories: Memories
   memoryLinks: MemoryLinks
@@ -508,7 +479,6 @@ export interface Database {
   projectInteractions: ProjectInteractions
   projectOrganizations: ProjectOrganizations
   projectPeople: ProjectPeople
-  projectTasks: ProjectTasks
   projects: Projects
   relationshipStrengths: RelationshipStrengths
   schemaMeta: SchemaMeta
