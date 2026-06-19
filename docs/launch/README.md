@@ -92,9 +92,10 @@ brain graph --center self --json
 brain doctor --json     # health: database and schema
 ```
 
-For question answering, agents combine `brain search`, `brain show`, and report
-commands, then reason over the returned records themselves. The CLI does not call
-an LLM or synthesize answers.
+For question answering, the desktop **Ask** surface uses the Vercel AI SDK with the
+configured BYOK provider and persists chat history in SQLite. Agents using the CLI
+combine `brain search`, `brain show`, and report commands, then reason over the
+returned records themselves; the CLI does not call an LLM or synthesize answers.
 
 ## Model boundaries (BYOK)
 
@@ -103,6 +104,8 @@ key:
 
 - The desktop stores the key in the **macOS keychain** (Settings → AI providers) —
   never in app settings or the export.
+- Ask fetches the selected key into webview memory only for the duration of a
+  user-approved request.
 - With no key, extraction is a no-op. Lexical (FTS5) search always works.
 
 External model payloads are minimal and visible: only the source text needed for

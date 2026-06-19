@@ -4,6 +4,7 @@ import { TodaySurface } from '../surfaces/today'
 import { TasksSurface } from '../surfaces/tasks'
 import { NetworkSurface } from '../surfaces/network'
 import { ProjectsSurface } from '../surfaces/projects'
+import { AskSurface } from '../surfaces/ask'
 import { SettingsSurface } from '../surfaces/settings'
 import { PersonDetail } from '../surfaces/detail/person'
 import { ProjectDetail } from '../surfaces/detail/project'
@@ -24,6 +25,8 @@ export function RouteContent({ route }: { route: Route }): ReactNode {
       return <NetworkSurface tab={route.tab} />
     case 'projects':
       return <ProjectsSurface />
+    case 'ask':
+      return <AskSurface key={route.conversationId ?? 'new'} conversationId={route.conversationId} />
     case 'person':
       return <PersonDetail id={route.id} />
     case 'organization':

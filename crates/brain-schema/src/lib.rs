@@ -21,7 +21,7 @@ pub const SUPPORT_DIRNAME: &str = ".local-brain";
 
 /// Bumped whenever a migration is appended below. Asserted against the applied
 /// `user_version` in tests so the constant can never drift from the list.
-pub const LATEST_SCHEMA_VERSION: usize = 8;
+pub const LATEST_SCHEMA_VERSION: usize = 9;
 
 /// The canonical filesystem layout for one Local Brain root directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +57,7 @@ static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
         M::up(include_str!("../migrations/0006_import_identity.sql")),
         M::up(include_str!("../migrations/0007_remove_chat.sql")),
         M::up(include_str!("../migrations/0008_asset_search.sql")),
+        M::up(include_str!("../migrations/0009_restore_chat.sql")),
     ])
 });
 
@@ -403,6 +404,8 @@ mod tests {
             "asset_links",
             "asset_texts",
             "asset_search",
+            "chat_conversations",
+            "chat_messages",
         ];
         for table in durable {
             let count: i64 = conn

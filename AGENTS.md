@@ -22,10 +22,10 @@ Current product shape:
   Codex daily automation that ingests context, updates tasks, and records memories.
 - Most reads should also be agent-driven, for example daily reports, todo lists, and
   briefings generated from the CLI or database access.
-- Main user surfaces are Today, Tasks, Network, Projects, Graph, and Settings.
+- Main user surfaces are Today, Tasks, Network, Projects, Graph, Ask, and Settings.
 - Network contains People and Organizations.
 - Documents and Interactions are first-class records, but they are browsed inside
-  person, organization, project, and task detail pages, and through search.
+  person, organization, project, and task detail pages, and through search or Ask.
 - The UI is still important, but mainly for quick browsing, correction, inspection,
   and demonstrating the power of the user's local brain.
 - Relationship intelligence is part of the product model: recency, reconnect cadence,
@@ -60,6 +60,9 @@ Implementation conventions:
   hosted Local Brain model proxy for MVP.
 - Store model keys, credentials, and integration secrets in the OS keychain, not in
   SQLite, markdown, Git, logs, or local config files.
+- Ask uses the Vercel AI SDK from the desktop webview. Provider keys stay in the
+  OS keychain at rest, but are fetched into webview memory for the duration of a
+  user-approved Ask request.
 - Keep the CLI provider-neutral. It should expose typed Local Brain operations and
   generic source/external identity fields, but it should not know about `gws`, Gmail,
   Granola, Google Contacts, Apple Contacts, or any other upstream connector API. Codex

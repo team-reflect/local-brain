@@ -21,6 +21,8 @@ const ROUTES: Route[] = [
   { kind: 'document', id: 'd-1' },
   { kind: 'interaction', id: 'i-1' },
   { kind: 'asset', id: 'a-1' },
+  { kind: 'ask' },
+  { kind: 'ask', conversationId: 'chat-1' },
   { kind: 'settings' },
   { kind: 'settings', section: 'keys' },
 ]
@@ -55,10 +57,16 @@ describe('route serialization', () => {
     expect(routeFromPath('/graph')).toEqual({ kind: 'network', tab: 'graph' })
   })
 
+  it('parses Ask with an optional conversation id', () => {
+    expect(routeFromPath('/ask')).toEqual({ kind: 'ask' })
+    expect(routeFromPath('/ask?conversation=chat-1')).toEqual({ kind: 'ask', conversationId: 'chat-1' })
+  })
+
   it('maps detail routes to their sidebar section', () => {
     expect(sectionForRoute({ kind: 'task', id: 't' })).toBe('tasks')
     expect(sectionForRoute({ kind: 'person', id: 'p' })).toBe('network')
     expect(sectionForRoute({ kind: 'project', id: 'p' })).toBe('projects')
     expect(sectionForRoute({ kind: 'asset', id: 'a' })).toBe('today')
+    expect(sectionForRoute({ kind: 'ask', conversationId: 'chat' })).toBe('ask')
   })
 })
