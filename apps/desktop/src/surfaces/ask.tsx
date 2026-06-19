@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { useChat } from '@ai-sdk/react'
 import { Plus, Send } from 'lucide-react'
 import { z } from 'zod'
@@ -40,9 +40,8 @@ function persistedMessages(messages: ChatMessage[] | undefined): UIMessage[] {
 }
 
 export function AskSurface({ conversationId }: { conversationId: string | undefined }): ReactNode {
-  const routeConversationId = conversationId ?? null
-  const lastRouteConversationId = useRef(routeConversationId)
-  const [activeId, setActiveId] = useState(() => conversationId ?? createChatId())
+  const [draftConversationId, setDraftConversationId] = useState(() => createChatId())
+  const chatId = conversationId ?? draftConversationId
   const storedMessages = useMessages(conversationId)
   const conversations = useConversations()
   const modelStatus = useModelStatus()
@@ -53,36 +52,20 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
   const [draft, setDraft] = useState('')
 
   const chat = useChat({
-    id: activeId,
+    id: chatId,
     transport,
     messages: initialMessages,
     onFinish: () => {
       void queryClient.invalidateQueries({ queryKey: ['chat-conversations'] })
-      void queryClient.invalidateQueries({ queryKey: ['chat-messages', activeId] })
+      void queryClient.invalidateQueries({ queryKey: ['chat-messages', chatId] })
     },
   })
   const { error, messages, sendMessage, setMessages, status } = chat
 
   useEffect(() => {
-    const previousRouteConversationId = lastRouteConversationId.current
-    lastRouteConversationId.current = routeConversationId
-
-    if (conversationId) {
-      setActiveId(conversationId)
-      if (conversationId !== activeId) setMessages([])
-      return
-    }
-
-    if (previousRouteConversationId) {
-      setActiveId(createChatId())
-      setMessages([])
-      setDraft('')
-    }
-  }, [activeId, conversationId, routeConversationId, setMessages])
-
-  useEffect(() => {
-    if (storedMessages.data && status === 'ready') setMessages(persistedMessages(storedMessages.data))
-  }, [setMessages, status, storedMessages.data])
+    if (!conversationId || status !== 'ready' || messages.length > 0 || !storedMessages.data) return
+    setMessages(initialMessages)
+  }, [conversationId, initialMessages, messages.length, setMessages, status, storedMessages.data])
 
   const providerClosed = modelStatus.data && !modelStatus.data.canRun ? modelStatus.data.reason : null
   const pending = status === 'submitted' || status === 'streaming'
@@ -93,9 +76,9 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
     setDraft('')
     try {
       await sendMessage({ text, messageId: createChatId() })
-      if (!conversationId) navigate({ kind: 'ask', conversationId: activeId })
+      if (!conversationId) navigate({ kind: 'ask', conversationId: chatId })
       void queryClient.invalidateQueries({ queryKey: ['chat-conversations'] })
-      void queryClient.invalidateQueries({ queryKey: ['chat-messages', activeId] })
+      void queryClient.invalidateQueries({ queryKey: ['chat-messages', chatId] })
     } catch {
       setDraft(text)
     }
@@ -112,7 +95,7 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
     if (conversationId) {
       navigate({ kind: 'ask' })
     } else {
-      setActiveId(createChatId())
+      setDraftConversationId(createChatId())
     }
   }
 
