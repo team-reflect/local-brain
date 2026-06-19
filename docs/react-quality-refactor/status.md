@@ -16,15 +16,16 @@ passing before any change. The branch was later merged with `origin/master` @
 - [x] Reconciled the branch with the upstream Ask removal; obsolete Ask-history
   changes/tests were dropped.
 
-## Verification state (final)
+## Verification state (post-merge final)
 
 - `git diff --check`: clean.
-- `pnpm check` (typecheck + oxlint + vitest): pass before upstream merge — 80
-  tests across packages. Re-run pending after the `dd602e9` merge.
-- `pnpm --filter @local-brain/desktop build`: pass before upstream merge.
-  Re-run pending after the `dd602e9` merge.
-- `pnpm --filter @local-brain/desktop sidecar`: pass before upstream merge.
-  Re-run pending after the `dd602e9` merge.
+- `pnpm check` (typecheck + oxlint + vitest): pass after the `dd602e9` merge —
+  core 189 tests, db 4 tests, desktop 76 tests, skills has no tests.
+- `pnpm --filter @local-brain/desktop build`: pass after the `dd602e9` merge
+  (2247 modules; only the pre-existing `install-model.ts` dual import and
+  chunk-size warnings).
+- `pnpm --filter @local-brain/desktop sidecar`: pass after the `dd602e9` merge —
+  staged `brain-aarch64-apple-darwin`.
 - No Rust/native source touched, so cargo checks not required.
 
 ## Notes / decisions
