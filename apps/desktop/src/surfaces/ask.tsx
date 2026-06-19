@@ -77,11 +77,11 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
     if (!text || pending) return
     setDraft('')
     try {
-      await sendMessage({ text, messageId: createChatId() })
       if (!conversationId) {
         setHydratedConversationId(chatId)
         navigate({ kind: 'ask', conversationId: chatId })
       }
+      await sendMessage({ text, messageId: createChatId() })
       void queryClient.invalidateQueries({ queryKey: ['chat-conversations'] })
       void queryClient.invalidateQueries({ queryKey: ['chat-messages', chatId] })
     } catch {
