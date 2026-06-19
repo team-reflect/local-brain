@@ -1,6 +1,23 @@
 # PR #48 Bugbot fixes — status
 
-State: **all four original findings + six follow-ups fixed, tested, and verified locally.**
+State: **all four original findings + seven follow-ups fixed, tested, and verified locally.**
+
+## Follow-up (fresh current-head Bugbot finding #11, head `71bbff6`/`bca58b6`)
+
+Bugbot re-reviewed head `bca58b6` and flagged one fresh current-head issue. It is
+fixed in commit `5e09c39a9967fbf8851fe173c19e2c9f7265b965`, with the regression
+test strengthened in the follow-up commit.
+
+| # | BUGBOT | Sev | Finding | Fix | Tests |
+|---|--------|-----|---------|-----|-------|
+| 11 | `5b5ef2e7` (comment `3439870954`) | Medium | Duplicate import marks primary handles — `insert_person_handles` wrote the first email/phone of each incoming batch with `is_primary = 1` by loop index alone, so duplicate-person enrichment that adds only secondary addresses still flagged the new row primary, leaving one person with multiple primary emails or phones | `insert_person_handles` first checks whether the person already owns a primary of each kind (`SELECT EXISTS(… AND is_primary = 1)`); a handle is promoted to primary only when it is first in the batch **and** the person has no existing primary, so new-person creation is unchanged while enrichment never creates a second primary | `add.rs` `duplicate_enrichment_keeps_single_primary_handle` (enrichment lists the brand-new address *first* so the buggy `index == 0` rule would flag it primary — confirmed to fail before the fix with `left: 2, right: 1`) |
+
+Verification (run at this head): `cargo fmt -p brain-cli -- --check` clean,
+`cargo test -p brain-cli` = 21 unit + 28 integration + 2 skill all pass. The
+regression test was confirmed to fail before the fix (two primary emails) and
+pass after.
+
+> Bugbot must re-run against the pushed head before finding #11 is settled.
 
 ## Follow-up (fresh current-head Bugbot findings #9–#10, head `4166204`)
 

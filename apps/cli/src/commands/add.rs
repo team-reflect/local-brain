@@ -2002,14 +2002,17 @@ mod tests {
         );
 
         // Duplicate enrichment: a re-import that only adds secondary addresses
-        // must not promote the new rows to primary.
+        // must not promote the new rows to primary. The brand-new address is
+        // listed *first* so the batch's index-0 slot is a genuinely new row
+        // (the buggy `index == 0` rule would flag it primary); the existing
+        // primary trails it so the duplicate still resolves to this person.
         add_person(
             &mut conn,
             true,
             person_args(
                 "Robin Spencer",
-                vec!["robin@example.com", "robin.work@example.com"],
-                vec!["+1 555 0100", "+1 555 0200"],
+                vec!["robin.work@example.com", "robin@example.com"],
+                vec!["+1 555 0200", "+1 555 0100"],
                 None,
             ),
         )

@@ -296,7 +296,11 @@ the established primary untouched.
 Coverage: `add.rs` unit test `duplicate_enrichment_keeps_single_primary_handle`
 seeds a new person (asserting exactly one primary email and one primary phone),
 re-imports the same person with an added secondary email and phone, then asserts
-both secondary rows were added while the primary counts stay at exactly one.
+both secondary rows were added while the primary counts stay at exactly one. The
+enrichment batch lists the brand-new address *first* (with the existing primary
+trailing so the duplicate still resolves to this person), so the index-0 slot is
+a genuinely new row — the buggy `index == 0` rule promotes it and the test fails
+before the fix (`left: 2, right: 1` primary emails); it passes after.
 
 ### Verification (run before commit)
 
