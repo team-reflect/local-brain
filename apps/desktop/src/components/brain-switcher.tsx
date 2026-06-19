@@ -66,7 +66,12 @@ export function BrainSwitcher(): ReactNode {
             <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent aria-label="Switch brain" side="top" sideOffset={4}>
+        <DropdownMenuContent
+          aria-label="Switch brain"
+          side="top"
+          sideOffset={4}
+          className="w-auto min-w-56 max-w-72"
+        >
           {others.map((brain) => (
             <DropdownMenuItem
               key={brain.rootPath}
