@@ -6,7 +6,7 @@
 - **Title:** Refactor Local Brain foundation: shared domain write layer
 - **Base:** `master` @ `9cd2d84`
 - **Branch:** `codex/local-brain-foundation-refactor`
-- **Final commit SHA:** `0836b2d9009f623ec100ca395bdc89d51efdb4bb`
+- **Final commit SHA:** `2f2282c3f12f79146362381423d5ceb2995fe9f3`
 - **Diff:** 30 files changed, +854 / −161, across 4 commits.
 
 ## What this refactor is (and is not)
