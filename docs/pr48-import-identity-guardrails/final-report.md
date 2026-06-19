@@ -17,7 +17,8 @@
 
 Bugbot's re-review of `f72c9f9` completed NEUTRAL but posted one new
 current-head issue (bug `0116a927-927c-4788-b4f0-1a408b419cc9`, review comment
-`3439779341`), addressed in the commit on top of `f72c9f9`. See finding #5.
+`3439779341`), addressed in **code-fix commit `ac5e88f6f070481f5ad4e7452bc89c7fc0bd6d6e`**
+(parent `f72c9f9`), with docs in the commit on top of it. See finding #5.
 
 ## Files changed (commit 39d74ff)
 
@@ -110,7 +111,7 @@ noise such as `noreply via Mailchimp` → `noreply` is still flagged and skipped
 Coverage: `add.rs` unit tests `route_phrase_strips_to_usable_person_name`,
 `assess_creates_person_after_stripping_route_phrase` (covers ` via `/` from `/
 ` at ` variants), and the negative `assess_skips_route_phrase_noise`; plus the
-pre-existing integration test
+new integration test
 `add_person_from_email_strips_route_phrase_and_creates_person`.
 
 ## Verification commands & results (run at head 39d74ff)
