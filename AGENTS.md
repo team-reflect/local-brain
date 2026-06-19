@@ -74,7 +74,9 @@ Implementation conventions:
   frontend camelCase once in a bridge layer.
 - For UI work, follow the Local Brain design docs and Reflect Open's component
   patterns. Check existing shadcn/ui primitives before building custom interactive
-  controls, overlays, dialogs, menus, popovers, or tooltips. Use Lucide icons where
+  controls, overlays, dialogs, menus, popovers, or tooltips. If shadcn/ui already
+  covers the needed primitive, install or generate it into the app's `components/ui`
+  directory and use it instead of hand-rolling the control. Use Lucide icons where
   appropriate.
 - For React, use named exports, one component per file by default, providers plus
   small hooks for shared state, and never call hooks conditionally.
