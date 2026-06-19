@@ -62,4 +62,35 @@ describe('createInteraction participant validation', () => {
     expect(inserts).toHaveLength(1)
     expect(inserts[0]?.params).toContain('person-1')
   })
+
+  it('dedupes identical name-only participants in one create', async () => {
+    const calls = captureDbBridge()
+    await createInteraction(INTERACTION, [
+      { role: 'to', displayName: 'Casey Jordan' },
+      { role: 'to', displayName: 'Casey Jordan' }, // exact duplicate → dropped
+      { role: 'to', displayName: '  Casey Jordan  ' }, // normalizes to the same → dropped
+      { role: 'cc', displayName: 'Casey Jordan' }, // different role → kept
+    ])
+    const inserts = participantInserts(batchStatements(calls))
+    expect(inserts).toHaveLength(2)
+    const roles = inserts.map((insert) => insert.params).map((params) => params)
+    // One 'to' row and one 'cc' row survive.
+    expect(roles.filter((params) => params.includes('to'))).toHaveLength(1)
+    expect(roles.filter((params) => params.includes('cc'))).toHaveLength(1)
+  })
+
+  it('dedupes duplicate handle and personId participants in one create', async () => {
+    const calls = captureDbBridge()
+    await createInteraction(INTERACTION, [
+      { role: 'from', handle: 'Robin@Example.com' },
+      { role: 'from', handle: 'robin@example.com' }, // same normalized handle+role → dropped
+      { role: 'to', personId: 'person-1' },
+      { role: 'cc', personId: 'person-1' }, // same personId (index ignores role) → dropped
+    ])
+    const inserts = participantInserts(batchStatements(calls))
+    expect(inserts).toHaveLength(2)
+    const flat = inserts.flatMap((insert) => insert.params)
+    expect(flat.filter((value) => value === 'robin@example.com')).toHaveLength(1)
+    expect(flat.filter((value) => value === 'person-1')).toHaveLength(1)
+  })
 })

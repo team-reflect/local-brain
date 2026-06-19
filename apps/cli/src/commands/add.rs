@@ -211,10 +211,37 @@ fn insert_external_identity(
     ) else {
         return Ok(());
     };
+    let table = entity_table(entity_type).ok_or_else(|| {
+        CliError::Runtime(format!(
+            "unknown external identity entity type '{entity_type}'"
+        ))
+    })?;
+    // `INSERT OR IGNORE` alone is wrong on a re-import of an archived record: the
+    // unique (source_id, kind, external_id) row still points at the archived
+    // entity, so the new active record would never get an identity row and later
+    // imports would skip `find_external_identity` (which only matches active
+    // rows). Re-point the conflicting identity at the new entity, but ONLY when
+    // the currently-referenced entity is no longer active. This mirrors
+    // `find_external_identity`'s active-only scope and never clobbers an identity
+    // that still maps to a live record.
+    let sql = format!(
+        "INSERT INTO external_identities
+           (id, entity_type, entity_id, source_id, kind, external_id, url)
+         VALUES (?1,?2,?3,?4,?5,?6,?7)
+         ON CONFLICT (source_id, kind, external_id) DO UPDATE SET
+           entity_type = excluded.entity_type,
+           entity_id = excluded.entity_id,
+           url = excluded.url,
+           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE external_identities.entity_id <> excluded.entity_id
+           AND NOT EXISTS (
+             SELECT 1 FROM {table} t
+             WHERE t.id = external_identities.entity_id
+               AND t.archived_at IS NULL
+           )",
+    );
     conn.execute(
-        "INSERT OR IGNORE INTO external_identities
-         (id, entity_type, entity_id, source_id, kind, external_id, url)
-         VALUES (?1,?2,?3,?4,?5,?6,?7)",
+        &sql,
         params![
             new_id(),
             entity_type,
@@ -1918,6 +1945,130 @@ mod tests {
         assert_eq!(
             phone_count, 0,
             "duplicate-path handle write must roll back when a later step fails"
+        );
+    }
+
+    #[test]
+    fn add_person_reimport_after_archive_repoints_external_identity() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // First import: an active person carrying external id "ext-1".
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Robin Spencer",
+                vec!["robin@example.com"],
+                vec![],
+                Some("ext-1"),
+            ),
+        )
+        .unwrap();
+        let archived_id = single_person_id(&conn, "Robin Spencer");
+        conn.execute(
+            "UPDATE people SET archived_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+            params![archived_id],
+        )
+        .unwrap();
+
+        // Re-import the same external id with a distinct name/email so neither the
+        // external-identity lookup (archived) nor the name/email fallback matches.
+        // A fresh active person must be created.
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Robin Spencer Reborn",
+                vec!["robin.reborn@example.com"],
+                vec![],
+                Some("ext-1"),
+            ),
+        )
+        .unwrap();
+        let active_id = single_person_id(&conn, "Robin Spencer Reborn");
+        assert_ne!(active_id, archived_id, "expected a brand new active person");
+
+        // The single (source, kind, external_id) identity row must now point at
+        // the new active record, not the archived one.
+        let identity_target: String = conn
+            .query_row(
+                "SELECT entity_id FROM external_identities
+                 WHERE entity_type = 'person' AND kind = 'contact' AND external_id = 'ext-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            identity_target, active_id,
+            "archived re-import must re-point the external identity to the active record"
+        );
+
+        // A later import with the same external id now dedupes onto the active
+        // record instead of creating a third person.
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Totally Different Name",
+                vec!["different@example.com"],
+                vec![],
+                Some("ext-1"),
+            ),
+        )
+        .unwrap();
+        let active_people: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM people WHERE archived_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            active_people, 1,
+            "external-id dedupe must reuse the active record after a re-point"
+        );
+    }
+
+    #[test]
+    fn add_person_reimport_does_not_clobber_active_external_identity() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // Two distinct active people; only the first owns external id "ext-1".
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Alice Owner",
+                vec!["alice@example.com"],
+                vec![],
+                Some("ext-1"),
+            ),
+        )
+        .unwrap();
+        let owner_id = single_person_id(&conn, "Alice Owner");
+
+        // Re-importing "ext-1" while the owner is still active must dedupe onto the
+        // owner and leave the identity row untouched (never re-point to anyone).
+        add_person(
+            &mut conn,
+            true,
+            person_args(
+                "Alice Owner",
+                vec!["alice@example.com"],
+                vec![],
+                Some("ext-1"),
+            ),
+        )
+        .unwrap();
+        let identity_target: String = conn
+            .query_row(
+                "SELECT entity_id FROM external_identities
+                 WHERE entity_type = 'person' AND kind = 'contact' AND external_id = 'ext-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            identity_target, owner_id,
+            "an active external identity must not be re-pointed on re-import"
         );
     }
 
