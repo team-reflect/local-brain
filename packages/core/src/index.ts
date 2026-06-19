@@ -24,7 +24,7 @@ export {
 export { db } from './db/client'
 export { execute, executeRaw, batch, type DbStatement } from './db/commands'
 export { newId } from './db/id'
-export { nowIso } from './db/time'
+export { nowIso, localDateString } from './db/time'
 
 // People
 export {

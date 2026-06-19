@@ -23,7 +23,7 @@ import {
   getModelSettings,
   keychainGet,
   listProjects,
-  nowIso,
+  localDateString,
   type AiProviderConfig,
 } from '@local-brain/core'
 
@@ -141,7 +141,7 @@ async function persistLatestUser(conversationId: string, messages: readonly UIMe
 }
 
 async function loadChatContext(): Promise<{ system: string }> {
-  const today = nowIso().slice(0, 10)
+  const today = localDateString()
   const projects = await listProjects({ activeOnly: true, limit: 40 })
   return {
     system: buildChatSystemPrompt({ today, projects }),

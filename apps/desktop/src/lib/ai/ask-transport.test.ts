@@ -13,7 +13,7 @@ const coreMocks = vi.hoisted(() => ({
   getModelSettings: vi.fn(),
   keychainGet: vi.fn(),
   listProjects: vi.fn(),
-  nowIso: vi.fn(),
+  localDateString: vi.fn(),
 }))
 
 const aiMocks = vi.hoisted(() => ({
@@ -33,7 +33,7 @@ vi.mock('@local-brain/core', () => ({
   getModelSettings: coreMocks.getModelSettings,
   keychainGet: coreMocks.keychainGet,
   listProjects: coreMocks.listProjects,
-  nowIso: coreMocks.nowIso,
+  localDateString: coreMocks.localDateString,
 }))
 
 vi.mock('@ai-sdk/openai', () => ({
@@ -73,7 +73,7 @@ describe('createAskTransport', () => {
     coreMocks.getConversation.mockResolvedValue(undefined)
     coreMocks.createConversation.mockResolvedValue('chat-1')
     coreMocks.appendChatMessage.mockResolvedValue('message-id')
-    coreMocks.nowIso.mockReturnValue('2026-06-19T10:00:00Z')
+    coreMocks.localDateString.mockReturnValue('2026-06-19')
     coreMocks.listProjects.mockResolvedValue([
       { id: 'p1', name: 'Atlas', status: 'active', summary: null, targetDate: null, completedOn: null, archivedAt: null, createdAt: '', updatedAt: '', kind: null, notes: null, startedOn: null },
     ])
