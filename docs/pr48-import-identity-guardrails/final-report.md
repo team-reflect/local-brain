@@ -221,4 +221,56 @@ JS was touched in this follow-up.
 | `cargo fmt --check` (in `apps/cli`) | clean |
 | `cargo clippy --all-targets` (in `apps/cli`) | no new warnings; only the pre-existing `large_enum_variant` in `main.rs` (untouched, out of scope) |
 | `cargo test` (in `apps/cli`) | 16 unit + 26 integration + 2 skill — all pass (incl. 3 new route_phrase unit tests) |
+
+## Follow-up: Bugbot NEUTRAL re-review on head `4166204` (2 fresh issues)
+
+Cursor Bugbot re-reviewed head `416620408edbb8e82f013649b08ec830a03a9307` and
+flagged two new current-head issues. Both are fixed in commit
+**`c2988ff898fedc5ed24e0984d3a6e3b917b78f34`**.
+
+### 1. Archived reimport loses external identity — BUGBOT 4de6e6a1 (comment 3439826634)
+`apps/cli/src/commands/add.rs` — after an archived person/interaction is
+re-imported with the same `--source`/`--external-id`, `insert_external_identity`
+used `INSERT OR IGNORE` while the unique `(source_id, kind, external_id)` row
+still pointed at the archived entity. The new active record never received an
+identity row, so later imports skipped `find_external_identity` (which only
+matches active rows) and could miss dedupe.
+
+Fix: `insert_external_identity` now upserts via
+`ON CONFLICT (source_id, kind, external_id) DO UPDATE … WHERE` the existing
+identity points at a *different* entity **and** that entity is no longer active
+(`NOT EXISTS … archived_at IS NULL` against the entity's owning table). This
+re-points a stale identity from an archived record onto the new active record
+while never clobbering an identity that still maps to a live record (mirroring
+`find_external_identity`'s active-only scope). Regression tests:
+`add_person_reimport_after_archive_repoints_external_identity` (re-point + later
+dedupe reuses the active record) and
+`add_person_reimport_does_not_clobber_active_external_identity` (active identity
+left untouched).
+
+### 2. TS creates duplicate name-only participants — BUGBOT 9d74880a (comment 3439826640)
+`packages/core/src/domains/interactions/setters.ts` — `createInteraction`
+inserted every built participant row with no dedupe. Migration 0006 only
+unique-indexes rows with a `normalized_handle`, so the desktop batch path could
+persist duplicate identical unresolved (name-only) participants in one create —
+the case the CLI already guards on re-import.
+
+Fix: `createInteraction` now dedupes built participant rows by an identity key
+that mirrors migration 0006's unique indexes plus the CLI's name-only guard —
+person rows key on `(interactionId, personId)`, handle rows on
+`(interactionId, normalizedHandle, role)`, and name-only rows on
+`(interactionId, displayName, role)`. Regression tests:
+`dedupes identical name-only participants in one create` and
+`dedupes duplicate handle and personId participants in one create`.
+
+### Verification (run before commit)
+
+| Command | Result |
+|---------|--------|
+| `cargo test -p brain-cli` | 20 unit + 28 integration + 2 skill — all pass (incl. 2 new reimport unit tests) |
+| `cargo fmt -p brain-cli -- --check` | clean |
+| `cargo clippy -p brain-cli --tests` | no new warnings; only the pre-existing `large_enum_variant` in `main.rs` (untouched) |
+| `pnpm --filter @local-brain/core exec vitest run src/domains/interactions/setters.test.ts` | 5/5 pass (incl. 2 new dedupe tests) |
+| `pnpm --filter @local-brain/core typecheck` | clean |
+| `pnpm exec oxlint packages/core/src/domains/interactions` | clean |
 </content>
