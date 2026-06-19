@@ -44,5 +44,6 @@ alone.
 
 - Branch: `codex/local-brain-shadcn-dialog-primitives`
 - Base: `origin/master` @ `21feb6b1b33e984012c72cf1800bd0d3a031c067`
-- Final HEAD: _see below_
-- PR: _see below_
+- PR: https://github.com/maccman/local-brain/pull/72
+- Commit (code + docs): `28e8d4214605fa274ed4581bcca930b6b759da7d`
+- Final HEAD updated by the report-finalize commit below; see `git log`.
