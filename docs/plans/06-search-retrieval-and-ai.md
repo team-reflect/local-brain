@@ -1,6 +1,6 @@
 # Plan 06 - Search, Retrieval, and AI
 
-**Goal:** Provide fast local search, cited AI answers, and agent-readable report
+**Goal:** Provide fast local search, model-backed extraction, and agent-readable report
 generation over the personal-CRM records.
 
 **Depends on:** Plans 01-05.
@@ -9,9 +9,8 @@ generation over the personal-CRM records.
 
 ## Scope
 
-**In:** FTS5, optional vector search, retrieval policy, Ask conversations, citations,
-answer persistence, record lookup, daily report/todo retrieval, model boundary
-settings.
+**In:** FTS5, optional vector search, retrieval policy, citations, record lookup,
+daily report/todo retrieval, and model boundary settings for extraction.
 
 **Out:** hosted sync, browser extension search, automatic external app connectors.
 
@@ -19,13 +18,12 @@ settings.
 
 - FTS5 is the first search path.
 - Embeddings are additive and optional until packaging and speed are proven.
-- Global search ranks visible records, including assets. Ask/retrieval ranks chunks from
-  documents and interactions.
-- One `retrieve()` API serves Ask, daily reports, graph context, search enrichment, and
-  CLI reads.
-- AI answers cite `content_chunks` through `evidence_refs`.
-- Chat history lives in `chat_conversations` and `chat_messages`.
-- Daily reports and todo lists should use the same retrieval/citation machinery as Ask.
+- Global search ranks visible records, including assets.
+- Retrieval ranks visible records and chunks from documents and interactions.
+- One `retrieve()` API serves daily reports, graph context, search enrichment, and CLI
+  reads.
+- Extracted memories and tasks cite `content_chunks` through `evidence_refs`.
+- Daily reports and todo lists should use retrieval/citation machinery where useful.
 - Settings controls AI providers.
 - There is no row-level sensitivity label schema for launch.
 
@@ -35,7 +33,7 @@ settings.
 - FTS uses title/body weighting, snippets, small result caps, and no filesystem scan.
 - Embeddings run locally in Rust, off the UI thread, with lexical fallback.
 - Hybrid retrieval uses one shared contract rather than separate AI/search indexes.
-- AI context assembly is transparent and cited.
+- AI extraction context assembly is transparent and cited.
 - External model payloads pass through one typed boundary so unchecked context cannot be
   sent accidentally.
 
@@ -82,34 +80,25 @@ settings.
    - vectors stored in `sqlite-vec` (`chunk_embeddings` + `chunk_vectors` vec0, cosine)
    - chunk text hashes skip unchanged work; a model change re-embeds
    - failure means semantic unavailable, not app failure (lexical fallback)
-7. Add retrieval API for Ask and agent workflows:
+7. Add retrieval API for agent workflows:
    - question
    - selected filters/context
    - ranked chunks
    - linked records
    - mode: lexical, semantic, or hybrid
    - citations/evidence payload
-8. Build Ask answer generation with citations.
-9. Persist conversations and messages.
-10. Create `evidence_refs` for assistant messages.
-11. Add model boundary checks:
+8. Add model boundary checks:
    - require configured key or local model
    - show when external calls are disabled
-   - include only retrieved text needed for the answer
+   - include only source text needed for extraction
    - construct external model context through one checked helper/type
-   - log/model usage metadata in chat message metadata if useful
-12. Add cited-answer UI:
-   - answer text
-   - citation list
-   - jump to document or interaction
-   - show linked people, organizations, projects, and tasks
-13. Add retrieval endpoints for agent workflows:
+9. Add retrieval endpoints for agent workflows:
    - daily report
    - todo list
    - changed records since timestamp
    - waiting items
    - relationship follow-ups
-14. Add graph data endpoint:
+10. Add graph data endpoint:
    - centered on the user's own person row
    - returns typed nodes and weighted edges
 
@@ -120,17 +109,13 @@ settings.
   link captions, linked record titles, and optional local asset text.
 - Cmd/Ctrl+K provides one keyboard-native surface for find, navigate, and command
   execution.
-- Ask can answer a question using local documents and interactions.
-- Every factual Ask answer shows citations.
-- Citations open the exact document or interaction context.
-- Chat history is persisted.
 - An agent can request enough structured context to generate a daily report and todo
   list.
 - Daily brief retrieval includes relationship follow-ups, stale relationships, and
   upcoming important dates.
 - Graph data can be generated from durable typed records without a separate graph table.
-- Search and Ask share ranking/query helpers where applicable, but asset search is
-  navigational; factual Ask citations still come from document/interaction chunks.
+- Asset search is navigational; factual report citations still come from
+  document/interaction chunks.
 - Semantic search can be unavailable while lexical search still works.
 - The app behaves clearly when no AI provider or local model is configured.
 
@@ -140,15 +125,14 @@ settings.
 - Integration test FTS indexing and rebuild.
 - Unit test command registry execution and keyboard-result behavior.
 - Unit test chunk hash stability and lexical fallback when embeddings are unavailable.
-- Integration test cited answer persistence.
-- Manual test Ask across a seeded person, project, task, document, and interaction.
+- Integration test cited task/memory evidence persistence.
 
 ## Open Questions
 
 - The embedding backend is `fastembed` + `sqlite-vec` (see `docs/reflect-embeddings/`).
   Bundling/notarizing the ONNX runtime and the on-demand model download still need a
   packaging pass (Plan 09); the runtime degrades to lexical if unavailable.
-- Semantic search is desktop-only for now — the `brain` CLI's search/ask stay lexical
-  (no embedding runtime in the CLI binary).
+- Semantic search is desktop-only for now — the `brain` CLI's search stays lexical (no
+  embedding runtime in the CLI binary).
 - Graph data filters by node type, date range, project, and relationship strength are
   optional follow-up.

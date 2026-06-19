@@ -49,7 +49,6 @@ time*? → interaction. Is it *material to read/reference*? → document.
 brain search "northwind partnership" --json        # ranked search across records/assets
 brain show person <id> --json                       # a record + its links
 brain show asset <id> --json                        # asset metadata, text status, linked records
-brain ask "what did we decide about pricing?" --json # grounded, cited answer
 brain today --json                                   # daily brief: tasks, recents, reconnects
 brain report daily --json
 brain tasks plan-day --json                          # prioritized todo list
@@ -58,11 +57,9 @@ brain changes --since 2026-06-01T00:00:00Z --json    # what changed since a time
 brain graph --center self --json                     # the user-centered graph
 ```
 
-`brain ask` always returns the **cited evidence** it retrieved. If a model is
-configured (`ANTHROPIC_API_KEY`), it also synthesizes a cited answer; otherwise
-it returns `answered:false` with the evidence — **you** are the model, so reason
-over the returned `citations` yourself. Each citation names the owning document
-or interaction so the user can open the exact source.
+For question answering, use `brain search`, `brain show`, and cited memories or
+task evidence. Reason from the returned records yourself; the CLI does not call
+an LLM or synthesize answers.
 
 ## Writing
 
@@ -161,5 +158,5 @@ The CLI normally targets a brain folder via `--brain <dir>` or `$BRAIN_ROOT`, an
 uses `<dir>/brain.sqlite` with assets under `<dir>/assets`. `--db <path>` and
 `$BRAIN_DB` remain advanced exact-file overrides for tests and diagnostics. It
 opens SQLite directly and works with the desktop app closed. Run
-`brain doctor --json` to check health (schema version, model configured, curl
-available). Exit codes: `0` ok, `1` runtime error, `3` not found, `4` no database.
+`brain doctor --json` to check database and schema health. Exit codes: `0` ok,
+`1` runtime error, `3` not found, `4` no database.

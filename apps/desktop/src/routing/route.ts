@@ -19,7 +19,6 @@ export type Route =
   | { kind: 'document'; id: string }
   | { kind: 'interaction'; id: string }
   | { kind: 'asset'; id: string }
-  | { kind: 'ask'; conversationId?: string }
   | { kind: 'settings'; section?: string }
 
 export const HOME_ROUTE: Route = { kind: 'today' }
@@ -65,8 +64,6 @@ export function routesEqual(a: Route, b: Route): boolean {
     case 'interaction':
     case 'asset':
       return a.id === (b as { id: string }).id
-    case 'ask':
-      return a.conversationId === (b as Extract<Route, { kind: 'ask' }>).conversationId
     case 'settings':
       return a.section === (b as Extract<Route, { kind: 'settings' }>).section
     default:
@@ -99,10 +96,6 @@ export function routeToPath(route: Route): string {
       return `/interactions/${encodeURIComponent(route.id)}`
     case 'asset':
       return `/assets/${encodeURIComponent(route.id)}`
-    case 'ask':
-      return route.conversationId
-        ? `/ask?conversation=${encodeURIComponent(route.conversationId)}`
-        : '/ask'
     case 'settings':
       return route.section ? `/settings?section=${encodeURIComponent(route.section)}` : '/settings'
   }
@@ -142,10 +135,6 @@ export function routeFromPath(pathWithQuery: string): Route {
       return id ? { kind: 'asset', id: decodeURIComponent(id) } : { kind: 'today' }
     case 'graph':
       return { kind: 'network', tab: 'graph' }
-    case 'ask': {
-      const conversationId = query.get('conversation')
-      return conversationId ? { kind: 'ask', conversationId } : { kind: 'ask' }
-    }
     case 'settings': {
       const section = query.get('section')
       return section ? { kind: 'settings', section } : { kind: 'settings' }
@@ -174,8 +163,6 @@ export function sectionForRoute(route: Route): string {
     case 'interaction':
     case 'asset':
       return 'today'
-    case 'ask':
-      return 'ask'
     case 'settings':
       return 'settings'
   }

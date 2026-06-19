@@ -5,7 +5,6 @@ import {
   ChevronRight,
   FolderKanban,
   ListTodo,
-  MessageSquare,
   Search,
   Settings,
   Users,
@@ -34,7 +33,6 @@ const NAV: readonly NavItem[] = [
   { section: 'tasks', label: 'Tasks', icon: ListTodo, route: { kind: 'tasks' } },
   { section: 'network', label: 'Network', icon: Users, route: { kind: 'network', tab: 'graph' } },
   { section: 'projects', label: 'Projects', icon: FolderKanban, route: { kind: 'projects' } },
-  { section: 'ask', label: 'Ask', icon: MessageSquare, route: { kind: 'ask' } },
 ]
 
 const HISTORY_BUTTON_CLASS =

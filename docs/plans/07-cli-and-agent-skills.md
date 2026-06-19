@@ -9,7 +9,7 @@ querying, and reporting from the user's local brain.
 
 ## Scope
 
-**In:** `brain` CLI, JSON output, local skill docs, add/search/ask/today/report/graph
+**In:** `brain` CLI, JSON output, local skill docs, add/search/today/report/graph
 commands, provider-neutral import identity, record lookup, brain-root/database/asset
 path resolution, sidecar bundling, installation checks.
 
@@ -34,7 +34,7 @@ path resolution, sidecar bundling, installation checks.
 - Assets are first-class searchable records by metadata, links, and optional local
   `asset_texts`; importers can pass attachment text without coupling `brain` to a
   provider.
-- Agents can search and ask, but cited answers still come from document or interaction
+- Agents can search records and produce cited reports from document or interaction
   chunks.
 - stdout carries data only; diagnostics and warnings go to stderr.
 - `--json` output shapes are stable and snapshot-tested.
@@ -86,7 +86,6 @@ path resolution, sidecar bundling, installation checks.
    - `brain remember --kind fact --claim ... --link person:...`
 6. Add read/query commands:
    - `brain search "..."`
-   - `brain ask "..."`
    - `brain today`
    - `brain report daily`
    - `brain tasks plan-day`
@@ -143,7 +142,6 @@ path resolution, sidecar bundling, installation checks.
   importer-provided text.
 - An agent can inspect an asset's metadata, text status, and linked records as JSON.
 - An agent can add a task linked to a person/project.
-- An agent can ask a cited question from the terminal.
 - An agent can generate a daily report and todo list from the terminal.
 - An agent can list relationship follow-ups from the terminal.
 - An agent can query the user-centered graph as JSON.
@@ -155,7 +153,7 @@ path resolution, sidecar bundling, installation checks.
 ## Tests or Verification
 
 - CLI snapshot tests for JSON output.
-- CLI integration tests for add/search/ask/today/show, sources, contact handles,
+- CLI integration tests for add/search/today/show, sources, contact handles,
   external identity dedupe, guarded email senders, and raw interaction participants.
 - CLI concurrent-open test with desktop-style WAL settings.
 - Sidecar staging smoke test.

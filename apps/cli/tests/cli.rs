@@ -1,7 +1,6 @@
 //! Integration tests for the `brain` CLI against a temporary SQLite database.
 //! They run the real built binary (`CARGO_BIN_EXE_brain`), assert the stable
-//! JSON contracts, and verify stdout/stderr separation. No model key is needed:
-//! `ask` is exercised in its degraded (evidence-only) mode.
+//! JSON contracts, and verify stdout/stderr separation.
 
 use std::io::Write;
 use std::path::Path;
@@ -22,7 +21,6 @@ fn run(db: &Path, args: &[&str]) -> Output {
         .args(args)
         .env_remove("BRAIN_DB")
         .env_remove("BRAIN_ROOT")
-        .env_remove("ANTHROPIC_API_KEY")
         .output()
         .expect("failed to run brain")
 }
@@ -34,7 +32,6 @@ fn run_with_brain(root: &Path, args: &[&str]) -> Output {
         .args(args)
         .env_remove("BRAIN_DB")
         .env_remove("BRAIN_ROOT")
-        .env_remove("ANTHROPIC_API_KEY")
         .output()
         .expect("failed to run brain")
 }
@@ -152,7 +149,6 @@ fn brain_root_env_derives_standard_folder_layout() {
         .args(["--json", "path"])
         .env_remove("BRAIN_DB")
         .env("BRAIN_ROOT", &root)
-        .env_remove("ANTHROPIC_API_KEY")
         .output()
         .expect("failed to run brain");
     assert!(
@@ -1513,30 +1509,6 @@ fn search_finds_added_records_by_full_text() {
     assert!(hits
         .iter()
         .any(|h| h["kind"] == "interaction" && h["title"] == "Kickoff"));
-}
-
-#[test]
-fn ask_degrades_to_cited_evidence_without_a_model() {
-    let dir = TempDir::new().unwrap();
-    let db = db_path(&dir);
-    run_json(
-        &db,
-        &[
-            "--json",
-            "add",
-            "document",
-            "--title",
-            "Doc",
-            "--text",
-            "The partnership covers go-to-market.",
-        ],
-    );
-    let answer = run_json(&db, &["--json", "ask", "what is the partnership about?"]);
-    assert_eq!(answer["answered"], false);
-    let citations = answer["citations"].as_array().unwrap();
-    assert!(!citations.is_empty());
-    assert!(citations[0]["recordType"].is_string());
-    assert!(citations[0]["quote"].is_string());
 }
 
 #[test]

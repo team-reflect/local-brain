@@ -210,21 +210,6 @@ export {
   type RelationshipSignals,
 } from './domains/relationships/strength'
 
-// Chat (Ask)
-export {
-  listConversations,
-  getConversation,
-  listMessages,
-  type ChatConversation,
-  type ChatMessage,
-} from './domains/chat/getters'
-export {
-  createConversation,
-  addMessage,
-  archiveConversation,
-  type NewChatMessage,
-} from './domains/chat/setters'
-
 // Quick search (command palette)
 export { quickSearch } from './search/getters'
 
@@ -351,15 +336,12 @@ export {
   type DeletableKind,
 } from './domains/maintenance'
 
-// AI: BYOK model boundary, cited Ask, model-backed extractor
+// AI: BYOK model boundary and model-backed extractor
 export {
   setModelProvider,
   getModelProvider,
   getModelStatus,
   ModelUnavailableError,
-  assembleAnswerContext,
-  citedSubset,
-  ask,
   createModelExtractor,
   extractJsonObject,
   createAnthropicProvider,
@@ -390,11 +372,6 @@ export {
   type ModelCompletion,
   type ModelUsage,
   type ModelStatus,
-  type AssembledContext,
-  type AnswerCitation,
-  type AskResult,
-  type AskCitation,
-  type AskOptions,
   type AnthropicOptions,
   type OpenAiOptions,
   type GoogleOptions,

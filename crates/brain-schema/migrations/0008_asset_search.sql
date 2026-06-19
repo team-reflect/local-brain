@@ -1,4 +1,4 @@
--- 0007_asset_search.sql
+-- 0008_asset_search.sql
 --
 -- First-class search for asset metadata plus optional local/imported asset text.
 -- The binary bytes still live under the brain root's assets/ directory; this

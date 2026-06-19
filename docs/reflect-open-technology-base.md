@@ -89,7 +89,6 @@ Use SQLite for:
 - durable personal CRM records
 - imported readable text
 - hidden memories
-- chat history
 - settings
 - FTS indexes
 - optional vector index
@@ -101,7 +100,6 @@ Derived indexes can be rebuilt. Durable records cannot depend on generated markd
 Use AI for:
 
 - extraction from documents and interactions
-- Ask over local context
 - summarization for detail pages
 - task suggestion
 - memory cleanup
@@ -124,7 +122,6 @@ The CLI should expose:
 - add task
 - remember atomic claim
 - search
-- ask
 - today
 - daily report
 - todo planning
@@ -147,7 +144,7 @@ UI influence the product surfaces:
 - restrained styling
 - powerful search
 
-Local Brain's sidebar is Today, Tasks, Network, Projects, Ask, and Settings. The graph
+Local Brain's sidebar is Today, Tasks, Network, Projects, and Settings. The graph
 is the default tab inside Network.
 
 ## Security And Boundaries
@@ -157,7 +154,7 @@ For launch:
 - no hosted Local Brain service
 - provider keys stored in the OS keychain
 - Settings controls AI provider configuration
-- Ask and extraction should send only the context needed for the operation
+- Extraction should send only the context needed for the operation
 - app-managed backup/export is deferred
 
 Future sync, git portability, or deeper privacy controls should be designed after the

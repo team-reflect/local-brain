@@ -2,7 +2,7 @@
 
 SQLite is the durable source of truth for Local Brain. The launch schema is a personal
 CRM with first-class people, organizations, projects, tasks, interactions, documents,
-asset metadata, hidden atomic memories, tags, AI chat, and settings.
+asset metadata, hidden atomic memories, tags, and settings.
 
 The schema should make everyday questions easy:
 
@@ -320,7 +320,7 @@ Allowed `record_type` values for launch: `document`, `interaction`.
 
 ### `memories`
 
-Hidden atomic claims extracted from documents, interactions, tasks, and chat.
+Hidden atomic claims extracted from documents, interactions, and tasks.
 
 Key columns:
 
@@ -355,8 +355,7 @@ Allowed `record_type` values: `person`, `organization`, `project`, `task`,
 
 ### `evidence_refs`
 
-Citation links from memories, tasks, and AI answers to exact document or interaction
-chunks.
+Citation links from memories and tasks to exact document or interaction chunks.
 
 Key columns:
 
@@ -369,7 +368,7 @@ Key columns:
 - `note`
 - `created_at`
 
-Allowed `subject_type` values: `memory`, `task`, `chat_message`.
+Allowed `subject_type` values: `memory`, `task`.
 
 ### `tags` and `taggings`
 
@@ -393,29 +392,6 @@ Lightweight user-defined grouping.
 
 Allowed `record_type` values: `person`, `organization`, `project`, `task`,
 `document`, `interaction`, `memory`.
-
-### `chat_conversations` and `chat_messages`
-
-Ask conversations and answer history.
-
-`chat_conversations` key columns:
-
-- `id`
-- `title`
-- `created_at`
-- `updated_at`
-- `archived_at`
-
-`chat_messages` key columns:
-
-- `id`
-- `conversation_id`
-- `role`
-- `content`
-- `model`
-- `created_at`
-
-Assistant messages can be cited through `evidence_refs`.
 
 ### `settings`
 
@@ -505,16 +481,16 @@ Each join table should include:
                                                  +-------------+
                                                  | asset_texts |
                                                  +-------------+
-           ^      ^     ^
-           |      |     |
-      +---------+ | +--------------------+
-      | memories| | |  chat_messages     |
-      +---------+ | +--------------------+
-           ^      |          ^
-           |      |          |
-      +--------------+ +--------------------+
-      | memory_links | | chat_conversations |
-      +--------------+ +--------------------+
+           ^      ^
+           |      |
+      +---------+ |
+      | memories| |
+      +---------+ |
+           ^      |
+           |      |
+      +--------------+
+      | memory_links |
+      +--------------+
 ```
 
 ## Derived Indexes

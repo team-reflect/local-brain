@@ -21,7 +21,7 @@ export const SKILLS: readonly SkillManifest[] = [
     id: 'brain',
     name: 'Local Brain',
     description:
-      "Read from and write to the user's Local Brain (a local SQLite personal CRM) through the `brain` CLI: remember people/meetings/notes/tasks, search, ask cited questions, and produce daily briefs and reconnect follow-ups.",
+      "Read from and write to the user's Local Brain (a local SQLite personal CRM) through the `brain` CLI: remember people/meetings/notes/tasks, search records, and produce daily briefs and reconnect follow-ups.",
     docPath: 'skills/brain/SKILL.md',
   },
 ]

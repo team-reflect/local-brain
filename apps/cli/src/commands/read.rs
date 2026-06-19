@@ -1,73 +1,18 @@
-//! Read commands: `brain search`, `brain ask`, `brain show`. Retrieval reuses
+//! Read commands: `brain search` and `brain show`. Retrieval reuses
 //! the same FTS5 contract as the app (the SQL is the shared layer), reimplemented
-//! here in Rust so the CLI runs standalone. `ask` is grounded: it returns the
-//! cited chunks the answer is built from, and only synthesizes prose when a model
-//! is configured — otherwise it degrades to returning the evidence for the
-//! calling agent to reason over.
+//! here in Rust so the CLI runs standalone.
 
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 
-use super::{now_iso, to_like_pattern, to_match_query};
+use super::{to_like_pattern, to_match_query};
 use crate::error::CliError;
-use crate::id::new_id;
-use crate::model;
-use crate::output::{diag, print_json};
-
-/// A retrieved chunk with enough provenance to cite it.
-pub struct ChunkHit {
-    pub chunk_id: String,
-    pub text: String,
-    pub snippet: String,
-    pub record_type: String,
-    pub record_id: String,
-    pub record_title: Option<String>,
-    pub lexical: f64,
-}
+use crate::output::print_json;
 
 /// bm25 (more-negative is better) -> bounded [0,1] lexical score (mirrors core).
 fn lexical_score(bm25: f64) -> f64 {
     let magnitude = (-bm25).max(0.0);
     magnitude / (magnitude + 4.0)
-}
-
-/// Retrieve the top-`limit` grounding chunks for a query via FTS5 over
-/// `content_chunks` (OR-recall, ranked by bm25).
-pub fn retrieve_chunks(
-    conn: &Connection,
-    query: &str,
-    limit: usize,
-) -> Result<Vec<ChunkHit>, CliError> {
-    let Some(match_query) = to_match_query(query, true) else {
-        return Ok(Vec::new());
-    };
-    let mut stmt = conn.prepare(
-        "SELECT cc.id, cc.text,
-                snippet(content_chunks_fts, 0, '[', ']', '…', 12),
-                cc.record_type, cc.record_id,
-                COALESCE(d.title, i.title),
-                bm25(content_chunks_fts)
-         FROM content_chunks_fts
-         JOIN content_chunks cc ON cc.rowid = content_chunks_fts.rowid
-         LEFT JOIN documents d    ON d.id = cc.record_id AND cc.record_type = 'document'
-         LEFT JOIN interactions i ON i.id = cc.record_id AND cc.record_type = 'interaction'
-         WHERE content_chunks_fts MATCH ?1
-           AND d.archived_at IS NULL AND i.archived_at IS NULL
-         ORDER BY bm25(content_chunks_fts)
-         LIMIT ?2",
-    )?;
-    let rows = stmt.query_map(params![match_query, limit as i64], |row| {
-        Ok(ChunkHit {
-            chunk_id: row.get(0)?,
-            text: row.get(1)?,
-            snippet: row.get(2)?,
-            record_type: row.get(3)?,
-            record_id: row.get(4)?,
-            record_title: row.get(5)?,
-            lexical: lexical_score(row.get::<_, f64>(6)?),
-        })
-    })?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(CliError::from)
 }
 
 /// `brain search` — full-text across documents/interactions plus name matches
@@ -192,120 +137,6 @@ fn emit_search(json: bool, query: &str, hits: &[Value]) -> Result<(), CliError> 
         );
     }
     Ok(())
-}
-
-/// `brain ask` — grounded question answering. Always returns the cited evidence;
-/// synthesizes an answer when a model is configured, otherwise degrades cleanly
-/// (`answered: false`) so the calling agent can reason over the evidence itself.
-pub fn ask(
-    conn: &mut Connection,
-    json: bool,
-    question: &str,
-    limit: usize,
-    no_model: bool,
-) -> Result<(), CliError> {
-    let chunks = retrieve_chunks(conn, question, limit)?;
-    let citations: Vec<Value> = chunks
-        .iter()
-        .enumerate()
-        .map(|(i, c)| {
-            json!({
-                "index": i + 1,
-                "chunkId": c.chunk_id,
-                "recordType": c.record_type,
-                "recordId": c.record_id,
-                "recordTitle": c.record_title,
-                "snippet": c.snippet,
-                "quote": c.text,
-                "score": c.lexical,
-            })
-        })
-        .collect();
-
-    let model_result = if no_model {
-        None
-    } else {
-        model::synthesize(question, &chunks)?
-    };
-
-    match model_result {
-        Some(answer) => {
-            // Persist the answer + cited evidence so it shows in the app's Ask history.
-            let (conversation_id, message_id) = persist_answer(conn, question, &answer, &chunks)?;
-            if json {
-                print_json(&json!({
-                    "answered": true,
-                    "answer": answer.text,
-                    "model": answer.model,
-                    "conversationId": conversation_id,
-                    "messageId": message_id,
-                    "citations": citations,
-                }))
-            } else {
-                println!("{}", answer.text);
-                Ok(())
-            }
-        }
-        None => {
-            let reason = if no_model {
-                "model disabled (--no-model)"
-            } else {
-                "no model configured (set ANTHROPIC_API_KEY); returning retrieved evidence"
-            };
-            diag(reason);
-            if json {
-                print_json(&json!({
-                    "answered": false,
-                    "reason": reason,
-                    "citations": citations,
-                }))
-            } else {
-                if citations.is_empty() {
-                    println!("(no relevant records found)");
-                }
-                for c in &citations {
-                    println!("[{}] {}\n    {}", c["index"], c["recordTitle"], c["quote"]);
-                }
-                Ok(())
-            }
-        }
-    }
-}
-
-/// Insert a conversation + assistant message + one evidence_ref per cited source.
-fn persist_answer(
-    conn: &mut Connection,
-    question: &str,
-    answer: &model::Answer,
-    chunks: &[ChunkHit],
-) -> Result<(String, String), CliError> {
-    let conversation_id = new_id();
-    let user_id = new_id();
-    let message_id = new_id();
-    let now = now_iso(conn)?;
-    let title: String = question.chars().take(60).collect();
-    let tx = conn.transaction()?;
-    tx.execute(
-        "INSERT INTO chat_conversations (id, title, updated_at) VALUES (?1,?2,?3)",
-        params![conversation_id, title, now],
-    )?;
-    tx.execute(
-        "INSERT INTO chat_messages (id, conversation_id, role, content) VALUES (?1,?2,'user',?3)",
-        params![user_id, conversation_id, question],
-    )?;
-    tx.execute(
-        "INSERT INTO chat_messages (id, conversation_id, role, content, model) VALUES (?1,?2,'assistant',?3,?4)",
-        params![message_id, conversation_id, answer.text, answer.model],
-    )?;
-    // Cite every retrieved chunk the answer was grounded in.
-    for chunk in chunks {
-        tx.execute(
-            "INSERT INTO evidence_refs (id, subject_type, subject_id, chunk_id, note) VALUES (?1,'chat_message',?2,?3,?4)",
-            params![new_id(), message_id, chunk.chunk_id, chunk.record_title],
-        )?;
-    }
-    tx.commit()?;
-    Ok((conversation_id, message_id))
 }
 
 /// `brain show <kind> <id>` — a record's core fields plus its linked neighborhood.

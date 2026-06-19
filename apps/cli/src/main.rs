@@ -10,7 +10,6 @@ mod commands;
 mod db;
 mod error;
 mod id;
-mod model;
 mod output;
 mod text;
 
@@ -53,7 +52,7 @@ enum Command {
     Status,
     /// Print the resolved database path only.
     Path,
-    /// Report environment, database, and model-boundary health.
+    /// Report environment and database health.
     Doctor,
     /// Add a record (person, asset, document, interaction, or task).
     Add {
@@ -77,8 +76,6 @@ enum Command {
     },
     /// Full-text search across your records.
     Search(SearchArgs),
-    /// Ask a grounded, cited question.
-    Ask(AskArgs),
     /// Today's brief: tasks, recent interactions, reconnects.
     Today,
     /// Generate a report.
@@ -266,16 +263,6 @@ struct SearchArgs {
     query: String,
     #[arg(long, default_value_t = 20)]
     limit: usize,
-}
-
-#[derive(Parser)]
-struct AskArgs {
-    question: String,
-    #[arg(long, default_value_t = 8)]
-    limit: usize,
-    /// Skip the model call; return retrieved evidence only.
-    #[arg(long)]
-    no_model: bool,
 }
 
 #[derive(Parser)]
@@ -541,10 +528,6 @@ fn run(cli: Cli) -> Result<(), CliError> {
             let conn = db::open_existing(&db_path)?;
             read::search(&conn, json, &a.query, a.limit)
         }
-        Command::Ask(a) => {
-            let mut conn = db::open_existing(&db_path)?;
-            read::ask(&mut conn, json, &a.question, a.limit, a.no_model)
-        }
         Command::Show { kind, id } => {
             let conn = db::open_existing(&db_path)?;
             read::show(&conn, json, &kind, &id)
@@ -599,7 +582,7 @@ fn resolve_optional_text(
     }
 }
 
-/// `brain doctor` — environment, database, and model-boundary health.
+/// `brain doctor` — environment and database health.
 fn doctor(storage: &db::StoragePaths, json: bool) -> Result<(), CliError> {
     let db_path = &storage.database_path;
     let exists = db_path.is_file();
@@ -607,14 +590,6 @@ fn doctor(storage: &db::StoragePaths, json: bool) -> Result<(), CliError> {
         Ok(conn) => (db::schema_version(&conn).unwrap_or(-1), true),
         Err(_) => (-1, false),
     };
-    let model_configured = std::env::var("ANTHROPIC_API_KEY")
-        .map(|k| !k.trim().is_empty())
-        .unwrap_or(false);
-    let curl = std::process::Command::new("curl")
-        .arg("--version")
-        .output()
-        .is_ok();
-
     if json {
         print_json(&json!({
             "brainRoot": storage.root_path.as_ref().map(|path| path.display().to_string()),
@@ -624,8 +599,6 @@ fn doctor(storage: &db::StoragePaths, json: bool) -> Result<(), CliError> {
             "dbOk": ok,
             "schemaVersion": schema_version,
             "expectedSchemaVersion": brain_schema::LATEST_SCHEMA_VERSION,
-            "modelConfigured": model_configured,
-            "curlAvailable": curl,
         }))
     } else {
         diag(&format!(
@@ -637,15 +610,6 @@ fn doctor(storage: &db::StoragePaths, json: bool) -> Result<(), CliError> {
             "schema: v{schema_version} (expected v{})",
             brain_schema::LATEST_SCHEMA_VERSION
         );
-        println!(
-            "model: {}",
-            if model_configured {
-                "configured (ANTHROPIC_API_KEY)"
-            } else {
-                "not configured"
-            }
-        );
-        println!("curl: {}", if curl { "available" } else { "missing" });
         Ok(())
     }
 }

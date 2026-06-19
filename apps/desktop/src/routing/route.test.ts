@@ -21,8 +21,6 @@ const ROUTES: Route[] = [
   { kind: 'document', id: 'd-1' },
   { kind: 'interaction', id: 'i-1' },
   { kind: 'asset', id: 'a-1' },
-  { kind: 'ask' },
-  { kind: 'ask', conversationId: 'c-1' },
   { kind: 'settings' },
   { kind: 'settings', section: 'keys' },
 ]

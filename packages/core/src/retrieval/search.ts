@@ -12,7 +12,7 @@ import { toLikePattern, toMatchQuery } from './match-query'
  * FTS projection over metadata, linked-record context, and optional local text.
  * Results are merged and ranked into one list.
  *
- * This is the navigational/find surface. Grounded retrieval for Ask and agents
+ * This is the navigational/find surface. Grounded retrieval for agents
  * is {@link retrieve} over `content_chunks`; both share the same FTS index and
  * ranking helpers.
  */

@@ -3,9 +3,8 @@
  *
  * Local Brain never bundles a model. A {@link ModelProvider} is registered at
  * runtime — the desktop app wires one backed by a keychain-stored provider key
- * (Plan 08), the CLI wires one from an env var, and tests register a mock. When
- * no provider is registered, the whole AI surface degrades cleanly: Ask returns
- * an honest "not configured" message and the model-backed extractor is a no-op.
+ * (Plan 08), and tests register a mock. When no provider is registered, the
+ * model-backed extractor is a no-op.
  * Nothing here fakes a model with heuristics.
  *
  * All external-model context is assembled through the single typed helper in

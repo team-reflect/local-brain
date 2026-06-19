@@ -20,8 +20,8 @@ import {
  *
  * The default provider is read from settings and its key from the OS keychain.
  * Local development can still use provider-specific VITE_* API key env vars as
- * no-persist escape hatches. With no configured provider/key, Ask degrades
- * cleanly and the extractor no-ops.
+ * no-persist escape hatches. With no configured provider/key, the extractor
+ * no-ops.
  *
  * The model-backed extractor is registered regardless; it is a safe no-op until
  * a provider exists. Call after the Tauri bridge is installed.
