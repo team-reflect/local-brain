@@ -104,6 +104,22 @@ pub fn resolve_text(text: Option<&str>, text_file: Option<&Path>) -> Result<Stri
     }
 }
 
+/// Resolve optional body text for commands that can be represented by typed
+/// fields alone. At most one source may be provided.
+pub fn resolve_optional_text(
+    text: Option<&str>,
+    text_file: Option<&Path>,
+) -> Result<Option<String>, CliError> {
+    match (text, text_file) {
+        (Some(t), None) => Ok(Some(t.to_string())),
+        (None, Some(path)) => resolve_text(None, Some(path)).map(Some),
+        (Some(_), Some(_)) => Err(CliError::Runtime(
+            "provide only one of --text / --text-file".into(),
+        )),
+        (None, None) => Ok(None),
+    }
+}
+
 /// Current timestamp as the app's ISO-8601 millisecond format, from SQLite so it
 /// matches column defaults exactly.
 pub fn now_iso(conn: &Connection) -> Result<String, CliError> {

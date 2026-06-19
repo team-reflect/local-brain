@@ -22,6 +22,10 @@ or approved local database access.
   `brain` CLI calls.
 - Preserve provenance directly on documents, interactions, tasks, memories, and
   evidence references.
+- Treat `brain --json contract` as the discoverable source of truth for command shapes,
+  link syntax, source identity rules, exit codes, and import mappings.
+- In `--json` mode, parse command failures from JSON on stderr:
+  `{ ok: false, error: { kind, message, exitCode } }`.
 - Prefer cited records and evidence over uncited summaries.
 - Never invent context. Add uncertain details as low-confidence memories or skip them.
 
@@ -30,6 +34,7 @@ or approved local database access.
 Status and diagnostics:
 
 ```bash
+brain --json contract
 brain status
 brain doctor --json
 brain path
@@ -44,6 +49,7 @@ brain add person-from-email --full-name "Maya Chen" --email maya@example.com --s
 brain add document --title "Kitchen remodel notes" --text-file notes.md
 brain add interaction --kind meeting --title "Call with Maya" --text-file transcript.txt
 brain add interaction --kind email --title "Email from Maya" --text-file body.txt --source gmail --external-id msg-123 --participant "from:Maya Chen <maya@example.com>" --json
+brain add interaction --kind event --title "Calendar: Hotel stay" --occurred-at 2026-07-09 --ended-at 2026-07-12 --location "Louma" --source google_calendar --external-id event-123 --self-participant "attendee:You <alex@example.com>" --json
 brain add asset --file maya.jpg --link person:maya --role avatar
 brain add asset --file invoice.pdf --link interaction:email-id --text-file extracted.txt --text-source importer --json
 brain asset text set asset-id --text-file - --source importer --json
@@ -121,8 +127,21 @@ When importing emails or calendar events:
 
 - Store readable body text as an interaction.
 - Pass provider identity through generic `--source` and `--external-id`.
+- For calendar events, map structured fields onto the interaction before notes:
+  `--occurred-at` for start, `--ended-at` for end, `--location` for venue or
+  address, and `--original-url` for the provider event URL.
+- Use `--kind meeting` for people-centered calendar items and `--kind event` for
+  travel, lodging, reservations, reminders, and all-day schedule blocks, even when
+  they have attendees.
+- Link known people with `--link person:<id>` when the importer has already resolved
+  them. Raw participant email handles that match existing people are also resolved by
+  the CLI.
 - Preserve raw unresolved participants with repeatable `--participant` values such as
   `from:Robin Spencer <robin@example.com>`; do not create people for every handle.
+- Use `--self-participant` for attendee rows the upstream provider marks as the user.
+- Keep notes for source-specific details that do not have typed Local Brain fields,
+  not as the primary storage for start/end/location/attendee data.
+- Calendar items with a title and structured fields may omit `--text` / `--text-file`.
 - Store binary attachments through `brain add asset --link interaction:<id>`.
 
 When adding an asset:

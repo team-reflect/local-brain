@@ -19,7 +19,9 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use serde_json::json;
 
-use commands::{add, graph as graph_cmd, parse_links, read, report, resolve_text, source};
+use commands::{
+    add, graph as graph_cmd, parse_links, read, report, resolve_optional_text, resolve_text, source,
+};
 use error::CliError;
 use output::{diag, print_json};
 
@@ -54,6 +56,8 @@ enum Command {
     Path,
     /// Report environment and database health.
     Doctor,
+    /// Print the machine-readable CLI contract for local agents.
+    Contract,
     /// Add a record (person, asset, document, interaction, or task).
     Add {
         // Boxed because the `add` subcommands carry by far the largest argument
@@ -212,26 +216,46 @@ struct AddDocumentArgs {
 
 #[derive(Parser)]
 struct AddInteractionArgs {
+    /// Interaction kind, e.g. note, meeting, call, email, message, event.
     #[arg(long, default_value = "note")]
     kind: String,
+    /// Short display title.
     #[arg(long)]
     title: Option<String>,
+    /// When the interaction/event starts or happened (ISO timestamp or YYYY-MM-DD).
     #[arg(long)]
     occurred_at: Option<String>,
+    /// When the interaction/event ends (ISO timestamp or YYYY-MM-DD).
+    #[arg(long)]
+    ended_at: Option<String>,
+    /// Venue, address, or meaningful location label.
+    #[arg(long)]
+    location: Option<String>,
+    /// Upstream source slug, e.g. gmail, google_calendar, google_people.
     #[arg(long)]
     source: Option<String>,
+    /// Stable upstream record id scoped to --source.
     #[arg(long)]
     external_id: Option<String>,
+    /// Provider URL for the original record.
     #[arg(long)]
     original_url: Option<String>,
+    /// Optional readable body text. Use --text-file for large bodies.
     #[arg(long)]
     text: Option<String>,
+    /// Optional file containing body text, or '-' to read stdin.
     #[arg(long, value_name = "PATH")]
     text_file: Option<PathBuf>,
+    /// Typed link to an existing record, e.g. person:01ABC or project:01XYZ.
     #[arg(long = "link", value_name = "KIND:ID")]
     links: Vec<String>,
+    /// Raw unresolved participant, e.g. attendee:Alice <alice@example.com>.
     #[arg(long = "participant", value_name = "ROLE:NAME <EMAIL>")]
     participants: Vec<String>,
+    /// Participant row for the user's own self person, e.g. attendee:You <you@example.com>.
+    #[arg(long = "self-participant", value_name = "ROLE:NAME <EMAIL>")]
+    self_participants: Vec<String>,
+    /// Force a new record even if content or external identity already matches.
     #[arg(long)]
     allow_duplicate: bool,
 }
@@ -345,10 +369,26 @@ struct EnsureSourceArgs {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    let json = cli.json;
     match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            diag(&err.to_string());
+            if json {
+                eprintln!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({
+                        "ok": false,
+                        "error": {
+                            "kind": err.kind(),
+                            "message": err.to_string(),
+                            "exitCode": err.exit_code(),
+                        }
+                    }))
+                    .unwrap_or_else(|_| err.to_string())
+                );
+            } else {
+                diag(&err.to_string());
+            }
             ExitCode::from(err.exit_code())
         }
     }
@@ -391,6 +431,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
             }
         }
         Command::Doctor => doctor(&storage, json),
+        Command::Contract => contract(&storage, json),
 
         Command::Add { what } => {
             let mut conn = db::open(&db_path)?;
@@ -461,12 +502,15 @@ fn run(cli: Cli) -> Result<(), CliError> {
                         title: a.title.as_deref(),
                         kind: &a.kind,
                         occurred_at: a.occurred_at.as_deref(),
+                        ended_at: a.ended_at.as_deref(),
+                        location: a.location.as_deref(),
                         source_slug: a.source.as_deref(),
                         external_id: a.external_id.as_deref(),
                         original_url: a.original_url.as_deref(),
-                        body: resolve_text(a.text.as_deref(), a.text_file.as_deref())?,
+                        body: resolve_optional_text(a.text.as_deref(), a.text_file.as_deref())?,
                         links: parse_links(&a.links)?,
                         raw_participants: a.participants.iter().map(String::as_str).collect(),
+                        self_participants: a.self_participants.iter().map(String::as_str).collect(),
                         allow_duplicate: a.allow_duplicate,
                     },
                 ),
@@ -572,16 +616,6 @@ fn run(cli: Cli) -> Result<(), CliError> {
     }
 }
 
-fn resolve_optional_text(
-    text: Option<&str>,
-    text_file: Option<&std::path::Path>,
-) -> Result<Option<String>, CliError> {
-    match (text, text_file) {
-        (None, None) => Ok(None),
-        _ => resolve_text(text, text_file).map(Some),
-    }
-}
-
 /// `brain doctor` — environment and database health.
 fn doctor(storage: &db::StoragePaths, json: bool) -> Result<(), CliError> {
     let db_path = &storage.database_path;
@@ -612,4 +646,161 @@ fn doctor(storage: &db::StoragePaths, json: bool) -> Result<(), CliError> {
         );
         Ok(())
     }
+}
+
+/// `brain contract` — a compact, machine-readable guide for local agents.
+fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
+    print_json(&json!({
+        "name": "brain",
+        "version": env!("CARGO_PKG_VERSION"),
+        "purpose": "Agent interface to a Local Brain SQLite database.",
+        "paths": {
+            "brainRoot": storage.root_path.as_ref().map(|path| path.display().to_string()),
+            "dbPath": storage.database_path.display().to_string(),
+            "assetsPath": storage.assets_path.as_ref().map(|path| path.display().to_string()),
+        },
+        "output": {
+            "stdout": "data only",
+            "stderr": "diagnostics and errors only",
+            "json": "Pass global --json for stable camelCase JSON on stdout. With --json, command errors are JSON on stderr.",
+        },
+        "exitCodes": [
+            { "code": 0, "kind": "ok", "meaning": "success" },
+            { "code": 1, "kind": "runtime", "meaning": "validation, SQL, IO, or unsupported operation failure" },
+            { "code": 3, "kind": "not_found", "meaning": "requested record was not found" },
+            { "code": 4, "kind": "no_database", "meaning": "database is missing or unusable" },
+        ],
+        "recordKinds": [
+            "person",
+            "organization",
+            "project",
+            "task",
+            "document",
+            "interaction",
+            "asset",
+            "memory",
+        ],
+        "linkSyntax": {
+            "format": "kind:id",
+            "acceptedKinds": ["person", "organization", "org", "project", "task", "document", "doc", "interaction"],
+            "examples": ["person:01ABC", "project:01XYZ", "task:01TODO"],
+        },
+        "sources": {
+            "builtInSlugs": [
+                "manual",
+                "agent",
+                "file",
+                "gmail",
+                "google_people",
+                "google_calendar",
+                "google_meet",
+                "zoom",
+                "ai_extraction",
+            ],
+            "identityRule": "Use --source plus --external-id for idempotent provider imports. External ids are source-scoped.",
+        },
+        "writeRules": [
+            "Search before writing likely duplicates.",
+            "Prefer typed fields over burying structure in notes/body text.",
+            "Reuse and link existing people, organizations, projects, and tasks when possible.",
+            "Preserve provider provenance with --source, --external-id, and --original-url.",
+            "Do not create people for every raw sender or attendee; preserve unresolved handles with --participant.",
+            "Use --text-file or --text-file - for large text bodies; structured calendar events may omit body text.",
+        ],
+        "commands": {
+            "status": {
+                "usage": "brain --json status",
+                "returns": "database path, existence, and schema version",
+            },
+            "doctor": {
+                "usage": "brain --json doctor",
+                "returns": "database health and expected schema version",
+            },
+            "search": {
+                "usage": "brain --json search <query> --limit 20",
+                "returns": "ranked records with kind, id, title, snippet, and score",
+            },
+            "show": {
+                "usage": "brain --json show <person|organization|project|task> <id>",
+                "returns": "core typed fields for one visible record",
+            },
+            "addPerson": {
+                "usage": "brain --json add person --full-name <name> [--email <email>...] [--phone <phone>...] [--source <slug> --external-id <id>]",
+                "dedupe": "external identity, then email handle, then normalized name",
+            },
+            "addPersonFromEmail": {
+                "usage": "brain --json add person-from-email --full-name <display> --email <email> --source gmail --external-id <message-id>",
+                "purpose": "Safely create people from untrusted sender/display-name pairs; machine senders are skipped with reasonCodes.",
+            },
+            "addDocument": {
+                "usage": "brain --json add document --title <title> (--text <text>|--text-file <path|->) [--link kind:id...]",
+                "useFor": ["reference notes", "PDF text", "webpages", "receipts", "long-form material"],
+            },
+            "addInteraction": {
+                "usage": "brain --json add interaction --kind <kind> --title <title> [--text <text>|--text-file <path|->] [--occurred-at <iso>] [--ended-at <iso>] [--location <label>] [--source <slug> --external-id <id>] [--original-url <url>] [--participant 'role:Name <email>'...] [--self-participant 'role:Name <email>'...] [--link kind:id...]",
+                "kinds": ["note", "meeting", "call", "email", "message", "event"],
+                "bodyText": "Optional for structured calendar events; title or body text is still required.",
+                "kindGuidance": "Use event for travel, lodging, reservations, reminders, and all-day schedule blocks even if they have attendees. Use meeting for people-centered appointments.",
+                "calendarMapping": {
+                    "start": "--occurred-at",
+                    "end": "--ended-at",
+                    "venueOrAddress": "--location",
+                    "providerUrl": "--original-url",
+                    "attendees": "--participant",
+                    "selfAttendees": "--self-participant",
+                    "knownPeople": "--link person:<id> or matching participant email",
+                    "notes": "Only source-specific leftovers that do not have typed fields.",
+                },
+            },
+            "addAsset": {
+                "usage": "brain --json add asset --file <path> --link <kind:id> [--role attachment|avatar|logo|screenshot|source_file]",
+                "purpose": "Copy bytes into the managed assets directory and link them to a typed record.",
+            },
+            "addTask": {
+                "usage": "brain --json add task --title <title> [--due-at <iso>] [--link kind:id...]",
+            },
+            "remember": {
+                "usage": "brain --json remember --kind <fact|preference|decision|commitment|instruction|risk|idea> --claim <atomic claim> --link kind:id...",
+                "rule": "Memories should be atomic and linked to visible evidence records.",
+            },
+            "today": {
+                "usage": "brain --json today",
+                "returns": "tasks, recentInteractions, reconnect suggestions, and counts",
+            },
+            "tasksPlanDay": {
+                "usage": "brain --json tasks plan-day --limit 25",
+                "returns": "prioritized open task list",
+            },
+            "relationshipsFollowups": {
+                "usage": "brain --json relationships followups",
+                "returns": "people due for reconnect",
+            },
+            "changes": {
+                "usage": "brain --json changes --since <iso> --limit 50",
+                "returns": "recently updated visible records",
+            },
+            "graph": {
+                "usage": "brain --json graph --center self",
+                "returns": "typed user-centered graph nodes and edges",
+            },
+        },
+        "examples": [
+            {
+                "name": "calendarEvent",
+                "command": "brain --json add interaction --kind event --title 'Calendar: Stay at Louma' --occurred-at 2026-07-09 --ended-at 2026-07-12 --location 'Louma Country Shepherds Hut' --source google_calendar --external-id 3p20rd --original-url 'https://www.google.com/calendar/event?eid=...' --participant 'organizer:Alice Wyatt <alice@example.com>' --self-participant 'attendee:You <alex@example.com>'",
+            },
+            {
+                "name": "email",
+                "command": "brain --json add interaction --kind email --title 'Email from Maya' --occurred-at 2026-06-19T10:00:00Z --source gmail --external-id msg-123 --participant 'from:Maya Chen <maya@example.com>' --text-file body.txt",
+            },
+            {
+                "name": "dailyAutomation",
+                "commands": [
+                    "brain --json today",
+                    "brain --json tasks plan-day --limit 25",
+                    "brain --json relationships followups",
+                ],
+            },
+        ],
+    }))
 }
