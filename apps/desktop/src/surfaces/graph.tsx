@@ -103,6 +103,34 @@ function clampZoom(scale: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale))
 }
 
+interface FitTransform {
+  /** Pixels per viewBox unit (uniform — the viewBox keeps its aspect ratio). */
+  scale: number
+  /** Letterbox padding on each axis, from `xMidYMid` centering. */
+  offsetX: number
+  offsetY: number
+}
+
+/**
+ * How the viewBox lands inside the rendered SVG box under the default
+ * `xMidYMid meet`: scaled uniformly to fit, then centered. Pointer math must go
+ * through this — the box can be wider/taller than the viewBox, so mapping across
+ * the full rect would drift on letterboxed (height-bounded) routes.
+ */
+function fitTransform(
+  rect: { width: number; height: number },
+  layout: Pick<GraphLayout, 'width' | 'height'>,
+): FitTransform | null {
+  if (rect.width <= 0 || rect.height <= 0) return null
+  if (layout.width <= 0 || layout.height <= 0) return null
+  const scale = Math.min(rect.width / layout.width, rect.height / layout.height)
+  return {
+    scale,
+    offsetX: (rect.width - layout.width * scale) / 2,
+    offsetY: (rect.height - layout.height * scale) / 2,
+  }
+}
+
 function clientPointToGraphPoint(
   svg: SVGSVGElement,
   layout: Pick<GraphLayout, 'width' | 'height'>,
@@ -110,10 +138,11 @@ function clientPointToGraphPoint(
   clientY: number,
 ): GraphPoint | null {
   const rect = svg.getBoundingClientRect()
-  if (rect.width <= 0 || rect.height <= 0) return null
+  const fit = fitTransform(rect, layout)
+  if (!fit) return null
   return {
-    x: ((clientX - rect.left) / rect.width) * layout.width,
-    y: ((clientY - rect.top) / rect.height) * layout.height,
+    x: (clientX - rect.left - fit.offsetX) / fit.scale,
+    y: (clientY - rect.top - fit.offsetY) / fit.scale,
   }
 }
 
@@ -124,10 +153,12 @@ function clientDeltaToGraphDelta(
   deltaY: number,
 ): GraphPoint | null {
   const rect = svg.getBoundingClientRect()
-  if (rect.width <= 0 || rect.height <= 0) return null
+  const fit = fitTransform(rect, layout)
+  if (!fit) return null
+  // Centering offsets cancel for a delta; only the uniform scale matters.
   return {
-    x: (deltaX / rect.width) * layout.width,
-    y: (deltaY / rect.height) * layout.height,
+    x: deltaX / fit.scale,
+    y: deltaY / fit.scale,
   }
 }
 
@@ -277,7 +308,7 @@ export function GraphSurface({
   )
 
   return (
-    <div className={cn('mx-auto flex w-full max-w-5xl flex-col gap-4', className)}>
+    <div className={cn('mx-auto flex h-full min-h-0 w-full max-w-5xl flex-col gap-4', className)}>
       {showHeader ? <PageHead eyebrow="Graph" title="Graph" /> : null}
       {graph.isLoading ? (
         <Loading />
@@ -287,7 +318,7 @@ export function GraphSurface({
           hint="People, projects, and the records that connect them will appear here."
         />
       ) : (
-        <div className="relative min-h-[24rem] overflow-hidden">
+        <div className="relative min-h-0 flex-1 overflow-hidden">
           <div
             className="absolute top-3 right-3 z-10 flex w-44 flex-col gap-1.5 rounded-md border border-border bg-background/95 p-2 shadow-[0_8px_28px_rgba(2,6,23,0.12)]"
             role="group"
@@ -317,7 +348,7 @@ export function GraphSurface({
             ))}
           </div>
           {!layout || layout.nodes.length === 0 ? (
-            <div className="flex min-h-[24rem] items-center justify-center pt-48 sm:pt-0 sm:pr-48">
+            <div className="flex h-full min-h-[24rem] items-center justify-center pt-48 sm:pt-0 sm:pr-48">
               <EmptyState
                 title="All node types hidden"
                 hint="Turn on a node type to draw the graph."
@@ -327,7 +358,8 @@ export function GraphSurface({
             <svg
               ref={svgRef}
               viewBox={`0 0 ${layout.width} ${layout.height}`}
-              className="h-auto w-full cursor-grab touch-none select-none active:cursor-grabbing"
+              preserveAspectRatio="xMidYMid meet"
+              className="h-full w-full cursor-grab touch-none select-none active:cursor-grabbing"
               role="img"
               aria-label="User-centered knowledge graph"
               onPointerDown={handlePointerDown}
