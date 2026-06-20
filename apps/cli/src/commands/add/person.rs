@@ -4,7 +4,7 @@
 //! Every write — new record, enrichment, handles, external identity — runs in one
 //! transaction so a late failure can never leave a half-updated person.
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::json;
 
 use super::identity::{
@@ -31,6 +31,31 @@ pub struct AddPersonArgs<'a> {
     pub external_id: Option<&'a str>,
     pub original_url: Option<&'a str>,
     pub allow_duplicate: bool,
+    pub org: Option<&'a str>,
+    pub org_domain: Option<&'a str>,
+    pub title: Option<&'a str>,
+    pub role: Option<&'a str>,
+    pub current: bool,
+}
+
+/// Shared employer-affiliation step: when `org` is given, find-or-create the
+/// organization and upsert the person's affiliation in the caller's transaction.
+/// Used by both `add person` and `add person-from-email` create/enrich paths.
+fn apply_affiliation(
+    tx: &Connection,
+    person_id: &str,
+    org: Option<&str>,
+    org_domain: Option<&str>,
+    title: Option<&str>,
+    role: Option<&str>,
+    current: bool,
+) -> Result<(), CliError> {
+    let Some(org) = org.map(str::trim).filter(|name| !name.is_empty()) else {
+        return Ok(());
+    };
+    let org_id = super::organization::find_or_create_organization(tx, org, org_domain)?;
+    super::affiliation::upsert_affiliation(tx, person_id, &org_id, title, role, current)?;
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -452,6 +477,15 @@ pub fn add_person(conn: &mut Connection, json: bool, args: AddPersonArgs) -> Res
                     force_duplicate: false,
                 },
             )?;
+            apply_affiliation(
+                &tx,
+                &existing,
+                args.org,
+                args.org_domain,
+                args.title,
+                args.role,
+                args.current,
+            )?;
             tx.commit()?;
             return report_person(json, &existing, true);
         }
@@ -502,6 +536,15 @@ pub fn add_person(conn: &mut Connection, json: bool, args: AddPersonArgs) -> Res
             force_duplicate,
         },
     )?;
+    apply_affiliation(
+        &tx,
+        &id,
+        args.org,
+        args.org_domain,
+        args.title,
+        args.role,
+        args.current,
+    )?;
     tx.commit()?;
     report_person(json, &id, false)
 }
@@ -511,6 +554,38 @@ pub struct AddPersonFromEmailArgs<'a> {
     pub email: &'a str,
     pub source_slug: Option<&'a str>,
     pub external_id: Option<&'a str>,
+    pub headline: Option<&'a str>,
+    pub phone: Option<&'a str>,
+    pub location: Option<&'a str>,
+    pub org: Option<&'a str>,
+    pub org_domain: Option<&'a str>,
+    pub title: Option<&'a str>,
+    pub current: bool,
+}
+
+/// Fill blank `headline` / `location` on an existing person from importer-provided
+/// signature fields. Mirrors the blank-only enrichment `add person` uses; phones
+/// flow through `insert_person_handles`, emails through `enrich_duplicate_person_email`.
+fn fill_blank_contact_fields(
+    conn: &Connection,
+    id: &str,
+    headline: Option<&str>,
+    location: Option<&str>,
+) -> Result<(), CliError> {
+    conn.execute(
+        "UPDATE people
+         SET headline = CASE
+               WHEN (headline IS NULL OR trim(headline) = '') AND ?2 IS NOT NULL THEN ?2 ELSE headline END,
+             location = CASE
+               WHEN (location IS NULL OR trim(location) = '') AND ?3 IS NOT NULL THEN ?3 ELSE location END,
+             updated_at = CASE
+               WHEN ((headline IS NULL OR trim(headline) = '') AND ?2 IS NOT NULL)
+                 OR ((location IS NULL OR trim(location) = '') AND ?3 IS NOT NULL)
+               THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE updated_at END
+         WHERE id = ?1",
+        params![id, normalize_optional(headline), normalize_optional(location)],
+    )?;
+    Ok(())
 }
 
 pub fn add_person_from_email(
@@ -524,6 +599,7 @@ pub fn add_person_from_email(
     }
     let source_id = source_id(conn, args.source_slug)?;
     let emails = normalize_email_handles([args.email]);
+    let phones = normalize_values(args.phone.into_iter(), normalize_optional);
     let existing_by_external = find_external_identity(
         conn,
         "person",
@@ -540,12 +616,13 @@ pub fn add_person_from_email(
         // Same atomicity guarantee as add_person's duplicate path: handle,
         // enrichment, and external-identity writes commit together or not at all.
         let tx = conn.transaction()?;
-        insert_person_handles(&tx, &existing, &emails, &[], source_id.as_deref())?;
+        insert_person_handles(&tx, &existing, &emails, &phones, source_id.as_deref())?;
         enrich_duplicate_person_email(
             &tx,
             &existing,
             emails.first().map_or(args.email, |e| e.email.as_str()),
         )?;
+        fill_blank_contact_fields(&tx, &existing, args.headline, args.location)?;
         insert_external_identity(
             &tx,
             ExternalIdentityWrite {
@@ -558,6 +635,15 @@ pub fn add_person_from_email(
                 force_duplicate: false,
             },
         )?;
+        apply_affiliation(
+            &tx,
+            &existing,
+            args.org,
+            args.org_domain,
+            args.title,
+            None,
+            args.current,
+        )?;
         tx.commit()?;
         return report_person_assessment(json, Some(&existing), false, true, &assessment);
     }
@@ -565,19 +651,22 @@ pub fn add_person_from_email(
     let id = new_id();
     let tx = conn.transaction()?;
     tx.execute(
-        "INSERT INTO people (id, full_name, primary_email, notes)
-         VALUES (?1,?2,?3,?4)",
+        "INSERT INTO people (id, full_name, primary_email, primary_phone, headline, location, notes)
+         VALUES (?1,?2,?3,?4,?5,?6,?7)",
         params![
             id,
             &assessment.normalized_name,
             emails.first().map(|email| email.email.as_str()),
+            phones.first(),
+            normalize_optional(args.headline),
+            normalize_optional(args.location),
             format!(
                 "Imported from untrusted email display name: {}",
                 args.full_name
             ),
         ],
     )?;
-    insert_person_handles(&tx, &id, &emails, &[], source_id.as_deref())?;
+    insert_person_handles(&tx, &id, &emails, &phones, source_id.as_deref())?;
     insert_external_identity(
         &tx,
         ExternalIdentityWrite {
@@ -590,8 +679,162 @@ pub fn add_person_from_email(
             force_duplicate: false,
         },
     )?;
+    apply_affiliation(
+        &tx,
+        &id,
+        args.org,
+        args.org_domain,
+        args.title,
+        None,
+        args.current,
+    )?;
     tx.commit()?;
     report_person_assessment(json, Some(&id), true, false, &assessment)
+}
+
+/// Fields for `brain self set`. All optional: `set` creates the single `is_self`
+/// person when none exists (then `full_name` is required) and otherwise updates
+/// only the fields provided. Registering emails/phones here lets import-time
+/// participant resolution auto-link the user without `--self-participant`.
+pub struct SetSelfArgs<'a> {
+    pub full_name: Option<&'a str>,
+    pub preferred_name: Option<&'a str>,
+    pub emails: Vec<&'a str>,
+    pub phones: Vec<&'a str>,
+    pub headline: Option<&'a str>,
+    pub location: Option<&'a str>,
+}
+
+fn find_self_person_id(conn: &Connection) -> Result<Option<String>, CliError> {
+    Ok(conn
+        .query_row(
+            "SELECT id FROM people WHERE is_self = 1 AND archived_at IS NULL LIMIT 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?)
+}
+
+/// Create or update the single self person and its known handles, in one
+/// transaction. Provided fields overwrite (this is explicit self-management, not
+/// blank-only enrichment); unprovided fields are left untouched.
+pub fn set_self(conn: &mut Connection, json: bool, args: SetSelfArgs) -> Result<(), CliError> {
+    let emails = normalize_email_handles(args.emails.iter().copied());
+    let phones = normalize_values(args.phones.iter().copied(), normalize_optional);
+    let primary_email = emails.first().map(|email| email.email.clone());
+    let primary_phone = phones.first().cloned();
+
+    let tx = conn.transaction()?;
+    let existing = find_self_person_id(&tx)?;
+    let created = existing.is_none();
+    let id = match existing {
+        Some(id) => {
+            tx.execute(
+                "UPDATE people
+                 SET full_name      = COALESCE(?2, full_name),
+                     preferred_name = COALESCE(?3, preferred_name),
+                     primary_email  = COALESCE(?4, primary_email),
+                     primary_phone  = COALESCE(?5, primary_phone),
+                     headline       = COALESCE(?6, headline),
+                     location       = COALESCE(?7, location),
+                     is_self        = 1,
+                     updated_at     = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                 WHERE id = ?1",
+                params![
+                    id,
+                    normalize_optional(args.full_name),
+                    normalize_optional(args.preferred_name),
+                    primary_email,
+                    primary_phone,
+                    normalize_optional(args.headline),
+                    normalize_optional(args.location),
+                ],
+            )?;
+            id
+        }
+        None => {
+            let full_name = args
+                .full_name
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .ok_or_else(|| {
+                    CliError::Runtime("--full-name is required to create the self person".into())
+                })?;
+            let id = new_id();
+            tx.execute(
+                "INSERT INTO people
+                   (id, full_name, preferred_name, primary_email, primary_phone,
+                    headline, location, is_self)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,1)",
+                params![
+                    id,
+                    full_name,
+                    normalize_optional(args.preferred_name),
+                    primary_email,
+                    primary_phone,
+                    normalize_optional(args.headline),
+                    normalize_optional(args.location),
+                ],
+            )?;
+            id
+        }
+    };
+    insert_person_handles(&tx, &id, &emails, &phones, None)?;
+    tx.commit()?;
+    report_self(conn, json, &id, created)
+}
+
+/// Print the self person (or `null`) and its registered handles.
+pub fn show_self(conn: &Connection, json: bool) -> Result<(), CliError> {
+    match find_self_person_id(conn)? {
+        Some(id) => report_self(conn, json, &id, false),
+        None => {
+            if json {
+                print_json(&json!({ "self": serde_json::Value::Null }))
+            } else {
+                println!("no self person set (run `brain self set --full-name …`)");
+                Ok(())
+            }
+        }
+    }
+}
+
+fn report_self(conn: &Connection, json: bool, id: &str, created: bool) -> Result<(), CliError> {
+    let (full_name, primary_email): (String, Option<String>) = conn.query_row(
+        "SELECT full_name, primary_email FROM people WHERE id = ?1",
+        params![id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let mut stmt = conn.prepare(
+        "SELECT email FROM person_emails WHERE person_id = ?1 ORDER BY is_primary DESC, email",
+    )?;
+    let emails: Vec<String> = stmt
+        .query_map(params![id], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut stmt = conn.prepare(
+        "SELECT phone FROM person_phones WHERE person_id = ?1 ORDER BY is_primary DESC, phone",
+    )?;
+    let phones: Vec<String> = stmt
+        .query_map(params![id], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    if json {
+        print_json(&json!({
+            "kind": "person",
+            "id": id,
+            "isSelf": true,
+            "created": created,
+            "fullName": full_name,
+            "primaryEmail": primary_email,
+            "emails": emails,
+            "phones": phones,
+        }))
+    } else {
+        println!("self person {id} ({full_name})");
+        if !emails.is_empty() {
+            println!("  emails: {}", emails.join(", "));
+        }
+        Ok(())
+    }
 }
 
 fn report_person(json: bool, id: &str, duplicate: bool) -> Result<(), CliError> {
@@ -661,6 +904,11 @@ mod tests {
             external_id,
             original_url: None,
             allow_duplicate: false,
+            org: None,
+            org_domain: None,
+            title: None,
+            role: None,
+            current: false,
         }
     }
 
@@ -671,6 +919,90 @@ mod tests {
             |row| row.get::<_, String>(0),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn set_self_creates_then_updates_single_self_row_with_handles() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        set_self(
+            &mut conn,
+            true,
+            SetSelfArgs {
+                full_name: Some("Alex MacCaw"),
+                preferred_name: None,
+                emails: vec!["alex@maccaw.org", "maccman@gmail.com"],
+                phones: vec![],
+                headline: None,
+                location: None,
+            },
+        )
+        .unwrap();
+        let self_id: String = conn
+            .query_row(
+                "SELECT id FROM people WHERE is_self = 1 AND archived_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let email_handles: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM person_emails WHERE person_id = ?1",
+                params![self_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(email_handles, 2, "both self addresses are registered");
+
+        // A second `set` updates the SAME self row (no second self person) and fills
+        // a newly provided field without disturbing the unique self invariant.
+        set_self(
+            &mut conn,
+            true,
+            SetSelfArgs {
+                full_name: None,
+                preferred_name: None,
+                emails: vec![],
+                phones: vec![],
+                headline: Some("Founder"),
+                location: None,
+            },
+        )
+        .unwrap();
+        let self_rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM people WHERE is_self = 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(self_rows, 1, "still exactly one self person");
+        let headline: Option<String> = conn
+            .query_row(
+                "SELECT headline FROM people WHERE id = ?1",
+                params![self_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(headline.as_deref(), Some("Founder"));
+    }
+
+    #[test]
+    fn set_self_without_name_and_no_existing_self_errors() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        let result = set_self(
+            &mut conn,
+            true,
+            SetSelfArgs {
+                full_name: None,
+                preferred_name: None,
+                emails: vec!["me@example.com"],
+                phones: vec![],
+                headline: None,
+                location: None,
+            },
+        );
+        assert!(
+            result.is_err(),
+            "creating a self person requires --full-name"
+        );
     }
 
     #[test]
@@ -1278,6 +1610,13 @@ mod tests {
                 email: "robin@example.com",
                 source_slug: Some("gmail"),
                 external_id: Some("msg-1"),
+                headline: None,
+                phone: None,
+                location: None,
+                org: None,
+                org_domain: None,
+                title: None,
+                current: false,
             },
         );
         assert!(result.is_err(), "expected the missing-table write to error");
@@ -1410,6 +1749,13 @@ mod tests {
                 email: "alice@example.com",
                 source_slug: Some("gmail"),
                 external_id: Some("msg-bob"),
+                headline: None,
+                phone: None,
+                location: None,
+                org: None,
+                org_domain: None,
+                title: None,
+                current: false,
             },
         )
         .unwrap();
@@ -1536,6 +1882,13 @@ mod tests {
                 email: "  Robin.Spencer@Example.COM  ",
                 source_slug: Some("gmail"),
                 external_id: Some("msg-1"),
+                headline: None,
+                phone: None,
+                location: None,
+                org: None,
+                org_domain: None,
+                title: None,
+                current: false,
             },
         )
         .unwrap();

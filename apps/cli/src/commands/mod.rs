@@ -50,12 +50,20 @@ pub struct LinkRef {
     pub id: String,
 }
 
-/// A parsed evidence pointer, e.g. `interaction:01ABC#0`.
+/// How an evidence pointer locates a chunk: by explicit index (`#0`) or by a quote
+/// substring (`~"..."`) resolved against the record's chunk text at write time.
+#[derive(Debug, Clone)]
+pub enum EvidenceLocator {
+    Chunk(i64),
+    Quote(String),
+}
+
+/// A parsed evidence pointer, e.g. `interaction:01ABC#0` or `interaction:01ABC~quote`.
 #[derive(Debug, Clone)]
 pub struct EvidenceRef {
     pub kind: LinkKind,
     pub id: String,
-    pub chunk_index: i64,
+    pub locator: EvidenceLocator,
 }
 
 /// Parse `person:01ABC` / `organization:…` / `project:…` / `task:…`.
@@ -87,19 +95,32 @@ pub fn parse_links(raw: &[String]) -> Result<Vec<LinkRef>, CliError> {
     raw.iter().map(|r| parse_link(r)).collect()
 }
 
-/// Parse `document:<id>#<chunk_index>` / `interaction:<id>#<chunk_index>`.
+/// Parse an evidence pointer. Two locator forms are accepted after the
+/// `document:`/`interaction:` link: `#<chunk_index>` for an exact chunk, or
+/// `~<quote>` to resolve the chunk that contains the quote substring at write
+/// time (so an agent need not predict chunk boundaries). The `~` form is tried
+/// first because a quote may itself contain a `#`.
 pub fn parse_evidence_ref(raw: &str) -> Result<EvidenceRef, CliError> {
+    if let Some((link, quote)) = raw.split_once('~') {
+        let link = parse_evidence_link(link, raw)?;
+        let quote = quote.trim().trim_matches('"').trim();
+        if quote.is_empty() {
+            return Err(CliError::Runtime(format!(
+                "invalid --evidence '{raw}' (quote after '~' is empty)"
+            )));
+        }
+        return Ok(EvidenceRef {
+            kind: link.kind,
+            id: link.id,
+            locator: EvidenceLocator::Quote(quote.to_string()),
+        });
+    }
     let (link, chunk) = raw.split_once('#').ok_or_else(|| {
         CliError::Runtime(format!(
-            "invalid --evidence '{raw}' (expected document:id#chunk or interaction:id#chunk)"
+            "invalid --evidence '{raw}' (expected document:id#chunk, interaction:id#chunk, or :id~quote)"
         ))
     })?;
-    let link = parse_link(link)?;
-    if !matches!(link.kind, LinkKind::Document | LinkKind::Interaction) {
-        return Err(CliError::Runtime(format!(
-            "invalid --evidence '{raw}' (evidence must cite a document or interaction chunk)"
-        )));
-    }
+    let link = parse_evidence_link(link, raw)?;
     let chunk_index = chunk.parse::<i64>().map_err(|_| {
         CliError::Runtime(format!(
             "invalid --evidence '{raw}' (chunk index must be an integer)"
@@ -113,8 +134,19 @@ pub fn parse_evidence_ref(raw: &str) -> Result<EvidenceRef, CliError> {
     Ok(EvidenceRef {
         kind: link.kind,
         id: link.id,
-        chunk_index,
+        locator: EvidenceLocator::Chunk(chunk_index),
     })
+}
+
+/// Parse and validate the `document:`/`interaction:` link half of an evidence ref.
+fn parse_evidence_link(link: &str, raw: &str) -> Result<LinkRef, CliError> {
+    let link = parse_link(link)?;
+    if !matches!(link.kind, LinkKind::Document | LinkKind::Interaction) {
+        return Err(CliError::Runtime(format!(
+            "invalid --evidence '{raw}' (evidence must cite a document or interaction chunk)"
+        )));
+    }
+    Ok(link)
 }
 
 pub fn parse_evidence_refs(raw: &[String]) -> Result<Vec<EvidenceRef>, CliError> {

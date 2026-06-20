@@ -450,6 +450,33 @@ Key columns:
 
 Settings owns about, brain identity, AI providers, and semantic search flags.
 
+### `suggestions` and `suggestion_links`
+
+A user-facing curation queue for structure the importer must not auto-create — a
+new project or organization. This is deliberately NOT an automation log (see the
+`AGENTS.md` guardrail): every suggestion is actionable and cites evidence.
+
+`suggestions` key columns:
+
+- `id`
+- `kind` (`create_project`, `create_organization`)
+- `title` (the proposed entity name)
+- `payload_json` (proposed fields: name, summary, domain, kind)
+- `rationale`
+- `status` (`open`, `accepted`, `dismissed`)
+- `resolved_record_type`, `resolved_record_id` (the record created on accept)
+- `created_at`, `resolved_at`
+
+`suggestion_links` cites the visible records that prompted a suggestion (the
+interactions/people behind it); on accept these are relinked to the created
+project/organization. Key columns: `id`, `suggestion_id`, `record_type`,
+`record_id`, `role`, `created_at`.
+
+Proposals dedupe by (`kind`, normalized `title`) across every status, so a
+dismissed proposal is durable and never re-raised. Accepting a `create_project`
+suggestion creates the project and relinks its cited interactions/tasks; accepting
+a `create_organization` suggestion creates the org and affiliates cited people.
+
 ## Join Tables
 
 Use explicit typed join tables where they make the UI faster and clearer:
@@ -560,7 +587,9 @@ The launch schema intentionally omits:
 - A top-level ingestion bucket for raw material.
 - A generic graph-node table as the primary model.
 - A generic edge table as the primary link model.
-- A top-level automation log table or surface.
+- A top-level automation log table or surface. (The `suggestions` curation queue
+  is a deliberate, narrowly-scoped exception — proposed structure awaiting the
+  user's ratification, not a log of agent activity.)
 - Row-level sensitivity labels.
 - Hosted sync tables.
 - Browser/email/calendar OAuth integration tables.

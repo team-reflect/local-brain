@@ -42,7 +42,13 @@ Schema guardrails:
 - Do not use a generic graph node table as the primary model. Prefer typed people,
   organizations, projects, tasks, documents, and interactions. The Graph surface should
   be derived from typed records and links, centered on the user's own person row.
-- Do not add a separate automation log surface.
+- Do not add a separate automation log surface. The `suggestions` table is the
+  permitted exception and is explicitly NOT an automation log: it is a user-facing
+  curation queue of proposed structure the importer must not auto-create (a new
+  project or organization). Every suggestion must be actionable (accepting it
+  performs the typed write and relinks the cited records) and must cite evidence;
+  dismissals are durable so a proposal is never re-raised. Do not widen it into a
+  log of agent activity.
 - Do not add row-level sensitivity labels for launch. Settings can own model keys,
   export, backup, diagnostics, and future privacy-adjacent configuration.
 

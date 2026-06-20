@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- generated; grows with the migration set */
 /**
  * GENERATED FILE — do not edit by hand.
  *
@@ -384,6 +385,28 @@ export interface Sources {
   updatedAt: Generated<string>
 }
 
+export interface SuggestionLinks {
+  id: string
+  suggestionId: string
+  recordType: string
+  recordId: string
+  role: string | null
+  createdAt: Generated<string>
+}
+
+export interface Suggestions {
+  id: string
+  kind: string
+  title: string
+  payloadJson: string | null
+  rationale: string | null
+  status: Generated<string>
+  resolvedRecordType: string | null
+  resolvedRecordId: string | null
+  createdAt: Generated<string>
+  resolvedAt: string | null
+}
+
 export interface Taggings {
   id: string
   tagId: string
@@ -484,6 +507,8 @@ export interface Database {
   schemaMeta: SchemaMeta
   settings: Settings
   sources: Sources
+  suggestionLinks: SuggestionLinks
+  suggestions: Suggestions
   taggings: Taggings
   tags: Tags
   taskDocuments: TaskDocuments

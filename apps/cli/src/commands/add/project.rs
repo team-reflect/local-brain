@@ -96,7 +96,7 @@ fn enrich_duplicate_project(
     Ok(())
 }
 
-fn insert_project_links(
+pub(super) fn insert_project_links(
     conn: &Connection,
     project_id: &str,
     links: &[LinkRef],
@@ -159,6 +159,36 @@ fn enrich_existing_project(
         },
     )?;
     Ok(())
+}
+
+/// Find-or-create a project by normalized name, filling a blank summary. Used by
+/// `suggestion accept` so ratifying a proposed project never forks a second row
+/// when the user already created one with the same name.
+pub(super) fn find_or_create_project(
+    conn: &Connection,
+    name: &str,
+    summary: Option<&str>,
+) -> Result<String, CliError> {
+    let name = normalize_title(Some(name))
+        .ok_or_else(|| CliError::Runtime("a project needs a name".into()))?;
+    if let Some(existing) = find_duplicate_project(conn, &name)? {
+        if let Some(summary) = normalize_optional(summary) {
+            conn.execute(
+                "UPDATE projects
+                 SET summary = CASE WHEN (summary IS NULL OR trim(summary) = '') THEN ?1 ELSE summary END,
+                     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                 WHERE id = ?2",
+                params![summary, existing],
+            )?;
+        }
+        return Ok(existing);
+    }
+    let id = new_id();
+    conn.execute(
+        "INSERT INTO projects (id, name, status, summary) VALUES (?1,?2,'active',?3)",
+        params![id, name, normalize_optional(summary)],
+    )?;
+    Ok(id)
 }
 
 pub fn add_project(

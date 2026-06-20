@@ -38,10 +38,14 @@ operate it through the `brain` CLI — never by touching the database file direc
   "decided to ship in Q3"). `brain remember`. Memories cite their evidence.
 - **person / organization / project** — durable entities. Create people directly
   when importing contacts or when the user gives you explicit contact details.
-  Create projects only when the user explicitly asks or uses the Projects UI; imports
-  and transcript analysis may link existing projects but must not auto-create topic
-  buckets. Keep projects flat. Link to them by id with `--link person:<id>` /
-  `--link project:<id>`.
+  Create an **organization** with `brain add organization` (deduped by name then
+  email domain) and record someone's employer with `brain add person --org "<name>"
+  [--org-domain <d>] [--title <t>] [--current]` or `brain affiliate --person <id>
+  --org <id>`. Two correspondents sharing an email domain (e.g. `@acme.com`) are a
+  strong org signal. Create projects only when the user explicitly asks or uses the
+  Projects UI; imports and transcript analysis may link existing projects but must
+  not auto-create topic buckets. Keep projects flat. Link by id with
+  `--link person:<id>` / `--link project:<id>`.
 - **source / external identity** — provider-neutral import metadata. `brain`
   knows source slugs and external ids, not provider APIs. Upstream tools translate
   Gmail, Google People, calendars, files, or other systems into generic CLI calls.
@@ -61,6 +65,7 @@ brain report daily --json
 brain tasks plan-day --json                          # prioritized todo list
 brain changes --since 2026-06-01T00:00:00Z --json    # what changed since a time
 brain graph --center self --json                     # the user-centered graph
+brain suggest list --json                            # open curation proposals (new projects/orgs)
 ```
 
 For question answering, use `brain search`, `brain show`, and cited memories or
@@ -162,7 +167,12 @@ Notes:
   them explicitly; assets dedupe by content hash and can still be linked to a new record. Pass
   `--allow-duplicate` only when you truly mean to re-import.
 - For source-backed interaction refreshes, pass `--replace-body` only when the upstream
-  source is authoritative and the existing body should be replaced and re-chunked.
+  source is authoritative and the existing body should be replaced and re-chunked. For
+  evolving threads (a Gmail thread that grew, a transcript that changed), re-import with
+  the same `--source`/`--external-id` and pass `--refresh`: it re-digests only when the
+  body actually changed and is a no-op otherwise, so it is safe on every daily re-import.
+  A deduped re-import returns `bodyChanged: true` when the upstream body diverged from the
+  stored one — treat that as a signal to re-run with `--refresh`/`--replace-body`.
 - Asset search covers filenames, MIME/kind/storage metadata, original URLs, link
   captions, linked record titles, and optional `asset_texts`. Text-like UTF-8 files
   are indexed automatically; PDFs/images need importer-provided text for content
@@ -170,7 +180,25 @@ Notes:
 - Resolve link ids by `brain search` first.
 - Use `--evidence document:<id>#<chunk_index>` or
   `--evidence interaction:<id>#<chunk_index>` when a task or memory comes from a
-  specific source chunk.
+  specific source chunk. If you don't know the chunk index, cite by quote instead:
+  `--evidence interaction:<id>~"a phrase from the source"` resolves to the chunk that
+  contains the phrase at write time (errors if no chunk matches).
+
+## Identify the user (do this once)
+
+The user is the single `is_self` person. Register their known email and phone
+handles so imports can auto-link them:
+
+```bash
+brain self show --json                                 # current self person + handles
+brain self set --full-name "Alex MacCaw" \
+  --email alex@maccaw.org --email me@work.com --json    # create/update + register handles
+```
+
+Once an address is registered, a plain `--participant "from:You <alex@maccaw.org>"`
+resolves to the self person automatically — you only need `--self-participant` for
+addresses not yet registered. Check `brain self show` at the start of an import; if
+the self person has no email, set it before importing email or calendar data.
 
 ## Provider-neutral import workflow
 
@@ -178,20 +206,30 @@ External fetchers read upstream systems, then call `brain`. The CLI stays
 provider-neutral and must not know about helper tools such as `gws`:
 
 1. Read `brain --json contract` if the command shape is unclear.
-2. Ensure a stable source slug with `brain source ensure`.
-3. Import likely-human contacts with `brain add person` when the source is trusted,
-   or `brain add person-from-email` for untrusted sender/display-name pairs.
-4. Import meaningful email conversations as `brain add interaction --kind email`.
+2. Confirm self handles with `brain self show`; register them with `brain self set`
+   if the self person has no email yet.
+3. Ensure a stable source slug with `brain source ensure`.
+4. Import likely-human contacts with `brain add person` when the source is trusted,
+   or `brain add person-from-email` for untrusted sender/display-name pairs. Capture
+   the structured fields a signature gives you — `--headline`/`--phone`/`--location`
+   and the employer via `--org`/`--org-domain`/`--title` — rather than discarding
+   them; both person commands accept these and apply them only when a person is
+   actually created or has blank fields to fill.
+5. Import meaningful email conversations as `brain add interaction --kind email`.
    Prefer thread-level digests with `--external-kind thread` for long Gmail threads.
    Use `--external-kind message` for standalone messages.
-5. Redact or summarize when raw source text contains secrets, passwords, credential
+6. Redact or summarize when raw source text contains secrets, passwords, credential
    setup, legal/medical boilerplate, repeated quote chains, or low-signal notification
    noise. Store a concise digest in `--summary` and pass searchable digest/body text
    through `--text-file` or `--text`.
-6. Search existing projects and link imports to them when there is a clear match.
-   Do not create projects during import or post-analysis; surface possible new
-   projects to the user as suggestions instead.
-7. Import calendar items as `brain add interaction --kind meeting|event`. Use `event`
+7. Search existing projects and link imports to them when there is a clear match.
+   Do not create projects during import or post-analysis. When a thread or meeting
+   looks project-shaped, record a durable proposal with `brain suggest project
+   --title "<name>" --rationale "<why>" --link interaction:<id>` instead of
+   creating one; the user accepts it later with `brain suggest accept <id>` (which
+   creates the project and relinks the cited records). The same applies to a likely
+   new organization via `brain suggest organization`.
+8. Import calendar items as `brain add interaction --kind meeting|event`. Use `event`
    for travel, lodging, reservations, reminders, and all-day schedule blocks even
    when they have attendees; use `meeting` for people-centered appointments. Map
    start to `--occurred-at`, end to `--ended-at`, venue/address to `--location`,
@@ -199,9 +237,9 @@ provider-neutral and must not know about helper tools such as `gws`:
    to `--self-participant`, and known people to `--link person:<id>` or matching
    participant email. Notes/body text are only for readable source leftovers that
    do not have typed fields.
-8. Import original attachments with `brain add asset --link interaction:<id>`, passing
+9. Import original attachments with `brain add asset --link interaction:<id>`, passing
    extracted plain text with `--text-file`/`--text-source importer` when available.
-9. Preserve raw participant handles with `--participant` instead of creating people
+10. Preserve raw participant handles with `--participant` instead of creating people
    for every address seen in an email or calendar event.
 
 ## Transcript post-analysis
@@ -213,8 +251,8 @@ Every imported transcript must get an immediate enrichment pass:
    or exact name; create a new person only when the transcript/title gives a clear
    durable identity.
 3. Link the interaction to existing projects when there is a clear match. Do not
-   create projects during transcript analysis; note possible new projects for the user
-   instead.
+   create projects during transcript analysis; record a `brain suggest project`
+   proposal (citing the interaction) for the user to accept instead.
 4. Extract explicit follow-up tasks and link each task to the source
    `interaction:<id>`, relevant `project:<id>`, and owner/contact `person:<id>` when
    known. Add `--evidence interaction:<id>#<chunk>` when the task is grounded in a
@@ -244,6 +282,8 @@ Every imported transcript must get an immediate enrichment pass:
 3. For each new transcript/note the user gives you: `brain add interaction …`, then
    run transcript post-analysis.
 4. Produce a brief from `brain report daily` + `brain tasks plan-day`.
+5. Surface open proposals with `brain suggest list`; present them for the user to
+   accept (`brain suggest accept <id>`) or dismiss (`brain suggest dismiss <id>`).
 
 ## What not to store
 
