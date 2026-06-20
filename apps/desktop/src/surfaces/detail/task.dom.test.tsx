@@ -86,6 +86,15 @@ async function waitForUpdate(calls: CapturedCall[]): Promise<unknown[]> {
   return updateCalls(calls).at(-1)?.args['params'] as unknown[]
 }
 
+async function waitForUpdateContaining(calls: CapturedCall[], expected: unknown[]): Promise<unknown[]> {
+  await waitFor(() => {
+    const params = updateCalls(calls).at(-1)?.args['params'] as unknown[] | undefined
+    expect(params).toBeDefined()
+    for (const value of expected) expect(params).toContain(value)
+  })
+  return updateCalls(calls).at(-1)?.args['params'] as unknown[]
+}
+
 describe('TaskDetail inline editing', () => {
   it('autosaves editable fields inline', async () => {
     const calls = installTaskDetailBridge()
@@ -117,14 +126,15 @@ describe('TaskDetail inline editing', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Edit project' }))
     fireEvent.change(screen.getByLabelText('Project'), { target: { value: '' } })
 
-    const params = await waitForUpdate(calls)
-    expect(params).toContain('Send revised deck')
-    expect(params).toContain('Add pricing')
-    expect(params).toContain('waiting')
-    expect(params).toContain(3)
-    expect(params).toContain('2026-07-10')
-    expect(params).toContain('2026-07-08')
-    expect(params).toContain(null)
+    await waitForUpdateContaining(calls, [
+      'Send revised deck',
+      'Add pricing',
+      'waiting',
+      3,
+      '2026-07-10',
+      '2026-07-08',
+      null,
+    ])
   })
 
   it('does not save an invalid blank title', async () => {
@@ -160,5 +170,27 @@ describe('TaskDetail inline editing', () => {
     const params = await waitForUpdate(calls)
     expect(params).toContain('open')
     expect(params).toContain(null)
+    expect(screen.getByRole('button', { name: 'Edit completed' }).textContent).toContain('—')
+  })
+
+  it('allows explicit completed date edits on non-done tasks', async () => {
+    const calls = installTaskDetailBridge({ status: 'open', completed_at: null })
+    renderWithProviders(<TaskDetail id="t1" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit completed' }))
+    fireEvent.change(screen.getByLabelText('Completed'), { target: { value: '2026-06-22' } })
+
+    await waitForUpdateContaining(calls, ['open', '2026-06-22'])
+  })
+
+  it('flushes pending valid edits when unmounted', async () => {
+    const calls = installTaskDetailBridge()
+    const { unmount } = renderWithProviders(<TaskDetail id="t1" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit title' }))
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Unmounted edit' } })
+    unmount()
+
+    await waitForUpdateContaining(calls, ['Unmounted edit'])
   })
 })

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { StatusBadge } from '../../components/badge'
 import { DetailFields } from '../../components/detail-fields'
@@ -14,6 +14,10 @@ export function ProjectDetail({ id }: { id: string }): ReactNode {
   const links = useProjectLinks(id)
   const onUnlink = useUnlinkFrom({ kind: 'project', id })
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+
+  useEffect(() => {
+    setSelectedTaskId(null)
+  }, [id])
 
   return (
     <>

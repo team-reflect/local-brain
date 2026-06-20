@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { useState, type ReactNode } from 'react'
 import { describe, expect, it } from 'vitest'
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { ProjectDetail } from './project'
@@ -17,6 +18,13 @@ const projectRow = {
   kind: null,
   notes: null,
   started_on: null,
+}
+
+const secondProjectRow = {
+  ...projectRow,
+  id: 'pr2',
+  name: 'Second project',
+  summary: 'A different project',
 }
 
 const taskRow = {
@@ -38,8 +46,10 @@ const taskRow = {
 
 function installProjectBridge(): void {
   installFakeBridge({
-    query: (sql) => {
-      if (sql.includes('from "projects"') && sql.includes('where "id" = ?')) return [projectRow]
+    query: (sql, params) => {
+      if (sql.includes('from "projects"') && sql.includes('where "id" = ?')) {
+        return params[0] === 'pr2' ? [secondProjectRow] : [projectRow]
+      }
       if (sql.includes('from "tasks"') && sql.includes('where "id" = ?')) return [taskRow]
       if (sql.includes('from "tasks"') && sql.includes('"tasks"."project_id" = ?')) {
         return [{ id: 't1', title: 'Send deck', subtitle: 'open' }]
@@ -51,6 +61,18 @@ function installProjectBridge(): void {
       return []
     },
   })
+}
+
+function ProjectSwitcher(): ReactNode {
+  const [id, setId] = useState('pr1')
+  return (
+    <>
+      <button type="button" onClick={() => setId('pr2')}>
+        Switch project
+      </button>
+      <ProjectDetail id={id} />
+    </>
+  )
 }
 
 describe('ProjectDetail task drawer', () => {
@@ -77,5 +99,18 @@ describe('ProjectDetail task drawer', () => {
     fireEvent.click((await screen.findByText('Ada Lovelace')).closest('button')!)
 
     expect(screen.queryByRole('button', { name: 'Close task details' })).toBeNull()
+  })
+
+  it('closes an open task drawer when navigating to another project', async () => {
+    installProjectBridge()
+    renderWithProviders(<ProjectSwitcher />)
+
+    fireEvent.click((await screen.findByText('Send deck')).closest('button')!)
+    expect(await screen.findByRole('button', { name: 'Close task details' })).toBeDefined()
+
+    fireEvent.click(screen.getByText('Switch project').closest('button')!)
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Close task details' })).toBeNull())
+    expect(await screen.findByRole('heading', { name: 'Second project' })).toBeDefined()
   })
 })

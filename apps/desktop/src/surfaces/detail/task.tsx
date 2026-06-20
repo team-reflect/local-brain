@@ -41,7 +41,7 @@ export function TaskDetail({ id }: { id: string }): ReactNode {
     <DetailPage query={task} notFoundTitle="Task not found">
       {(t) => (
         <>
-          <TaskInlineEditor task={t} />
+          <TaskInlineEditor key={t.id} task={t} />
           {links.data ? (
             <>
               <LinkedRecords title="Project" records={links.data.projects} onUnlink={onUnlink} />
@@ -70,17 +70,36 @@ function TaskInlineEditor({ task }: { task: Task }): ReactNode {
   const [form, setForm] = useState<TaskFormState>(() => stateFromTask(task))
   const [error, setError] = useState<string | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('idle')
+  const formRef = useRef(form)
+  const taskRef = useRef(task)
+  const taskIdRef = useRef(task.id)
+  const mountedRef = useRef(true)
+  const inFlightSaveRef = useRef(false)
+  const pendingSaveRef = useRef<TaskFormState | null>(null)
   const skipAutosaveRef = useRef(true)
   const savedSnapshotRef = useRef(serializeState(stateFromTask(task)))
 
   useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      requestSave(formRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    taskRef.current = task
     const next = stateFromTask(task)
-    savedSnapshotRef.current = serializeState(next)
-    skipAutosaveRef.current = true
-    setActiveField(null)
-    setForm(next)
-    setError(null)
-    setSaveState('idle')
+    if (task.id !== taskIdRef.current) {
+      taskIdRef.current = task.id
+      pendingSaveRef.current = null
+      resetForm(next)
+      return
+    }
+
+    if (!hasUnsavedChanges(formRef.current) && !inFlightSaveRef.current && pendingSaveRef.current === null) {
+      resetForm(next)
+    }
   }, [task])
 
   useEffect(() => {
@@ -91,43 +110,132 @@ function TaskInlineEditor({ task }: { task: Task }): ReactNode {
 
     const serialized = serializeState(form)
     if (serialized === savedSnapshotRef.current) {
-      setError(null)
-      setSaveState('idle')
+      if (mountedRef.current) {
+        setError(null)
+        setSaveState('idle')
+      }
       return undefined
     }
 
     const validation = validateForm(form)
     if (validation !== null) {
-      setError(validation)
-      setSaveState('error')
+      if (mountedRef.current) {
+        setError(validation)
+        setSaveState('error')
+      }
       return undefined
     }
 
-    setError(null)
-    setSaveState('saving')
+    if (mountedRef.current) {
+      setError(null)
+      setSaveState('saving')
+    }
     const timeout = window.setTimeout(() => {
-      void saveForm(form)
+      requestSave(form)
     }, AUTOSAVE_DELAY_MS)
     return () => window.clearTimeout(timeout)
   }, [form])
 
-  async function saveForm(next: TaskFormState): Promise<void> {
+  async function drainSaveQueue(): Promise<void> {
+    if (inFlightSaveRef.current) return
+    const next = pendingSaveRef.current
+    if (next === null) return
+
+    pendingSaveRef.current = null
+    const serialized = serializeState(next)
+    if (serialized === savedSnapshotRef.current) {
+      if (mountedRef.current) setSaveState('idle')
+      if (pendingSaveRef.current !== null) void drainSaveQueue()
+      return
+    }
+
+    const validation = validateForm(next)
+    if (validation !== null) {
+      if (mountedRef.current) {
+        setError(validation)
+        setSaveState('error')
+      }
+      return
+    }
+
+    inFlightSaveRef.current = true
     try {
-      await updateTask.mutateAsync(toTaskPatch(next, task))
+      await updateTask.mutateAsync(toTaskPatch(next))
       savedSnapshotRef.current = serializeState(next)
-      setSaveState('idle')
+      if (mountedRef.current) {
+        setError(null)
+        setSaveState(pendingSaveRef.current === null ? 'idle' : 'saving')
+      }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not save task')
-      setSaveState('error')
+      if (mountedRef.current) {
+        setError(cause instanceof Error ? cause.message : 'Could not save task')
+        setSaveState('error')
+      }
+    } finally {
+      inFlightSaveRef.current = false
+      if (pendingSaveRef.current !== null) void drainSaveQueue()
     }
   }
 
+  function requestSave(next: TaskFormState): void {
+    if (serializeState(next) === savedSnapshotRef.current) return
+    const validation = validateForm(next)
+    if (validation !== null) {
+      if (mountedRef.current) {
+        setError(validation)
+        setSaveState('error')
+      }
+      return
+    }
+
+    pendingSaveRef.current = next
+    if (mountedRef.current) {
+      setError(null)
+      setSaveState('saving')
+    }
+    void drainSaveQueue()
+  }
+
+  function resetForm(next: TaskFormState): void {
+    formRef.current = next
+    savedSnapshotRef.current = serializeState(next)
+    skipAutosaveRef.current = true
+    setActiveField(null)
+    setForm(next)
+    setError(null)
+    setSaveState('idle')
+  }
+
+  function hasUnsavedChanges(next: TaskFormState): boolean {
+    return serializeState(next) !== savedSnapshotRef.current
+  }
+
   function patchForm(patch: Partial<TaskFormState>): void {
-    setForm((current) => ({ ...current, ...patch }))
+    setForm((current) => {
+      const next = { ...current, ...patch }
+      formRef.current = next
+      return next
+    })
+  }
+
+  function patchStatus(status: string): void {
+    setForm((current) => {
+      const next = {
+        ...current,
+        status,
+        completedAt:
+          status === 'done'
+            ? current.completedAt || toDateInput(taskRef.current.completedAt) || todayDate()
+            : '',
+      }
+      formRef.current = next
+      return next
+    })
   }
 
   function closeActiveField(): void {
     setActiveField(null)
+    requestSave(formRef.current)
   }
 
   const currentProjectName = projects.data?.find((project) => project.id === form.projectId)?.name
@@ -169,7 +277,7 @@ function TaskInlineEditor({ task }: { task: Task }): ReactNode {
             isEditing={activeField === 'status'}
             onEdit={() => setActiveField('status')}
             onBlur={closeActiveField}
-            onChange={(status) => patchForm({ status })}
+            onChange={patchStatus}
           >
             {TASK_STATUSES.map((status) => (
               <option key={status} value={status}>
@@ -319,7 +427,7 @@ function validateForm(form: TaskFormState): string | null {
     : 'Priority must be a whole number'
 }
 
-function toTaskPatch(form: TaskFormState, task: Task) {
+function toTaskPatch(form: TaskFormState) {
   const priority = form.priority.trim()
   return {
     title: form.title.trim(),
@@ -329,10 +437,7 @@ function toTaskPatch(form: TaskFormState, task: Task) {
     projectId: form.projectId || null,
     dueAt: form.dueAt || null,
     scheduledFor: form.scheduledFor || null,
-    completedAt:
-      form.status === 'done'
-        ? form.completedAt || toDateInput(task.completedAt) || todayDate()
-        : null,
+    completedAt: form.status === 'done' ? form.completedAt || todayDate() : form.completedAt || null,
   }
 }
 
