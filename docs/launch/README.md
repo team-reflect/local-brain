@@ -57,8 +57,7 @@ CLI resolves storage as:
 4. `$BRAIN_ROOT`
 5. the legacy platform data path for diagnostics/dev workflows
 
-The active brain folder is shown in **Settings → Brain**. SQLite and asset paths
-are shown in **Settings → Local database** and **Settings → Diagnostics**.
+The active brain folder is shown in **Settings → Brain**.
 Migrations run automatically when a brain is opened and the schema is versioned.
 
 ## Importing your first record
@@ -118,5 +117,5 @@ extraction is sent through the provider boundary.
 - **Gatekeeper blocks the app:** unsigned alpha build; right-click → Open.
 - **Search finds nothing after a bulk delete:** derived indexes rebuild
   automatically after deletes; if needed, the maintenance rebuild runs on next
-  ingest. See Settings → Diagnostics for FTS status.
-- **General health:** `brain doctor --json` or Settings → Diagnostics.
+  ingest.
+- **General health:** `brain doctor --json`.

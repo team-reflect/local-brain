@@ -27,9 +27,7 @@ export function SemanticSearchSettings(): ReactNode {
       <div className="flex flex-col gap-3 text-sm">
         <p className="text-muted-foreground">
           Semantic search finds documents and interactions by meaning, not just keywords. Vectors
-          are computed on this machine with a local model (all-MiniLM-L6-v2) and stored alongside
-          your data — nothing is sent to a provider. It is an additive layer: keyword search keeps
-          working regardless.
+          are computed on this machine with a local model
         </p>
 
         {status && !status.enabled ? (

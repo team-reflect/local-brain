@@ -377,6 +377,16 @@ function Composer({
   pending: boolean
   onSubmit: (event: FormEvent) => Promise<void>
 }): ReactNode {
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+
+    textarea.style.height = 'auto'
+    textarea.style.height = `${textarea.scrollHeight}px`
+  }, [draft])
+
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
@@ -387,8 +397,9 @@ function Composer({
   const empty = draft.trim().length === 0
   return (
     <form onSubmit={onSubmit} className="mx-auto w-full max-w-2xl pt-4">
-      <div className="rounded-lg border border-border bg-card focus-within:border-ring">
+      <div className="relative rounded-lg border border-border bg-card focus-within:border-ring">
         <textarea
+          ref={textareaRef}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={onKeyDown}
@@ -396,15 +407,18 @@ function Composer({
           placeholder="Ask about your people, projects, documents, or interactions..."
           aria-label="Ask message"
           disabled={pending}
-          className="max-h-40 w-full resize-none bg-transparent px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+          className="field-sizing-content max-h-60 min-h-24 w-full resize-none overflow-y-auto bg-transparent px-3 py-2 pb-12 pr-28 text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
         />
-        <div className="flex items-center justify-between gap-2 border-t border-border px-2 py-2">
-          <span className="px-1 text-xs text-muted-foreground">Grounded in local records</span>
-          <Button type="submit" size="sm" variant="primary" disabled={empty || pending}>
-            <Send className="size-3.5" />
-            Send
-          </Button>
-        </div>
+        <Button
+          type="submit"
+          size="sm"
+          variant="primary"
+          disabled={empty || pending}
+          className="absolute bottom-2 right-2"
+        >
+          <Send className="size-3.5" />
+          Send
+        </Button>
       </div>
     </form>
   )

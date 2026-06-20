@@ -63,6 +63,14 @@ vi.mock('./route-content', () => ({
 afterEach(() => cleanup())
 
 describe('AppShell', () => {
+  it('places Ask directly under Today in the sidebar', () => {
+    render(<AppShell />)
+
+    const navItems = screen.getAllByRole('button').map((button) => button.textContent?.trim())
+
+    expect(navItems.indexOf('Ask')).toBe(navItems.indexOf('Today') + 1)
+  })
+
   it('places history arrows in the main header beside search, not in the sidebar', () => {
     render(<AppShell />)
 

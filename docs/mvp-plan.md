@@ -54,7 +54,7 @@ demonstration.
   conversations and messages in SQLite.
 - The Network Graph tab shows a user-centered node map derived from typed records and
   links. Filters by node type, time, strength, and project are optional follow-up.
-- Settings owns AI providers, local storage paths, diagnostics, and skill setup.
+- Settings owns about, brain identity, AI providers, and semantic search.
 - The UI is optimized for quick browsing and inspection, not bulk data entry.
 
 ## Phase 6 - Agent Interface
@@ -84,5 +84,4 @@ demonstration.
 - A Codex daily automation can update the brain and generate a daily report/todo list.
 - The daily report includes tasks, recent interactions, active projects, and cited
   relationship context where relevant.
-- Settings shows the brain root, local database path, asset directory path, and
-  diagnostics.
+- Settings shows about, the active brain identity, AI providers, and semantic search.

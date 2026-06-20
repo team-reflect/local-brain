@@ -2,12 +2,9 @@ import { useEffect, type ReactNode } from 'react'
 import { AiProvidersSettings } from '../../components/ai-providers-settings'
 import { cn } from '../../lib/utils'
 import { useRouter } from '../../routing/router'
+import { AboutSettings } from './about'
 import { BrainSettings } from './brain'
-import { DiagnosticsSettings } from './diagnostics'
-import { GeneralSettings } from './general'
-import { LocalDatabaseSettings } from './local-database'
 import { SemanticSearchSettings } from './semantic-search'
-import { SkillsSettings } from './skills'
 
 interface SettingsSection {
   key: string
@@ -15,16 +12,13 @@ interface SettingsSection {
 }
 
 const SECTIONS: readonly SettingsSection[] = [
-  { key: 'general', label: 'General' },
+  { key: 'about', label: 'About' },
   { key: 'brain', label: 'Brain' },
   { key: 'ai-providers', label: 'AI providers' },
   { key: 'search', label: 'Semantic search' },
-  { key: 'database', label: 'Local database' },
-  { key: 'skills', label: 'Skills' },
-  { key: 'diagnostics', label: 'Diagnostics' },
 ]
 
-const DEFAULT_SECTION = 'general'
+const DEFAULT_SECTION = 'about'
 
 function isSettingsSection(section: string | undefined): section is SettingsSection['key'] {
   return SECTIONS.some((s) => s.key === section)
@@ -94,14 +88,8 @@ function SectionBody({ section }: { section: string }): ReactNode {
       return <AiProvidersSettings />
     case 'search':
       return <SemanticSearchSettings />
-    case 'database':
-      return <LocalDatabaseSettings />
-    case 'skills':
-      return <SkillsSettings />
-    case 'diagnostics':
-      return <DiagnosticsSettings />
-    case 'general':
+    case 'about':
     default:
-      return <GeneralSettings />
+      return <AboutSettings />
   }
 }

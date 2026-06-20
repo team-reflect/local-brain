@@ -48,8 +48,8 @@ Top-level sections:
 - **Network:** graph, people, and organizations, with Graph as the default tab.
 - **Projects:** active, waiting, paused, done, and archived projects.
 - **Ask:** grounded chat over local documents and interactions.
-- **Settings:** the active brain's identity (name, color, location), AI providers,
-  local storage paths, diagnostics, and skill setup.
+- **Settings:** about, the active brain's identity (name, color, location), AI
+  providers, and semantic search.
 
 A **brain** is the top-level workspace: a user-selected folder containing the local
 SQLite database plus its app-managed assets directory. The sidebar
@@ -118,11 +118,10 @@ Ask
   - durable conversations and messages
   - request-local retrieved sources
 Settings
+  - about (description and app version)
   - brain (identity: name, color, folder reveal)
   - AI providers
-  - brain root, local database path, and asset directory path
-  - diagnostics
-  - agent skill setup
+  - semantic search
 ```
 
 ## Visual Style

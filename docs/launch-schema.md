@@ -448,7 +448,7 @@ Key columns:
 - `value_json`
 - `updated_at`
 
-Settings owns AI providers, local paths, diagnostics, and skill setup flags.
+Settings owns about, brain identity, AI providers, and semantic search flags.
 
 ## Join Tables
 

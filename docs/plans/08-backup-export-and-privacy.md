@@ -1,7 +1,7 @@
 # Plan 08 - Settings and Privacy Boundaries
 
-**Goal:** Put diagnostics, AI providers, local storage visibility, skill setup, and
-privacy boundaries under Settings.
+**Goal:** Put AI provider secrets, semantic search controls, and privacy boundaries
+under Settings.
 
 **Depends on:** Plans 01-07.
 
@@ -9,15 +9,15 @@ privacy boundaries under Settings.
 
 ## Scope
 
-**In:** deletion/archive semantics, keychain secrets, diagnostics, external-model
-boundary settings, skill setup, and local storage path visibility.
+**In:** deletion/archive semantics, keychain secrets, external-model boundary
+settings, and semantic search controls.
 
 **Out:** hosted sync, git sync, encrypted cloud backup, app-managed backup/export,
 and row-level sensitivity labels.
 
 ## Key Decisions
 
-- Settings owns AI providers, local brain root visibility, diagnostics, and skill setup.
+- Settings owns about, brain identity, AI providers, and semantic search.
 - App-managed backup/export is deferred; SQLite remains the source of truth for
   records and asset metadata, while app-managed assets stay under the same brain root
   as durable bytes.
@@ -29,11 +29,10 @@ and row-level sensitivity labels.
 ## Implementation Steps
 
 1. Add Settings sections:
-   - general
+   - about
+   - brain
    - AI providers
-   - local brain storage
-   - diagnostics
-   - agent skill setup
+   - semantic search
 2. Add deletion/archive rules:
    - archive visible records by default
    - hard delete only behind confirmation
@@ -42,21 +41,13 @@ and row-level sensitivity labels.
 3. Add keychain integration for AI provider keys.
 4. Add model boundary settings:
    - selected provider/model
-   - diagnostics showing whether model-backed extraction can run
-5. Add diagnostics:
-   - brain root, database path, asset directory path, and migration status
-   - FTS/vector availability
-   - keychain/provider status
-   - CLI/skill installation status
-   - recent failed jobs, if a jobs table exists
+   - whether model-backed extraction can run
 
 ## Acceptance Criteria
 
 - Provider keys are not stored in plain settings rows.
 - Destructive deletion behavior is explicit.
-- Diagnostics explain common failures clearly.
-- Settings exposes the brain root, local SQLite path, and asset directory path without
-  providing backup/export actions.
+- Settings does not expose backup/export actions.
 - No launch code depends on row-level sensitivity labels.
 
 ## Tests or Verification
@@ -64,7 +55,6 @@ and row-level sensitivity labels.
 - Keychain mock test.
 - Deletion/archive cascade tests.
 - Settings smoke test.
-- Diagnostics smoke test.
 
 ## Open Questions
 

@@ -31,9 +31,9 @@ interface NavItem {
 
 const NAV: readonly NavItem[] = [
   { section: 'today', label: 'Today', icon: CalendarDays, route: { kind: 'today' } },
+  { section: 'ask', label: 'Ask', icon: MessageSquare, route: { kind: 'ask' } },
   { section: 'tasks', label: 'Tasks', icon: ListTodo, route: { kind: 'tasks' } },
   { section: 'network', label: 'Network', icon: Users, route: { kind: 'network', tab: 'graph' } },
-  { section: 'ask', label: 'Ask', icon: MessageSquare, route: { kind: 'ask' } },
 ]
 
 const HISTORY_BUTTON_CLASS =

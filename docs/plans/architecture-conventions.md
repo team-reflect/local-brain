@@ -306,9 +306,7 @@ Settings owns:
 - the active brain's identity: name, color, location, and schema version, plus
   the list of known brains (switch / forget / create / open)
 - AI providers
-- storage path
-- diagnostics
-- CLI and skill setup
+- semantic search
 - external-model boundary configuration
 
 Provider keys belong in the OS keychain, not regular settings rows.
