@@ -18,4 +18,12 @@ describe('validateTaskPatch', () => {
   it('leaves a status-only patch untouched', () => {
     expect(validateTaskPatch({ status: 'done' })).toEqual({ status: 'done' })
   })
+
+  it('normalizes editable text fields', () => {
+    expect(validateTaskPatch({ title: '  Ship  it ', description: '  Bring the deck  ' })).toEqual({
+      title: 'Ship it',
+      description: 'Bring the deck',
+    })
+    expect(validateTaskPatch({ description: '   ' })).toEqual({ description: null })
+  })
 })
