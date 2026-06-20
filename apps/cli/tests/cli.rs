@@ -2823,7 +2823,39 @@ fn graph_is_centered_and_typed() {
     let graph = run_json(&db, &["--json", "graph", "--center", "self"]);
     assert!(graph["nodes"].is_array());
     assert!(graph["edges"].is_array());
-    assert!(graph.get("truncatedKinds").is_some());
+    assert!(graph.get("truncatedKinds").is_none());
+}
+
+#[test]
+fn graph_does_not_cap_dense_node_kinds() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let mut ids = Vec::new();
+
+    for index in 0..75 {
+        let person = run_json(
+            &db,
+            &[
+                "--json",
+                "add",
+                "person",
+                "--full-name",
+                &format!("Graph Person {index:02}"),
+            ],
+        );
+        ids.push(person["id"].as_str().unwrap().to_string());
+    }
+
+    let graph = run_json(&db, &["--json", "graph", "--center", "self"]);
+    let nodes = graph["nodes"].as_array().unwrap();
+    let node_ids: std::collections::HashSet<&str> = nodes
+        .iter()
+        .filter_map(|node| node["id"].as_str())
+        .collect();
+
+    for id in &ids {
+        assert!(node_ids.contains(id.as_str()), "graph omitted {id}");
+    }
 }
 
 #[test]

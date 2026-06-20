@@ -10,9 +10,9 @@ import { db } from '../db/client'
  * - join-table edges (affiliations, project membership, project tasks,
  *   interaction participants, memory links) wire the rest of the network.
  *
- * Each entity list is capped so the graph stays legible; `truncatedKinds`
- * names any type that hit the cap, so the UI never silently implies it drew
- * everything.
+ * The graph is intentionally uncapped: every visible typed record is returned.
+ * Layout and rendering performance belong in the graph surface, not in the data
+ * contract.
  */
 
 export type GraphNodeKind =
@@ -41,15 +41,12 @@ export interface Graph {
   selfId: string | null
   nodes: GraphNode[]
   edges: GraphEdge[]
-  truncatedKinds: GraphNodeKind[]
 }
-
-const NODE_CAP = 60
 
 function label(value: string | null, fallback: string): string {
   const trimmed = (value ?? '').trim()
   if (!trimmed) return fallback
-  return trimmed.length > 48 ? `${trimmed.slice(0, 47)}…` : trimmed
+  return trimmed
 }
 
 export async function getGraph(): Promise<Graph> {
@@ -60,105 +57,81 @@ export async function getGraph(): Promise<Graph> {
         .where('archivedAt', 'is', null)
         .orderBy('isSelf', 'desc')
         .orderBy('fullName', 'asc')
-        .limit(NODE_CAP + 1)
         .select(['id', 'fullName', 'isSelf'])
         .execute(),
       db
         .selectFrom('organizations')
         .where('archivedAt', 'is', null)
         .orderBy('name', 'asc')
-        .limit(NODE_CAP + 1)
         .select(['id', 'name'])
         .execute(),
       db
         .selectFrom('projects')
         .where('archivedAt', 'is', null)
         .orderBy('createdAt', 'desc')
-        .limit(NODE_CAP + 1)
         .select(['id', 'name'])
         .execute(),
       db
         .selectFrom('tasks')
         .where('archivedAt', 'is', null)
         .orderBy('createdAt', 'desc')
-        .limit(NODE_CAP + 1)
         .select(['id', 'title', 'projectId'])
         .execute(),
       db
         .selectFrom('documents')
         .where('archivedAt', 'is', null)
         .orderBy('createdAt', 'desc')
-        .limit(NODE_CAP + 1)
         .select(['id', 'title'])
         .execute(),
       db
         .selectFrom('interactions')
         .where('archivedAt', 'is', null)
         .orderBy('occurredAt', 'desc')
-        .limit(NODE_CAP + 1)
         .select(['id', 'title', 'kind'])
         .execute(),
       db
         .selectFrom('memories')
         .where('archivedAt', 'is', null)
         .orderBy('createdAt', 'desc')
-        .limit(NODE_CAP + 1)
         .select(['id', 'claim'])
         .execute(),
     ])
 
-  const truncatedKinds: GraphNodeKind[] = []
-  const cap = <T>(rows: T[], kind: GraphNodeKind): T[] => {
-    if (rows.length > NODE_CAP) {
-      truncatedKinds.push(kind)
-      return rows.slice(0, NODE_CAP)
-    }
-    return rows
-  }
-
-  const peopleCapped = cap(people, 'person')
-  const orgsCapped = cap(organizations, 'organization')
-  const projectsCapped = cap(projects, 'project')
-  const tasksCapped = cap(tasks, 'task')
-  const docsCapped = cap(documents, 'document')
-  const interactionsCapped = cap(interactions, 'interaction')
-  const memoriesCapped = cap(memories, 'memory')
-
-  const selfRow = peopleCapped.find((person) => person.isSelf === 1)
+  const selfRow = people.find((person) => person.isSelf === 1)
   const selfId = selfRow?.id ?? null
 
   const nodes: GraphNode[] = [
-    ...peopleCapped.map<GraphNode>((person) => ({
+    ...people.map<GraphNode>((person) => ({
       id: person.id,
       kind: person.isSelf === 1 ? 'self' : 'person',
       label: label(person.fullName, 'Unnamed'),
     })),
-    ...orgsCapped.map<GraphNode>((org) => ({
+    ...organizations.map<GraphNode>((org) => ({
       id: org.id,
       kind: 'organization',
       label: label(org.name, 'Organization'),
     })),
-    ...projectsCapped.map<GraphNode>((project) => ({
+    ...projects.map<GraphNode>((project) => ({
       id: project.id,
       kind: 'project',
       label: label(project.name, 'Project'),
     })),
-    ...tasksCapped.map<GraphNode>((task) => ({
+    ...tasks.map<GraphNode>((task) => ({
       id: task.id,
       kind: 'task',
       label: label(task.title, 'Task'),
     })),
-    ...docsCapped.map<GraphNode>((doc) => ({
+    ...documents.map<GraphNode>((doc) => ({
       id: doc.id,
       kind: 'document',
       label: label(doc.title, 'Document'),
     })),
-    ...interactionsCapped.map<GraphNode>((interaction) => ({
+    ...interactions.map<GraphNode>((interaction) => ({
       id: interaction.id,
       kind: 'interaction',
       label: label(interaction.title, interaction.kind),
     })),
-    ...memoriesCapped.map<GraphNode>((memory) => ({
+    ...memories.map<GraphNode>((memory) => ({
       id: memory.id,
       kind: 'memory',
       label: label(memory.claim, 'Memory'),
@@ -166,9 +139,9 @@ export async function getGraph(): Promise<Graph> {
   ]
   const nodeIds = new Set(nodes.map((node) => node.id))
 
-  // Only wire join-table edges whose record ids made the node cap.
+  // Only wire join-table edges whose endpoints are visible records.
   const inScope = (...ids: string[]): boolean => ids.every((id) => nodeIds.has(id))
-  const projectIds = new Set(projectsCapped.map((project) => project.id))
+  const projectIds = new Set(projects.map((project) => project.id))
 
   const [affiliations, projectPeople, participants, memoryLinks] = await Promise.all([
     db.selectFrom('affiliations').select(['personId', 'organizationId']).execute(),
@@ -180,10 +153,10 @@ export async function getGraph(): Promise<Graph> {
   const edges: GraphEdge[] = []
 
   if (selfId) {
-    for (const person of peopleCapped) {
+    for (const person of people) {
       if (person.id !== selfId) edges.push({ source: selfId, target: person.id, kind: 'knows' })
     }
-    for (const project of projectsCapped) {
+    for (const project of projects) {
       edges.push({ source: selfId, target: project.id, kind: 'owns' })
     }
   }
@@ -197,7 +170,7 @@ export async function getGraph(): Promise<Graph> {
       edges.push({ source: row.projectId, target: row.personId, kind: 'member' })
     }
   }
-  for (const task of tasksCapped) {
+  for (const task of tasks) {
     if (task.projectId && projectIds.has(task.projectId)) {
       edges.push({ source: task.projectId, target: task.id, kind: 'task' })
     }
@@ -214,5 +187,5 @@ export async function getGraph(): Promise<Graph> {
     }
   }
 
-  return { selfId, nodes, edges, truncatedKinds }
+  return { selfId, nodes, edges }
 }

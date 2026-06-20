@@ -142,7 +142,6 @@ export function GraphSurface({ showHeader = true }: { showHeader?: boolean } = {
     return {
       ...graph.data,
       nodes: graph.data.nodes.filter((node) => visibleKinds.has(node.kind)),
-      truncatedKinds: graph.data.truncatedKinds.filter((kind) => visibleKinds.has(kind)),
     }
   }, [graph.data, visibleKinds])
 
@@ -353,15 +352,6 @@ export function GraphSurface({ showHeader = true }: { showHeader?: boolean } = {
           )}
         </div>
       )}
-      {!graph.isLoading &&
-      graph.data &&
-      graph.data.nodes.length > 0 &&
-      filteredGraph &&
-      filteredGraph.truncatedKinds.length > 0 ? (
-        <p className="text-xs text-muted-foreground">
-          Showing a capped view; more exist for: {filteredGraph.truncatedKinds.join(', ')}.
-        </p>
-      ) : null}
     </div>
   )
 }

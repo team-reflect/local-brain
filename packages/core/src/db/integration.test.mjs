@@ -153,7 +153,7 @@ describe('03b read getters (real SQLite round-trip over the seed)', () => {
   it('builds a user-centered graph from the seed', async () => {
     const graph = await getGraph()
     expect(graph.selfId).toBeTruthy()
-    expect(graph.truncatedKinds).toEqual([])
+    expect(graph).not.toHaveProperty('truncatedKinds')
     // 3 people + 1 org + 1 project + 2 tasks + 1 doc + 1 interaction + 1 memory.
     expect(graph.nodes).toHaveLength(10)
     expect(graph.nodes.filter((n) => n.kind === 'self')).toHaveLength(1)
@@ -167,6 +167,21 @@ describe('03b read getters (real SQLite round-trip over the seed)', () => {
     expect(graph.edges.some((e) => e.kind === 'memory')).toBe(true)
     const ids = new Set(graph.nodes.map((n) => n.id))
     expect(graph.edges.every((e) => ids.has(e.source) && ids.has(e.target))).toBe(true)
+  })
+
+  it('returns every graph node instead of capping dense kinds', async () => {
+    const created = []
+    for (let index = 0; index < 75; index += 1) {
+      created.push(await createPerson({ fullName: `Graph Person ${index.toString().padStart(2, '0')}` }))
+    }
+
+    const graph = await getGraph()
+    const nodeIds = new Set(graph.nodes.map((node) => node.id))
+
+    for (const id of created) {
+      expect(nodeIds.has(id)).toBe(true)
+    }
+    expect(graph.nodes.filter((node) => node.kind === 'person')).toHaveLength(77)
   })
 
   it('quick-searches record names/titles across types', async () => {

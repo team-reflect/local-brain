@@ -158,10 +158,10 @@ Status legend: `pending` → not started · `in progress` → branch exists, wor
     `LinkedRecord`s; memories getters incl. `listMemoriesForRecord`; citations/evidence
     (`listCitationsForSubject`, `listEvidenceFromDocument`); chat conversations/messages
     getters + setters (`createConversation`, `addMessage` — message + conversation touch
-    in one batch); a user-centered `getGraph` assembler (self-hub + join-table edges, node
-    caps with `truncatedKinds`); and a `quickSearch` LIKE getter for the palette.
+    in one batch); a user-centered `getGraph` assembler (self-hub + join-table edges,
+    uncapped typed nodes); and a `quickSearch` LIKE getter for the palette.
   - **Surfaces (`apps/desktop`):** SVG user-centered **Graph** (pure `graph-layout`
-    radial layout, click-to-navigate, legend, truncation note); **Ask** chat shell
+    expanding radial layout, click-to-navigate, legend); **Ask** chat shell
     (conversation list + thread + composer, persists a labeled Plan-06 placeholder answer);
     full **Settings** (General / Model keys / Local database / Backup & export / Skills /
     Diagnostics via the `settings.section` route param); **Network → Organizations** tab +
