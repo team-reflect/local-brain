@@ -3,12 +3,11 @@ import type { Task } from '@local-brain/core'
 import { AlertCircle, Loader2 } from 'lucide-react'
 import { StatusBadge } from '../../components/badge'
 import { DetailPage } from '../../components/detail-page'
+import { InlineEditableInput } from '../../components/inline-edit-input'
+import { InlineEditableSelect } from '../../components/inline-edit-select'
+import { InlineEditableTextarea } from '../../components/inline-edit-textarea'
 import { LinkedRecords } from '../../components/linked-records'
 import { PageHead } from '../../components/page-head'
-import { Input } from '../../components/ui/input'
-import { NativeSelect } from '../../components/ui/native-select'
-import { Textarea } from '../../components/ui/textarea'
-import { cn } from '../../lib/utils'
 import { useProjects, useTask, useTaskLinks, useUnlinkFrom, useUpdateTask } from '../../lib/queries'
 
 const TASK_STATUSES = ['open', 'waiting', 'scheduled', 'done', 'canceled'] as const
@@ -138,113 +137,89 @@ function TaskInlineEditor({ task }: { task: Task }): ReactNode {
     <>
       <PageHead eyebrow="Task" title={displayTitle(form.title)} actions={<SaveIndicator state={saveState} />} />
       <div className="flex flex-col gap-3">
-        <EditableShell label="Title" display={displayTitle(form.title)} onEdit={() => setActiveField('title')}>
-          {activeField === 'title' ? (
-            <Input
-              autoFocus
-              aria-label="Title"
-              value={form.title}
-              onBlur={closeActiveField}
-              onChange={(event) => patchForm({ title: event.target.value })}
-              aria-invalid={error === 'Title is required' ? true : undefined}
-              className="text-base font-semibold"
-            />
-          ) : null}
-        </EditableShell>
+        <InlineEditableInput
+          label="Title"
+          value={form.title}
+          display={displayTitle(form.title)}
+          isEditing={activeField === 'title'}
+          onEdit={() => setActiveField('title')}
+          onBlur={closeActiveField}
+          onChange={(title) => patchForm({ title })}
+          ariaInvalid={error === 'Title is required'}
+        />
 
-        <EditableShell
+        <InlineEditableTextarea
           label="Description"
           display={form.description || 'Click to add description'}
+          value={form.description}
           muted={!form.description}
-          multiline
+          isEditing={activeField === 'description'}
           onEdit={() => setActiveField('description')}
-        >
-          {activeField === 'description' ? (
-            <Textarea
-              autoFocus
-              aria-label="Description"
-              value={form.description}
-              onBlur={closeActiveField}
-              onChange={(event) => patchForm({ description: event.target.value })}
-              rows={4}
-              className="min-h-24 font-normal"
-            />
-          ) : null}
-        </EditableShell>
+          onBlur={closeActiveField}
+          onChange={(description) => patchForm({ description })}
+          rows={4}
+          inputClassName="min-h-24"
+        />
 
         <div className="grid gap-2 sm:grid-cols-2">
-          <EditableShell
+          <InlineEditableSelect
             label="Status"
             display={<StatusBadge status={form.status} />}
+            value={form.status}
+            isEditing={activeField === 'status'}
             onEdit={() => setActiveField('status')}
+            onBlur={closeActiveField}
+            onChange={(status) => patchForm({ status })}
           >
-            {activeField === 'status' ? (
-              <NativeSelect
-                autoFocus
-                aria-label="Status"
-                value={form.status}
-                onBlur={closeActiveField}
-                onChange={(event) => patchForm({ status: event.target.value })}
-              >
-                {TASK_STATUSES.map((status) => (
-                  <option key={status} value={status}>
-                    {status}
-                  </option>
-                ))}
-              </NativeSelect>
-            ) : null}
-          </EditableShell>
+            {TASK_STATUSES.map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </InlineEditableSelect>
 
-          <EditableShell
+          <InlineEditableSelect
             label="Priority"
             display={priorityLabel(form.priority)}
+            value={form.priority}
             muted={!form.priority}
+            isEditing={activeField === 'priority'}
             onEdit={() => setActiveField('priority')}
+            onBlur={closeActiveField}
+            onChange={(priority) => patchForm({ priority })}
+            ariaInvalid={error === 'Priority must be a whole number'}
           >
-            {activeField === 'priority' ? (
-              <NativeSelect
-                autoFocus
-                aria-label="Priority"
-                value={form.priority}
-                onBlur={closeActiveField}
-                onChange={(event) => patchForm({ priority: event.target.value })}
-                aria-invalid={error === 'Priority must be a whole number' ? true : undefined}
-              >
-                <option value="">No priority</option>
-                {PRIORITY_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-                {form.priority && !PRIORITY_OPTIONS.some((option) => option.value === form.priority) ? (
-                  <option value={form.priority}>{`Current priority (${form.priority})`}</option>
-                ) : null}
-              </NativeSelect>
+            <option value="">No priority</option>
+            {PRIORITY_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+            {form.priority && !PRIORITY_OPTIONS.some((option) => option.value === form.priority) ? (
+              <option value={form.priority}>{`Current priority (${form.priority})`}</option>
             ) : null}
-          </EditableShell>
+          </InlineEditableSelect>
         </div>
 
-        <EditableShell label="Project" display={projectDisplay} onEdit={() => setActiveField('projectId')}>
-          {activeField === 'projectId' ? (
-            <NativeSelect
-              autoFocus
-              aria-label="Project"
-              value={form.projectId}
-              onBlur={closeActiveField}
-              onChange={(event) => patchForm({ projectId: event.target.value })}
-            >
-              <option value="">No project</option>
-              {projects.data?.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-              {form.projectId && !projects.data?.some((project) => project.id === form.projectId) ? (
-                <option value={form.projectId}>Current project</option>
-              ) : null}
-            </NativeSelect>
+        <InlineEditableSelect
+          label="Project"
+          display={projectDisplay}
+          value={form.projectId}
+          isEditing={activeField === 'projectId'}
+          onEdit={() => setActiveField('projectId')}
+          onBlur={closeActiveField}
+          onChange={(projectId) => patchForm({ projectId })}
+        >
+          <option value="">No project</option>
+          {projects.data?.map((project) => (
+            <option key={project.id} value={project.id}>
+              {project.name}
+            </option>
+          ))}
+          {form.projectId && !projects.data?.some((project) => project.id === form.projectId) ? (
+            <option value={form.projectId}>Current project</option>
           ) : null}
-        </EditableShell>
+        </InlineEditableSelect>
 
         <div className="grid gap-2 sm:grid-cols-3">
           <DateEditableShell
@@ -287,49 +262,6 @@ function TaskInlineEditor({ task }: { task: Task }): ReactNode {
   )
 }
 
-function EditableShell({
-  label,
-  display,
-  muted = false,
-  multiline = false,
-  onEdit,
-  children,
-}: {
-  label: string
-  display: ReactNode
-  muted?: boolean
-  multiline?: boolean
-  onEdit: () => void
-  children: ReactNode
-}): ReactNode {
-  if (children) {
-    return (
-      <label className="flex flex-col gap-1.5 text-xs font-medium text-[hsl(var(--lb-ink-2))]">
-        {label}
-        {children}
-      </label>
-    )
-  }
-
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-xs font-medium text-[hsl(var(--lb-ink-2))]">{label}</span>
-      <button
-        type="button"
-        onClick={onEdit}
-        aria-label={`Edit ${label.toLowerCase()}`}
-        className={cn(
-          'flex min-h-8 w-full items-start justify-start rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30',
-          multiline && 'min-h-16 whitespace-pre-wrap',
-          muted && 'text-muted-foreground',
-        )}
-      >
-        <span className={cn('min-w-0', multiline && 'block w-full')}>{display}</span>
-      </button>
-    </div>
-  )
-}
-
 function DateEditableShell({
   label,
   field,
@@ -348,23 +280,17 @@ function DateEditableShell({
   patchForm: (patch: Partial<TaskFormState>) => void
 }): ReactNode {
   return (
-    <EditableShell
+    <InlineEditableInput
       label={label}
+      type="date"
+      value={value}
       display={value || '—'}
       muted={!value}
+      isEditing={activeField === field}
       onEdit={() => setActiveField(field)}
-    >
-      {activeField === field ? (
-        <Input
-          autoFocus
-          aria-label={label}
-          type="date"
-          value={value}
-          onBlur={closeActiveField}
-          onChange={(event) => patchForm({ [field]: event.target.value })}
-        />
-      ) : null}
-    </EditableShell>
+      onBlur={closeActiveField}
+      onChange={(nextValue) => patchForm({ [field]: nextValue })}
+    />
   )
 }
 
