@@ -4,7 +4,7 @@ import { X } from 'lucide-react'
 import { Badge } from '../components/badge'
 import { DataList, type Column } from '../components/data-list'
 import { EmptyState } from '../components/empty-state'
-import { Dialog, DialogContent, DialogTitle } from '../components/ui/dialog'
+import { Drawer, DrawerContent, DrawerTitle } from '../components/ui/drawer'
 import { cn } from '../lib/utils'
 import { useOrganizations, usePeople } from '../lib/queries'
 import { useRouter } from '../routing/router'
@@ -163,13 +163,16 @@ function NetworkDetailDrawer({
   onClose: () => void
 }): ReactNode {
   return (
-    <Dialog open onOpenChange={(next) => (next ? undefined : onClose())}>
-      <DialogContent
-        overlayClassName="items-stretch justify-end overflow-hidden bg-foreground/10 px-0 py-0 backdrop-blur-0"
-        className="my-0 h-full max-h-full w-[min(40rem,calc(100vw-4rem))] max-w-none rounded-none rounded-l-lg border-y-0 border-r-0 shadow-[0_18px_48px_rgba(2,6,23,0.22)] data-[state=open]:slide-in-from-right-4 data-[state=closed]:slide-out-to-right-4"
+    <Drawer
+      open
+      direction="right"
+      onOpenChange={(next) => (next ? undefined : onClose())}
+    >
+      <DrawerContent
+        className="h-full max-h-full w-[min(40rem,calc(100vw-4rem))] max-w-none rounded-none rounded-l-lg border-y-0 border-r-0 bg-popover text-popover-foreground shadow-[0_18px_48px_rgba(2,6,23,0.22)] sm:max-w-none"
         aria-describedby={undefined}
       >
-        <DialogTitle className="sr-only">Network detail</DialogTitle>
+        <DrawerTitle className="sr-only">Network detail</DrawerTitle>
         <button
           type="button"
           onClick={onClose}
@@ -180,9 +183,13 @@ function NetworkDetailDrawer({
           <X className="size-4" />
         </button>
         <div className="min-h-0 flex-1 overflow-y-auto py-8 pl-7 pr-12">
-          {detail.kind === 'person' ? <PersonDetail id={detail.id} /> : <OrganizationDetail id={detail.id} />}
+          {detail.kind === 'person' ? (
+            <PersonDetail id={detail.id} />
+          ) : (
+            <OrganizationDetail id={detail.id} />
+          )}
         </div>
-      </DialogContent>
-    </Dialog>
+      </DrawerContent>
+    </Drawer>
   )
 }

@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import 'tw-animate-css';
 
 /* Dark variant keyed to the `.dark` scope set on <html> by the theme provider. */
 @custom-variant dark (&:where(.dark, .dark *));
