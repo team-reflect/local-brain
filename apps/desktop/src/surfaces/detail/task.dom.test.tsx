@@ -91,15 +91,29 @@ describe('TaskDetail inline editing', () => {
     const calls = installTaskDetailBridge()
     renderWithProviders(<TaskDetail id="t1" />)
 
-    expect(await screen.findByLabelText('Title')).toBeDefined()
+    expect(await screen.findByRole('button', { name: 'Edit title' })).toBeDefined()
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
+    expect(screen.queryByLabelText('Title')).toBeNull()
 
+    fireEvent.click(screen.getByRole('button', { name: 'Edit title' }))
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: '  Send revised deck  ' } })
+    fireEvent.blur(screen.getByLabelText('Title'))
+    fireEvent.click(screen.getByRole('button', { name: 'Edit description' }))
     fireEvent.change(screen.getByLabelText('Description'), { target: { value: '  Add pricing  ' } })
+    fireEvent.blur(screen.getByLabelText('Description'))
+    fireEvent.click(screen.getByRole('button', { name: 'Edit status' }))
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'waiting' } })
+    fireEvent.blur(screen.getByLabelText('Status'))
+    fireEvent.click(screen.getByRole('button', { name: 'Edit priority' }))
     fireEvent.change(screen.getByLabelText('Priority'), { target: { value: '3' } })
+    fireEvent.blur(screen.getByLabelText('Priority'))
+    fireEvent.click(screen.getByRole('button', { name: 'Edit due' }))
     fireEvent.change(screen.getByLabelText('Due'), { target: { value: '2026-07-10' } })
+    fireEvent.blur(screen.getByLabelText('Due'))
+    fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
     fireEvent.change(screen.getByLabelText('Scheduled'), { target: { value: '2026-07-08' } })
+    fireEvent.blur(screen.getByLabelText('Scheduled'))
+    fireEvent.click(screen.getByRole('button', { name: 'Edit project' }))
     fireEvent.change(screen.getByLabelText('Project'), { target: { value: '' } })
 
     const params = await waitForUpdate(calls)
@@ -116,7 +130,8 @@ describe('TaskDetail inline editing', () => {
     const calls = installTaskDetailBridge()
     renderWithProviders(<TaskDetail id="t1" />)
 
-    fireEvent.change(await screen.findByLabelText('Title'), { target: { value: '   ' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit title' }))
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: '   ' } })
 
     expect(await screen.findByText('Title is required')).toBeDefined()
     expect(updateCalls(calls)).toHaveLength(0)
@@ -126,7 +141,8 @@ describe('TaskDetail inline editing', () => {
     const calls = installTaskDetailBridge({ status: 'open', completed_at: null })
     renderWithProviders(<TaskDetail id="t1" />)
 
-    fireEvent.change(await screen.findByLabelText('Status'), { target: { value: 'done' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit status' }))
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'done' } })
 
     const params = await waitForUpdate(calls)
     expect(params).toContain('done')
@@ -137,7 +153,8 @@ describe('TaskDetail inline editing', () => {
     const calls = installTaskDetailBridge({ status: 'done', completed_at: '2026-06-18' })
     renderWithProviders(<TaskDetail id="t1" />)
 
-    fireEvent.change(await screen.findByLabelText('Status'), { target: { value: 'open' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit status' }))
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'open' } })
 
     const params = await waitForUpdate(calls)
     expect(params).toContain('open')
