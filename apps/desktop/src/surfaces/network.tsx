@@ -93,53 +93,55 @@ export function NetworkSurface({ tab, detail }: { tab: NetworkTab; detail?: Netw
 
   return (
     <>
-      <div className="mx-auto grid h-full min-h-0 max-w-6xl grid-cols-[10rem_minmax(0,1fr)] gap-6">
-        <nav className="flex h-fit flex-col gap-0.5 border-l border-border py-1">
-          {TABS.map((option) => (
-            <button
-              key={option.key}
-              type="button"
-              onClick={() => navigate({ kind: 'network', tab: option.key })}
-              aria-current={tab === option.key ? 'page' : undefined}
-              className={cn(
-                'rounded-r-md border-l-2 px-3 py-1.5 text-left text-sm font-medium transition-colors',
-                tab === option.key
-                  ? '-ml-px border-primary text-foreground'
-                  : '-ml-px border-transparent text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {option.label}
-            </button>
-          ))}
-        </nav>
-        <div className="min-h-0 min-w-0">
-          {tab === 'graph' ? (
-            <GraphSurface showHeader={false} />
-          ) : tab === 'people' ? (
-            <DataList
-              rows={people.data ?? []}
-              columns={columns}
-              rowKey={(person) => person.id}
-              isLoading={people.isLoading}
-              onRowClick={(person) => navigate({ kind: 'person', id: person.id })}
-              empty={<EmptyState title="No people yet" />}
-              virtualize
-              estimateRowHeight={40}
-            />
-          ) : (
-            <DataList
-              rows={organizations.data ?? []}
-              columns={orgColumns}
-              rowKey={(org) => org.id}
-              isLoading={organizations.isLoading}
-              onRowClick={(org) => navigate({ kind: 'organization', id: org.id })}
-              empty={<EmptyState title="No organizations yet" />}
-              virtualize
-              estimateRowHeight={40}
-            />
-          )}
+      {tab === 'graph' ? (
+        <div
+          className="relative mx-auto h-full min-h-0 max-w-6xl"
+          data-testid="network-graph-layout"
+        >
+          <NetworkTabs
+            tab={tab}
+            onSelect={(nextTab) => navigate({ kind: 'network', tab: nextTab })}
+            className="absolute left-0 top-9 z-10 w-40 rounded-md border border-border bg-background/95 py-1 shadow-[0_8px_28px_rgba(2,6,23,0.10)]"
+          />
+          <GraphSurface showHeader={false} className="max-w-none" />
         </div>
-      </div>
+      ) : (
+        <div
+          className="mx-auto grid h-full min-h-0 max-w-6xl grid-cols-[10rem_minmax(0,1fr)] gap-6"
+          data-testid="network-list-layout"
+        >
+          <NetworkTabs
+            tab={tab}
+            onSelect={(nextTab) => navigate({ kind: 'network', tab: nextTab })}
+            className="h-fit border-l border-border py-1"
+          />
+          <div className="min-h-0 min-w-0">
+            {tab === 'people' ? (
+              <DataList
+                rows={people.data ?? []}
+                columns={columns}
+                rowKey={(person) => person.id}
+                isLoading={people.isLoading}
+                onRowClick={(person) => navigate({ kind: 'person', id: person.id })}
+                empty={<EmptyState title="No people yet" />}
+                virtualize
+                estimateRowHeight={40}
+              />
+            ) : (
+              <DataList
+                rows={organizations.data ?? []}
+                columns={orgColumns}
+                rowKey={(org) => org.id}
+                isLoading={organizations.isLoading}
+                onRowClick={(org) => navigate({ kind: 'organization', id: org.id })}
+                empty={<EmptyState title="No organizations yet" />}
+                virtualize
+                estimateRowHeight={40}
+              />
+            )}
+          </div>
+        </div>
+      )}
       {detail ? (
         <NetworkDetailDrawer
           detail={detail}
@@ -152,6 +154,37 @@ export function NetworkSurface({ tab, detail }: { tab: NetworkTab; detail?: Netw
         />
       ) : null}
     </>
+  )
+}
+
+function NetworkTabs({
+  tab,
+  onSelect,
+  className,
+}: {
+  tab: NetworkTab
+  onSelect: (tab: NetworkTab) => void
+  className?: string
+}): ReactNode {
+  return (
+    <nav aria-label="Network" className={cn('flex flex-col gap-0.5', className)}>
+      {TABS.map((option) => (
+        <button
+          key={option.key}
+          type="button"
+          onClick={() => onSelect(option.key)}
+          aria-current={tab === option.key ? 'page' : undefined}
+          className={cn(
+            'rounded-r-md border-l-2 px-3 py-1.5 text-left text-sm font-medium transition-colors',
+            tab === option.key
+              ? '-ml-px border-primary text-foreground'
+              : '-ml-px border-transparent text-muted-foreground hover:text-foreground',
+          )}
+        >
+          {option.label}
+        </button>
+      ))}
+    </nav>
   )
 }
 

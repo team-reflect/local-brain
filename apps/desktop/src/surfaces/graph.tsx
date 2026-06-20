@@ -12,6 +12,7 @@ import { Checkbox } from '../components/ui/checkbox'
 import { EmptyState } from '../components/empty-state'
 import { Loading } from '../components/loading'
 import { PageHead } from '../components/page-head'
+import { cn } from '../lib/utils'
 import { useGraph } from '../lib/queries'
 import { layoutGraph, type GraphLayout, type PositionedNode } from './graph-layout'
 import type { Route } from '../routing/route'
@@ -120,7 +121,13 @@ function clientDeltaToGraphDelta(
   }
 }
 
-export function GraphSurface({ showHeader = true }: { showHeader?: boolean } = {}): ReactNode {
+export function GraphSurface({
+  showHeader = true,
+  className,
+}: {
+  showHeader?: boolean
+  className?: string
+} = {}): ReactNode {
   const { navigate } = useRouter()
   const graph = useGraph()
   const [visibleKinds, setVisibleKinds] = useState<ReadonlySet<GraphNodeKind>>(
@@ -256,7 +263,7 @@ export function GraphSurface({ showHeader = true }: { showHeader?: boolean } = {
   )
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-4">
+    <div className={cn('mx-auto flex w-full max-w-5xl flex-col gap-4', className)}>
       {showHeader ? <PageHead eyebrow="Graph" title="Graph" /> : null}
       {graph.isLoading ? (
         <Loading />
