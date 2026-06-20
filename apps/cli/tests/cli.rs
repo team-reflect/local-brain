@@ -2820,10 +2820,87 @@ fn graph_is_centered_and_typed() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
     run_json(&db, &["--json", "add", "task", "--title", "T"]);
+    Connection::open(&db)
+        .unwrap()
+        .execute(
+            "INSERT INTO people (id, full_name, is_self) VALUES ('self', 'You', 1)",
+            [],
+        )
+        .unwrap();
+    let person = run_json(&db, &["--json", "add", "person", "--full-name", "Ada"]);
+    let interaction = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Catchup",
+            "--link",
+            &format!("person:{}", person["id"].as_str().unwrap()),
+        ],
+    );
+    let raw_interaction = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Raw sender",
+            "--participant",
+            "from:Raw Sender <raw@example.com>",
+        ],
+    );
+    Connection::open(&db)
+        .unwrap()
+        .execute_batch(&format!(
+            "INSERT INTO memories (id, claim) VALUES ('mem-from-interaction', 'Ada likes graphs');
+             INSERT INTO memory_links (id, memory_id, record_type, record_id)
+             VALUES ('ml-from-interaction', 'mem-from-interaction', 'interaction', '{}');
+             INSERT INTO memories (id, claim) VALUES ('mem-from-raw-interaction', 'Raw sender likes graphs');
+             INSERT INTO memory_links (id, memory_id, record_type, record_id)
+             VALUES ('ml-from-raw-interaction', 'mem-from-raw-interaction', 'interaction', '{}');
+             INSERT INTO memories (id, claim) VALUES ('mem-from-missing-interaction', 'Missing interaction');
+             INSERT INTO memory_links (id, memory_id, record_type, record_id)
+             VALUES ('ml-from-missing-interaction', 'mem-from-missing-interaction', 'interaction', 'missing-interaction');",
+            interaction["id"].as_str().unwrap(),
+            raw_interaction["id"].as_str().unwrap()
+        ))
+        .unwrap();
     let graph = run_json(&db, &["--json", "graph", "--center", "self"]);
     assert!(graph["nodes"].is_array());
     assert!(graph["edges"].is_array());
     assert!(graph.get("truncatedKinds").is_none());
+    assert!(!graph["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|node| node["kind"] == "interaction"));
+    assert!(graph["edges"].as_array().unwrap().iter().any(|edge| {
+        edge["kind"] == "interaction"
+            && edge["weight"] == 1
+            && edge["interactionId"] == interaction["id"]
+    }));
+    assert!(graph["edges"].as_array().unwrap().iter().any(|edge| {
+        edge["kind"] == "memory"
+            && edge["source"] == "mem-from-interaction"
+            && edge["target"] == person["id"]
+    }));
+    assert!(graph["edges"].as_array().unwrap().iter().any(|edge| {
+        edge["kind"] == "memory"
+            && edge["source"] == "mem-from-raw-interaction"
+            && edge["target"] == "self"
+    }));
+    assert!(!graph["edges"].as_array().unwrap().iter().any(|edge| {
+        edge["kind"] == "memory"
+            && edge["source"] == "mem-from-missing-interaction"
+            && edge["target"] == "self"
+    }));
 }
 
 #[test]

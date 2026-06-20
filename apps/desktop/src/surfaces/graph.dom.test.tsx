@@ -15,6 +15,7 @@ const GRAPH: Graph = {
   edges: [
     { source: 'self', target: 'p1', kind: 'knows' },
     { source: 'p1', target: 'org1', kind: 'affiliation' },
+    { source: 'self', target: 'p1', kind: 'interaction', weight: 3, interactionId: 'int1' },
   ],
 }
 
@@ -134,5 +135,27 @@ describe('GraphSurface', () => {
     await waitFor(() => {
       expect(window.location.pathname).toBe('/people/p1')
     })
+  })
+
+  it('draws interactions as clickable links and opens the interaction on click', async () => {
+    window.history.pushState({}, '', '/network?tab=graph')
+    const { container } = renderWithProviders(<GraphSurface showHeader={false} />)
+
+    const link = container.querySelector('line[stroke="#db2777"]')
+    expect(link).not.toBeNull()
+
+    fireEvent.click(link as Element)
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/interactions/int1')
+    })
+  })
+
+  it('hides interaction links when the Interactions filter is turned off', () => {
+    const { container } = renderWithProviders(<GraphSurface showHeader={false} />)
+
+    expect(container.querySelector('line[stroke="#db2777"]')).not.toBeNull()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Interactions' }))
+    expect(container.querySelector('line[stroke="#db2777"]')).toBeNull()
   })
 })

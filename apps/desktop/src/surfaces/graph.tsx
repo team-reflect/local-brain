@@ -18,8 +18,15 @@ import { layoutGraph, type GraphLayout, type PositionedNode } from './graph-layo
 import type { Route } from '../routing/route'
 import { useRouter } from '../routing/router'
 
-/** A calm, distinguishable color per node kind (Reflect cool palette, indigo self). */
-const KIND_COLOR: Record<GraphNodeKind, string> = {
+/**
+ * The graph legend mixes node kinds with one edge category: interactions are
+ * drawn as the links between people, not as their own nodes, but they still get
+ * a toggle and a swatch.
+ */
+type GraphFilterKind = GraphNodeKind | 'interaction'
+
+/** A calm, distinguishable color per kind (Reflect cool palette, indigo self). */
+const KIND_COLOR: Record<GraphFilterKind, string> = {
   self: '#4f46e5',
   person: '#2563eb',
   organization: '#7c3aed',
@@ -30,7 +37,7 @@ const KIND_COLOR: Record<GraphNodeKind, string> = {
   memory: '#d97706',
 }
 
-const KIND_LABEL: Record<GraphNodeKind, string> = {
+const KIND_LABEL: Record<GraphFilterKind, string> = {
   self: 'You',
   person: 'People',
   organization: 'Organizations',
@@ -41,7 +48,7 @@ const KIND_LABEL: Record<GraphNodeKind, string> = {
   memory: 'Memories',
 }
 
-const ALL_KINDS = Object.keys(KIND_LABEL) as GraphNodeKind[]
+const ALL_KINDS = Object.keys(KIND_LABEL) as GraphFilterKind[]
 const DEFAULT_VIEWPORT = { offsetX: 0, offsetY: 0, scale: 1 }
 const MIN_ZOOM = 0.45
 const MAX_ZOOM = 3
@@ -78,8 +85,6 @@ function routeForNode(node: PositionedNode): Route | null {
       return { kind: 'task', id: node.id }
     case 'document':
       return { kind: 'document', id: node.id }
-    case 'interaction':
-      return { kind: 'interaction', id: node.id }
     case 'memory':
       return null
   }
@@ -87,6 +92,11 @@ function routeForNode(node: PositionedNode): Route | null {
 
 function clip(label: string): string {
   return label.length > 22 ? `${label.slice(0, 21)}…` : label
+}
+
+/** Thicken an interaction edge by how many interactions connect the pair. */
+function interactionEdgeWidth(weight: number | undefined): number {
+  return Math.min(6, 1.25 + Math.log2((weight ?? 1) + 1) * 1.1)
 }
 
 function clampZoom(scale: number): number {
@@ -130,7 +140,7 @@ export function GraphSurface({
 } = {}): ReactNode {
   const { navigate } = useRouter()
   const graph = useGraph()
-  const [visibleKinds, setVisibleKinds] = useState<ReadonlySet<GraphNodeKind>>(
+  const [visibleKinds, setVisibleKinds] = useState<ReadonlySet<GraphFilterKind>>(
     () => new Set(ALL_KINDS),
   )
   const [viewport, setViewport] = useState<GraphViewport>(DEFAULT_VIEWPORT)
@@ -139,22 +149,27 @@ export function GraphSurface({
   const suppressNextNodeClickRef = useRef(false)
 
   const presentKinds = useMemo(() => {
-    if (!graph.data) return [] as GraphNodeKind[]
-    const seen = new Set(graph.data.nodes.map((node) => node.kind))
+    if (!graph.data) return [] as GraphFilterKind[]
+    const seen = new Set<GraphFilterKind>(graph.data.nodes.map((node) => node.kind))
+    if (graph.data.edges.some((edge) => edge.kind === 'interaction')) seen.add('interaction')
     return ALL_KINDS.filter((kind) => seen.has(kind))
   }, [graph.data])
 
   const filteredGraph = useMemo<Graph | null>(() => {
     if (!graph.data) return null
+    const showInteractions = visibleKinds.has('interaction')
     return {
       ...graph.data,
       nodes: graph.data.nodes.filter((node) => visibleKinds.has(node.kind)),
+      edges: showInteractions
+        ? graph.data.edges
+        : graph.data.edges.filter((edge) => edge.kind !== 'interaction'),
     }
   }, [graph.data, visibleKinds])
 
   const layout = useMemo(() => (filteredGraph ? layoutGraph(filteredGraph) : null), [filteredGraph])
 
-  const toggleKind = (kind: GraphNodeKind): void => {
+  const toggleKind = (kind: GraphFilterKind): void => {
     setVisibleKinds((current) => {
       const next = new Set(current)
       if (next.has(kind)) {
@@ -290,7 +305,11 @@ export function GraphSurface({
                 />
                 <span
                   aria-hidden="true"
-                  className="inline-block size-2.5 shrink-0 rounded-full"
+                  className={cn(
+                    'inline-block shrink-0 rounded-full',
+                    // Interactions are links, not nodes — show a bar, not a dot.
+                    kind === 'interaction' ? 'h-0.5 w-2.5' : 'size-2.5',
+                  )}
                   style={{ backgroundColor: KIND_COLOR[kind] }}
                 />
                 <span className="min-w-0 truncate">{KIND_LABEL[kind]}</span>
@@ -321,17 +340,53 @@ export function GraphSurface({
                 transform={`translate(${viewport.offsetX} ${viewport.offsetY}) scale(${viewport.scale})`}
               >
                 <g stroke="hsl(var(--border))" strokeWidth={1}>
-                  {layout.edges.map((edge, index) => (
-                    <line
-                      key={`${edge.source.id}-${edge.target.id}-${index}`}
-                      x1={edge.source.x}
-                      y1={edge.source.y}
-                      x2={edge.target.x}
-                      y2={edge.target.y}
-                      strokeOpacity={0.5}
-                    />
-                  ))}
+                  {layout.edges
+                    .filter((edge) => edge.kind !== 'interaction')
+                    .map((edge, index) => (
+                      <line
+                        key={`${edge.source.id}-${edge.target.id}-${index}`}
+                        x1={edge.source.x}
+                        y1={edge.source.y}
+                        x2={edge.target.x}
+                        y2={edge.target.y}
+                        strokeOpacity={0.5}
+                      />
+                    ))}
                 </g>
+                {layout.edges
+                  .filter((edge) => edge.kind === 'interaction')
+                  .map((edge, index) => {
+                    const route: Route | null = edge.interactionId
+                      ? { kind: 'interaction', id: edge.interactionId }
+                      : null
+                    return (
+                      <g
+                        key={`interaction-${edge.source.id}-${edge.target.id}-${index}`}
+                        className={route ? 'cursor-pointer' : undefined}
+                        onClick={route ? () => handleNodeClick(route) : undefined}
+                      >
+                        {/* Wide transparent hit area so thin links are easy to click. */}
+                        <line
+                          x1={edge.source.x}
+                          y1={edge.source.y}
+                          x2={edge.target.x}
+                          y2={edge.target.y}
+                          stroke="transparent"
+                          strokeWidth={12}
+                        />
+                        <line
+                          x1={edge.source.x}
+                          y1={edge.source.y}
+                          x2={edge.target.x}
+                          y2={edge.target.y}
+                          stroke={KIND_COLOR.interaction}
+                          strokeWidth={interactionEdgeWidth(edge.weight)}
+                          strokeOpacity={0.55}
+                          strokeLinecap="round"
+                        />
+                      </g>
+                    )
+                  })}
                 {layout.nodes.map((node) => {
                   const route = routeForNode(node)
                   return (
