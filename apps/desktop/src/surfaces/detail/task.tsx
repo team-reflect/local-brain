@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Task } from '@local-brain/core'
-import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react'
+import { AlertCircle, Loader2 } from 'lucide-react'
 import { StatusBadge } from '../../components/badge'
 import { DetailPage } from '../../components/detail-page'
 import { LinkedRecords } from '../../components/linked-records'
@@ -26,7 +26,7 @@ interface TaskFormState {
 }
 
 type EditableField = keyof TaskFormState
-type SaveState = 'idle' | 'saving' | 'saved' | 'error'
+type SaveState = 'idle' | 'saving' | 'error'
 
 export function TaskDetail({ id }: { id: string }): ReactNode {
   const task = useTask(id)
@@ -111,7 +111,7 @@ function TaskInlineEditor({ task }: { task: Task }): ReactNode {
     try {
       await updateTask.mutateAsync(toTaskPatch(next, task))
       savedSnapshotRef.current = serializeState(next)
-      setSaveState('saved')
+      setSaveState('idle')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not save task')
       setSaveState('error')
@@ -361,14 +361,6 @@ function SaveIndicator({ state }: { state: SaveState }): ReactNode {
       <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
         <Loader2 className="size-3.5 animate-spin" />
         Saving
-      </span>
-    )
-  }
-  if (state === 'saved') {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-        <CheckCircle2 className="size-3.5" />
-        Saved
       </span>
     )
   }
