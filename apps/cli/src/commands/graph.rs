@@ -100,11 +100,7 @@ fn add_interaction_edge(
     }
 }
 
-fn derive_interaction_edges(
-    conn: &Connection,
-    person_ids: &HashSet<String>,
-    self_id: Option<&str>,
-) -> Result<Vec<Value>, CliError> {
+fn active_interaction_ranks(conn: &Connection) -> Result<HashMap<String, usize>, CliError> {
     let mut interactions_stmt = conn.prepare(
         "SELECT id FROM interactions WHERE archived_at IS NULL ORDER BY occurred_at DESC",
     )?;
@@ -113,7 +109,14 @@ fn derive_interaction_edges(
     for (index, row) in interaction_rows.enumerate() {
         recency_rank.insert(row?, index);
     }
+    Ok(recency_rank)
+}
 
+fn interaction_people(
+    conn: &Connection,
+    person_ids: &HashSet<String>,
+    recency_rank: &HashMap<String, usize>,
+) -> Result<HashMap<String, HashSet<String>>, CliError> {
     let mut participants_stmt = conn.prepare(
         "SELECT interaction_id, person_id
            FROM interaction_participants
@@ -134,19 +137,26 @@ fn derive_interaction_edges(
             .or_default()
             .insert(person_id);
     }
+    Ok(people_by_interaction)
+}
 
+fn derive_interaction_edges(
+    people_by_interaction: &HashMap<String, HashSet<String>>,
+    recency_rank: &HashMap<String, usize>,
+    self_id: Option<&str>,
+) -> Vec<Value> {
     let mut interaction_edges: HashMap<String, (String, String, i64, String)> = HashMap::new();
     for (interaction_id, people) in people_by_interaction {
-        let people: Vec<String> = people.into_iter().collect();
+        let people: Vec<&String> = people.iter().collect();
         if people.len() >= 2 {
             for a in 0..people.len() {
                 for b in (a + 1)..people.len() {
                     add_interaction_edge(
                         &mut interaction_edges,
-                        &people[a],
-                        &people[b],
-                        &interaction_id,
-                        &recency_rank,
+                        people[a],
+                        people[b],
+                        interaction_id,
+                        recency_rank,
                     );
                 }
             }
@@ -155,13 +165,13 @@ fn derive_interaction_edges(
                 &mut interaction_edges,
                 id,
                 person_id,
-                &interaction_id,
-                &recency_rank,
+                interaction_id,
+                recency_rank,
             );
         }
     }
 
-    Ok(interaction_edges
+    interaction_edges
         .into_values()
         .map(|(source, target, weight, interaction_id)| {
             json!({
@@ -172,7 +182,48 @@ fn derive_interaction_edges(
                 "interactionId": interaction_id,
             })
         })
-        .collect())
+        .collect()
+}
+
+fn derive_memory_edges(
+    conn: &Connection,
+    node_ids: &HashSet<String>,
+    people_by_interaction: &HashMap<String, HashSet<String>>,
+) -> Result<Vec<Value>, CliError> {
+    let mut stmt = conn.prepare("SELECT memory_id, record_type, record_id FROM memory_links")?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    let mut edges = Vec::new();
+    let mut seen = HashSet::new();
+    let mut push = |memory_id: &str, record_id: &str| {
+        if !node_ids.contains(memory_id) || !node_ids.contains(record_id) {
+            return;
+        }
+        let key = format!("{memory_id}\0{record_id}");
+        if !seen.insert(key) {
+            return;
+        }
+        edges.push(json!({ "source": memory_id, "target": record_id, "kind": "memory" }));
+    };
+
+    for row in rows {
+        let (memory_id, record_type, record_id) = row?;
+        if record_type == "interaction" {
+            if let Some(people) = people_by_interaction.get(&record_id) {
+                for person_id in people {
+                    push(&memory_id, person_id);
+                }
+            }
+        } else {
+            push(&memory_id, &record_id);
+        }
+    }
+    Ok(edges)
 }
 
 pub fn graph(conn: &Connection, json: bool) -> Result<(), CliError> {
@@ -285,17 +336,18 @@ pub fn graph(conn: &Connection, json: bool) -> Result<(), CliError> {
         "task",
         &node_ids,
     )?);
-    edges.extend(edges_from(
+    let recency_rank = active_interaction_ranks(conn)?;
+    let people_by_interaction = interaction_people(conn, &person_ids, &recency_rank)?;
+    edges.extend(derive_memory_edges(
         conn,
-        "SELECT memory_id, record_id FROM memory_links",
-        "memory",
         &node_ids,
+        &people_by_interaction,
     )?);
     edges.extend(derive_interaction_edges(
-        conn,
-        &person_ids,
+        &people_by_interaction,
+        &recency_rank,
         self_id.as_deref(),
-    )?);
+    ));
 
     let graph = json!({
         "selfId": self_id,

@@ -59,6 +59,17 @@ export interface Graph {
   edges: GraphEdge[]
 }
 
+interface InteractionParticipantRef {
+  interactionId: string
+  personId: string | null
+}
+
+interface MemoryLinkRef {
+  memoryId: string
+  recordType: string
+  recordId: string
+}
+
 function label(value: string | null, fallback: string): string {
   const trimmed = (value ?? '').trim()
   if (!trimmed) return fallback
@@ -73,25 +84,33 @@ function label(value: string | null, fallback: string): string {
  * archived/absent interaction or at a person outside `personIds` are skipped; an
  * interaction with a single participant links them to `selfId`.
  */
-export function deriveInteractionEdges(
+function groupInteractionPeople(
   interactions: ReadonlyArray<{ id: string }>,
-  participants: ReadonlyArray<{ interactionId: string; personId: string | null }>,
+  participants: ReadonlyArray<InteractionParticipantRef>,
   personIds: ReadonlySet<string>,
-  selfId: string | null,
-): GraphEdge[] {
-  const recencyRank = new Map<string, number>()
-  interactions.forEach((interaction, index) => recencyRank.set(interaction.id, index))
-
-  // Group in-scope participant people by interaction.
+): Map<string, Set<string>> {
+  const activeInteractionIds = new Set(interactions.map((interaction) => interaction.id))
   const peopleByInteraction = new Map<string, Set<string>>()
   for (const row of participants) {
     if (row.personId === null) continue
-    if (!recencyRank.has(row.interactionId)) continue // archived or absent interaction
+    if (!activeInteractionIds.has(row.interactionId)) continue // archived or absent interaction
     if (!personIds.has(row.personId)) continue
     const group = peopleByInteraction.get(row.interactionId) ?? new Set<string>()
     group.add(row.personId)
     peopleByInteraction.set(row.interactionId, group)
   }
+  return peopleByInteraction
+}
+
+export function deriveInteractionEdges(
+  interactions: ReadonlyArray<{ id: string }>,
+  participants: ReadonlyArray<InteractionParticipantRef>,
+  personIds: ReadonlySet<string>,
+  selfId: string | null,
+): GraphEdge[] {
+  const recencyRank = new Map<string, number>()
+  interactions.forEach((interaction, index) => recencyRank.set(interaction.id, index))
+  const peopleByInteraction = groupInteractionPeople(interactions, participants, personIds)
 
   const edges = new Map<string, Required<Pick<GraphEdge, 'source' | 'target' | 'weight' | 'interactionId'>>>()
   const link = (a: string, b: string, interactionId: string): void => {
@@ -123,6 +142,33 @@ export function deriveInteractionEdges(
   }
 
   return [...edges.values()].map((edge) => ({ ...edge, kind: 'interaction' }))
+}
+
+export function deriveMemoryEdges(
+  memoryLinks: ReadonlyArray<MemoryLinkRef>,
+  nodeIds: ReadonlySet<string>,
+  peopleByInteraction: ReadonlyMap<string, ReadonlySet<string>>,
+): GraphEdge[] {
+  const seen = new Set<string>()
+  const edges: GraphEdge[] = []
+  const link = (memoryId: string, recordId: string): void => {
+    if (!nodeIds.has(memoryId) || !nodeIds.has(recordId)) return
+    const key = `${memoryId}\u0000${recordId}`
+    if (seen.has(key)) return
+    seen.add(key)
+    edges.push({ source: memoryId, target: recordId, kind: 'memory' })
+  }
+
+  for (const row of memoryLinks) {
+    if (row.recordType === 'interaction') {
+      const people = peopleByInteraction.get(row.recordId) ?? new Set<string>()
+      for (const personId of people) link(row.memoryId, personId)
+    } else {
+      link(row.memoryId, row.recordId)
+    }
+  }
+
+  return edges
 }
 
 export async function getGraph(): Promise<Graph> {
@@ -221,7 +267,7 @@ export async function getGraph(): Promise<Graph> {
     db.selectFrom('affiliations').select(['personId', 'organizationId']).execute(),
     db.selectFrom('projectPeople').select(['projectId', 'personId']).execute(),
     db.selectFrom('interactionParticipants').select(['interactionId', 'personId']).execute(),
-    db.selectFrom('memoryLinks').select(['memoryId', 'recordId']).execute(),
+    db.selectFrom('memoryLinks').select(['memoryId', 'recordType', 'recordId']).execute(),
   ])
 
   const edges: GraphEdge[] = []
@@ -249,14 +295,10 @@ export async function getGraph(): Promise<Graph> {
       edges.push({ source: task.projectId, target: task.id, kind: 'task' })
     }
   }
-  for (const row of memoryLinks) {
-    if (inScope(row.memoryId, row.recordId)) {
-      edges.push({ source: row.memoryId, target: row.recordId, kind: 'memory' })
-    }
-  }
-
   // Interactions are edges, not nodes: dissolve each into weighted links between
   // the people it involved.
+  const peopleByInteraction = groupInteractionPeople(interactions, participants, personIds)
+  edges.push(...deriveMemoryEdges(memoryLinks, nodeIds, peopleByInteraction))
   edges.push(...deriveInteractionEdges(interactions, participants, personIds, selfId))
 
   return { selfId, nodes, edges }

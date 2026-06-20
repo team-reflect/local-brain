@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { deriveInteractionEdges } from './getters'
+import { deriveInteractionEdges, deriveMemoryEdges } from './getters'
 
 describe('deriveInteractionEdges', () => {
   const personIds = new Set(['self', 'p1', 'p2', 'p3'])
@@ -85,5 +85,28 @@ describe('deriveInteractionEdges', () => {
         'self',
       ),
     ).toEqual([])
+  })
+})
+
+describe('deriveMemoryEdges', () => {
+  it('keeps direct memory links to visible nodes', () => {
+    const edges = deriveMemoryEdges(
+      [{ memoryId: 'm1', recordType: 'person', recordId: 'p1' }],
+      new Set(['m1', 'p1']),
+      new Map(),
+    )
+    expect(edges).toEqual([{ source: 'm1', target: 'p1', kind: 'memory' }])
+  })
+
+  it('dissolves interaction memory links through visible participants', () => {
+    const edges = deriveMemoryEdges(
+      [{ memoryId: 'm1', recordType: 'interaction', recordId: 'i1' }],
+      new Set(['m1', 'p1', 'p2']),
+      new Map([['i1', new Set(['p1', 'p2', 'ghost'])]]),
+    )
+    expect(edges).toEqual([
+      { source: 'm1', target: 'p1', kind: 'memory' },
+      { source: 'm1', target: 'p2', kind: 'memory' },
+    ])
   })
 })

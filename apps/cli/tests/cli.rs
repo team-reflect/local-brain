@@ -2842,6 +2842,15 @@ fn graph_is_centered_and_typed() {
             &format!("person:{}", person["id"].as_str().unwrap()),
         ],
     );
+    Connection::open(&db)
+        .unwrap()
+        .execute_batch(&format!(
+            "INSERT INTO memories (id, claim) VALUES ('mem-from-interaction', 'Ada likes graphs');
+             INSERT INTO memory_links (id, memory_id, record_type, record_id)
+             VALUES ('ml-from-interaction', 'mem-from-interaction', 'interaction', '{}');",
+            interaction["id"].as_str().unwrap()
+        ))
+        .unwrap();
     let graph = run_json(&db, &["--json", "graph", "--center", "self"]);
     assert!(graph["nodes"].is_array());
     assert!(graph["edges"].is_array());
@@ -2855,6 +2864,11 @@ fn graph_is_centered_and_typed() {
         edge["kind"] == "interaction"
             && edge["weight"] == 1
             && edge["interactionId"] == interaction["id"]
+    }));
+    assert!(graph["edges"].as_array().unwrap().iter().any(|edge| {
+        edge["kind"] == "memory"
+            && edge["source"] == "mem-from-interaction"
+            && edge["target"] == person["id"]
     }));
 }
 

@@ -16,6 +16,7 @@ import {
   createPerson,
   createProject,
   createTask,
+  db,
   getDocument,
   getGraph,
   getInteraction,
@@ -35,6 +36,7 @@ import {
   listOrganizations,
   listPeople,
   listTasks,
+  newId,
   quickSearch,
   seedDemoData,
   updateDocument,
@@ -178,6 +180,26 @@ describe('03b read getters (real SQLite round-trip over the seed)', () => {
 
     const ids = new Set(graph.nodes.map((n) => n.id))
     expect(graph.edges.every((e) => ids.has(e.source) && ids.has(e.target))).toBe(true)
+  })
+
+  it('connects memories sourced from interactions through visible participants', async () => {
+    const interaction = (await listInteractions())[0]
+    const memoryId = newId()
+    await db.insertInto('memories').values({ id: memoryId, claim: 'Interaction-sourced memory' }).execute()
+    await db
+      .insertInto('memoryLinks')
+      .values({
+        id: newId(),
+        memoryId,
+        recordType: 'interaction',
+        recordId: interaction.id,
+      })
+      .execute()
+
+    const graph = await getGraph()
+
+    expect(graph.nodes.some((node) => node.id === interaction.id)).toBe(false)
+    expect(graph.edges.some((edge) => edge.kind === 'memory' && edge.source === memoryId && edge.target === alex.id)).toBe(true)
   })
 
   it('returns every graph node instead of capping dense kinds', async () => {
