@@ -32,6 +32,18 @@ pub(super) fn upsert_affiliation(
     role: Option<&str>,
     is_current: bool,
 ) -> Result<(), CliError> {
+    // Demote every current affiliation for the person FIRST, before inserting or
+    // promoting the target, so the single-current unique index
+    // (idx_affiliations_one_current) is never momentarily violated by two current
+    // rows. The target is (re)marked current below.
+    if is_current {
+        conn.execute(
+            "UPDATE affiliations
+             SET is_current = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             WHERE person_id = ?1 AND is_current = 1",
+            params![person_id],
+        )?;
+    }
     let existing: Option<String> = conn
         .query_row(
             "SELECT id FROM affiliations
@@ -41,7 +53,7 @@ pub(super) fn upsert_affiliation(
             |row| row.get(0),
         )
         .optional()?;
-    let affiliation_id = match existing {
+    let _affiliation_id = match existing {
         Some(id) => {
             conn.execute(
                 "UPDATE affiliations
@@ -79,13 +91,9 @@ pub(super) fn upsert_affiliation(
             id
         }
     };
+    // Others were already demoted above, so the target is the sole current row;
+    // sync the denormalized current employer to match.
     if is_current {
-        conn.execute(
-            "UPDATE affiliations
-             SET is_current = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-             WHERE person_id = ?1 AND id <> ?2 AND is_current = 1",
-            params![person_id, affiliation_id],
-        )?;
         conn.execute(
             "UPDATE people
              SET current_organization_id = ?1,

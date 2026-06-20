@@ -60,6 +60,28 @@ pub(super) fn normalize_source_slug(raw: &str) -> String {
     raw.trim().to_lowercase()
 }
 
+/// Normalize an organization domain for comparison and storage: lowercase, trim,
+/// strip a leading `http(s)://` scheme and `www.`, and drop any path after the
+/// host. The Rust twin of core `normalizeDomain`
+/// (`packages/core/src/text/normalize.ts`); keep the two in agreement so the CLI
+/// and app dedupe organizations the same way. Returns `None` for blank input.
+pub(super) fn normalize_domain(raw: Option<&str>) -> Option<String> {
+    let lower = normalize_optional(raw)?.to_lowercase();
+    let without_scheme = lower
+        .strip_prefix("https://")
+        .or_else(|| lower.strip_prefix("http://"))
+        .unwrap_or(lower.as_str());
+    let without_www = without_scheme
+        .strip_prefix("www.")
+        .unwrap_or(without_scheme);
+    let host = without_www.split('/').next().unwrap_or(without_www).trim();
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
+}
+
 /// A minimal structural email check: a non-empty local part, a dotted domain,
 /// and no internal whitespace. Not RFC-complete — just enough to reject obvious
 /// non-addresses before they become people.

@@ -44,6 +44,9 @@ pub struct AddInteractionArgs<'a> {
 
 /// Whether the stored interaction's body differs from the incoming one, so a
 /// re-imported thread/transcript that grew can be detected and re-digested.
+/// Recomputes the stored body's hash rather than trusting `content_hash`: a null
+/// or stale hash column (e.g. a body written without one, or by another writer)
+/// would otherwise falsely report a change even when `body_text` already matches.
 fn body_changed(
     conn: &Connection,
     existing: &str,
@@ -52,14 +55,20 @@ fn body_changed(
     let Some(incoming_hash) = incoming_hash else {
         return Ok(false);
     };
-    let stored: Option<String> = conn
+    let stored_body: Option<String> = conn
         .query_row(
-            "SELECT content_hash FROM interactions WHERE id = ?1",
+            "SELECT body_text FROM interactions WHERE id = ?1",
             params![existing],
-            |row| row.get(0),
+            |row| row.get::<_, Option<String>>(0),
         )
-        .optional()?;
-    Ok(stored.as_deref() != Some(incoming_hash))
+        .optional()?
+        .flatten();
+    let stored_hash = stored_body
+        .as_deref()
+        .map(normalize_text)
+        .filter(|body| !body.is_empty())
+        .map(|body| content_hash(&body));
+    Ok(stored_hash.as_deref() != Some(incoming_hash))
 }
 
 fn find_duplicate_interaction(
@@ -729,6 +738,29 @@ mod tests {
             replace_body: false,
             refresh: false,
         }
+    }
+
+    #[test]
+    fn body_changed_recomputes_from_body_text_ignoring_null_hash() {
+        let conn = brain_schema::open_in_memory().unwrap();
+        // A stored interaction with a body but NULL content_hash (e.g. written by
+        // another writer or a legacy path).
+        conn.execute(
+            "INSERT INTO interactions (id, kind, title, body_text, content_hash)
+             VALUES ('i1', 'email', 'T', 'shared body text', NULL)",
+            [],
+        )
+        .unwrap();
+        let same = content_hash(&normalize_text("shared body text"));
+        assert!(
+            !body_changed(&conn, "i1", Some(&same)).unwrap(),
+            "a matching body must not report a change despite the null stored hash"
+        );
+        let different = content_hash(&normalize_text("a genuinely different body"));
+        assert!(
+            body_changed(&conn, "i1", Some(&different)).unwrap(),
+            "a different body still reports a change"
+        );
     }
 
     #[test]

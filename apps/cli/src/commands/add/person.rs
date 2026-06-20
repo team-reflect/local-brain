@@ -563,14 +563,16 @@ pub struct AddPersonFromEmailArgs<'a> {
     pub current: bool,
 }
 
-/// Fill blank `headline` / `location` on an existing person from importer-provided
-/// signature fields. Mirrors the blank-only enrichment `add person` uses; phones
-/// flow through `insert_person_handles`, emails through `enrich_duplicate_person_email`.
+/// Fill blank `headline` / `location` / denormalized `primary_phone` on an
+/// existing person from importer-provided signature fields. Mirrors the blank-only
+/// enrichment `add person` uses; phone *handles* still flow through
+/// `insert_person_handles`, emails through `enrich_duplicate_person_email`.
 fn fill_blank_contact_fields(
     conn: &Connection,
     id: &str,
     headline: Option<&str>,
     location: Option<&str>,
+    phone: Option<&str>,
 ) -> Result<(), CliError> {
     conn.execute(
         "UPDATE people
@@ -578,12 +580,20 @@ fn fill_blank_contact_fields(
                WHEN (headline IS NULL OR trim(headline) = '') AND ?2 IS NOT NULL THEN ?2 ELSE headline END,
              location = CASE
                WHEN (location IS NULL OR trim(location) = '') AND ?3 IS NOT NULL THEN ?3 ELSE location END,
+             primary_phone = CASE
+               WHEN (primary_phone IS NULL OR trim(primary_phone) = '') AND ?4 IS NOT NULL THEN ?4 ELSE primary_phone END,
              updated_at = CASE
                WHEN ((headline IS NULL OR trim(headline) = '') AND ?2 IS NOT NULL)
                  OR ((location IS NULL OR trim(location) = '') AND ?3 IS NOT NULL)
+                 OR ((primary_phone IS NULL OR trim(primary_phone) = '') AND ?4 IS NOT NULL)
                THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE updated_at END
          WHERE id = ?1",
-        params![id, normalize_optional(headline), normalize_optional(location)],
+        params![
+            id,
+            normalize_optional(headline),
+            normalize_optional(location),
+            normalize_optional(phone),
+        ],
     )?;
     Ok(())
 }
@@ -622,7 +632,13 @@ pub fn add_person_from_email(
             &existing,
             emails.first().map_or(args.email, |e| e.email.as_str()),
         )?;
-        fill_blank_contact_fields(&tx, &existing, args.headline, args.location)?;
+        fill_blank_contact_fields(
+            &tx,
+            &existing,
+            args.headline,
+            args.location,
+            phones.first().map(String::as_str),
+        )?;
         insert_external_identity(
             &tx,
             ExternalIdentityWrite {
@@ -1657,6 +1673,54 @@ mod tests {
             Some("https://example.com/robin-updated"),
             "a URL-less re-import must not clobber an existing external-identity URL"
         );
+    }
+
+    #[test]
+    fn person_from_email_duplicate_fills_blank_phone_and_headline() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // Seed a person with an email but blank phone/headline.
+        add_person(
+            &mut conn,
+            true,
+            person_args("Lisa Freeman", vec!["lisa@evensendesign.com"], vec![], None),
+        )
+        .unwrap();
+        let id = single_person_id(&conn, "Lisa Freeman");
+
+        // A person-from-email re-import resolves by email and supplies signature
+        // fields; the dup path must fill the blank primary_phone and headline.
+        add_person_from_email(
+            &mut conn,
+            true,
+            AddPersonFromEmailArgs {
+                full_name: "Lisa Freeman",
+                email: "lisa@evensendesign.com",
+                source_slug: Some("gmail"),
+                external_id: Some("msg-1"),
+                headline: Some("Lead Designer"),
+                phone: Some("+1 555 0100"),
+                location: None,
+                org: None,
+                org_domain: None,
+                title: None,
+                current: false,
+            },
+        )
+        .unwrap();
+
+        let (phone, headline): (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT primary_phone, headline FROM people WHERE id = ?1",
+                params![id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            phone.as_deref(),
+            Some("+1 555 0100"),
+            "blank primary_phone is filled"
+        );
+        assert_eq!(headline.as_deref(), Some("Lead Designer"));
     }
 
     #[test]

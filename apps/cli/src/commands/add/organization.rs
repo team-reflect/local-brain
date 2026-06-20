@@ -10,7 +10,7 @@ use super::identity::{
     external_kind, find_external_identity, insert_external_identity, source_id,
     ExternalIdentityWrite,
 };
-use super::text::{normalize_name, normalize_optional, normalize_title};
+use super::text::{normalize_domain, normalize_name, normalize_optional, normalize_title};
 use crate::commands::{LinkKind, LinkRef};
 use crate::error::CliError;
 use crate::id::new_id;
@@ -54,18 +54,6 @@ pub struct AddOrganizationArgs<'a> {
     pub external_id: Option<&'a str>,
     pub original_url: Option<&'a str>,
     pub allow_duplicate: bool,
-}
-
-/// Normalize an org domain for comparison and storage: lowercase, trim, and strip
-/// a leading `www.`. Returns `None` for blank.
-pub(super) fn normalize_domain(raw: Option<&str>) -> Option<String> {
-    normalize_optional(raw).map(|value| {
-        let lower = value.to_lowercase();
-        lower
-            .strip_prefix("www.")
-            .map(ToOwned::to_owned)
-            .unwrap_or(lower)
-    })
 }
 
 /// Resolve an existing active organization by normalized name, then by normalized
@@ -324,6 +312,25 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1, "name and domain dedupe must reuse one org");
+    }
+
+    #[test]
+    fn normalize_domain_strips_scheme_www_and_path() {
+        // Parity with core normalizeDomain (packages/core/src/text/normalize.ts).
+        assert_eq!(
+            normalize_domain(Some("https://www.Acme.com/team")).as_deref(),
+            Some("acme.com")
+        );
+        assert_eq!(
+            normalize_domain(Some("http://Evensen.Design/")).as_deref(),
+            Some("evensen.design")
+        );
+        assert_eq!(
+            normalize_domain(Some("  WWW.acme.com  ")).as_deref(),
+            Some("acme.com")
+        );
+        assert_eq!(normalize_domain(Some("   ")), None);
+        assert_eq!(normalize_domain(None), None);
     }
 
     #[test]

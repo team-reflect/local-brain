@@ -186,7 +186,10 @@ Notes:
   `--evidence interaction:<id>#<chunk_index>` when a task or memory comes from a
   specific source chunk. If you don't know the chunk index, cite by quote instead:
   `--evidence interaction:<id>~"a phrase from the source"` resolves to the chunk that
-  contains the phrase at write time (errors if no chunk matches).
+  contains the phrase at write time (errors if no chunk matches). Use a short,
+  distinctive, single-line phrase: matching is case-insensitive but literal against
+  the stored (whitespace-collapsed) text, so a quote spanning a line break won't
+  match; if the phrase appears in more than one chunk, the lowest-indexed one wins.
 
 ## Identify the user (do this once)
 

@@ -51,3 +51,19 @@ Branch: `claude/dazzling-bardeen-4e90be`. See [plan.md](plan.md).
   `openSuggestions`, per-source import watermarks (`imports[].latestAt`), and `counts`.
   Tolerates a brand-new brain (creates + migrates like `status`). Wired into the skill
   as the first step of the import workflow; contract + skill-lint + integration test.
+
+## "Soon"-tier follow-ups (now done in this PR)
+- [x] **#6a** Single-current-employer invariant is now a DB constraint — migration 0012
+  (schema v12) demotes pre-existing duplicates, syncs `current_organization_id`, and adds
+  a partial unique index `ON affiliations(person_id) WHERE is_current=1`. `upsert_affiliation`
+  demotes-first so it never trips the index. Cross-writer durable (CLI + desktop).
+- [x] **#6b** Rust `normalize_domain` now matches core `normalizeDomain` (strips scheme,
+  `www.`, and path), moved into the shared `text.rs` twin. Live: `https://www.x.com/about`
+  dedupes to `x.com`.
+- [x] **#7** `person-from-email` dup path now fills a blank denormalized `primary_phone`
+  (not just headline/location).
+- [x] **#8** Skill documents the evidence-quote gotchas (single-line distinctive phrase;
+  literal/whitespace-collapsed match; lowest-indexed chunk wins).
+- [x] **Bugbot (eea6a61):** `body_changed` recomputes the stored body's hash instead of
+  trusting a possibly-null/stale `content_hash`, so a matching body never falsely flags
+  `bodyChanged`.
