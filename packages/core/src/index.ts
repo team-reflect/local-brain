@@ -495,6 +495,7 @@ export {
   type GraphNode,
   type GraphEdge,
   type GraphNodeKind,
+  type GraphEdgeKind,
 } from './graph/getters'
 
 // Seed / demo data

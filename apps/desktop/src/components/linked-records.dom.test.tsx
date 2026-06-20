@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { LinkedRecord } from '@local-brain/core'
-import { screen } from '@testing-library/react'
+import { fireEvent, screen } from '@testing-library/react'
 import { LinkedRecords } from './linked-records'
 import { renderWithProviders } from '../test/utils'
 
@@ -31,5 +31,15 @@ describe('LinkedRecords', () => {
     renderWithProviders(<LinkedRecords title="Memories" records={records} />)
     const button = screen.getByRole('button', { name: /Alex founded Northwind/ })
     expect(button.hasAttribute('disabled')).toBe(true)
+  })
+
+  it('lets callers override record opening', () => {
+    const records: LinkedRecord[] = [{ kind: 'task', id: 't1', title: 'Send deck', subtitle: 'open' }]
+    const onOpenRecord = vi.fn()
+    renderWithProviders(<LinkedRecords title="Tasks" records={records} onOpenRecord={onOpenRecord} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Send deck/ }))
+
+    expect(onOpenRecord).toHaveBeenCalledWith(records[0])
   })
 })

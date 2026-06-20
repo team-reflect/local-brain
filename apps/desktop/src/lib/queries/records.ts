@@ -25,8 +25,10 @@ import {
   listPeople,
   listProjects,
   listTasks,
+  updateTask,
   type ListTasksOptions,
   type NewProject,
+  type TaskPatch,
 } from '@local-brain/core'
 
 /**
@@ -74,6 +76,24 @@ export function useTasks(options: ListTasksOptions = {}) {
 
 export function useTask(id: string) {
   return useQuery({ queryKey: ['task', id], queryFn: () => getTask(id).then((t) => t ?? null) })
+}
+
+export function useUpdateTask(id: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (patch: TaskPatch) => updateTask(id, patch),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+        queryClient.invalidateQueries({ queryKey: ['task', id] }),
+        queryClient.invalidateQueries({ queryKey: ['task', id, 'links'] }),
+        queryClient.invalidateQueries({ queryKey: ['task-assignees'] }),
+        queryClient.invalidateQueries({ queryKey: ['projects'] }),
+        queryClient.invalidateQueries({ queryKey: ['project'] }),
+        queryClient.invalidateQueries({ queryKey: ['graph'] }),
+      ])
+    },
+  })
 }
 
 export function useInteractions(limit?: number) {
