@@ -1,14 +1,33 @@
-import type { Graph, GraphNode, GraphNodeKind } from '@local-brain/core'
+import type { Graph, GraphNodeKind } from '@local-brain/core'
+import {
+  forceCollide,
+  forceLink,
+  forceManyBody,
+  forceRadial,
+  forceSimulation,
+  type SimulationLinkDatum,
+  type SimulationNodeDatum,
+} from 'd3-force'
 
 /**
- * A deterministic, dependency-free radial layout for the user-centered graph.
- * The self row sits at the center; every other node is placed in a concentric
- * kind band. Dense bands grow into additional rings instead of forcing the data
- * getter to truncate. Pure and synchronous so it can be unit-tested without a
- * DOM.
+ * A force-directed layout for the user-centered graph, run to convergence and
+ * returned statically (no animation). The self row is pinned at the center; the
+ * rest settle under a weighted spring/charge simulation so that people who share
+ * interactions cluster together - interaction edges pull harder and shorter the
+ * more often you interact, while structural edges (knows/owns/member/...) act as
+ * weak scaffolding. A faint radial force keeps a loose, legible "kind band" feel
+ * (people inner, documents/memories outer) instead of a free-floating hairball.
+ *
+ * The simulation is deterministic: positions are seeded from a fixed radial
+ * placement, d3-force uses its own seeded PRNG, and we tick a fixed number of
+ * times - so the same graph always produces the same layout. Pure and
+ * synchronous, so it can be unit-tested without a DOM.
  */
 
-export interface PositionedNode extends GraphNode {
+export interface PositionedNode {
+  id: string
+  kind: GraphNodeKind
+  label: string
   x: number
   y: number
   radius: number
@@ -36,7 +55,7 @@ export interface LayoutOptions {
   height?: number
 }
 
-/** Which concentric band a node kind lives on. */
+/** Which concentric band a node kind loosely belongs to. */
 const BAND_FOR_KIND: Record<GraphNodeKind, number> = {
   self: 0,
   person: 1,
@@ -47,98 +66,149 @@ const BAND_FOR_KIND: Record<GraphNodeKind, number> = {
   memory: 4,
 }
 
-/** A per-band angular offset so adjacent bands don't visually line up. */
+/** Target ring radius per band - drives both the seed and the radial force. */
+const BAND_RADIUS = [0, 150, 250, 340, 430]
+/** A per-band angular offset so seeded bands don't line up before relaxing. */
 const BAND_PHASE = [0, 0, 0.5, 0.9, 1.3]
+
 const DEFAULT_WIDTH = 880
 const DEFAULT_HEIGHT = 760
-const FIRST_RING_RADIUS = 115
-const BAND_GAP = 78
-const RING_GAP = 42
-const MIN_NODE_SPACING = 34
 const OUTER_MARGIN = 56
 
-interface PolarNode {
-  node: GraphNode
-  radius: number
-  angle: number
+// Hand-tuned force parameters. Adjust here to retune the layout's feel.
+const CHARGE = -260 // node repulsion (Barnes-Hut)
+const COLLIDE_RADIUS = 30 // keeps nodes (and their labels) from piling up
+const LINK_DIST_STRUCTURE = 120 // resting length of knows/owns/member/... springs
+const LINK_DIST_INTERACTION = 80 // base resting length of interaction springs
+const STRUCTURE_PULL = 0.04 // weak: structure only scaffolds
+const INTERACTION_PULL = 0.25 // per-interaction clustering pull, capped at 1
+const RADIAL_PULL = 0.045 // faint band bias to stay legible
+const ITERATIONS = 300 // fixed ticks about default alpha cool-down
+
+interface SimNode extends SimulationNodeDatum {
+  id: string
+  kind: GraphNodeKind
+  label: string
+  band: number
 }
 
-function ringCapacity(radius: number): number {
-  return Math.max(6, Math.floor((2 * Math.PI * radius) / MIN_NODE_SPACING))
+interface SimLink extends SimulationLinkDatum<SimNode> {
+  kind: string
+  weight?: number
+  interactionId?: string
+}
+
+/** Deterministically seed origin-centered positions from a radial placement. */
+function seedPositions(nodes: SimNode[]): void {
+  const byBand = new Map<number, SimNode[]>()
+  for (const node of nodes) {
+    const group = byBand.get(node.band) ?? []
+    group.push(node)
+    byBand.set(node.band, group)
+  }
+  for (const [band, group] of byBand) {
+    const radius = BAND_RADIUS[band] ?? BAND_RADIUS[BAND_RADIUS.length - 1]!
+    const phase = BAND_PHASE[band] ?? 0
+    group.forEach((node, index) => {
+      if (radius === 0) {
+        node.x = 0
+        node.y = 0
+        return
+      }
+      const angle = phase + (2 * Math.PI * index) / group.length
+      node.x = radius * Math.cos(angle)
+      node.y = radius * Math.sin(angle)
+    })
+  }
 }
 
 export function layoutGraph(graph: Graph, options: LayoutOptions = {}): GraphLayout {
-  // Bucket nodes by band, preserving the order the getter returned them in.
-  const bands: GraphNode[][] = BAND_PHASE.map(() => [])
-  for (const node of graph.nodes) {
-    bands[BAND_FOR_KIND[node.kind]]?.push(node)
-  }
+  const simNodes: SimNode[] = graph.nodes.map((node) => ({
+    id: node.id,
+    kind: node.kind,
+    label: node.label,
+    band: BAND_FOR_KIND[node.kind],
+  }))
+  const nodeById = new Map(simNodes.map((node) => [node.id, node]))
 
-  const polarNodes: PolarNode[] = []
-  let outerRadius = 0
-  let nextRadius = FIRST_RING_RADIUS
-
-  const selfNodes = bands[0] ?? []
-  selfNodes.forEach((node, index) => {
-    polarNodes.push({
-      node,
-      radius: index === 0 ? 0 : FIRST_RING_RADIUS,
-      angle: (2 * Math.PI * index) / Math.max(selfNodes.length, 1),
-    })
-  })
-  if (selfNodes.length > 1) {
-    outerRadius = FIRST_RING_RADIUS
-    nextRadius = FIRST_RING_RADIUS + BAND_GAP
-  }
-
-  for (let band = 1; band < bands.length; band += 1) {
-    const bandNodes = bands[band] ?? []
-    if (bandNodes.length === 0) continue
-    let remaining = bandNodes.length
-    let start = 0
-    let radius = Math.max(nextRadius, outerRadius + BAND_GAP)
-    while (remaining > 0) {
-      const count = Math.min(remaining, ringCapacity(radius))
-      const phase = BAND_PHASE[band] ?? 0
-      for (let index = 0; index < count; index += 1) {
-        polarNodes.push({
-          node: bandNodes[start + index]!,
-          radius,
-          angle: phase + (2 * Math.PI * index) / count,
-        })
-      }
-      outerRadius = Math.max(outerRadius, radius)
-      start += count
-      remaining -= count
-      radius += RING_GAP
+  // Pin the self row at the origin so it stays the visual center.
+  for (const node of simNodes) {
+    if (node.kind === 'self') {
+      node.fx = 0
+      node.fy = 0
     }
-    nextRadius = outerRadius + BAND_GAP
   }
 
-  const naturalSize = outerRadius > 0 ? outerRadius * 2 + OUTER_MARGIN * 2 : 0
-  const width = Math.max(options.width ?? DEFAULT_WIDTH, naturalSize)
-  const height = Math.max(options.height ?? DEFAULT_HEIGHT, naturalSize)
+  // forceLink throws on an unknown endpoint, so only wire edges whose endpoints
+  // are present nodes (this also preserves the "drop dangling edges" contract).
+  const simLinks: SimLink[] = []
+  for (const edge of graph.edges) {
+    if (!nodeById.has(edge.source) || !nodeById.has(edge.target)) continue
+    const link: SimLink = { source: edge.source, target: edge.target, kind: edge.kind }
+    if (edge.weight !== undefined) link.weight = edge.weight
+    if (edge.interactionId !== undefined) link.interactionId = edge.interactionId
+    simLinks.push(link)
+  }
+
+  seedPositions(simNodes)
+
+  const simulation = forceSimulation(simNodes)
+    .force(
+      'link',
+      forceLink<SimNode, SimLink>(simLinks)
+        .id((node) => node.id)
+        .distance((link) =>
+          link.kind === 'interaction'
+            ? LINK_DIST_INTERACTION / (1 + (link.weight ?? 1))
+            : LINK_DIST_STRUCTURE,
+        )
+        .strength((link) =>
+          link.kind === 'interaction'
+            ? Math.min(1, INTERACTION_PULL * (link.weight ?? 1))
+            : STRUCTURE_PULL,
+        ),
+    )
+    .force('charge', forceManyBody().strength(CHARGE))
+    .force('collide', forceCollide(COLLIDE_RADIUS))
+    .force('radial', forceRadial<SimNode>((node) => BAND_RADIUS[node.band] ?? 0, 0, 0).strength(RADIAL_PULL))
+    .stop()
+
+  for (let i = 0; i < ITERATIONS; i += 1) simulation.tick()
+
+  // Size the canvas around the settled extent, keeping the origin (self) centered.
+  let maxAbsX = 0
+  let maxAbsY = 0
+  for (const node of simNodes) {
+    maxAbsX = Math.max(maxAbsX, Math.abs(node.x ?? 0))
+    maxAbsY = Math.max(maxAbsY, Math.abs(node.y ?? 0))
+  }
+  const width = Math.max(options.width ?? DEFAULT_WIDTH, 2 * (maxAbsX + OUTER_MARGIN))
+  const height = Math.max(options.height ?? DEFAULT_HEIGHT, 2 * (maxAbsY + OUTER_MARGIN))
   const cx = width / 2
   const cy = height / 2
 
   const positioned = new Map<string, PositionedNode>()
-  for (const item of polarNodes) {
-    positioned.set(item.node.id, {
-      ...item.node,
-      x: item.radius === 0 ? cx : cx + item.radius * Math.cos(item.angle),
-      y: item.radius === 0 ? cy : cy + item.radius * Math.sin(item.angle),
-      radius: item.node.kind === 'self' ? 13 : 7,
+  for (const node of simNodes) {
+    positioned.set(node.id, {
+      id: node.id,
+      kind: node.kind,
+      label: node.label,
+      x: cx + (node.x ?? 0),
+      y: cy + (node.y ?? 0),
+      radius: node.kind === 'self' ? 13 : 7,
     })
   }
 
+  // After ticking, forceLink has replaced each link's source/target with the
+  // resolved node objects.
   const edges: PositionedEdge[] = []
-  for (const edge of graph.edges) {
-    const source = positioned.get(edge.source)
-    const target = positioned.get(edge.target)
+  for (const link of simLinks) {
+    const source = positioned.get((link.source as SimNode).id)
+    const target = positioned.get((link.target as SimNode).id)
     if (!source || !target) continue
-    const positionedEdge: PositionedEdge = { source, target, kind: edge.kind }
-    if (edge.weight !== undefined) positionedEdge.weight = edge.weight
-    if (edge.interactionId !== undefined) positionedEdge.interactionId = edge.interactionId
+    const positionedEdge: PositionedEdge = { source, target, kind: link.kind }
+    if (link.weight !== undefined) positionedEdge.weight = link.weight
+    if (link.interactionId !== undefined) positionedEdge.interactionId = link.interactionId
     edges.push(positionedEdge)
   }
 

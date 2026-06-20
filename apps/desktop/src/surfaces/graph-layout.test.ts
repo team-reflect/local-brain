@@ -47,11 +47,55 @@ describe('layoutGraph', () => {
     expect(layout.edges.every((edge) => 'x' in edge.source && 'x' in edge.target)).toBe(true)
   })
 
-  it('spreads people on the same ring to distinct angles', () => {
+  it('places people at distinct, non-overlapping positions', () => {
     const layout = layoutGraph(GRAPH)
     const people = layout.nodes.filter((node) => node.kind === 'person')
     expect(people).toHaveLength(2)
-    expect(people[0]?.x === people[1]?.x && people[0]?.y === people[1]?.y).toBe(false)
+    const [a, b] = people
+    expect(a?.x === b?.x && a?.y === b?.y).toBe(false)
+    // The collision force keeps them measurably apart.
+    expect(Math.hypot((a?.x ?? 0) - (b?.x ?? 0), (a?.y ?? 0) - (b?.y ?? 0))).toBeGreaterThan(10)
+  })
+
+  it('pulls people who share interactions closer than unconnected people', () => {
+    const graph: Graph = {
+      selfId: 'self',
+      nodes: [
+        { id: 'self', kind: 'self', label: 'You' },
+        { id: 'a', kind: 'person', label: 'A' },
+        { id: 'b', kind: 'person', label: 'B' },
+        { id: 'c', kind: 'person', label: 'C' },
+      ],
+      edges: [
+        { source: 'self', target: 'a', kind: 'knows' },
+        { source: 'self', target: 'b', kind: 'knows' },
+        { source: 'self', target: 'c', kind: 'knows' },
+        // A and B interact often; C interacts with neither.
+        { source: 'a', target: 'b', kind: 'interaction', weight: 5, interactionId: 'i1' },
+      ],
+    }
+    const byId = new Map(layoutGraph(graph).nodes.map((node) => [node.id, node]))
+    const dist = (p: string, q: string): number => {
+      const a = byId.get(p)
+      const b = byId.get(q)
+      return Math.hypot((a?.x ?? 0) - (b?.x ?? 0), (a?.y ?? 0) - (b?.y ?? 0))
+    }
+    expect(dist('a', 'b')).toBeLessThan(dist('a', 'c'))
+  })
+
+  it('handles a self-only graph without NaNs and keeps self centered', () => {
+    const layout = layoutGraph({
+      selfId: 'self',
+      nodes: [{ id: 'self', kind: 'self', label: 'You' }],
+      edges: [],
+    })
+    expect(layout.nodes).toHaveLength(1)
+    const self = layout.nodes[0]
+    expect(Number.isFinite(self?.x) && Number.isFinite(self?.y)).toBe(true)
+    expect(layout.width).toBe(880)
+    expect(layout.height).toBe(760)
+    expect(self?.x).toBe(440)
+    expect(self?.y).toBe(380)
   })
 
   it('carries interaction weight and target through to positioned edges', () => {
