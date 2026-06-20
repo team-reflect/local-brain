@@ -306,12 +306,12 @@ function EditableShell({
         onClick={onEdit}
         aria-label={`Edit ${label.toLowerCase()}`}
         className={cn(
-          'min-h-8 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30',
+          'flex min-h-8 w-full items-start justify-start rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30',
           multiline && 'min-h-16 whitespace-pre-wrap',
           muted && 'text-muted-foreground',
         )}
       >
-        {display}
+        <span className={cn('min-w-0', multiline && 'block w-full')}>{display}</span>
       </button>
     </div>
   )
