@@ -57,8 +57,9 @@ Measure on a developer workstation; treat as gates, re-measure on seed-large dat
 | Resident memory (idle) | < 250 MB |
 
 Notes: retrieval is FTS5 (indexed); the daily brief is a handful of indexed
-queries; the graph caps nodes per kind. Embeddings are off by default and must
-stay off the UI thread when added.
+queries; the graph is uncapped and must meet this target through layout and
+rendering performance. Embeddings are off by default and must stay off the UI
+thread when added.
 
 ## Privacy / model-boundary review
 

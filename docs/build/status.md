@@ -322,10 +322,10 @@ questions needing Alex.
   memories (`listMemoriesForRecord`); citations/evidence (`listCitationsForSubject`,
   `listEvidenceFromDocument`); chat conversations/messages (getters + `createConversation`
   / `addMessage` that writes the message and touches the conversation in one batch); a
-  user-centered `getGraph` assembler (self-hub + join-table edges, per-kind node caps with
-  `truncatedKinds`); and a `quickSearch` LIKE getter for the palette.
+  user-centered `getGraph` assembler (self-hub + join-table edges, uncapped typed
+  nodes); and a `quickSearch` LIKE getter for the palette.
 - Built the surfaces: an SVG **Graph** (a pure, unit-tested `graph-layout` radial layout,
-  click-to-navigate nodes, a kind legend, and a truncation note); the **Ask** chat shell
+  click-to-navigate nodes, a kind legend, and an expanding layout for dense graphs); the **Ask** chat shell
   (conversation list + thread + composer; persists a clearly-labeled Plan-06 placeholder
   answer — DEC-8); full **Settings** sections wired to the `settings.section` route param;
   the **Network → Organizations** tab + organization detail; richer

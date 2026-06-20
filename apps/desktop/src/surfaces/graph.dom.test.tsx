@@ -7,7 +7,6 @@ import { GraphSurface } from './graph'
 
 const GRAPH: Graph = {
   selfId: 'self',
-  truncatedKinds: [],
   nodes: [
     { id: 'self', kind: 'self', label: 'You' },
     { id: 'p1', kind: 'person', label: 'Ada Lovelace' },

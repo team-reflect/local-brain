@@ -4,7 +4,6 @@ import { layoutGraph } from './graph-layout'
 
 const GRAPH: Graph = {
   selfId: 'self',
-  truncatedKinds: [],
   nodes: [
     { id: 'self', kind: 'self', label: 'You' },
     { id: 'p1', kind: 'person', label: 'Alex' },
@@ -53,5 +52,26 @@ describe('layoutGraph', () => {
     const people = layout.nodes.filter((node) => node.kind === 'person')
     expect(people).toHaveLength(2)
     expect(people[0]?.x === people[1]?.x && people[0]?.y === people[1]?.y).toBe(false)
+  })
+
+  it('expands the canvas instead of dropping dense node sets', () => {
+    const graph: Graph = {
+      selfId: 'self',
+      nodes: [
+        { id: 'self', kind: 'self', label: 'You' },
+        ...Array.from({ length: 420 }, (_, index) => ({
+          id: `person-${index}`,
+          kind: 'person' as const,
+          label: `Person ${index}`,
+        })),
+      ],
+      edges: [],
+    }
+
+    const layout = layoutGraph(graph)
+
+    expect(layout.nodes).toHaveLength(graph.nodes.length)
+    expect(layout.width).toBeGreaterThan(880)
+    expect(layout.height).toBeGreaterThan(760)
   })
 })
