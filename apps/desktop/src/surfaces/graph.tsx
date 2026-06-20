@@ -124,9 +124,11 @@ function clientDeltaToGraphDelta(
 export function GraphSurface({
   showHeader = true,
   className,
+  fillAvailableHeight = false,
 }: {
   showHeader?: boolean
   className?: string
+  fillAvailableHeight?: boolean
 } = {}): ReactNode {
   const { navigate } = useRouter()
   const graph = useGraph()
@@ -262,7 +264,13 @@ export function GraphSurface({
   )
 
   return (
-    <div className={cn('mx-auto flex w-full max-w-5xl flex-col gap-4', className)}>
+    <div
+      className={cn(
+        'mx-auto flex w-full max-w-5xl flex-col gap-4',
+        fillAvailableHeight ? 'h-full min-h-0' : null,
+        className,
+      )}
+    >
       {showHeader ? <PageHead eyebrow="Graph" title="Graph" /> : null}
       {graph.isLoading ? (
         <Loading />
@@ -272,7 +280,12 @@ export function GraphSurface({
           hint="People, projects, and the records that connect them will appear here."
         />
       ) : (
-        <div className="relative min-h-[24rem] overflow-hidden">
+        <div
+          className={cn(
+            'relative overflow-hidden',
+            fillAvailableHeight ? 'min-h-0 flex-1' : 'min-h-[24rem]',
+          )}
+        >
           <div
             className="absolute top-3 right-3 z-10 flex w-44 flex-col gap-1.5 rounded-md border border-border bg-background/95 p-2 shadow-[0_8px_28px_rgba(2,6,23,0.12)]"
             role="group"
@@ -298,7 +311,14 @@ export function GraphSurface({
             ))}
           </div>
           {!layout || layout.nodes.length === 0 ? (
-            <div className="flex min-h-[24rem] items-center justify-center pt-48 sm:pt-0 sm:pr-48">
+            <div
+              className={cn(
+                'flex items-center justify-center',
+                fillAvailableHeight
+                  ? 'h-full min-h-0 pt-48 sm:pt-0 sm:pr-48'
+                  : 'min-h-[24rem] pt-48 sm:pt-0 sm:pr-48',
+              )}
+            >
               <EmptyState
                 title="All node types hidden"
                 hint="Turn on a node type to draw the graph."
@@ -308,7 +328,10 @@ export function GraphSurface({
             <svg
               ref={svgRef}
               viewBox={`0 0 ${layout.width} ${layout.height}`}
-              className="h-auto w-full cursor-grab touch-none select-none active:cursor-grabbing"
+              className={cn(
+                'w-full cursor-grab touch-none select-none active:cursor-grabbing',
+                fillAvailableHeight ? 'h-full' : 'h-auto',
+              )}
               role="img"
               aria-label="User-centered knowledge graph"
               onPointerDown={handlePointerDown}

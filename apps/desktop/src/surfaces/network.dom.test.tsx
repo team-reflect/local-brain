@@ -12,7 +12,10 @@ describe('NetworkSurface', () => {
 
     expect(await screen.findByText('Nothing to graph yet')).toBeDefined()
     expect(screen.getByRole('navigation', { name: 'Network' })).toBeDefined()
-    expect(container.querySelector('[data-testid="network-graph-layout"]')).toBeDefined()
+    const graphLayout = container.querySelector('[data-testid="network-graph-layout"]')
+    expect(graphLayout).toBeDefined()
+    expect(graphLayout?.className).toContain('overflow-hidden')
+    expect(screen.getByRole('navigation', { name: 'Network' }).className).toContain('top-0')
     expect(container.querySelector('[data-testid="network-list-layout"]')).toBeNull()
   })
 
