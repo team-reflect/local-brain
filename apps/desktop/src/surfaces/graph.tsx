@@ -93,6 +93,34 @@ function clampZoom(scale: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale))
 }
 
+interface FitTransform {
+  /** Pixels per viewBox unit (uniform — the viewBox keeps its aspect ratio). */
+  scale: number
+  /** Letterbox padding on each axis, from `xMidYMid` centering. */
+  offsetX: number
+  offsetY: number
+}
+
+/**
+ * How the viewBox lands inside the rendered SVG box under the default
+ * `xMidYMid meet`: scaled uniformly to fit, then centered. Pointer math must go
+ * through this — the box can be wider/taller than the viewBox, so mapping across
+ * the full rect would drift on letterboxed (height-bounded) routes.
+ */
+function fitTransform(
+  rect: { width: number; height: number },
+  layout: Pick<GraphLayout, 'width' | 'height'>,
+): FitTransform | null {
+  if (rect.width <= 0 || rect.height <= 0) return null
+  if (layout.width <= 0 || layout.height <= 0) return null
+  const scale = Math.min(rect.width / layout.width, rect.height / layout.height)
+  return {
+    scale,
+    offsetX: (rect.width - layout.width * scale) / 2,
+    offsetY: (rect.height - layout.height * scale) / 2,
+  }
+}
+
 function clientPointToGraphPoint(
   svg: SVGSVGElement,
   layout: Pick<GraphLayout, 'width' | 'height'>,
@@ -100,10 +128,11 @@ function clientPointToGraphPoint(
   clientY: number,
 ): GraphPoint | null {
   const rect = svg.getBoundingClientRect()
-  if (rect.width <= 0 || rect.height <= 0) return null
+  const fit = fitTransform(rect, layout)
+  if (!fit) return null
   return {
-    x: ((clientX - rect.left) / rect.width) * layout.width,
-    y: ((clientY - rect.top) / rect.height) * layout.height,
+    x: (clientX - rect.left - fit.offsetX) / fit.scale,
+    y: (clientY - rect.top - fit.offsetY) / fit.scale,
   }
 }
 
@@ -114,10 +143,12 @@ function clientDeltaToGraphDelta(
   deltaY: number,
 ): GraphPoint | null {
   const rect = svg.getBoundingClientRect()
-  if (rect.width <= 0 || rect.height <= 0) return null
+  const fit = fitTransform(rect, layout)
+  if (!fit) return null
+  // Centering offsets cancel for a delta; only the uniform scale matters.
   return {
-    x: (deltaX / rect.width) * layout.width,
-    y: (deltaY / rect.height) * layout.height,
+    x: deltaX / fit.scale,
+    y: deltaY / fit.scale,
   }
 }
 
@@ -308,6 +339,7 @@ export function GraphSurface({
             <svg
               ref={svgRef}
               viewBox={`0 0 ${layout.width} ${layout.height}`}
+              preserveAspectRatio="xMidYMid meet"
               className="h-full w-full cursor-grab touch-none select-none active:cursor-grabbing"
               role="img"
               aria-label="User-centered knowledge graph"

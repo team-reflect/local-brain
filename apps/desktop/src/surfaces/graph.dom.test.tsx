@@ -22,19 +22,21 @@ vi.mock('../lib/queries', () => ({
   useGraph: () => ({ data: GRAPH, isLoading: false }),
 }))
 
-function mockGraphBounds(): SVGSVGElement {
+function mockGraphBounds(rect?: { width: number; height: number }): SVGSVGElement {
+  const width = rect?.width ?? 880
+  const height = rect?.height ?? 760
   const svg = screen.getByRole('img', {
     name: 'User-centered knowledge graph',
   }) as unknown as SVGSVGElement
   Object.defineProperty(svg, 'getBoundingClientRect', {
     configurable: true,
     value: () => ({
-      bottom: 760,
-      height: 760,
+      bottom: height,
+      height,
       left: 0,
-      right: 880,
+      right: width,
       top: 0,
-      width: 880,
+      width,
       x: 0,
       y: 0,
       toJSON: () => ({}),
@@ -95,6 +97,49 @@ describe('GraphSurface', () => {
     dispatchPointer(svg, 'pointerup', { pointerId: 1, clientX: 188, clientY: 100 })
 
     expect(viewport.getAttribute('transform')).toBe('translate(88 0) scale(1)')
+  })
+
+  it('maps pan through the uniform letterbox scale, not the per-axis ratio', () => {
+    renderWithProviders(<GraphSurface showHeader={false} />)
+
+    // 440x760 box vs an 880x760 viewBox: width-bound, so the graph renders at a
+    // uniform scale of 0.5 with vertical letterboxing. An 88px diagonal drag must
+    // move the viewport 176 units on BOTH axes — the per-axis ratio would wrongly
+    // give 88 on Y.
+    const svg = mockGraphBounds({ width: 440, height: 760 })
+    const viewport = screen.getByTestId('graph-viewport')
+
+    dispatchPointer(svg, 'pointerdown', { pointerId: 1, button: 0, clientX: 100, clientY: 100 })
+    dispatchPointer(svg, 'pointermove', { pointerId: 1, clientX: 188, clientY: 188 })
+    dispatchPointer(svg, 'pointerup', { pointerId: 1, clientX: 188, clientY: 188 })
+
+    expect(viewport.getAttribute('transform')).toBe('translate(176 176) scale(1)')
+  })
+
+  it('anchors zoom on the cursor when the svg is letterboxed', () => {
+    renderWithProviders(<GraphSurface showHeader={false} />)
+
+    // Width-bound box (scale 0.5, 190px vertical letterbox). Cursor is above the
+    // vertical center so the letterbox offset matters: client (220,200) maps to
+    // viewBox (440,20). Zoom must keep that exact point fixed under the cursor.
+    const svg = mockGraphBounds({ width: 440, height: 760 })
+    const viewport = screen.getByTestId('graph-viewport')
+
+    fireEvent.wheel(svg, { deltaY: -100, clientX: 220, clientY: 200 })
+
+    const match = /^translate\(([-\d.]+) ([-\d.]+)\) scale\(([\d.]+)\)$/.exec(
+      viewport.getAttribute('transform') ?? '',
+    )
+    expect(match).not.toBeNull()
+    const [, txRaw, tyRaw, sRaw] = match as RegExpExecArray
+    const tx = Number(txRaw)
+    const ty = Number(tyRaw)
+    const scale = Number(sRaw)
+    expect(scale).toBeGreaterThan(1)
+    // The viewBox point under the cursor (440,20) stays under the cursor:
+    // newOffset + point * newScale === point.
+    expect(tx + 440 * scale).toBeCloseTo(440, 5)
+    expect(ty + 20 * scale).toBeCloseTo(20, 5)
   })
 
   it('zooms the graph around the wheel cursor', () => {
