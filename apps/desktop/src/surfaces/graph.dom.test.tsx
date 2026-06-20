@@ -125,6 +125,25 @@ describe('GraphSurface', () => {
     expect(window.location.pathname + window.location.search).toBe('/network?tab=graph')
   })
 
+  it('fills its container height with a bounded, non-overflowing svg', () => {
+    renderWithProviders(<GraphSurface showHeader={false} />)
+
+    const svg = screen.getByRole('img', { name: 'User-centered knowledge graph' })
+    // h-full (not h-auto) keeps the svg inside the route height; with the
+    // viewBox + default preserveAspectRatio it letterboxes instead of growing.
+    expect(svg.getAttribute('class')).toContain('h-full')
+    expect(svg.getAttribute('class')).toContain('w-full')
+    expect(svg.getAttribute('class')).not.toContain('h-auto')
+
+    const wrapper = svg.parentElement
+    expect(wrapper?.className).toContain('flex-1')
+    expect(wrapper?.className).toContain('min-h-0')
+
+    const root = wrapper?.parentElement
+    expect(root?.className).toContain('h-full')
+    expect(root?.className).toContain('min-h-0')
+  })
+
   it('still opens a node on click', async () => {
     window.history.pushState({}, '', '/network?tab=graph')
     renderWithProviders(<GraphSurface showHeader={false} />)
