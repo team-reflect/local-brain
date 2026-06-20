@@ -148,6 +148,7 @@ export function deriveMemoryEdges(
   memoryLinks: ReadonlyArray<MemoryLinkRef>,
   nodeIds: ReadonlySet<string>,
   peopleByInteraction: ReadonlyMap<string, ReadonlySet<string>>,
+  activeInteractionIds: ReadonlySet<string>,
   selfId: string | null,
 ): GraphEdge[] {
   const seen = new Set<string>()
@@ -165,7 +166,7 @@ export function deriveMemoryEdges(
       const people = peopleByInteraction.get(row.recordId) ?? new Set<string>()
       if (people.size > 0) {
         for (const personId of people) link(row.memoryId, personId)
-      } else if (selfId) {
+      } else if (selfId && activeInteractionIds.has(row.recordId)) {
         link(row.memoryId, selfId)
       }
     } else {
@@ -302,8 +303,11 @@ export async function getGraph(): Promise<Graph> {
   }
   // Interactions are edges, not nodes: dissolve each into weighted links between
   // the people it involved.
+  const activeInteractionIds = new Set(interactions.map((interaction) => interaction.id))
   const peopleByInteraction = groupInteractionPeople(interactions, participants, personIds)
-  edges.push(...deriveMemoryEdges(memoryLinks, nodeIds, peopleByInteraction, selfId))
+  edges.push(
+    ...deriveMemoryEdges(memoryLinks, nodeIds, peopleByInteraction, activeInteractionIds, selfId),
+  )
   edges.push(...deriveInteractionEdges(interactions, participants, personIds, selfId))
 
   return { selfId, nodes, edges }

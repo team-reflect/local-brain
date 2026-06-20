@@ -2864,7 +2864,10 @@ fn graph_is_centered_and_typed() {
              VALUES ('ml-from-interaction', 'mem-from-interaction', 'interaction', '{}');
              INSERT INTO memories (id, claim) VALUES ('mem-from-raw-interaction', 'Raw sender likes graphs');
              INSERT INTO memory_links (id, memory_id, record_type, record_id)
-             VALUES ('ml-from-raw-interaction', 'mem-from-raw-interaction', 'interaction', '{}');",
+             VALUES ('ml-from-raw-interaction', 'mem-from-raw-interaction', 'interaction', '{}');
+             INSERT INTO memories (id, claim) VALUES ('mem-from-missing-interaction', 'Missing interaction');
+             INSERT INTO memory_links (id, memory_id, record_type, record_id)
+             VALUES ('ml-from-missing-interaction', 'mem-from-missing-interaction', 'interaction', 'missing-interaction');",
             interaction["id"].as_str().unwrap(),
             raw_interaction["id"].as_str().unwrap()
         ))
@@ -2891,6 +2894,11 @@ fn graph_is_centered_and_typed() {
     assert!(graph["edges"].as_array().unwrap().iter().any(|edge| {
         edge["kind"] == "memory"
             && edge["source"] == "mem-from-raw-interaction"
+            && edge["target"] == "self"
+    }));
+    assert!(!graph["edges"].as_array().unwrap().iter().any(|edge| {
+        edge["kind"] == "memory"
+            && edge["source"] == "mem-from-missing-interaction"
             && edge["target"] == "self"
     }));
 }

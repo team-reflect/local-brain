@@ -189,6 +189,7 @@ fn derive_memory_edges(
     conn: &Connection,
     node_ids: &HashSet<String>,
     people_by_interaction: &HashMap<String, HashSet<String>>,
+    recency_rank: &HashMap<String, usize>,
     self_id: Option<&str>,
 ) -> Result<Vec<Value>, CliError> {
     let mut stmt = conn.prepare("SELECT memory_id, record_type, record_id FROM memory_links")?;
@@ -222,8 +223,10 @@ fn derive_memory_edges(
                 for person_id in people {
                     push(&memory_id, person_id);
                 }
-            } else if let Some(id) = self_id {
-                push(&memory_id, id);
+            } else if recency_rank.contains_key(&record_id) {
+                if let Some(id) = self_id {
+                    push(&memory_id, id);
+                }
             }
         } else {
             push(&memory_id, &record_id);
@@ -348,6 +351,7 @@ pub fn graph(conn: &Connection, json: bool) -> Result<(), CliError> {
         conn,
         &node_ids,
         &people_by_interaction,
+        &recency_rank,
         self_id.as_deref(),
     )?);
     edges.extend(derive_interaction_edges(
