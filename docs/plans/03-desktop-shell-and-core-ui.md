@@ -112,7 +112,8 @@ shared UI primitives, basic record detail pages.
 14. Build Projects table/detail pages.
 15. Build the Network Graph tab from typed records and links:
     - center on the user's own person row
-    - show people, organizations, projects, tasks, documents, interactions, and memories
+    - show people, organizations, projects, tasks, documents, and memories as nodes
+    - render interactions as weighted person-to-person links, not as individual nodes
     - open related detail pages from nodes
 16. Build Settings sections for about, brain identity, AI providers, and semantic search.
 
