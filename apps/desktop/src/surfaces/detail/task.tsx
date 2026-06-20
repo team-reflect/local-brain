@@ -12,6 +12,11 @@ import { cn } from '../../lib/utils'
 import { useProjects, useTask, useTaskLinks, useUnlinkFrom, useUpdateTask } from '../../lib/queries'
 
 const TASK_STATUSES = ['open', 'waiting', 'scheduled', 'done', 'canceled'] as const
+const PRIORITY_OPTIONS = [
+  { value: '1', label: 'High' },
+  { value: '2', label: 'Normal' },
+  { value: '3', label: 'Low' },
+] as const
 const AUTOSAVE_DELAY_MS = 350
 
 interface TaskFormState {
@@ -192,21 +197,29 @@ function TaskInlineEditor({ task }: { task: Task }): ReactNode {
 
           <EditableShell
             label="Priority"
-            display={form.priority || '—'}
+            display={priorityLabel(form.priority)}
             muted={!form.priority}
             onEdit={() => setActiveField('priority')}
           >
             {activeField === 'priority' ? (
-              <Input
+              <NativeSelect
                 autoFocus
                 aria-label="Priority"
                 value={form.priority}
-                inputMode="numeric"
-                pattern="[0-9]*"
                 onBlur={closeActiveField}
                 onChange={(event) => patchForm({ priority: event.target.value })}
                 aria-invalid={error === 'Priority must be a whole number' ? true : undefined}
-              />
+              >
+                <option value="">No priority</option>
+                {PRIORITY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+                {form.priority && !PRIORITY_OPTIONS.some((option) => option.value === form.priority) ? (
+                  <option value={form.priority}>{`Current priority (${form.priority})`}</option>
+                ) : null}
+              </NativeSelect>
             ) : null}
           </EditableShell>
         </div>
@@ -416,6 +429,11 @@ function serializeState(state: TaskFormState): string {
 
 function displayTitle(title: string): string {
   return title.trim() || 'Untitled task'
+}
+
+function priorityLabel(priority: string): string {
+  if (!priority) return 'No priority'
+  return PRIORITY_OPTIONS.find((option) => option.value === priority)?.label ?? `Priority ${priority}`
 }
 
 function toDateInput(value: string | null | undefined): string {

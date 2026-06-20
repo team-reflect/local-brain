@@ -94,6 +94,7 @@ describe('TaskDetail inline editing', () => {
     expect(await screen.findByRole('button', { name: 'Edit title' })).toBeDefined()
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
     expect(screen.queryByLabelText('Title')).toBeNull()
+    expect(screen.getByText('Normal')).toBeDefined()
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit title' }))
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: '  Send revised deck  ' } })
