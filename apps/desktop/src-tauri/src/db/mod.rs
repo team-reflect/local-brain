@@ -34,6 +34,7 @@ struct Active {
 /// write lands on the newly active brain.
 pub struct DbState {
     active: Mutex<Option<Active>>,
+    startup_error: Mutex<Option<String>>,
 }
 
 pub(crate) trait IntoActivePaths {
@@ -77,12 +78,21 @@ impl DbState {
                 conn,
                 paths: paths.into_active_paths(),
             })),
+            startup_error: Mutex::new(None),
         }
     }
 
     pub fn empty() -> Self {
         Self {
             active: Mutex::new(None),
+            startup_error: Mutex::new(None),
+        }
+    }
+
+    pub fn empty_with_startup_error(message: impl Into<String>) -> Self {
+        Self {
+            active: Mutex::new(None),
+            startup_error: Mutex::new(Some(message.into())),
         }
     }
 
@@ -94,6 +104,16 @@ impl DbState {
 
     fn no_active() -> AppError {
         AppError::no_database("choose a Local Brain folder to open a database")
+    }
+
+    /// The startup brain-load failure, if the remembered brain could not open.
+    pub fn startup_error(&self) -> AppResult<Option<String>> {
+        self.startup_error
+            .lock()
+            .map(|message| message.clone())
+            .map_err(|_| {
+                AppError::io("the startup database error lock was poisoned by an earlier panic")
+            })
     }
 
     /// The paths of the currently open brain.
@@ -140,6 +160,9 @@ impl DbState {
             conn,
             paths: paths.into_active_paths(),
         });
+        if let Ok(mut startup_error) = self.startup_error.lock() {
+            *startup_error = None;
+        }
         Ok(())
     }
 
@@ -288,6 +311,21 @@ mod tests {
         )
         .unwrap();
         assert_eq!(rows[0]["n"], json!(0), "the new brain has no rows");
+    }
+
+    #[test]
+    fn swap_clears_startup_error() {
+        let state = DbState::empty_with_startup_error("could not open remembered brain");
+        assert_eq!(
+            state.startup_error().unwrap().as_deref(),
+            Some("could not open remembered brain")
+        );
+
+        state
+            .swap_after(db(), paths(PathBuf::from("/tmp/remembered")), || Ok(()))
+            .unwrap();
+
+        assert_eq!(state.startup_error().unwrap(), None);
     }
 
     fn insert_person(conn: &Connection, id: &str, name: &str) -> AppResult<usize> {

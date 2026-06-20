@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from 'react'
 import { FolderOpen, FolderPlus } from 'lucide-react'
 import { useBrains, useOpenBrain } from '../lib/queries'
+import { errorMessage as formatErrorMessage } from '../lib/utils'
+import { Alert } from './alert'
 import { Button } from './button'
 import { BrainDialog, type BrainDialogMode } from './brain-dialog'
 import { BrainSwatch } from './brain-swatch'
@@ -10,13 +12,15 @@ import { BrainSwatch } from './brain-swatch'
  * root can't be resolved. It lists known brains to reopen and offers create/open
  * through the same folder-based flow as the switcher.
  */
-export function BrainChooser(): ReactNode {
+export function BrainChooser({ errorMessage }: { errorMessage?: string | null }): ReactNode {
   const brains = useBrains()
   const openBrain = useOpenBrain()
   const [dialog, setDialog] = useState<{ open: boolean; mode: BrainDialogMode }>({
     open: false,
     mode: 'open',
   })
+  const openError = openBrain.isError ? formatErrorMessage(openBrain.error) : null
+  const visibleError = openError ?? errorMessage
 
   return (
     <div className="flex h-full w-full items-center justify-center bg-background p-8">
@@ -39,6 +43,14 @@ export function BrainChooser(): ReactNode {
             Open another brain…
           </Button>
         </div>
+
+        {visibleError ? (
+          <div role="alert">
+            <Alert variant="error" className="text-center">
+              {visibleError}
+            </Alert>
+          </div>
+        ) : null}
 
         {(brains.data?.length ?? 0) > 0 ? (
           <div className="space-y-1">
