@@ -93,12 +93,12 @@ function TaskInlineEditor({ task }: { task: Task }): ReactNode {
     if (task.id !== taskIdRef.current) {
       taskIdRef.current = task.id
       pendingSaveRef.current = null
-      resetForm(next)
+      resetForm(next, { clearActiveField: true })
       return
     }
 
     if (!hasUnsavedChanges(formRef.current) && !inFlightSaveRef.current && pendingSaveRef.current === null) {
-      resetForm(next)
+      resetForm(next, { clearActiveField: false })
     }
   }, [task])
 
@@ -196,11 +196,14 @@ function TaskInlineEditor({ task }: { task: Task }): ReactNode {
     void drainSaveQueue()
   }
 
-  function resetForm(next: TaskFormState): void {
+  function resetForm(
+    next: TaskFormState,
+    { clearActiveField }: { clearActiveField: boolean },
+  ): void {
     formRef.current = next
     savedSnapshotRef.current = serializeState(next)
     skipAutosaveRef.current = true
-    setActiveField(null)
+    if (clearActiveField) setActiveField(null)
     setForm(next)
     setError(null)
     setSaveState('idle')

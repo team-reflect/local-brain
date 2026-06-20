@@ -64,6 +64,10 @@ function installTaskDetailBridge(overrides: Partial<TaskRow> = {}): CapturedCall
   installFakeBridge({
     respond: (command, args) => {
       calls.push({ command, args })
+      if (command === 'db_execute' && String(args['sql']).includes('update "tasks"')) {
+        const params = args['params'] as unknown[]
+        row.title = String(params[0])
+      }
       return undefined
     },
     query: (sql) => {
@@ -192,5 +196,16 @@ describe('TaskDetail inline editing', () => {
     unmount()
 
     await waitForUpdateContaining(calls, ['Unmounted edit'])
+  })
+
+  it('keeps the active field open after autosave refetches the task', async () => {
+    const calls = installTaskDetailBridge()
+    renderWithProviders(<TaskDetail id="t1" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit title' }))
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Focused edit' } })
+
+    await waitForUpdateContaining(calls, ['Focused edit'])
+    expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('Focused edit')
   })
 })
