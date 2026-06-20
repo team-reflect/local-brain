@@ -23,10 +23,12 @@ export function LinkedRecords({
   title,
   records,
   onUnlink,
+  onOpenRecord,
 }: {
   title: string
   records: LinkedRecord[]
   onUnlink?: (record: LinkedRecord) => void
+  onOpenRecord?: (record: LinkedRecord) => void
 }): ReactNode {
   const { navigate } = useRouter()
   if (records.length === 0) return null
@@ -37,12 +39,23 @@ export function LinkedRecords({
         {records.map((record) => {
           const route = routeForRecord(record.kind, record.id)
           const subtitle = hint(record.subtitle)
+          const canOpen = onOpenRecord !== undefined || route !== null
           return (
             <li key={`${record.kind}:${record.id}`} className="group flex items-center gap-1">
               <button
                 type="button"
-                disabled={route === null}
-                onClick={route ? () => navigate(route) : undefined}
+                disabled={!canOpen}
+                onClick={
+                  canOpen
+                    ? () => {
+                        if (onOpenRecord) {
+                          onOpenRecord(record)
+                          return
+                        }
+                        if (route) navigate(route)
+                      }
+                    : undefined
+                }
                 className="flex flex-1 items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left text-sm enabled:hover:bg-secondary/60 disabled:cursor-default"
               >
                 <span className="truncate text-foreground">{record.title}</span>

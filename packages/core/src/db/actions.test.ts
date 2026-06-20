@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { createInteraction, createPerson, completeTask, listPeople, setAiProvidersState } from '../index'
+import { createInteraction, createPerson, completeTask, listPeople, setAiProvidersState, updateTask } from '../index'
 import { captureDbBridge, type CapturedCall } from '../test/bridge'
 
 describe('domain actions', () => {
@@ -35,6 +35,16 @@ describe('domain actions', () => {
     expect(calls[0]?.command).toBe('db_execute')
     expect(String(calls[0]?.args['sql'])).toContain('update "tasks"')
     expect(calls[0]?.args['params']).toContain('done')
+  })
+
+  it('updateTask patches tasks and stamps updated_at', async () => {
+    await updateTask('t1', { title: '  Ship it ', status: 'waiting' })
+    expect(calls[0]?.command).toBe('db_execute')
+    expect(String(calls[0]?.args['sql'])).toContain('update "tasks"')
+    expect(String(calls[0]?.args['sql'])).toContain('"updated_at"')
+    expect(calls[0]?.args['params']).toContain('t1')
+    expect(calls[0]?.args['params']).toContain('Ship it')
+    expect(calls[0]?.args['params']).toContain('waiting')
   })
 
   it('createInteraction with participants writes both tables in one batch', async () => {
