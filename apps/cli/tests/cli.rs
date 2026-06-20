@@ -3272,3 +3272,111 @@ fn remember_evidence_by_quote_resolves_chunk() {
     );
     assert!(!out.status.success(), "an unmatched quote must error");
 }
+
+#[test]
+fn import_context_bundles_everything_an_import_needs() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+
+    // Empty brain: self is null, sources are seeded, counts are zero.
+    let empty = run_json(&db, &["--json", "import-context"]);
+    assert!(empty["self"].is_null(), "no self yet");
+    assert!(
+        empty["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["slug"] == "gmail"),
+        "seeded sources are listed"
+    );
+    assert_eq!(empty["counts"]["people"], 0);
+
+    // Populate: self, an existing project + org, a source-backed interaction, and an
+    // open suggestion.
+    run_json(
+        &db,
+        &[
+            "--json",
+            "self",
+            "set",
+            "--full-name",
+            "Alex MacCaw",
+            "--email",
+            "alex@maccaw.org",
+        ],
+    );
+    run_json(
+        &db,
+        &["--json", "add", "project", "--name", "Existing Project"],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "organization",
+            "--name",
+            "Evensen Design",
+            "--domain",
+            "evensendesign.com",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Thread",
+            "--source",
+            "gmail",
+            "--external-kind",
+            "thread",
+            "--external-id",
+            "thr-1",
+            "--occurred-at",
+            "2026-06-19T10:00:00Z",
+            "--text",
+            "body",
+        ],
+    );
+    run_json(
+        &db,
+        &["--json", "suggest", "project", "--title", "West Elizabeth"],
+    );
+
+    let ctx = run_json(&db, &["--json", "import-context"]);
+    assert_eq!(ctx["self"]["configured"], true);
+    assert_eq!(ctx["self"]["fullName"], "Alex MacCaw");
+    assert!(
+        ctx["projects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["name"] == "Existing Project"),
+        "existing projects are listed to link"
+    );
+    assert!(
+        ctx["organizations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|o| o["name"] == "Evensen Design"),
+        "existing organizations are listed to link"
+    );
+    assert_eq!(ctx["openSuggestions"].as_array().unwrap().len(), 1);
+
+    // Per-source watermark from the imported interaction.
+    let gmail = ctx["imports"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["source"] == "gmail")
+        .expect("gmail watermark present");
+    assert_eq!(gmail["latestAt"], "2026-06-19T10:00:00Z");
+    assert_eq!(gmail["count"], 1);
+    assert_eq!(ctx["counts"]["interactions"], 1);
+}

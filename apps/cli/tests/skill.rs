@@ -33,6 +33,7 @@ const DOCUMENTED: &[&[&str]] = &[
     &["report", "daily"],
     &["tasks", "plan-day"],
     &["changes"],
+    &["import-context"],
     &["graph"],
 ];
 

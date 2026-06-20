@@ -59,6 +59,7 @@ time*? → interaction. Is it *material to read/reference*? → document.
 ## Querying (read first)
 
 ```bash
+brain import-context --json                         # one-call context to prime an import
 brain contract --json                              # machine-readable CLI contract
 brain search "northwind partnership" --json        # ranked search across records/assets
 brain show person <id> --json                       # a record + its links
@@ -208,10 +209,16 @@ the self person has no email, set it before importing email or calendar data.
 External fetchers read upstream systems, then call `brain`. The CLI stays
 provider-neutral and must not know about helper tools such as `gws`:
 
-1. Read `brain --json contract` if the command shape is unclear.
-2. Confirm self handles with `brain self show`; register them with `brain self set`
-   if the self person has no email yet.
-3. Ensure a stable source slug with `brain source ensure`.
+1. Run `brain import-context` first. One call returns everything you need to honor
+   query-before-write: your `self` identity (with a `configured` flag), registered
+   `sources`, existing `projects` and `organizations` to link instead of fork, open
+   `openSuggestions` (so you don't re-propose), and per-source `imports[].latestAt`
+   watermarks (resume incrementally — e.g. Gmail `newer_than` the latest). Read
+   `brain --json contract` too if a command shape is unclear.
+2. If `self.configured` is false (or `self` is null), register the user's handles
+   with `brain self set` before importing, so participants resolve to them.
+3. Ensure a stable source slug with `brain source ensure` (skip if already in
+   `sources`).
 4. Import likely-human contacts with `brain add person` when the source is trusted,
    or `brain add person-from-email` for untrusted sender/display-name pairs. Capture
    the structured fields a signature gives you — `--headline`/`--phone`/`--location`

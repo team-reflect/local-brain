@@ -11,9 +11,36 @@ use super::identity::{
     ExternalIdentityWrite,
 };
 use super::text::{normalize_name, normalize_optional, normalize_title};
+use crate::commands::{LinkKind, LinkRef};
 use crate::error::CliError;
 use crate::id::new_id;
 use crate::output::print_json;
+
+/// Relink a suggestion's cited records to an organization on accept. Interactions,
+/// documents, and projects link via their typed join tables (provenance for why
+/// the org was proposed). Person links are intentionally skipped — making a cited
+/// person an employee is a stronger claim that belongs to `brain affiliate` /
+/// `add person --org`, not to ratifying an org proposal.
+pub(super) fn insert_organization_links(
+    conn: &Connection,
+    organization_id: &str,
+    links: &[LinkRef],
+) -> Result<(), CliError> {
+    for link in links {
+        let (table, other_col) = match link.kind {
+            LinkKind::Interaction => ("interaction_organizations", "interaction_id"),
+            LinkKind::Document => ("document_organizations", "document_id"),
+            LinkKind::Project => ("project_organizations", "project_id"),
+            LinkKind::Person | LinkKind::Organization | LinkKind::Task => continue,
+        };
+        let sql = format!(
+            "INSERT OR IGNORE INTO {table} (id, organization_id, {other_col}) VALUES (?1,?2,?3)"
+        );
+        conn.execute(&sql, params![new_id(), organization_id, link.id])
+            .map_err(|e| CliError::Runtime(format!("could not link organization evidence: {e}")))?;
+    }
+    Ok(())
+}
 
 pub struct AddOrganizationArgs<'a> {
     pub name: &'a str,

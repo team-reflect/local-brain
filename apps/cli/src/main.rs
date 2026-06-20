@@ -108,6 +108,8 @@ enum Command {
     },
     /// Records created/updated since a timestamp.
     Changes(ChangesArgs),
+    /// One-call read-first context for an importing agent.
+    ImportContext(ImportContextArgs),
     /// The user-centered knowledge graph as JSON.
     Graph(GraphArgs),
     /// Show a record by kind and id.
@@ -436,6 +438,13 @@ struct SearchArgs {
 struct ChangesArgs {
     #[arg(long)]
     since: String,
+    #[arg(long, default_value_t = 50)]
+    limit: usize,
+}
+
+#[derive(Parser)]
+struct ImportContextArgs {
+    /// Max projects/organizations to list (compare against counts for the total).
     #[arg(long, default_value_t = 50)]
     limit: usize,
 }
@@ -944,6 +953,12 @@ fn run(cli: Cli) -> Result<(), CliError> {
             let conn = db::open_existing(&db_path)?;
             report::changes(&conn, json, &a.since, a.limit)
         }
+        Command::ImportContext(a) => {
+            // A priming command: tolerate a brand-new brain (create + migrate like
+            // `status`) so "run this first" works before any data exists.
+            let conn = db::open(&db_path)?;
+            report::import_context(&conn, json, a.limit)
+        }
         Command::Graph(a) => {
             if a.center != "self" {
                 return Err(CliError::Runtime(format!(
@@ -1140,6 +1155,11 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
             "changes": {
                 "usage": "brain --json changes --since <iso> --limit 50",
                 "returns": "recently updated visible records",
+            },
+            "importContext": {
+                "usage": "brain --json import-context [--limit 50]",
+                "returns": "one-call read-first context for an import: self (with `configured` flag), sources, existing projects and organizations to link (capped by --limit), openSuggestions, per-source import watermarks (imports[].latestAt), and counts",
+                "use": "Run this first when importing. Honors query-before-write: link existing projects/orgs instead of forking, skip re-proposing open suggestions, and resume incrementally from imports[].latestAt.",
             },
             "graph": {
                 "usage": "brain --json graph --center self",

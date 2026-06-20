@@ -38,3 +38,16 @@ Branch: `claude/dazzling-bardeen-4e90be`. See [plan.md](plan.md).
 - [x] Skill now states the org-governance boundary: assert when confident, else
   `brain suggest organization`.
 - [x] Removed the throwaway demo memory created during live testing of `~quote`.
+
+## Second review round (PR #86)
+- [x] `suggest accept` (organization) now relinks cited interactions/documents/projects
+  to the org via typed join tables (people are still NOT auto-affiliated) (Bugbot).
+- [x] Re-proposing an *open* suggestion now merges newly-cited `--link` evidence
+  instead of dropping it; resolved proposals stay untouched (Bugbot).
+
+## Bonus — `brain import-context`
+- One-call read-first context for an importing agent: `self` (+ `configured` flag),
+  `sources`, existing `projects`/`organizations` to link (capped by `--limit`),
+  `openSuggestions`, per-source import watermarks (`imports[].latestAt`), and `counts`.
+  Tolerates a brand-new brain (creates + migrates like `status`). Wired into the skill
+  as the first step of the import workflow; contract + skill-lint + integration test.

@@ -9,7 +9,7 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 
-use super::organization::find_or_create_organization;
+use super::organization::{find_or_create_organization, insert_organization_links};
 use super::project::{find_or_create_project, insert_project_links};
 use super::text::{normalize_name, normalize_optional, normalize_title};
 use crate::commands::{LinkKind, LinkRef};
@@ -109,13 +109,26 @@ pub fn suggest(conn: &mut Connection, json: bool, args: SuggestArgs) -> Result<(
             row.get::<_, String>(2)?,
         ))
     })?;
+    let mut matched = None;
     for row in rows {
         let (id, existing_title, status) = row?;
         if normalize_name(&existing_title) == key {
-            return report_suggestion(json, &id, kind, &status, true);
+            matched = Some((id, status));
+            break;
         }
     }
     drop(stmt);
+    if let Some((id, status)) = matched {
+        // Merge any newly cited evidence into an existing *open* proposal
+        // (INSERT OR IGNORE dedupes the pairs); a resolved proposal is left
+        // untouched so an accepted/dismissed decision is never reopened or grown.
+        if status == "open" && !args.links.is_empty() {
+            let tx = conn.transaction()?;
+            insert_suggestion_links(&tx, &id, &args.links)?;
+            tx.commit()?;
+        }
+        return report_suggestion(json, &id, kind, &status, true);
+    }
 
     let payload = json!({
         "name": title,
@@ -262,10 +275,10 @@ pub fn accept_suggestion(conn: &mut Connection, json: bool, id: &str) -> Result<
             ("project", project_id)
         }
         "create_organization" => {
-            // Create the org only. Cited people are *evidence* for the proposal,
-            // not an assertion that they are employees — auto-affiliating them
-            // would manufacture relationships the user never confirmed. Use
-            // `brain affiliate` / `add person --org` to record employment.
+            // Relink cited interactions/documents/projects to the org as
+            // provenance. Cited *people* are evidence, NOT asserted employees —
+            // auto-affiliating them would manufacture relationships the user never
+            // confirmed; use `brain affiliate` / `add person --org` for employment.
             let name = payload_str("name").unwrap_or_else(|| suggestion.title.clone());
             let org_id = find_or_create_organization(
                 &tx,
@@ -273,6 +286,7 @@ pub fn accept_suggestion(conn: &mut Connection, json: bool, id: &str) -> Result<
                 payload_str("domain").as_deref(),
                 payload_str("kind").as_deref(),
             )?;
+            insert_organization_links(&tx, &org_id, &links)?;
             ("organization", org_id)
         }
         other => {
@@ -452,15 +466,16 @@ mod tests {
     }
 
     #[test]
-    fn accept_create_organization_applies_kind_and_does_not_affiliate_cited_people() {
+    fn accept_create_organization_relinks_interaction_but_does_not_affiliate_people() {
         let mut conn = brain_schema::open_in_memory().unwrap();
-        // A person cited only as evidence for the proposal — not an employee.
+        // A person and an interaction both cited as evidence for the proposal.
         let person = new_id();
         conn.execute(
             "INSERT INTO people (id, full_name) VALUES (?1, 'Cited Person')",
             params![person],
         )
         .unwrap();
+        let interaction = interaction_id(&conn);
         suggest(
             &mut conn,
             true,
@@ -471,10 +486,16 @@ mod tests {
                 domain: Some("evensendesign.com"),
                 org_kind: Some("studio"),
                 rationale: Some("two correspondents share the domain"),
-                links: vec![LinkRef {
-                    kind: LinkKind::Person,
-                    id: person.clone(),
-                }],
+                links: vec![
+                    LinkRef {
+                        kind: LinkKind::Person,
+                        id: person.clone(),
+                    },
+                    LinkRef {
+                        kind: LinkKind::Interaction,
+                        id: interaction.clone(),
+                    },
+                ],
             },
         )
         .unwrap();
@@ -502,6 +523,20 @@ mod tests {
             Some("studio"),
             "accept carries the proposed kind"
         );
+        // The cited interaction is relinked to the new org (provenance).
+        let linked_interaction: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM interaction_organizations
+                 WHERE organization_id = ?1 AND interaction_id = ?2",
+                params![org_id, interaction],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            linked_interaction, 1,
+            "cited interaction relinks to the org"
+        );
+        // But the cited person is NOT turned into an employee.
         let affiliations: i64 = conn
             .query_row("SELECT COUNT(*) FROM affiliations", [], |row| row.get(0))
             .unwrap();
@@ -509,6 +544,53 @@ mod tests {
             affiliations, 0,
             "cited people are evidence, not auto-affiliated employees"
         );
+    }
+
+    #[test]
+    fn re_suggesting_an_open_proposal_merges_new_evidence() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        let first = interaction_id(&conn);
+        suggest(
+            &mut conn,
+            true,
+            project_suggestion(
+                "West Elizabeth",
+                vec![LinkRef {
+                    kind: LinkKind::Interaction,
+                    id: first,
+                }],
+            ),
+        )
+        .unwrap();
+        let sid: String = conn
+            .query_row("SELECT id FROM suggestions", [], |row| row.get(0))
+            .unwrap();
+        // Re-propose the same (deduped) title with a *new* cited interaction.
+        let second = interaction_id(&conn);
+        suggest(
+            &mut conn,
+            true,
+            project_suggestion(
+                "  west   elizabeth ",
+                vec![LinkRef {
+                    kind: LinkKind::Interaction,
+                    id: second,
+                }],
+            ),
+        )
+        .unwrap();
+        let suggestions: i64 = conn
+            .query_row("SELECT COUNT(*) FROM suggestions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(suggestions, 1, "still one suggestion (deduped)");
+        let links: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM suggestion_links WHERE suggestion_id = ?1",
+                params![sid],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(links, 2, "new evidence merged into the open proposal");
     }
 
     #[test]
