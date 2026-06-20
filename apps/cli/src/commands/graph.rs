@@ -1,10 +1,11 @@
 //! `brain graph --center self` — the user-centered knowledge graph as JSON.
 //! Compatible (simpler) twin of the app's `getGraph`: the self person row is the
-//! hub, with typed nodes and edges drawn from the durable join tables. The graph
-//! is intentionally uncapped; renderers should optimize layout/rendering instead
-//! of shrinking the data contract.
+//! hub, with typed nodes and edges drawn from the durable join tables. Interactions
+//! are summarized as edge evidence instead of emitted as individual nodes. The graph
+//! is intentionally uncapped; renderers should optimize layout/rendering instead of
+//! shrinking the data contract.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::Connection;
 use serde_json::{json, Value};
@@ -62,6 +63,83 @@ fn edges_from(
         }
     }
     Ok(edges)
+}
+
+fn ordered_pair(a: &str, b: &str) -> (String, String) {
+    if a < b {
+        (a.to_string(), b.to_string())
+    } else {
+        (b.to_string(), a.to_string())
+    }
+}
+
+fn add_interaction_edge(
+    edges: &mut HashMap<String, (String, String, i64, Option<String>)>,
+    source: &str,
+    target: &str,
+    occurred_at: Option<&str>,
+) {
+    let (source, target) = ordered_pair(source, target);
+    let key = format!("{source}\0{target}\0interaction");
+    let entry = edges
+        .entry(key)
+        .or_insert_with(|| (source, target, 0, None));
+    entry.2 += 1;
+    if let Some(value) = occurred_at {
+        if entry.3.as_deref().map_or(true, |current| value > current) {
+            entry.3 = Some(value.to_string());
+        }
+    }
+}
+
+fn interaction_people(
+    conn: &Connection,
+) -> Result<HashMap<String, Vec<(String, Option<String>)>>, CliError> {
+    let mut stmt = conn.prepare(
+        "SELECT ip.interaction_id, ip.person_id, i.occurred_at
+           FROM interaction_participants ip
+           JOIN interactions i ON i.id = ip.interaction_id
+          WHERE i.archived_at IS NULL AND ip.person_id IS NOT NULL",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+        ))
+    })?;
+    let mut grouped: HashMap<String, Vec<(String, Option<String>)>> = HashMap::new();
+    for row in rows {
+        let (interaction_id, person_id, occurred_at) = row?;
+        grouped
+            .entry(interaction_id)
+            .or_default()
+            .push((person_id, occurred_at));
+    }
+    Ok(grouped)
+}
+
+fn interaction_targets(
+    conn: &Connection,
+    sql: &str,
+) -> Result<HashMap<String, Vec<(String, Option<String>)>>, CliError> {
+    let mut stmt = conn.prepare(sql)?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+        ))
+    })?;
+    let mut grouped: HashMap<String, Vec<(String, Option<String>)>> = HashMap::new();
+    for row in rows {
+        let (interaction_id, target_id, occurred_at) = row?;
+        grouped
+            .entry(interaction_id)
+            .or_default()
+            .push((target_id, occurred_at));
+    }
+    Ok(grouped)
 }
 
 pub fn graph(conn: &Connection, json: bool) -> Result<(), CliError> {
@@ -128,13 +206,6 @@ pub fn graph(conn: &Connection, json: bool) -> Result<(), CliError> {
     )?;
     collect(
         conn,
-        "SELECT id, COALESCE(title, kind) FROM interactions WHERE archived_at IS NULL ORDER BY occurred_at DESC",
-        &[],
-        "interaction",
-        &mut nodes,
-    )?;
-    collect(
-        conn,
         "SELECT id, claim FROM memories WHERE archived_at IS NULL ORDER BY created_at DESC",
         &[],
         "memory",
@@ -171,12 +242,6 @@ pub fn graph(conn: &Connection, json: bool) -> Result<(), CliError> {
     )?);
     edges.extend(edges_from(
         conn,
-        "SELECT interaction_id, person_id FROM interaction_participants WHERE person_id IS NOT NULL",
-        "participant",
-        &node_ids,
-    )?);
-    edges.extend(edges_from(
-        conn,
         "SELECT project_id, id FROM tasks WHERE project_id IS NOT NULL AND archived_at IS NULL",
         "task",
         &node_ids,
@@ -187,6 +252,125 @@ pub fn graph(conn: &Connection, json: bool) -> Result<(), CliError> {
         "memory",
         &node_ids,
     )?);
+
+    let people_by_interaction = interaction_people(conn)?;
+    let orgs_by_interaction = interaction_targets(
+        conn,
+        "SELECT io.interaction_id, io.organization_id, i.occurred_at
+           FROM interaction_organizations io
+           JOIN interactions i ON i.id = io.interaction_id
+          WHERE i.archived_at IS NULL",
+    )?;
+    let projects_by_interaction = interaction_targets(
+        conn,
+        "SELECT pi.interaction_id, pi.project_id, i.occurred_at
+           FROM project_interactions pi
+           JOIN interactions i ON i.id = pi.interaction_id
+          WHERE i.archived_at IS NULL",
+    )?;
+    let tasks_by_interaction = interaction_targets(
+        conn,
+        "SELECT ti.interaction_id, ti.task_id, i.occurred_at
+           FROM task_interactions ti
+           JOIN interactions i ON i.id = ti.interaction_id
+          WHERE i.archived_at IS NULL
+          UNION
+         SELECT t.origin_interaction_id, t.id, i.occurred_at
+           FROM tasks t
+           JOIN interactions i ON i.id = t.origin_interaction_id
+          WHERE t.archived_at IS NULL AND i.archived_at IS NULL",
+    )?;
+    let mut interaction_edges: HashMap<String, (String, String, i64, Option<String>)> =
+        HashMap::new();
+
+    for (interaction_id, people) in &people_by_interaction {
+        for a in 0..people.len() {
+            let (source, occurred_at) = &people[a];
+            for (target, target_occurred_at) in people.iter().skip(a + 1) {
+                if node_ids.contains(source) && node_ids.contains(target) {
+                    add_interaction_edge(
+                        &mut interaction_edges,
+                        source,
+                        target,
+                        occurred_at.as_deref().or(target_occurred_at.as_deref()),
+                    );
+                }
+            }
+        }
+
+        let has_self = self_id
+            .as_ref()
+            .is_some_and(|id| people.iter().any(|(person_id, _)| person_id == id));
+        for (person_id, occurred_at) in people {
+            if let Some(id) = &self_id {
+                if !has_self
+                    && person_id != id
+                    && node_ids.contains(id)
+                    && node_ids.contains(person_id)
+                {
+                    add_interaction_edge(
+                        &mut interaction_edges,
+                        id,
+                        person_id,
+                        occurred_at.as_deref(),
+                    );
+                }
+            }
+
+            for (org_id, occurred_at) in orgs_by_interaction
+                .get(interaction_id)
+                .into_iter()
+                .flatten()
+            {
+                if node_ids.contains(person_id) && node_ids.contains(org_id) {
+                    add_interaction_edge(
+                        &mut interaction_edges,
+                        person_id,
+                        org_id,
+                        occurred_at.as_deref(),
+                    );
+                }
+            }
+            for (project_id, occurred_at) in projects_by_interaction
+                .get(interaction_id)
+                .into_iter()
+                .flatten()
+            {
+                if node_ids.contains(person_id) && node_ids.contains(project_id) {
+                    add_interaction_edge(
+                        &mut interaction_edges,
+                        person_id,
+                        project_id,
+                        occurred_at.as_deref(),
+                    );
+                }
+            }
+            for (task_id, occurred_at) in tasks_by_interaction
+                .get(interaction_id)
+                .into_iter()
+                .flatten()
+            {
+                if node_ids.contains(person_id) && node_ids.contains(task_id) {
+                    add_interaction_edge(
+                        &mut interaction_edges,
+                        person_id,
+                        task_id,
+                        occurred_at.as_deref(),
+                    );
+                }
+            }
+        }
+    }
+
+    for (_, (source, target, count, latest)) in interaction_edges {
+        edges.push(json!({
+            "source": source,
+            "target": target,
+            "kind": "interaction",
+            "interactionCount": count,
+            "latestInteractionAt": latest,
+        }));
+    }
 
     let graph = json!({
         "selfId": self_id,

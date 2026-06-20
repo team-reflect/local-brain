@@ -42,9 +42,9 @@ interaction.
 - **Projects:** manually curated areas of active or archived work, from professional
   deals to home projects or travel planning.
 - **Tasks:** commitments, follow-ups, reminders, waiting items, and scheduled actions.
-- **Graph:** a derived visual map of the user's brain, with the user at the center and
-  connected people, organizations, projects, tasks, documents, interactions, and
-  memories around them.
+- **Graph:** a derived visual map of the user's brain, with the user at the center,
+  typed records around them, and interactions summarized as evidence on links rather
+  than rendered as individual nodes.
 - **Interactions:** human exchanges: meetings, calls, emails, messages, chats, voice
   notes, notes, and events.
 - **Documents:** user-readable artifacts and reference material: notes, PDFs, text

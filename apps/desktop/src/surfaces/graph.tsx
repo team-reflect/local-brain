@@ -25,7 +25,6 @@ const KIND_COLOR: Record<GraphNodeKind, string> = {
   project: '#059669',
   task: '#0891b2',
   document: '#64748b',
-  interaction: '#db2777',
   memory: '#d97706',
 }
 
@@ -36,9 +35,10 @@ const KIND_LABEL: Record<GraphNodeKind, string> = {
   project: 'Projects',
   task: 'Tasks',
   document: 'Documents',
-  interaction: 'Interactions',
   memory: 'Memories',
 }
+
+const INTERACTION_EDGE_COLOR = '#db2777'
 
 const ALL_KINDS = Object.keys(KIND_LABEL) as GraphNodeKind[]
 const DEFAULT_VIEWPORT = { offsetX: 0, offsetY: 0, scale: 1 }
@@ -77,8 +77,6 @@ function routeForNode(node: PositionedNode): Route | null {
       return { kind: 'task', id: node.id }
     case 'document':
       return { kind: 'document', id: node.id }
-    case 'interaction':
-      return { kind: 'interaction', id: node.id }
     case 'memory':
       return null
   }
@@ -313,7 +311,7 @@ export function GraphSurface({ showHeader = true }: { showHeader?: boolean } = {
                 data-testid="graph-viewport"
                 transform={`translate(${viewport.offsetX} ${viewport.offsetY}) scale(${viewport.scale})`}
               >
-                <g stroke="hsl(var(--border))" strokeWidth={1}>
+                <g>
                   {layout.edges.map((edge, index) => (
                     <line
                       key={`${edge.source.id}-${edge.target.id}-${index}`}
@@ -321,7 +319,13 @@ export function GraphSurface({ showHeader = true }: { showHeader?: boolean } = {
                       y1={edge.source.y}
                       x2={edge.target.x}
                       y2={edge.target.y}
-                      strokeOpacity={0.5}
+                      stroke={edge.kind === 'interaction' ? INTERACTION_EDGE_COLOR : 'hsl(var(--border))'}
+                      strokeWidth={
+                        edge.kind === 'interaction'
+                          ? Math.min(3, 1 + (edge.interactionCount ?? 1) * 0.35)
+                          : 1
+                      }
+                      strokeOpacity={edge.kind === 'interaction' ? 0.65 : 0.5}
                     />
                   ))}
                 </g>

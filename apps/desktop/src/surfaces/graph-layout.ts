@@ -1,4 +1,4 @@
-import type { Graph, GraphNode, GraphNodeKind } from '@local-brain/core'
+import type { Graph, GraphEdge, GraphNode, GraphNodeKind } from '@local-brain/core'
 
 /**
  * A deterministic, dependency-free radial layout for the user-centered graph.
@@ -17,7 +17,9 @@ export interface PositionedNode extends GraphNode {
 export interface PositionedEdge {
   source: PositionedNode
   target: PositionedNode
-  kind: string
+  kind: GraphEdge['kind']
+  interactionCount?: number
+  latestInteractionAt?: string | null
 }
 
 export interface GraphLayout {
@@ -39,7 +41,6 @@ const BAND_FOR_KIND: Record<GraphNodeKind, number> = {
   organization: 2,
   project: 2,
   task: 3,
-  interaction: 3,
   document: 4,
   memory: 4,
 }
@@ -132,7 +133,17 @@ export function layoutGraph(graph: Graph, options: LayoutOptions = {}): GraphLay
   for (const edge of graph.edges) {
     const source = positioned.get(edge.source)
     const target = positioned.get(edge.target)
-    if (source && target) edges.push({ source, target, kind: edge.kind })
+    if (source && target) {
+      edges.push({
+        source,
+        target,
+        kind: edge.kind,
+        ...(edge.interactionCount !== undefined ? { interactionCount: edge.interactionCount } : {}),
+        ...(edge.latestInteractionAt !== undefined
+          ? { latestInteractionAt: edge.latestInteractionAt }
+          : {}),
+      })
+    }
   }
 
   return { width, height, nodes: [...positioned.values()], edges }

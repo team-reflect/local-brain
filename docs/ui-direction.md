@@ -83,8 +83,9 @@ Tasks
 Network
   - Graph tab
     - user-centered graph
-    - people, organizations, projects, tasks, documents, interactions, and memories
-    - optional filters by node type, time, strength, and project
+    - people, organizations, projects, tasks, documents, and memories as nodes
+    - interactions as linking evidence between nodes, summarized by count and recency
+    - optional filters by node type, interaction recency, relationship strength, and project
     - click a node to open the related detail page
   - People tab
     - people table
@@ -207,8 +208,8 @@ Settings
 | Network              |                 [Alex]                       |
 | Projects             |              /    |    \\                    |
 | Graph                |        Maya       Home Reno       Acme        |
-| Settings             |       /   \\          |          /  \\       |
-|                      | Budget  Call   Tile task   Jordan  Contract  |
+| Settings             |       /    \\         |          /  \\       |
+|                      | Budget 2x  Tile task   Jordan  Contract      |
 |                      |                                              |
 |                      | Selected: Home Reno                          |
 |                      | Tasks | People | Interactions | Documents    |
@@ -224,5 +225,9 @@ Settings
   fact from the detail page where it appears.
 - Graph should be a derived navigation and demonstration surface, not the storage
   model.
+- Graph should not render every interaction as a node. Meetings, emails, calls, and
+  messages should strengthen or annotate the links between people, organizations,
+  projects, and tasks, with individual interactions browsed from detail pages, search,
+  Today, and Ask.
 - Imported text should become a document or interaction immediately.
 - No mandatory review queue for extracted data.
