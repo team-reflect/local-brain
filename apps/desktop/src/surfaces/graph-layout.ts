@@ -18,6 +18,10 @@ export interface PositionedEdge {
   source: PositionedNode
   target: PositionedNode
   kind: string
+  /** For interaction edges: how many interactions connect this pair. */
+  weight?: number
+  /** For interaction edges: the interaction to open when the edge is clicked. */
+  interactionId?: string
 }
 
 export interface GraphLayout {
@@ -39,7 +43,6 @@ const BAND_FOR_KIND: Record<GraphNodeKind, number> = {
   organization: 2,
   project: 2,
   task: 3,
-  interaction: 3,
   document: 4,
   memory: 4,
 }
@@ -132,7 +135,11 @@ export function layoutGraph(graph: Graph, options: LayoutOptions = {}): GraphLay
   for (const edge of graph.edges) {
     const source = positioned.get(edge.source)
     const target = positioned.get(edge.target)
-    if (source && target) edges.push({ source, target, kind: edge.kind })
+    if (!source || !target) continue
+    const positionedEdge: PositionedEdge = { source, target, kind: edge.kind }
+    if (edge.weight !== undefined) positionedEdge.weight = edge.weight
+    if (edge.interactionId !== undefined) positionedEdge.interactionId = edge.interactionId
+    edges.push(positionedEdge)
   }
 
   return { width, height, nodes: [...positioned.values()], edges }

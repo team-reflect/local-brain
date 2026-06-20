@@ -154,9 +154,11 @@ describe('03b read getters (real SQLite round-trip over the seed)', () => {
     const graph = await getGraph()
     expect(graph.selfId).toBeTruthy()
     expect(graph).not.toHaveProperty('truncatedKinds')
-    // 3 people + 1 org + 1 project + 2 tasks + 1 doc + 1 interaction + 1 memory.
-    expect(graph.nodes).toHaveLength(10)
+    // 3 people + 1 org + 1 project + 2 tasks + 1 doc + 1 memory. Interactions are
+    // edges now, not nodes.
+    expect(graph.nodes).toHaveLength(9)
     expect(graph.nodes.filter((n) => n.kind === 'self')).toHaveLength(1)
+    expect(graph.nodes.some((n) => n.kind === 'interaction')).toBe(false)
 
     // The self row is the hub: edges to the two other people and the project.
     const fromSelf = graph.edges.filter((e) => e.source === graph.selfId)
@@ -165,6 +167,15 @@ describe('03b read getters (real SQLite round-trip over the seed)', () => {
     // Join-table edges are present and reference real nodes.
     expect(graph.edges.some((e) => e.kind === 'affiliation')).toBe(true)
     expect(graph.edges.some((e) => e.kind === 'memory')).toBe(true)
+
+    // The single-participant "Northwind kickoff" dissolves into one weighted
+    // interaction edge linking you to its attendee, opening that interaction.
+    const interactionEdges = graph.edges.filter((e) => e.kind === 'interaction')
+    expect(interactionEdges).toHaveLength(1)
+    expect(interactionEdges[0].weight).toBe(1)
+    expect(interactionEdges[0].interactionId).toBeTruthy()
+    expect([interactionEdges[0].source, interactionEdges[0].target]).toContain(graph.selfId)
+
     const ids = new Set(graph.nodes.map((n) => n.id))
     expect(graph.edges.every((e) => ids.has(e.source) && ids.has(e.target))).toBe(true)
   })

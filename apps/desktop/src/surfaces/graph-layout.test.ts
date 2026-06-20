@@ -54,6 +54,20 @@ describe('layoutGraph', () => {
     expect(people[0]?.x === people[1]?.x && people[0]?.y === people[1]?.y).toBe(false)
   })
 
+  it('carries interaction weight and target through to positioned edges', () => {
+    const graph: Graph = {
+      selfId: 'self',
+      nodes: [
+        { id: 'self', kind: 'self', label: 'You' },
+        { id: 'p1', kind: 'person', label: 'Alex' },
+      ],
+      edges: [{ source: 'self', target: 'p1', kind: 'interaction', weight: 4, interactionId: 'int9' }],
+    }
+    const edge = layoutGraph(graph).edges.find((candidate) => candidate.kind === 'interaction')
+    expect(edge?.weight).toBe(4)
+    expect(edge?.interactionId).toBe('int9')
+  })
+
   it('expands the canvas instead of dropping dense node sets', () => {
     const graph: Graph = {
       selfId: 'self',
