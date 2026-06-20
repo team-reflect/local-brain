@@ -81,17 +81,18 @@ function updateCalls(calls: CapturedCall[]): CapturedCall[] {
   )
 }
 
-describe('TaskDetail editing', () => {
-  it('validates title and saves editable fields', async () => {
+async function waitForUpdate(calls: CapturedCall[]): Promise<unknown[]> {
+  await waitFor(() => expect(updateCalls(calls).length).toBeGreaterThan(0))
+  return updateCalls(calls).at(-1)?.args['params'] as unknown[]
+}
+
+describe('TaskDetail inline editing', () => {
+  it('autosaves editable fields inline', async () => {
     const calls = installTaskDetailBridge()
     renderWithProviders(<TaskDetail id="t1" />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
-    fireEvent.change(screen.getByLabelText('Title'), { target: { value: '   ' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-
-    expect(await screen.findByText('Title is required')).toBeDefined()
-    expect(updateCalls(calls)).toHaveLength(0)
+    expect(await screen.findByLabelText('Title')).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
 
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: '  Send revised deck  ' } })
     fireEvent.change(screen.getByLabelText('Description'), { target: { value: '  Add pricing  ' } })
@@ -100,10 +101,8 @@ describe('TaskDetail editing', () => {
     fireEvent.change(screen.getByLabelText('Due'), { target: { value: '2026-07-10' } })
     fireEvent.change(screen.getByLabelText('Scheduled'), { target: { value: '2026-07-08' } })
     fireEvent.change(screen.getByLabelText('Project'), { target: { value: '' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
-    await waitFor(() => expect(updateCalls(calls)).toHaveLength(1))
-    const params = updateCalls(calls)[0]?.args['params'] as unknown[]
+    const params = await waitForUpdate(calls)
     expect(params).toContain('Send revised deck')
     expect(params).toContain('Add pricing')
     expect(params).toContain('waiting')
@@ -111,19 +110,25 @@ describe('TaskDetail editing', () => {
     expect(params).toContain('2026-07-10')
     expect(params).toContain('2026-07-08')
     expect(params).toContain(null)
-    expect(await screen.findByRole('button', { name: 'Edit' })).toBeDefined()
+  })
+
+  it('does not save an invalid blank title', async () => {
+    const calls = installTaskDetailBridge()
+    renderWithProviders(<TaskDetail id="t1" />)
+
+    fireEvent.change(await screen.findByLabelText('Title'), { target: { value: '   ' } })
+
+    expect(await screen.findByText('Title is required')).toBeDefined()
+    expect(updateCalls(calls)).toHaveLength(0)
   })
 
   it('sets completedAt when status changes to done', async () => {
     const calls = installTaskDetailBridge({ status: 'open', completed_at: null })
     renderWithProviders(<TaskDetail id="t1" />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
-    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'done' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.change(await screen.findByLabelText('Status'), { target: { value: 'done' } })
 
-    await waitFor(() => expect(updateCalls(calls)).toHaveLength(1))
-    const params = updateCalls(calls)[0]?.args['params'] as unknown[]
+    const params = await waitForUpdate(calls)
     expect(params).toContain('done')
     expect(params.some((param) => typeof param === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(param))).toBe(true)
   })
@@ -132,25 +137,10 @@ describe('TaskDetail editing', () => {
     const calls = installTaskDetailBridge({ status: 'done', completed_at: '2026-06-18' })
     renderWithProviders(<TaskDetail id="t1" />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
-    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'open' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.change(await screen.findByLabelText('Status'), { target: { value: 'open' } })
 
-    await waitFor(() => expect(updateCalls(calls)).toHaveLength(1))
-    const params = updateCalls(calls)[0]?.args['params'] as unknown[]
+    const params = await waitForUpdate(calls)
     expect(params).toContain('open')
     expect(params).toContain(null)
-  })
-
-  it('cancels without saving', async () => {
-    const calls = installTaskDetailBridge()
-    renderWithProviders(<TaskDetail id="t1" />)
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
-    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Changed' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-
-    expect(await screen.findByRole('heading', { name: 'Send deck' })).toBeDefined()
-    expect(updateCalls(calls)).toHaveLength(0)
   })
 })

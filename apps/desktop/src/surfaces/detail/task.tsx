@@ -1,9 +1,6 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Task } from '@local-brain/core'
-import { AlertCircle } from 'lucide-react'
-import { StatusBadge } from '../../components/badge'
-import { Button } from '../../components/button'
-import { DetailFields } from '../../components/detail-fields'
+import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react'
 import { DetailPage } from '../../components/detail-page'
 import { LinkedRecords } from '../../components/linked-records'
 import { PageHead } from '../../components/page-head'
@@ -13,6 +10,7 @@ import { Textarea } from '../../components/ui/textarea'
 import { useProjects, useTask, useTaskLinks, useUnlinkFrom, useUpdateTask } from '../../lib/queries'
 
 const TASK_STATUSES = ['open', 'waiting', 'scheduled', 'done', 'canceled'] as const
+const AUTOSAVE_DELAY_MS = 350
 
 interface TaskFormState {
   title: string
@@ -25,138 +23,112 @@ interface TaskFormState {
   completedAt: string
 }
 
+type SaveState = 'idle' | 'saving' | 'saved' | 'error'
+
 export function TaskDetail({ id }: { id: string }): ReactNode {
   const task = useTask(id)
   const links = useTaskLinks(id)
   const onUnlink = useUnlinkFrom({ kind: 'task', id })
-  const [editing, setEditing] = useState(false)
 
   return (
     <DetailPage query={task} notFoundTitle="Task not found">
-      {(t) =>
-        editing ? (
-          <TaskEditView task={t} onCancel={() => setEditing(false)} onSaved={() => setEditing(false)} />
-        ) : (
-          <>
-            <PageHead
-              eyebrow="Task"
-              title={t.title}
-              actions={
-                <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
-                  Edit
-                </Button>
-              }
-            />
-            <DetailFields
-              fields={[
-                { label: 'Status', value: <StatusBadge status={t.status} /> },
-                { label: 'Priority', value: t.priority ?? '—' },
-                { label: 'Due', value: toDateInput(t.dueAt) || '—' },
-                { label: 'Scheduled', value: toDateInput(t.scheduledFor) || '—' },
-                { label: 'Completed', value: toDateInput(t.completedAt) || '—' },
-              ]}
-            />
-            {t.description ? <p className="text-sm text-foreground">{t.description}</p> : null}
-            {links.data ? (
-              <>
-                <LinkedRecords title="Project" records={links.data.projects} onUnlink={onUnlink} />
-                {links.data.assignees.length > 0 ? (
-                  <LinkedRecords title="Assigned to" records={links.data.assignees} onUnlink={onUnlink} />
-                ) : null}
-                <LinkedRecords
-                  title="People"
-                  records={links.data.people.filter((p) => p.subtitle !== 'assignee')}
-                  onUnlink={onUnlink}
-                />
-                <LinkedRecords title="Documents" records={links.data.documents} onUnlink={onUnlink} />
-                <LinkedRecords title="Interactions" records={links.data.interactions} onUnlink={onUnlink} />
-              </>
-            ) : null}
-          </>
-        )
-      }
+      {(t) => (
+        <>
+          <TaskInlineEditor task={t} />
+          {links.data ? (
+            <>
+              <LinkedRecords title="Project" records={links.data.projects} onUnlink={onUnlink} />
+              {links.data.assignees.length > 0 ? (
+                <LinkedRecords title="Assigned to" records={links.data.assignees} onUnlink={onUnlink} />
+              ) : null}
+              <LinkedRecords
+                title="People"
+                records={links.data.people.filter((p) => p.subtitle !== 'assignee')}
+                onUnlink={onUnlink}
+              />
+              <LinkedRecords title="Documents" records={links.data.documents} onUnlink={onUnlink} />
+              <LinkedRecords title="Interactions" records={links.data.interactions} onUnlink={onUnlink} />
+            </>
+          ) : null}
+        </>
+      )}
     </DetailPage>
   )
 }
 
-function TaskEditView({
-  task,
-  onCancel,
-  onSaved,
-}: {
-  task: Task
-  onCancel: () => void
-  onSaved: () => void
-}): ReactNode {
-  const titleRef = useRef<HTMLInputElement>(null)
+function TaskInlineEditor({ task }: { task: Task }): ReactNode {
   const projects = useProjects()
   const updateTask = useUpdateTask(task.id)
   const [form, setForm] = useState<TaskFormState>(() => stateFromTask(task))
   const [error, setError] = useState<string | null>(null)
+  const [saveState, setSaveState] = useState<SaveState>('idle')
+  const skipAutosaveRef = useRef(true)
+  const savedSnapshotRef = useRef(serializeState(stateFromTask(task)))
 
   useEffect(() => {
-    setForm(stateFromTask(task))
+    const next = stateFromTask(task)
+    const serialized = serializeState(next)
+    savedSnapshotRef.current = serialized
+    skipAutosaveRef.current = true
+    setForm(next)
     setError(null)
+    setSaveState('idle')
   }, [task])
+
+  useEffect(() => {
+    if (skipAutosaveRef.current) {
+      skipAutosaveRef.current = false
+      return undefined
+    }
+
+    const serialized = serializeState(form)
+    if (serialized === savedSnapshotRef.current) {
+      setError(null)
+      setSaveState('idle')
+      return undefined
+    }
+
+    const validation = validateForm(form)
+    if (validation !== null) {
+      setError(validation)
+      setSaveState('error')
+      return undefined
+    }
+
+    setError(null)
+    setSaveState('saving')
+    const timeout = window.setTimeout(() => {
+      void saveForm(form)
+    }, AUTOSAVE_DELAY_MS)
+    return () => window.clearTimeout(timeout)
+  }, [form])
+
+  async function saveForm(next: TaskFormState): Promise<void> {
+    try {
+      await updateTask.mutateAsync(toTaskPatch(next, task))
+      savedSnapshotRef.current = serializeState(next)
+      setSaveState('saved')
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not save task')
+      setSaveState('error')
+    }
+  }
 
   function patchForm(patch: Partial<TaskFormState>): void {
     setForm((current) => ({ ...current, ...patch }))
-    if (error) setError(null)
-  }
-
-  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault()
-    const title = form.title.trim()
-    if (!title) {
-      setError('Title is required')
-      titleRef.current?.focus()
-      return
-    }
-
-    const priority = form.priority.trim()
-    const parsedPriority = priority === '' ? null : Number(priority)
-    if (
-      parsedPriority !== null &&
-      (!Number.isInteger(parsedPriority) || parsedPriority < 0)
-    ) {
-      setError('Priority must be a whole number')
-      return
-    }
-
-    const completedAt =
-      form.status === 'done'
-        ? form.completedAt || toDateInput(task.completedAt) || todayDate()
-        : null
-
-    setError(null)
-    try {
-      await updateTask.mutateAsync({
-        title,
-        description: form.description,
-        status: form.status,
-        priority: parsedPriority,
-        projectId: form.projectId || null,
-        dueAt: form.dueAt || null,
-        scheduledFor: form.scheduledFor || null,
-        completedAt,
-      })
-      onSaved()
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not save task')
-    }
   }
 
   return (
     <>
-      <PageHead eyebrow="Task" title="Edit task" />
-      <form onSubmit={submit} className="flex flex-col gap-4">
+      <PageHead eyebrow="Task" title="Task" actions={<SaveIndicator state={saveState} />} />
+      <div className="flex flex-col gap-4">
         <label className="flex flex-col gap-1.5 text-xs font-medium text-[hsl(var(--lb-ink-2))]">
           Title
           <Input
-            ref={titleRef}
             value={form.title}
             onChange={(event) => patchForm({ title: event.target.value })}
             aria-invalid={error === 'Title is required' ? true : undefined}
+            className="text-base font-semibold"
           />
         </label>
 
@@ -192,6 +164,7 @@ function TaskEditView({
               inputMode="numeric"
               pattern="[0-9]*"
               onChange={(event) => patchForm({ priority: event.target.value })}
+              aria-invalid={error === 'Priority must be a whole number' ? true : undefined}
             />
           </label>
         </div>
@@ -247,18 +220,59 @@ function TaskEditView({
             {error}
           </p>
         ) : null}
-
-        <div className="flex justify-end gap-2 pt-1">
-          <Button variant="ghost" onClick={onCancel} disabled={updateTask.isPending}>
-            Cancel
-          </Button>
-          <Button variant="primary" type="submit" disabled={updateTask.isPending}>
-            Save
-          </Button>
-        </div>
-      </form>
+      </div>
     </>
   )
+}
+
+function SaveIndicator({ state }: { state: SaveState }): ReactNode {
+  if (state === 'saving') {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Loader2 className="size-3.5 animate-spin" />
+        Saving
+      </span>
+    )
+  }
+  if (state === 'saved') {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        <CheckCircle2 className="size-3.5" />
+        Saved
+      </span>
+    )
+  }
+  if (state === 'error') {
+    return <span className="text-xs text-destructive">Not saved</span>
+  }
+  return null
+}
+
+function validateForm(form: TaskFormState): string | null {
+  if (!form.title.trim()) return 'Title is required'
+  const priority = form.priority.trim()
+  if (priority === '') return null
+  const parsedPriority = Number(priority)
+  return Number.isInteger(parsedPriority) && parsedPriority >= 0
+    ? null
+    : 'Priority must be a whole number'
+}
+
+function toTaskPatch(form: TaskFormState, task: Task) {
+  const priority = form.priority.trim()
+  return {
+    title: form.title.trim(),
+    description: form.description,
+    status: form.status,
+    priority: priority === '' ? null : Number(priority),
+    projectId: form.projectId || null,
+    dueAt: form.dueAt || null,
+    scheduledFor: form.scheduledFor || null,
+    completedAt:
+      form.status === 'done'
+        ? form.completedAt || toDateInput(task.completedAt) || todayDate()
+        : null,
+  }
 }
 
 function stateFromTask(task: Task): TaskFormState {
@@ -272,6 +286,10 @@ function stateFromTask(task: Task): TaskFormState {
     scheduledFor: toDateInput(task.scheduledFor),
     completedAt: toDateInput(task.completedAt),
   }
+}
+
+function serializeState(state: TaskFormState): string {
+  return JSON.stringify(state)
 }
 
 function toDateInput(value: string | null | undefined): string {
