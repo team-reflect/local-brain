@@ -9,7 +9,6 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 
-use super::affiliation::upsert_affiliation;
 use super::organization::find_or_create_organization;
 use super::project::{find_or_create_project, insert_project_links};
 use super::text::{normalize_name, normalize_optional, normalize_title};
@@ -263,13 +262,17 @@ pub fn accept_suggestion(conn: &mut Connection, json: bool, id: &str) -> Result<
             ("project", project_id)
         }
         "create_organization" => {
+            // Create the org only. Cited people are *evidence* for the proposal,
+            // not an assertion that they are employees — auto-affiliating them
+            // would manufacture relationships the user never confirmed. Use
+            // `brain affiliate` / `add person --org` to record employment.
             let name = payload_str("name").unwrap_or_else(|| suggestion.title.clone());
-            let org_id = find_or_create_organization(&tx, &name, payload_str("domain").as_deref())?;
-            for link in &links {
-                if link.kind == LinkKind::Person {
-                    upsert_affiliation(&tx, &link.id, &org_id, None, None, false)?;
-                }
-            }
+            let org_id = find_or_create_organization(
+                &tx,
+                &name,
+                payload_str("domain").as_deref(),
+                payload_str("kind").as_deref(),
+            )?;
             ("organization", org_id)
         }
         other => {
@@ -446,6 +449,66 @@ mod tests {
             )
             .unwrap();
         assert_eq!(status, "accepted");
+    }
+
+    #[test]
+    fn accept_create_organization_applies_kind_and_does_not_affiliate_cited_people() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // A person cited only as evidence for the proposal — not an employee.
+        let person = new_id();
+        conn.execute(
+            "INSERT INTO people (id, full_name) VALUES (?1, 'Cited Person')",
+            params![person],
+        )
+        .unwrap();
+        suggest(
+            &mut conn,
+            true,
+            SuggestArgs {
+                kind: SuggestionKind::Organization,
+                title: "Evensen Design",
+                summary: None,
+                domain: Some("evensendesign.com"),
+                org_kind: Some("studio"),
+                rationale: Some("two correspondents share the domain"),
+                links: vec![LinkRef {
+                    kind: LinkKind::Person,
+                    id: person.clone(),
+                }],
+            },
+        )
+        .unwrap();
+        let sid: String = conn
+            .query_row("SELECT id FROM suggestions", [], |row| row.get(0))
+            .unwrap();
+        accept_suggestion(&mut conn, true, &sid).unwrap();
+
+        let org_id: String = conn
+            .query_row(
+                "SELECT resolved_record_id FROM suggestions WHERE id = ?1",
+                params![sid],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let kind: Option<String> = conn
+            .query_row(
+                "SELECT kind FROM organizations WHERE id = ?1",
+                params![org_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            kind.as_deref(),
+            Some("studio"),
+            "accept carries the proposed kind"
+        );
+        let affiliations: i64 = conn
+            .query_row("SELECT COUNT(*) FROM affiliations", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            affiliations, 0,
+            "cited people are evidence, not auto-affiliated employees"
+        );
     }
 
     #[test]

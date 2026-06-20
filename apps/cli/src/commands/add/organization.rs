@@ -124,31 +124,37 @@ fn enrich_duplicate_organization(
 }
 
 /// Find-or-create an organization by name (then domain), filling a blank domain
-/// when one is supplied. Shared by the person affiliation path so importing an
-/// employer never forks a second org row.
+/// and kind when supplied. Shared by the person affiliation path and
+/// `suggestion accept` so importing/ratifying an employer never forks a second
+/// org row and carries the proposed kind through.
 pub(super) fn find_or_create_organization(
     conn: &Connection,
     name: &str,
     domain: Option<&str>,
+    kind: Option<&str>,
 ) -> Result<String, CliError> {
     let name = normalize_title(Some(name))
         .ok_or_else(|| CliError::Runtime("an organization needs a name".into()))?;
     if let Some(existing) = find_duplicate_organization(conn, &name, domain)? {
-        if let Some(domain) = normalize_domain(domain) {
-            conn.execute(
-                "UPDATE organizations
-                 SET domain = CASE WHEN (domain IS NULL OR trim(domain) = '') THEN ?1 ELSE domain END,
-                     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-                 WHERE id = ?2",
-                params![domain, existing],
-            )?;
-        }
+        conn.execute(
+            "UPDATE organizations
+             SET domain = CASE
+                   WHEN (domain IS NULL OR trim(domain) = '') AND ?1 IS NOT NULL THEN ?1 ELSE domain END,
+                 kind = CASE
+                   WHEN (kind IS NULL OR trim(kind) = '') AND ?2 IS NOT NULL THEN ?2 ELSE kind END,
+                 updated_at = CASE
+                   WHEN ((domain IS NULL OR trim(domain) = '') AND ?1 IS NOT NULL)
+                     OR ((kind IS NULL OR trim(kind) = '') AND ?2 IS NOT NULL)
+                   THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE updated_at END
+             WHERE id = ?3",
+            params![normalize_domain(domain), normalize_optional(kind), existing],
+        )?;
         return Ok(existing);
     }
     let id = new_id();
     conn.execute(
-        "INSERT INTO organizations (id, name, domain) VALUES (?1,?2,?3)",
-        params![id, name, normalize_domain(domain)],
+        "INSERT INTO organizations (id, name, domain, kind) VALUES (?1,?2,?3,?4)",
+        params![id, name, normalize_domain(domain), normalize_optional(kind)],
     )?;
     Ok(id)
 }
@@ -294,19 +300,25 @@ mod tests {
     }
 
     #[test]
-    fn find_or_create_fills_blank_domain() {
+    fn find_or_create_fills_blank_domain_and_kind() {
         let conn = brain_schema::open_in_memory().unwrap();
-        let id = find_or_create_organization(&conn, "Evensen Design", None).unwrap();
-        let again = find_or_create_organization(&conn, "Evensen Design", Some("evensendesign.com"))
-            .unwrap();
+        let id = find_or_create_organization(&conn, "Evensen Design", None, None).unwrap();
+        let again = find_or_create_organization(
+            &conn,
+            "Evensen Design",
+            Some("evensendesign.com"),
+            Some("studio"),
+        )
+        .unwrap();
         assert_eq!(id, again, "second call reuses the org");
-        let domain: Option<String> = conn
+        let (domain, kind): (Option<String>, Option<String>) = conn
             .query_row(
-                "SELECT domain FROM organizations WHERE id = ?1",
+                "SELECT domain, kind FROM organizations WHERE id = ?1",
                 params![id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
         assert_eq!(domain.as_deref(), Some("evensendesign.com"));
+        assert_eq!(kind.as_deref(), Some("studio"), "blank kind is filled");
     }
 }

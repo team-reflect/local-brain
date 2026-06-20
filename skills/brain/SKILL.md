@@ -39,13 +39,16 @@ operate it through the `brain` CLI — never by touching the database file direc
 - **person / organization / project** — durable entities. Create people directly
   when importing contacts or when the user gives you explicit contact details.
   Create an **organization** with `brain add organization` (deduped by name then
-  email domain) and record someone's employer with `brain add person --org "<name>"
+  email domain) and record an employer with `brain add person --org "<name>"
   [--org-domain <d>] [--title <t>] [--current]` or `brain affiliate --person <id>
-  --org <id>`. Two correspondents sharing an email domain (e.g. `@acme.com`) are a
-  strong org signal. Create projects only when the user explicitly asks or uses the
+  --org <id>`. Assert an org directly only when you are **confident** — the user
+  named it, the person stated their own employer, or several correspondents clearly
+  share a company domain. When it is merely *inferred* (a lone signature, one
+  ambiguous domain), do not assert it: record `brain suggest organization` and let
+  the user accept it. Create projects only when the user explicitly asks or uses the
   Projects UI; imports and transcript analysis may link existing projects but must
-  not auto-create topic buckets. Keep projects flat. Link by id with
-  `--link person:<id>` / `--link project:<id>`.
+  not auto-create topic buckets — use `brain suggest project` for proposals. Keep
+  projects flat. Link by id with `--link person:<id>` / `--link project:<id>`.
 - **source / external identity** — provider-neutral import metadata. `brain`
   knows source slugs and external ids, not provider APIs. Upstream tools translate
   Gmail, Google People, calendars, files, or other systems into generic CLI calls.

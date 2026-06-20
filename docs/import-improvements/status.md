@@ -24,3 +24,17 @@ Branch: `claude/dazzling-bardeen-4e90be`. See [plan.md](plan.md).
 - [x] dedupe reports `bodyChanged`; `--refresh` re-digests only when changed
 - [x] `--evidence interaction:<id>~"quote"` resolves chunk by substring
 - [x] tests, skill, contract. Live-validated: quote→chunk#1; bodyChanged signal; refresh no-op.
+
+## Post-review fixes (PR #86 review)
+- [x] `set_self` no longer stamps an email another active person owns onto the self
+  `primary_email` (Bugbot; guarded via `email_owned_by_other`).
+- [x] `suggest accept` (organization) now carries the proposed `kind` through
+  `find_or_create_organization` (Bugbot).
+- [x] Accepting a `create_organization` suggestion no longer auto-affiliates cited
+  people — they are evidence, not asserted employees.
+- [x] Added 6 black-box integration tests (`tests/cli.rs`) for the new commands' JSON
+  contract: self, add organization, affiliate, suggest→accept, `--refresh`/`bodyChanged`,
+  evidence-by-quote.
+- [x] Skill now states the org-governance boundary: assert when confident, else
+  `brain suggest organization`.
+- [x] Removed the throwaway demo memory created during live testing of `~quote`.

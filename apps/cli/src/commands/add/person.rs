@@ -53,7 +53,7 @@ fn apply_affiliation(
     let Some(org) = org.map(str::trim).filter(|name| !name.is_empty()) else {
         return Ok(());
     };
-    let org_id = super::organization::find_or_create_organization(tx, org, org_domain)?;
+    let org_id = super::organization::find_or_create_organization(tx, org, org_domain, None)?;
     super::affiliation::upsert_affiliation(tx, person_id, &org_id, title, role, current)?;
     Ok(())
 }
@@ -715,13 +715,30 @@ fn find_self_person_id(conn: &Connection) -> Result<Option<String>, CliError> {
         .optional()?)
 }
 
+/// The display email to use as the self person's denormalized `primary_email`:
+/// the first provided address, unless another active person already owns it.
+/// Mirrors `insert_person_handles`/`add_person` (which skip an owned address for
+/// `person_emails`), keeping the denormalized column consistent with the handle
+/// table so the self row never shows an address it doesn't own.
+fn self_primary_email(
+    conn: &Connection,
+    id: &str,
+    emails: &[EmailHandle],
+) -> Result<Option<String>, CliError> {
+    Ok(match emails.first() {
+        Some(email) if !email_owned_by_other(conn, id, &email.normalized)? => {
+            Some(email.email.clone())
+        }
+        _ => None,
+    })
+}
+
 /// Create or update the single self person and its known handles, in one
 /// transaction. Provided fields overwrite (this is explicit self-management, not
 /// blank-only enrichment); unprovided fields are left untouched.
 pub fn set_self(conn: &mut Connection, json: bool, args: SetSelfArgs) -> Result<(), CliError> {
     let emails = normalize_email_handles(args.emails.iter().copied());
     let phones = normalize_values(args.phones.iter().copied(), normalize_optional);
-    let primary_email = emails.first().map(|email| email.email.clone());
     let primary_phone = phones.first().cloned();
 
     let tx = conn.transaction()?;
@@ -729,6 +746,7 @@ pub fn set_self(conn: &mut Connection, json: bool, args: SetSelfArgs) -> Result<
     let created = existing.is_none();
     let id = match existing {
         Some(id) => {
+            let primary_email = self_primary_email(&tx, &id, &emails)?;
             tx.execute(
                 "UPDATE people
                  SET full_name      = COALESCE(?2, full_name),
@@ -761,6 +779,7 @@ pub fn set_self(conn: &mut Connection, json: bool, args: SetSelfArgs) -> Result<
                     CliError::Runtime("--full-name is required to create the self person".into())
                 })?;
             let id = new_id();
+            let primary_email = self_primary_email(&tx, &id, &emails)?;
             tx.execute(
                 "INSERT INTO people
                    (id, full_name, preferred_name, primary_email, primary_phone,
@@ -982,6 +1001,59 @@ mod tests {
             )
             .unwrap();
         assert_eq!(headline.as_deref(), Some("Founder"));
+    }
+
+    #[test]
+    fn set_self_does_not_stamp_an_email_another_person_owns() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // Alice (a normal person) owns alice@example.com.
+        add_person(
+            &mut conn,
+            true,
+            person_args("Alice Owner", vec!["alice@example.com"], vec![], None),
+        )
+        .unwrap();
+
+        // Setting self with Alice's address must NOT stamp it onto the self
+        // primary_email, and must not attach a handle Alice already owns.
+        set_self(
+            &mut conn,
+            true,
+            SetSelfArgs {
+                full_name: Some("Alex MacCaw"),
+                preferred_name: None,
+                emails: vec!["alice@example.com"],
+                phones: vec![],
+                headline: None,
+                location: None,
+            },
+        )
+        .unwrap();
+
+        let self_primary: Option<String> = conn
+            .query_row(
+                "SELECT primary_email FROM people WHERE is_self = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            self_primary, None,
+            "self must not claim an address another active person owns"
+        );
+        let owners: i64 = conn
+            .query_row(
+                "SELECT COUNT(DISTINCT p.id)
+                 FROM people p
+                 LEFT JOIN person_emails pe ON pe.person_id = p.id
+                 WHERE p.archived_at IS NULL
+                   AND (lower(p.primary_email) = 'alice@example.com'
+                        OR pe.normalized_email = 'alice@example.com')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(owners, 1, "exactly one active person owns the email");
     }
 
     #[test]
