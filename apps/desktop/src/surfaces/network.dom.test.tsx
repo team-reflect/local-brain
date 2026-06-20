@@ -54,6 +54,7 @@ describe('NetworkSurface', () => {
     expect(graphNav.className).toContain('absolute')
     expect(graphNav.className).toContain('top-0')
     expect(graphNav.className).not.toContain('top-9')
+    expect(graphNav.className).not.toContain('shadow-')
 
     const list = renderWithProviders(<NetworkSurface tab="people" />)
     expect(await within(list.container).findByText('No people yet')).toBeDefined()
