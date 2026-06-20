@@ -25,7 +25,7 @@ shared UI primitives, basic record detail pages.
 - Sidebar sections are Today, Tasks, Network, Projects, Ask, and Settings.
 - Network has Graph, People, and Organizations tabs, with Graph as the default.
 - Documents and interactions are browsed inside related detail pages and through search or Ask.
-- Settings owns diagnostics, AI providers, local storage paths, and skill setup.
+- Settings owns about, brain identity, AI providers, and semantic search.
 - Startup follows Reflect Open's graph chooser: choose/open a brain folder, show recents,
   auto-open the newest recent folder on launch, and surface open failures back on the
   chooser.
@@ -114,8 +114,7 @@ shared UI primitives, basic record detail pages.
     - center on the user's own person row
     - show people, organizations, projects, tasks, documents, interactions, and memories
     - open related detail pages from nodes
-16. Build Settings sections for AI providers, local brain storage, diagnostics, and skill
-    setup.
+16. Build Settings sections for about, brain identity, AI providers, and semantic search.
 
 ## Acceptance Criteria
 

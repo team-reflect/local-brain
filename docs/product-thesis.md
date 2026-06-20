@@ -52,7 +52,7 @@ interaction.
   treated as artifacts.
 - **Memories:** hidden atomic claims extracted from records: facts, preferences,
   decisions, commitments, instructions, risks, and ideas.
-- **Settings:** AI providers, local paths, diagnostics, and skill setup.
+- **Settings:** about, brain identity, AI providers, and semantic search.
 
 ## User Experience
 

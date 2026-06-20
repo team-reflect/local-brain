@@ -21,10 +21,13 @@ describe('RouteContent', () => {
     expect(await screen.findByText('Nothing to graph yet')).toBeDefined()
   })
 
-  it('renders Settings with the general section selected by default', () => {
+  it('renders Settings with the about section selected by default', async () => {
     renderWithProviders(<RouteContent route={{ kind: 'settings' }} />)
-    expect(screen.getByRole('heading', { name: 'General' })).toBeDefined()
-    expect(screen.getByText(/private, local-first personal CRM/)).toBeDefined()
+    expect(screen.getByRole('heading', { name: 'About' })).toBeDefined()
+    expect(
+      screen.getByText('Local Brain is a private, local-first, personal knowledge graph.'),
+    ).toBeDefined()
+    await waitFor(() => expect(screen.getByText('v0.1.0')).toBeDefined())
   })
 
   it('renders the Ask empty state for the ask route', async () => {

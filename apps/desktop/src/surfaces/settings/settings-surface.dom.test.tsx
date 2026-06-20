@@ -17,7 +17,28 @@ describe('SettingsSurface (Plan 08)', () => {
     expect(screen.queryByText('Create backup')).toBeNull()
     expect(screen.queryByText('Export JSON')).toBeNull()
     expect(screen.queryByRole('heading', { name: 'Settings' })).toBeNull()
-    expect(screen.getByRole('heading', { name: 'General' })).toBeDefined()
+    expect(screen.getByRole('heading', { name: 'About' })).toBeDefined()
+  })
+
+  it('does not expose local database, skills, or diagnostics sections', () => {
+    renderWithProviders(<SettingsSurface section={undefined} />)
+
+    expect(screen.queryByRole('button', { name: 'Local database' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Skills' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Diagnostics' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Local database' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Skills' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Diagnostics' })).toBeNull()
+  })
+
+  it('renders the about section with the app version', async () => {
+    renderWithProviders(<SettingsSurface section="about" />)
+
+    expect(screen.getByRole('heading', { name: 'About' })).toBeDefined()
+    expect(
+      screen.getByText('Local Brain is a private, local-first, personal knowledge graph.'),
+    ).toBeDefined()
+    await waitFor(() => expect(screen.getByText('v0.1.0')).toBeDefined())
   })
 
   it('renders AI providers as a Reflect-style row card with an add dialog', async () => {
