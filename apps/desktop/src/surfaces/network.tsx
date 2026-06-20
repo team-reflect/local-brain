@@ -95,13 +95,13 @@ export function NetworkSurface({ tab, detail }: { tab: NetworkTab; detail?: Netw
     <>
       {tab === 'graph' ? (
         <div
-          className="relative mx-auto h-full min-h-0 max-w-6xl"
+          className="relative mx-auto h-full min-h-0 max-w-6xl overflow-hidden"
           data-testid="network-graph-layout"
         >
           <NetworkTabs
             tab={tab}
             onSelect={(nextTab) => navigate({ kind: 'network', tab: nextTab })}
-            className="absolute left-0 top-0 z-10 w-40 rounded-md border border-border bg-background/95 py-1 shadow-[0_8px_28px_rgba(2,6,23,0.10)]"
+            className="absolute left-0 top-0 z-10 w-40 rounded-md border border-border bg-background/95 py-1"
           />
           <GraphSurface showHeader={false} className="max-w-none" />
         </div>

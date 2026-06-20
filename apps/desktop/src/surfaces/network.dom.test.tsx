@@ -12,7 +12,10 @@ describe('NetworkSurface', () => {
 
     expect(await screen.findByText('Nothing to graph yet')).toBeDefined()
     expect(screen.getByRole('navigation', { name: 'Network' })).toBeDefined()
-    expect(container.querySelector('[data-testid="network-graph-layout"]')).toBeDefined()
+    const graphLayout = container.querySelector('[data-testid="network-graph-layout"]')
+    expect(graphLayout).toBeDefined()
+    expect(graphLayout?.className).toContain('overflow-hidden')
+    expect(screen.getByRole('navigation', { name: 'Network' }).className).toContain('top-0')
     expect(container.querySelector('[data-testid="network-list-layout"]')).toBeNull()
   })
 
@@ -51,6 +54,7 @@ describe('NetworkSurface', () => {
     expect(graphNav.className).toContain('absolute')
     expect(graphNav.className).toContain('top-0')
     expect(graphNav.className).not.toContain('top-9')
+    expect(graphNav.className).not.toContain('shadow-')
 
     const list = renderWithProviders(<NetworkSurface tab="people" />)
     expect(await within(list.container).findByText('No people yet')).toBeDefined()
