@@ -2842,13 +2842,31 @@ fn graph_is_centered_and_typed() {
             &format!("person:{}", person["id"].as_str().unwrap()),
         ],
     );
+    let raw_interaction = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Raw sender",
+            "--participant",
+            "from:Raw Sender <raw@example.com>",
+        ],
+    );
     Connection::open(&db)
         .unwrap()
         .execute_batch(&format!(
             "INSERT INTO memories (id, claim) VALUES ('mem-from-interaction', 'Ada likes graphs');
              INSERT INTO memory_links (id, memory_id, record_type, record_id)
-             VALUES ('ml-from-interaction', 'mem-from-interaction', 'interaction', '{}');",
-            interaction["id"].as_str().unwrap()
+             VALUES ('ml-from-interaction', 'mem-from-interaction', 'interaction', '{}');
+             INSERT INTO memories (id, claim) VALUES ('mem-from-raw-interaction', 'Raw sender likes graphs');
+             INSERT INTO memory_links (id, memory_id, record_type, record_id)
+             VALUES ('ml-from-raw-interaction', 'mem-from-raw-interaction', 'interaction', '{}');",
+            interaction["id"].as_str().unwrap(),
+            raw_interaction["id"].as_str().unwrap()
         ))
         .unwrap();
     let graph = run_json(&db, &["--json", "graph", "--center", "self"]);
@@ -2869,6 +2887,11 @@ fn graph_is_centered_and_typed() {
         edge["kind"] == "memory"
             && edge["source"] == "mem-from-interaction"
             && edge["target"] == person["id"]
+    }));
+    assert!(graph["edges"].as_array().unwrap().iter().any(|edge| {
+        edge["kind"] == "memory"
+            && edge["source"] == "mem-from-raw-interaction"
+            && edge["target"] == "self"
     }));
 }
 

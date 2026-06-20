@@ -94,6 +94,7 @@ describe('deriveMemoryEdges', () => {
       [{ memoryId: 'm1', recordType: 'person', recordId: 'p1' }],
       new Set(['m1', 'p1']),
       new Map(),
+      'self',
     )
     expect(edges).toEqual([{ source: 'm1', target: 'p1', kind: 'memory' }])
   })
@@ -103,10 +104,21 @@ describe('deriveMemoryEdges', () => {
       [{ memoryId: 'm1', recordType: 'interaction', recordId: 'i1' }],
       new Set(['m1', 'p1', 'p2']),
       new Map([['i1', new Set(['p1', 'p2', 'ghost'])]]),
+      'self',
     )
     expect(edges).toEqual([
       { source: 'm1', target: 'p1', kind: 'memory' },
       { source: 'm1', target: 'p2', kind: 'memory' },
     ])
+  })
+
+  it('falls back to self for interaction memory links without visible participants', () => {
+    const edges = deriveMemoryEdges(
+      [{ memoryId: 'm1', recordType: 'interaction', recordId: 'i1' }],
+      new Set(['m1', 'self']),
+      new Map(),
+      'self',
+    )
+    expect(edges).toEqual([{ source: 'm1', target: 'self', kind: 'memory' }])
   })
 })
