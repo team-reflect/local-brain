@@ -48,13 +48,15 @@ Top-level sections:
 - **Network:** graph, people, and organizations, with Graph as the default tab.
 - **Projects:** active, waiting, paused, done, and archived projects.
 - **Ask:** grounded chat over local documents and interactions.
-- **Settings:** about, the active brain's identity (name, color, location), AI
-  providers, and semantic search.
+- **Settings:** about, the active brain's identity (name, color, location), forgetting
+  the active brain from the local catalogue, AI providers, and semantic search.
 
 A **brain** is the top-level workspace: a user-selected folder containing the local
 SQLite database plus its app-managed assets directory. The sidebar
 top holds a **brain switcher** (swatch + active brain name) to switch, create, or
-open another brain. Do not confuse a *brain* (the container) with the Network
+open another brain. Settings can forget the current brain from Local Brain's local
+catalogue without deleting its folder, database, assets, or support files. Do not
+confuse a *brain* (the container) with the Network
 **Graph** (a visualization of the records inside the current brain).
 
 Document and interaction records are browsed inside Network, Project, and Task detail

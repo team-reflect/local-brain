@@ -16,7 +16,7 @@ const ACTIVE = {
   schemaVersion: 2,
 }
 describe('Settings → Brain', () => {
-  it('renders the active brain identity, color popover, and folder only', async () => {
+  it('renders the active brain identity, color popover, folder, and forget action', async () => {
     installFakeBridge({
       respond: (command) => {
         switch (command) {
@@ -52,9 +52,54 @@ describe('Settings → Brain', () => {
     expect(brain.queryByText('Last opened')).toBeNull()
     expect(brain.queryByText('All brains')).toBeNull()
     expect(brain.queryByRole('button', { name: 'Switch' })).toBeNull()
+    expect(brain.getByRole('button', { name: 'Forget brain' })).toBeDefined()
 
     expect(screen.queryByRole('button', { name: 'Teal' })).toBeNull()
     fireEvent.click(brain.getByRole('button', { name: 'Brain color' }))
     expect(await screen.findByRole('button', { name: 'Teal' })).toBeDefined()
+  })
+
+  it('forgets the active brain from settings after confirmation', async () => {
+    const calls: Array<{ command: string; args: Record<string, unknown> }> = []
+    let active: typeof ACTIVE | null = ACTIVE
+    let brains = [ACTIVE]
+    installFakeBridge({
+      respond: (command, args) => {
+        calls.push({ command, args })
+        switch (command) {
+          case 'active_brain':
+            return active
+          case 'list_brains':
+            return brains
+          case 'forget_brain':
+            active = null
+            brains = []
+            return []
+          case 'database_path':
+            return ACTIVE.databasePath
+          default:
+            return undefined
+        }
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="brain" />)
+
+    await waitFor(() => expect(screen.getByText('My brain')).toBeDefined())
+    fireEvent.click(screen.getByRole('button', { name: 'Forget brain' }))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Forget My brain' })
+    expect(within(dialog).getByText(/does not delete the folder/)).toBeDefined()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Forget brain' }))
+
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (call) =>
+            call.command === 'forget_brain' && call.args['rootPath'] === '/data/local-brain',
+        ),
+      ).toBe(true),
+    )
+    await waitFor(() => expect(screen.getByText('No active brain.')).toBeDefined())
   })
 })

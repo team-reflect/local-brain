@@ -166,6 +166,23 @@ impl DbState {
         Ok(())
     }
 
+    /// Run `before_clear` while holding the active database lock, then close the
+    /// open brain. This is the active-brain counterpart to [`swap_after`]: a
+    /// caller can persist its registry update first, and a persistence failure
+    /// leaves the live connection untouched.
+    pub fn clear_after<F>(&self, before_clear: F) -> AppResult<()>
+    where
+        F: FnOnce() -> AppResult<()>,
+    {
+        let mut guard = self.lock()?;
+        before_clear()?;
+        *guard = None;
+        if let Ok(mut startup_error) = self.startup_error.lock() {
+            *startup_error = None;
+        }
+        Ok(())
+    }
+
     /// Run `f` against the durable connection inside one transaction, committing
     /// on `Ok` and rolling back on `Err`. Used by the embedding write commands,
     /// which need `last_insert_rowid` coupling that the generic `db_batch` path
@@ -326,6 +343,29 @@ mod tests {
             .unwrap();
 
         assert_eq!(state.startup_error().unwrap(), None);
+    }
+
+    #[test]
+    fn clear_after_closes_active_brain_and_clears_startup_error() {
+        let state = DbState::new(db(), paths(PathBuf::from("/tmp/active")));
+
+        state.clear_after(|| Ok(())).unwrap();
+
+        assert!(state.active_paths().is_err());
+        assert_eq!(state.startup_error().unwrap(), None);
+    }
+
+    #[test]
+    fn clear_after_keeps_active_brain_when_callback_fails() {
+        let state = DbState::new(db(), paths(PathBuf::from("/tmp/active")));
+
+        let result = state.clear_after(|| Err(AppError::io("registry write failed")));
+
+        assert!(result.is_err());
+        assert_eq!(
+            state.active_root_path().unwrap(),
+            PathBuf::from("/tmp/active")
+        );
     }
 
     fn insert_person(conn: &Connection, id: &str, name: &str) -> AppResult<usize> {

@@ -792,8 +792,8 @@ pub fn set_brain_color(
     )
 }
 
-/// Drop a brain from the catalogue (does not delete the database file). The
-/// active brain cannot be forgotten.
+/// Drop a brain from the catalogue (does not delete the database file). If the
+/// forgotten brain is active, close it and leave the app with no active brain.
 #[tauri::command]
 pub fn forget_brain(
     db: State<'_, DbState>,
@@ -808,23 +808,48 @@ fn forget_brain_impl(
     brains: &BrainState,
     root_path: &str,
 ) -> AppResult<Vec<BrainInfo>> {
+    let _switch = brains.switch_guard()?;
     let key = normalize_root(root_path);
-    // Guard against forgetting the *live* active brain (the one reads/writes hit),
-    // and derive the returned list's active flag from it too, so a stale registry
-    // pointer can neither block a valid forget nor mislabel the survivors.
     let active_paths = db.active_paths().ok();
-    let live_active = active_paths.as_ref().map(|paths| paths.root_path.as_path());
-    let live_active_str = live_active.map(|path| path.display().to_string());
-    if live_active_str.as_deref() == Some(key.as_str()) {
-        return Err(AppError::parse(
-            "cannot forget the active brain — switch to another brain first",
-        ));
-    }
+    let live_active_str = active_paths
+        .as_ref()
+        .map(|paths| paths.root_path.display().to_string());
+    let forgetting_live_active = live_active_str.as_deref() == Some(key.as_str());
+
     // A non-durable (in-memory fallback) registry would lose the removal on
     // restart, so reject it rather than report a forget that silently comes back.
     brains.require_durable()?;
-    let schema_version = db.schema_version().ok();
-    let conn = brains.lock()?;
+
+    if forgetting_live_active {
+        db.clear_after(|| {
+            let conn = brains.lock()?;
+            delete_brain_record(&conn, &key, root_path, None, true, true)
+        })?;
+    } else {
+        let conn = brains.lock()?;
+        delete_brain_record(
+            &conn,
+            &key,
+            root_path,
+            live_active_str.as_deref(),
+            false,
+            false,
+        )?;
+    }
+
+    let list = list_brain_infos(db, brains)?;
+    log_manifest_sync(crate::skill::sync_brain_manifest_from_infos(&list));
+    Ok(list)
+}
+
+fn delete_brain_record(
+    conn: &Connection,
+    key: &str,
+    root_path: &str,
+    replacement_active_path: Option<&str>,
+    allow_missing: bool,
+    clear_recorded_active: bool,
+) -> AppResult<()> {
     // The DELETE and the active-path reconciliation run in one transaction so a
     // forget can never drop the catalogue row while leaving `active_path` naming
     // it — a half-applied forget would still let the next launch reopen it.
@@ -832,32 +857,34 @@ fn forget_brain_impl(
     // A DELETE that matches no row means the requested brain isn't catalogued
     // (a stale path, or a legacy spelling that no longer normalizes to the
     // stored key). Returning the unchanged list would imply the forget
-    // succeeded, so surface it as "not found" instead of a silent no-op.
+    // succeeded, so surface it as "not found" instead of a silent no-op. The
+    // live active brain is the one exception: if it was synthesized because an
+    // earlier best-effort registry write failed, closing it is still a valid
+    // forget operation even though there is no catalogue row to delete.
     let affected = tx.execute("DELETE FROM brains WHERE path = ?1", [&key])?;
-    if affected == 0 {
+    if affected == 0 && !allow_missing {
         return Err(AppError::not_found(format!(
             "no brain registered at {root_path}"
         )));
     }
-    // The forget guard only protects the *live* active brain; the registry's
-    // recorded `active_path` can still name the brain we just removed (stale
-    // metadata from a failed startup `register_active`). Forgetting doesn't
-    // delete the database file, so leaving `active_path` pointing at the gone
-    // brain would let `active_candidate` reopen it on the next launch. Reconcile
-    // it to the live active brain — the source of truth — instead.
-    if active_path(&tx)?.as_deref() == Some(key.as_str()) {
-        match live_active_str.as_deref() {
+    // The registry's recorded `active_path` can name the brain we just removed
+    // (stale metadata from a failed startup `register_active`). Forgetting
+    // doesn't delete the database file, so leaving `active_path` pointing at the
+    // gone brain would let `active_candidate` reopen it on the next launch.
+    // Reconcile it to the replacement live brain. When the live brain itself is
+    // being forgotten there is deliberately no replacement, so clear the pointer
+    // even if it had already drifted to some other brain.
+    if clear_recorded_active {
+        tx.execute("DELETE FROM registry_meta WHERE key = 'active_path'", [])?;
+    } else if active_path(&tx)?.as_deref() == Some(key) {
+        match replacement_active_path {
             Some(live) => set_active_path(&tx, live)?,
             None => {
                 tx.execute("DELETE FROM registry_meta WHERE key = 'active_path'", [])?;
             }
         }
     }
-    tx.commit()?;
-    let list = infos(&conn, live_active, schema_version)?;
-    let list = include_uncatalogued_active(list, active_paths, schema_version);
-    log_manifest_sync(crate::skill::sync_brain_manifest_from_infos(&list));
-    Ok(list)
+    tx.commit().map_err(AppError::from)
 }
 
 /// Reveal a brain's root folder in the OS file manager (best effort).
@@ -1206,6 +1233,86 @@ mod tests {
         assert!(
             all_records(&conn).unwrap().is_empty(),
             "the catalogue row must be gone"
+        );
+    }
+
+    #[test]
+    fn forget_active_brain_closes_database_and_clears_registry_pointer() {
+        let dir = tempdir().unwrap();
+        let active = dir.path().join("active.sqlite");
+        let (db, active_key) = live_db(&active);
+        let brains = memory_state();
+        {
+            let conn = brains.lock().unwrap();
+            mark_opened(&conn, &active_key, Some("Active")).unwrap();
+        }
+
+        let remaining = forget_brain_impl(&db, &brains, &active_key).unwrap();
+
+        assert!(
+            remaining.is_empty(),
+            "the forgotten active brain is removed"
+        );
+        assert!(
+            db.active_paths().is_err(),
+            "forgetting the active brain must close the live database"
+        );
+        let conn = brains.lock().unwrap();
+        assert!(
+            active_path(&conn).unwrap().is_none(),
+            "the next launch must not reopen the forgotten brain"
+        );
+        assert!(
+            all_records(&conn).unwrap().is_empty(),
+            "the active brain row must be removed from the catalogue"
+        );
+    }
+
+    #[test]
+    fn forget_active_brain_clears_stale_pointer_to_other_brain() {
+        let dir = tempdir().unwrap();
+        let active = dir.path().join("active.sqlite");
+        let (db, active_key) = live_db(&active);
+        let brains = memory_state();
+        {
+            let conn = brains.lock().unwrap();
+            mark_opened(&conn, &active_key, Some("Active")).unwrap();
+            mark_opened(&conn, "/other/brain.sqlite", Some("Other")).unwrap();
+            set_active_path(&conn, "/other/brain.sqlite").unwrap();
+        }
+
+        let remaining = forget_brain_impl(&db, &brains, &active_key).unwrap();
+
+        assert_eq!(remaining.len(), 1, "the other brain remains catalogued");
+        assert_eq!(remaining[0].root_path, "/other/brain.sqlite");
+        assert!(
+            !remaining[0].is_active,
+            "closing the live brain must not promote a stale registry pointer"
+        );
+        assert!(
+            db.active_paths().is_err(),
+            "forgetting the active brain must close the live database"
+        );
+        let conn = brains.lock().unwrap();
+        assert!(
+            active_path(&conn).unwrap().is_none(),
+            "the next launch must return to the chooser instead of opening stale metadata"
+        );
+    }
+
+    #[test]
+    fn forget_uncatalogued_active_brain_still_closes_database() {
+        let dir = tempdir().unwrap();
+        let active = dir.path().join("active.sqlite");
+        let (db, active_key) = live_db(&active);
+        let brains = memory_state();
+
+        let remaining = forget_brain_impl(&db, &brains, &active_key).unwrap();
+
+        assert!(remaining.is_empty());
+        assert!(
+            db.active_paths().is_err(),
+            "an uncatalogued synthesized active brain can still be closed"
         );
     }
 
