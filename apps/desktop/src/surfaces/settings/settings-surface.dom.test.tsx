@@ -80,6 +80,204 @@ describe('SettingsSurface (Plan 08)', () => {
     expect(screen.getByRole('button', { name: 'Rebuild index' })).toBeDefined()
   })
 
+  it('shows CLI install status and installs the command', async () => {
+    const commands: string[] = []
+    installFakeBridge({
+      respond: (command) => {
+        commands.push(command)
+        return undefined
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="cli-agents" />)
+
+    expect(await screen.findByRole('heading', { name: 'CLI & agents' })).toBeDefined()
+    expect(await screen.findByText('brain command is not installed')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Install command' }))
+
+    await waitFor(() => expect(screen.getByText('brain command is installed')).toBeDefined())
+    expect(commands).toContain('cli_install')
+  })
+
+  it('shows CLI repair for a stale Local Brain symlink', async () => {
+    installFakeBridge({
+      respond: (command) => {
+        if (command === 'cli_status') {
+          return {
+            supported: true,
+            bundledPath: '/Applications/Local Brain.app/Contents/MacOS/brain',
+            bundledVersion: 'brain 0.1.0',
+            installTargetPath: '/Users/alex/.local/bin/brain',
+            installTargetDir: '/Users/alex/.local/bin',
+            targetDirOnPath: true,
+            installedPath: '/Users/alex/Downloads/Local Brain.app/Contents/MacOS/brain',
+            installedVersion: 'brain 0.0.9',
+            installState: 'stale',
+          }
+        }
+        return undefined
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="cli-agents" />)
+
+    expect(await screen.findByText('brain command needs repair')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Repair command' })).toBeDefined()
+  })
+
+  it('shows CLI conflicts without offering destructive install', async () => {
+    installFakeBridge({
+      respond: (command) => {
+        if (command === 'cli_status') {
+          return {
+            supported: true,
+            bundledPath: '/Applications/Local Brain.app/Contents/MacOS/brain',
+            bundledVersion: 'brain 0.1.0',
+            installTargetPath: '/Users/alex/.local/bin/brain',
+            installTargetDir: '/Users/alex/.local/bin',
+            targetDirOnPath: true,
+            installedPath: null,
+            installedVersion: null,
+            installState: 'conflict',
+          }
+        }
+        return undefined
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="cli-agents" />)
+
+    expect(await screen.findByText('brain command has a conflict')).toBeDefined()
+    expect(screen.getByText(/Another file already exists/)).toBeDefined()
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Install command' }).disabled).toBe(
+      true,
+    )
+  })
+
+  it('shows the PATH export when the CLI install dir is absent from PATH', async () => {
+    installFakeBridge({
+      respond: (command) => {
+        if (command === 'cli_status') {
+          return {
+            supported: true,
+            bundledPath: '/Applications/Local Brain.app/Contents/MacOS/brain',
+            bundledVersion: 'brain 0.1.0',
+            installTargetPath: '/Users/alex/.local/bin/brain',
+            installTargetDir: '/Users/alex/.local/bin',
+            targetDirOnPath: false,
+            installedPath: null,
+            installedVersion: null,
+            installState: 'missing',
+          }
+        }
+        return undefined
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="cli-agents" />)
+
+    expect(await screen.findByText('/Users/alex/.local/bin is not on PATH')).toBeDefined()
+    expect(screen.getByText('export PATH="$HOME/.local/bin:$PATH"')).toBeDefined()
+  })
+
+  it('shows Codex skill install status and installs the skill', async () => {
+    const commands: string[] = []
+    installFakeBridge({
+      respond: (command) => {
+        commands.push(command)
+        return undefined
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="cli-agents" />)
+
+    expect(await screen.findByText('Codex skill is not installed')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Install skill' }))
+
+    await waitFor(() => expect(screen.getByText('Codex skill is installed')).toBeDefined())
+    expect(commands).toContain('skill_install')
+  })
+
+  it('shows Codex skill repair for a stale managed install', async () => {
+    installFakeBridge({
+      respond: (command) => {
+        if (command === 'skill_status') {
+          return {
+            supported: true,
+            installTargetPath: '/Users/alex/.codex/skills/brain/SKILL.md',
+            installTargetDir: '/Users/alex/.codex/skills/brain',
+            bundledHash: 'abc123abc123abc123',
+            installedHash: 'old123old123',
+            installState: 'stale',
+          }
+        }
+        return undefined
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="cli-agents" />)
+
+    expect(await screen.findByText('Codex skill needs repair')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Repair skill' })).toBeDefined()
+  })
+
+  it('shows Codex skill conflicts without offering destructive install', async () => {
+    installFakeBridge({
+      respond: (command) => {
+        if (command === 'skill_status') {
+          return {
+            supported: true,
+            installTargetPath: '/Users/alex/.codex/skills/brain/SKILL.md',
+            installTargetDir: '/Users/alex/.codex/skills/brain',
+            bundledHash: 'abc123abc123abc123',
+            installedHash: null,
+            installState: 'conflict',
+          }
+        }
+        return undefined
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="cli-agents" />)
+
+    expect(await screen.findByText('Codex skill has a conflict')).toBeDefined()
+    expect(screen.getByText(/Another skill already exists/)).toBeDefined()
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Install skill' }).disabled).toBe(
+      true,
+    )
+  })
+
+  it('removes a current managed Codex skill', async () => {
+    const commands: string[] = []
+    installFakeBridge({
+      respond: (command) => {
+        commands.push(command)
+        if (command === 'skill_status') {
+          return {
+            supported: true,
+            installTargetPath: '/Users/alex/.codex/skills/brain/SKILL.md',
+            installTargetDir: '/Users/alex/.codex/skills/brain',
+            bundledHash: 'abc123abc123abc123',
+            installedHash: 'abc123abc123abc123',
+            installState: 'current',
+          }
+        }
+        return undefined
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="cli-agents" />)
+
+    expect(await screen.findByText('Codex skill is installed')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove skill' }))
+
+    await waitFor(() => expect(screen.getByText('Codex skill is not installed')).toBeDefined())
+    expect(commands).toContain('skill_uninstall')
+  })
+
   it('shows byte-level semantic model download progress', async () => {
     installFakeBridge({
       respond: (command) => {

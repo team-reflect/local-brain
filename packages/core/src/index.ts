@@ -14,6 +14,20 @@ export { type IpcBridge, setBridge, getBridge } from './ipc/bridge'
 export { call } from './ipc/invoke'
 export { appVersion, type AppInfo } from './ipc/commands'
 export {
+  cliInstall,
+  cliStatus,
+  cliUninstall,
+  type CliInstallState,
+  type CliStatus,
+} from './ipc/cli'
+export {
+  skillInstall,
+  skillStatus,
+  skillUninstall,
+  type SkillInstallState,
+  type SkillStatus,
+} from './ipc/skill'
+export {
   readTextFile,
   readTextFolder,
   type FileImport,
