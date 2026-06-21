@@ -35,7 +35,8 @@ personal intelligence database, not a dump of every byte.
    useful; binary PDFs/images are otherwise metadata-only.
 9. Skip deliberately: secrets, passwords, one-time links, medical/financial
    boilerplate, promos, alerts, receipts, and private material usually do not
-   belong in the brain.
+   belong in the brain. Do not redact imported source bodies; if a source record
+   should not be stored locally, skip the whole record and ledger the reason.
 
 ## Setup
 
@@ -201,7 +202,8 @@ Do not rely only on project keywords. For each month:
 2. Cluster by correspondent domain, sender/recipient, subject stem, known
    projects, and attachments.
 3. Read high-signal threads.
-4. Import concise redacted thread digests as `interaction --kind email`.
+4. Import full readable thread text as `interaction --kind email` when the
+   source record is worth storing.
 5. Preserve participants, source identity, project links, AI note, facts, tags,
    and evidence-backed tasks/memories.
 
@@ -211,24 +213,24 @@ Example:
 brain --brain "$BRAIN_ROOT" --json import interaction --kind email \
   --title "Gmail: <short subject>" \
   --summary "<digest>" \
-  --text-file digest.md \
+  --text-file full-thread.md \
   --source gmail --external-kind thread --external-id <thread-id> \
   --participant "from:Name <email>" --participant "to:Alex <email>" \
   --link project:<id>
 ```
 
 Skip credentials, codes, receipts, promos, alerts, long quoted chains, and
-legal/medical boilerplate unless they contain durable project intelligence.
-Use `--refresh` for repeat passes over the same thread so unchanged digests stay
-idempotent.
+legal/medical boilerplate unless they contain durable project intelligence worth
+storing as complete local evidence. Use `--refresh` for repeat passes over the
+same thread so unchanged bodies stay idempotent.
 
 ### Reflect Notes
 
 Enumerate every note in scope by path/date. For each note choose one:
 
 - full `import document` when mostly reference material;
-- redacted digest document when project signal is mixed with private material;
-- `skipped` with concrete reason;
+- `skipped` with a concrete reason when project signal is mixed with private
+  material that should not be stored locally;
 - `needs_review` when sensitive but likely important.
 
 Use stable source identity:
@@ -236,7 +238,7 @@ Use stable source identity:
 ```bash
 brain --brain "$BRAIN_ROOT" --json import document \
   --title "Reflect: <note title>" \
-  --text-file digest.md \
+  --text-file note.md \
   --source reflect_notes --external-kind note --external-id <stable-note-id> \
   --original-path "$HOME/Documents/reflect-maccman2/<note>.md" \
   --link project:<id>
@@ -252,6 +254,9 @@ brain --brain "$BRAIN_ROOT" --json import interaction --kind event \
   --title "Calendar: <event title>" \
   --occurred-at <start> --ended-at <end> \
   --location "<venue/address>" \
+  --text-file full-calendar-event.txt \
+  --metadata-json-file raw-google-calendar-event.json \
+  --event-json-file event-details.json \
   --source google_calendar --external-id <event-id> \
   --original-url "<provider-url>" \
   --participant "attendee:Name <email>" \
@@ -261,6 +266,9 @@ brain --brain "$BRAIN_ROOT" --json import interaction --kind event \
 
 Use `event` for travel, lodging, reservations, reminders, all-day blocks, and
 non-meeting schedule context. Use `meeting` for people-centered appointments.
+If the calendar body only says "see Gmail for details", fetch and import the
+linked Gmail source or leave the event incomplete with `--raw-text-unavailable`
+and a ledger note.
 
 ### Contacts And People
 

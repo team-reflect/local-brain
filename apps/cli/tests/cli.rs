@@ -204,6 +204,22 @@ fn contract_reports_agent_cli_contract() {
         .as_str()
         .unwrap()
         .contains("[--text <text>|--text-file <path|->]"));
+    assert!(contract["commands"]["addInteraction"]["usage"]
+        .as_str()
+        .unwrap()
+        .contains("[--metadata-json <json>|--metadata-json-file <path|->]"));
+    assert!(contract["commands"]["addInteraction"]["usage"]
+        .as_str()
+        .unwrap()
+        .contains("[--event-json <json>|--event-json-file <path|->]"));
+    assert_eq!(
+        contract["commands"]["addInteraction"]["eventJson"]["validOnlyWith"],
+        "--kind event"
+    );
+    assert_eq!(
+        contract["commands"]["addInteraction"]["calendarMapping"]["rawProviderPayload"],
+        "--metadata-json or --metadata-json-file"
+    );
     assert!(contract["commands"]["addProject"]["usage"]
         .as_str()
         .unwrap()
@@ -228,10 +244,15 @@ fn contract_reports_agent_cli_contract() {
         .as_array()
         .unwrap()
         .iter()
+        .any(|rule| rule.as_str().unwrap().contains("explicit user sign-off")));
+    assert!(contract["writeRules"]
+        .as_array()
+        .unwrap()
+        .iter()
         .any(|rule| rule
             .as_str()
             .unwrap()
-            .contains("explicit user sign-off")));
+            .contains("do not redact imported body text")));
 }
 
 #[test]
@@ -254,6 +275,31 @@ fn json_errors_are_machine_readable_on_stderr() {
         .as_str()
         .unwrap()
         .contains("title or body"));
+}
+
+#[test]
+fn event_json_is_only_valid_for_event_interactions() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let out = run(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Not an event",
+            "--text",
+            "Full readable source.",
+            "--event-json",
+            r#"{"details":{"subtype":"generic"}}"#,
+        ],
+    );
+    assert!(!out.status.success());
+    assert!(out.stdout.is_empty(), "errors must not write to stdout");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--event-json requires --kind event"));
 }
 
 #[test]
@@ -1265,6 +1311,311 @@ fn add_interaction_stores_calendar_fields_and_resolves_known_participants() {
 }
 
 #[test]
+fn import_interaction_writes_structured_event_payload_and_metadata() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let metadata_path = dir.path().join("gcal-payload.json");
+    let event_path = dir.path().join("event-payload.json");
+    std::fs::write(
+        &metadata_path,
+        r#"{"provider":"google_calendar","html":"Full readable booking source"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &event_path,
+        r#"{
+          "details": {
+            "subtype": "flight",
+            "status": "confirmed",
+            "startLocalAt": "2026-07-09T09:00:00",
+            "startTimezone": "Europe/London",
+            "endLocalAt": "2026-07-09T15:20:00",
+            "endTimezone": "America/Chicago",
+            "venueName": "London Heathrow",
+            "address": "Heathrow Airport",
+            "providerName": "Google Calendar",
+            "providerRecordKind": "calendar_event",
+            "sourceCompleteness": "complete"
+          },
+          "booking": {
+            "bookingType": "flight",
+            "confirmationReference": "ABC123",
+            "bookingChannel": "British Airways",
+            "providerName": "BA",
+            "partyCount": 1,
+            "guestCount": 1,
+            "contact": {"email":"support@example.com"},
+            "cost": {"currency":"USD","total":1200},
+            "cancellationPolicy": {"summary":"fare rules apply"}
+          },
+          "lodgingStay": {
+            "propertyName": "Four Seasons Montreal",
+            "checkInLocalAt": "2026-07-09T16:00:00",
+            "checkOutLocalAt": "2026-07-12T11:00:00",
+            "nights": 3,
+            "roomCount": 1,
+            "rooms": [{"name":"Premier King"}],
+            "guests": [{"name":"Alex"}],
+            "benefits": {"breakfast":true},
+            "policies": {"deposit":"one night"},
+            "arrivalNotes": "Late arrival requested"
+          },
+          "flightSegments": [{
+            "segmentIndex": 0,
+            "carrierName": "British Airways",
+            "carrierCode": "BA",
+            "flightNumber": "191",
+            "serviceClass": "business",
+            "originCode": "LHR",
+            "originName": "London Heathrow",
+            "originTimezone": "Europe/London",
+            "destinationCode": "AUS",
+            "destinationName": "Austin",
+            "destinationTimezone": "America/Chicago",
+            "departureLocalAt": "2026-07-09T09:00:00",
+            "arrivalLocalAt": "2026-07-09T15:20:00",
+            "departureAt": "2026-07-09T08:00:00Z",
+            "arrivalAt": "2026-07-09T20:20:00Z",
+            "durationMinutes": 740,
+            "confirmationReference": "ABC123",
+            "ticketNumbers": ["1250000000001"],
+            "passengers": [{"name":"Alex"}]
+          }]
+        }"#,
+    )
+    .unwrap();
+    let metadata_file = metadata_path.to_str().unwrap();
+    let event_file = event_path.to_str().unwrap();
+
+    let imported = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "interaction",
+            "--kind",
+            "event",
+            "--title",
+            "Calendar: Flight: London Heathrow, LHR to AUS",
+            "--text",
+            "Full readable source: BA confirmation ABC123, LHR to AUS, Four Seasons Montreal.",
+            "--source",
+            "google_calendar",
+            "--external-kind",
+            "event",
+            "--external-id",
+            "calendar-event-structured-1",
+            "--metadata-json-file",
+            metadata_file,
+            "--event-json-file",
+            event_file,
+        ],
+    );
+    assert_eq!(imported["isDuplicate"], false);
+    assert!(imported["chunkCount"].as_i64().unwrap() > 0);
+    let id = imported["id"].as_str().unwrap();
+
+    let conn = Connection::open(&db).unwrap();
+    let (body_text, metadata_json): (String, String) = conn
+        .query_row(
+            "SELECT body_text, metadata_json FROM interactions WHERE id = ?1",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert!(body_text.contains("Full readable source"));
+    let metadata: Value = serde_json::from_str(&metadata_json).unwrap();
+    assert_eq!(metadata["provider"], "google_calendar");
+    assert_eq!(metadata["html"], "Full readable booking source");
+
+    let (subtype, status, provider, completeness): (String, String, String, String) = conn
+        .query_row(
+            "SELECT subtype, status, provider_name, source_completeness
+             FROM interaction_event_details
+             WHERE interaction_id = ?1",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(subtype, "flight");
+    assert_eq!(status, "confirmed");
+    assert_eq!(provider, "Google Calendar");
+    assert_eq!(completeness, "complete");
+
+    let (confirmation, guest_count, cost_json): (String, i64, String) = conn
+        .query_row(
+            "SELECT confirmation_reference, guest_count, cost_json
+             FROM interaction_event_bookings
+             WHERE interaction_id = ?1",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(confirmation, "ABC123");
+    assert_eq!(guest_count, 1);
+    assert_eq!(
+        serde_json::from_str::<Value>(&cost_json).unwrap()["total"],
+        1200
+    );
+
+    let (property, nights, rooms_json): (String, i64, String) = conn
+        .query_row(
+            "SELECT property_name, nights, rooms_json
+             FROM interaction_event_lodging_stays
+             WHERE interaction_id = ?1",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(property, "Four Seasons Montreal");
+    assert_eq!(nights, 3);
+    assert_eq!(
+        serde_json::from_str::<Value>(&rooms_json).unwrap()[0]["name"],
+        "Premier King"
+    );
+
+    let (origin, destination, flight_number): (String, String, String) = conn
+        .query_row(
+            "SELECT origin_code, destination_code, flight_number
+             FROM interaction_event_flight_segments
+             WHERE interaction_id = ?1 AND segment_index = 0",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(origin, "LHR");
+    assert_eq!(destination, "AUS");
+    assert_eq!(flight_number, "191");
+
+    let update_event_json = r#"{
+      "details": {
+        "subtype": "flight",
+        "status": "schedule_updated",
+        "startLocalAt": "2026-07-09T10:00:00",
+        "startTimezone": "Europe/London",
+        "providerName": "Google Calendar",
+        "sourceCompleteness": "complete"
+      },
+      "booking": {
+        "bookingType": "flight",
+        "confirmationReference": "UPDATED",
+        "providerName": "BA"
+      },
+      "flightSegments": [
+        {"carrierCode":"BA","flightNumber":"193","originCode":"LHR","destinationCode":"ORD"},
+        {"carrierCode":"AA","flightNumber":"1234","originCode":"ORD","destinationCode":"AUS"}
+      ]
+    }"#;
+    let reimported = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "interaction",
+            "--kind",
+            "event",
+            "--title",
+            "Calendar: Flight: London Heathrow, LHR to AUS",
+            "--text",
+            "Full readable source after airline schedule change.",
+            "--source",
+            "google_calendar",
+            "--external-kind",
+            "event",
+            "--external-id",
+            "calendar-event-structured-1",
+            "--refresh",
+            "--metadata-json",
+            r#"{"provider":"google_calendar","version":2}"#,
+            "--event-json",
+            update_event_json,
+        ],
+    );
+    assert_eq!(reimported["isDuplicate"], true);
+    assert_eq!(reimported["id"], id);
+
+    let (
+        detail_rows,
+        updated_status,
+        preserved_venue,
+        preserved_start_timezone,
+        updated_confirmation,
+        preserved_booking_type,
+        preserved_cost_json,
+        segment_count,
+    ): (
+        i64,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        i64,
+    ) = conn
+        .query_row(
+            "SELECT
+               (SELECT COUNT(*) FROM interaction_event_details WHERE interaction_id = ?1),
+               (SELECT status FROM interaction_event_details WHERE interaction_id = ?1),
+               (SELECT venue_name FROM interaction_event_details WHERE interaction_id = ?1),
+               (SELECT start_timezone FROM interaction_event_details WHERE interaction_id = ?1),
+               (SELECT confirmation_reference FROM interaction_event_bookings WHERE interaction_id = ?1),
+               (SELECT booking_type FROM interaction_event_bookings WHERE interaction_id = ?1),
+               (SELECT cost_json FROM interaction_event_bookings WHERE interaction_id = ?1),
+               (SELECT COUNT(*) FROM interaction_event_flight_segments WHERE interaction_id = ?1)",
+            [id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(detail_rows, 1);
+    assert_eq!(updated_status, "schedule_updated");
+    assert_eq!(preserved_venue, "London Heathrow");
+    assert_eq!(preserved_start_timezone, "Europe/London");
+    assert_eq!(updated_confirmation, "UPDATED");
+    assert_eq!(preserved_booking_type, "flight");
+    assert_eq!(
+        serde_json::from_str::<Value>(&preserved_cost_json).unwrap()["total"],
+        1200
+    );
+    assert_eq!(segment_count, 2);
+
+    let updated_metadata: String = conn
+        .query_row(
+            "SELECT metadata_json FROM interactions WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&updated_metadata).unwrap()["version"],
+        2
+    );
+
+    let lodging_rows: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM interaction_event_lodging_stays WHERE interaction_id = ?1",
+            [id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        lodging_rows, 1,
+        "unsupplied lodgingStay section should not be deleted on reimport"
+    );
+}
+
+#[test]
 fn granola_interaction_reports_post_analysis_requirement() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
@@ -1303,7 +1654,7 @@ fn granola_interaction_reports_post_analysis_requirement() {
 }
 
 #[test]
-fn add_interaction_allows_structured_calendar_event_without_body() {
+fn add_interaction_stores_bodyless_calendar_event_as_incomplete_evidence() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
     let first = run_json(
@@ -1382,6 +1733,22 @@ fn add_interaction_allows_structured_calendar_event_without_body() {
     assert_eq!(
         original_url.as_deref(),
         Some("https://www.google.com/calendar/event?eid=calendar-event-no-body")
+    );
+
+    let event_ref = format!("interaction:{}", first["id"].as_str().unwrap());
+    let finalized = run_json(
+        &db,
+        &["--json", "import", "finalize", "--record", &event_ref],
+    );
+    assert_eq!(finalized["complete"], false);
+    let missing = finalized["missing"].as_array().unwrap();
+    assert!(
+        missing.iter().any(|item| item == "rawText"),
+        "bodyless event imports must report missing rawText"
+    );
+    assert!(
+        missing.iter().any(|item| item == "chunks"),
+        "bodyless event imports must report missing chunks"
     );
 }
 
@@ -4243,9 +4610,19 @@ fn import_finalize_supports_explicit_waivers_for_structured_events() {
         .as_array()
         .unwrap()
         .iter()
+        .any(|missing| missing == "rawText"));
+    assert!(before["missing"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|missing| missing == "chunks"));
+    assert!(before["missing"]
+        .as_array()
+        .unwrap()
+        .iter()
         .any(|missing| missing == "participantsOrEntities"));
 
-    let finalized = run_json(
+    let still_incomplete = run_json(
         &db,
         &[
             "--json",
@@ -4259,7 +4636,30 @@ fn import_finalize_supports_explicit_waivers_for_structured_events() {
             "--no-extracted-facts",
         ],
     );
+    assert_eq!(still_incomplete["complete"], false);
+    assert!(still_incomplete["missing"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|missing| missing == "rawText"));
+
+    let finalized = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "finalize",
+            "--record",
+            &event_ref,
+            "--raw-text-unavailable",
+            "--no-entities",
+            "--no-project-or-task-link",
+            "--no-derived-actions",
+            "--no-extracted-facts",
+        ],
+    );
     assert_eq!(finalized["complete"], true);
+    assert_eq!(finalized["waivers"]["rawTextUnavailable"], true);
     assert_eq!(finalized["waivers"]["noEntities"], true);
     assert_eq!(finalized["waivers"]["noExtractedFacts"], true);
 

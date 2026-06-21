@@ -18,8 +18,10 @@ translated into generic Local Brain commands.
   and `--original-url` where available.
 - Keep stdout as data and stderr as diagnostics. Use global `--json` for stable
   machine output and JSON errors.
-- Store raw evidence before summaries. Store AI narratives as `ai_notes`, not as
-  replacements for source text.
+- Store complete local readable evidence before summaries. Never redact an
+  imported source body; if a source record is too sensitive or not worth storing,
+  skip the whole record and ledger the reason.
+- Store AI narratives as `ai_notes`, not as replacements for source text.
 - Treat extracted claims as facts first; promote only durable, useful claims to
   memories.
 - Cite exact evidence chunks when creating tasks, facts, AI notes, and memories.
@@ -108,16 +110,31 @@ brain --json self set --full-name "Alex MacCaw" \
   --email alex@maccaw.org --email alex@picardo.health
 ```
 
-Import a Gmail thread digest:
+Import a Gmail thread with full readable source text:
 
 ```bash
 brain --json import interaction --kind email \
   --title "Gmail: Everlywell Integration" \
   --summary "Production credential setup and go-live readiness." \
-  --text-file digest.md \
+  --text-file full-thread.md \
   --source gmail --external-kind thread --external-id <thread-id> \
   --participant "from:Maya Chen <maya@example.com>" \
   --link project:<id>
+```
+
+Import a structured calendar event:
+
+```bash
+brain --json import interaction --kind event \
+  --title "Calendar: Flight: London Heathrow, LHR to AUS" \
+  --summary "Flight and related booking details." \
+  --text-file full-calendar-event.txt \
+  --metadata-json-file raw-google-calendar-event.json \
+  --event-json-file event-details.json \
+  --occurred-at 2026-07-09T09:00:00 \
+  --ended-at 2026-07-09T15:20:00 \
+  --source google_calendar --external-kind event --external-id <event-id> \
+  --original-url "https://www.google.com/calendar/event?eid=..."
 ```
 
 Import a Granola meeting with raw transcript and AI note:
@@ -212,7 +229,8 @@ A meeting, email, or document import is incomplete until it has:
 
 - source identity;
 - participants or entities where applicable;
-- raw text or transcript when available;
+- complete readable source text or transcript, unless `--raw-text-unavailable`
+  records a real source limitation;
 - an AI note;
 - extracted facts;
 - links to existing projects or tasks when relevant;
@@ -233,6 +251,11 @@ use an explicit waiver such as `--raw-text-unavailable`, `--no-entities`,
 `--no-project-or-task-link`, `--no-derived-actions`, or
 `--no-extracted-facts`; a successful finalize writes durable `finalized`
 provenance so audit does not re-raise the record.
+
+Concise summaries are welcome in `summary` or `ai_note` records, but they must
+not replace source body text. Calendar placeholders such as "see Gmail for
+details" should stay incomplete unless the importer fetches the linked Gmail
+source or explicitly records that raw text is unavailable.
 
 ## Guardrails
 

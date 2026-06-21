@@ -95,8 +95,14 @@ fn skill_doc_exists_and_covers_the_nouns() {
     assert!(
         text.contains("--ended-at")
             && text.contains("google_calendar")
-            && text.contains("--self-participant"),
+            && text.contains("--self-participant")
+            && text.contains("--metadata-json-file")
+            && text.contains("--event-json-file"),
         "skill must teach structured calendar imports"
+    );
+    assert!(
+        text.contains("complete readable source") && text.contains("Do not redact"),
+        "skill must teach full readable source evidence and no-redaction imports"
     );
     assert!(
         text.contains("Use `event`") && text.contains("travel, lodging"),

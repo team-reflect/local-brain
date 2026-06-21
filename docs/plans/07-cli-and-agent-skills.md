@@ -34,6 +34,9 @@ path resolution, sidecar bundling, installation checks.
 - Source-backed interaction imports can replace body text and regenerated chunks when
   the upstream source is authoritative, for example a Granola transcript replacing an
   earlier summary-only import.
+- Source-backed imports preserve full local readable evidence. If a source record is
+  too sensitive or not worth storing, the importer skips and ledgers the whole record
+  instead of importing a partial redaction.
 - People can have multiple emails and phones. Imports dedupe through external identity,
   then contact handles, then normalized name.
 - Email/calendar interactions can preserve unresolved raw participants without creating
@@ -151,8 +154,9 @@ path resolution, sidecar bundling, installation checks.
   and link attachments as assets.
 - An agent can import a Granola meeting with raw transcript body text and a separate
   summary, then refresh that body and its chunks idempotently.
-- An agent can import a redacted email or meeting digest as `summary` plus searchable
-  body text without storing unsafe raw quote chains.
+- An agent can import email or meeting source text as body text, keep concise summaries
+  in `summary` or `ai_notes`, and skip/ledger whole unsafe records rather than
+  redacting imported bodies.
 - An agent can create a project after explicit user sign-off, and imports can link
   interactions or tasks to existing projects without auto-creating topic buckets.
 - An agent can add a reference note as a document.

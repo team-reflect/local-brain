@@ -24,11 +24,10 @@ storage.
 - Email import should be thread-aware. Prefer one interaction per meaningful Gmail
   thread or conversation digest when the thread has long quoted history; use
   message-level interactions only for genuinely standalone messages.
-- Importers may store a redacted digest/summary instead of raw body text when email or
-  message sources contain credentials, passwords, legal/medical boilerplate, repeated
-  quote chains, or low-signal notification noise. Granola meeting imports are the
-  exception: always store the raw transcript when it is available, with summaries kept
-  separately.
+- Importers store full readable source text when they import a source record. If a
+  source is too sensitive, unsafe, or low-signal to store, skip the whole record and
+  ledger the reason. Summaries stay in `summary` or `ai_notes`; they do not replace
+  imported body text.
 - Projects are first-class links, but project rows are manually created user structure.
   Imports and extraction link existing projects only; possible new projects are
   suggestions, not automatic writes.
@@ -75,7 +74,8 @@ storage.
    - skip unsupported binary files
    - report imported/skipped/duplicate counts
 9. Compute content hashes to avoid accidental duplicates.
-10. Store readable text on `documents.body_text` or `interactions.body_text`.
+10. Store complete readable text on `documents.body_text` or `interactions.body_text`
+    for imported source records, unless the source text is truly unavailable.
 11. Generate `content_chunks` inside the same transaction.
 12. Trigger extraction jobs from newly created or changed records.
 13. Run transcript post-analysis for meeting/call imports:

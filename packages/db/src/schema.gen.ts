@@ -242,6 +242,81 @@ export interface ExtractedFacts {
   archivedAt: string | null
 }
 
+export interface InteractionEventBookings {
+  interactionId: string
+  bookingType: string | null
+  confirmationReference: string | null
+  bookingChannel: string | null
+  providerName: string | null
+  partyCount: number | null
+  guestCount: number | null
+  contactJson: string | null
+  costJson: string | null
+  cancellationPolicyJson: string | null
+  createdAt: Generated<string>
+  updatedAt: Generated<string>
+}
+
+export interface InteractionEventDetails {
+  interactionId: string
+  subtype: Generated<string>
+  status: string | null
+  startLocalAt: string | null
+  startTimezone: string | null
+  endLocalAt: string | null
+  endTimezone: string | null
+  isAllDay: Generated<number>
+  venueName: string | null
+  address: string | null
+  providerName: string | null
+  providerRecordKind: string | null
+  sourceCompleteness: string | null
+  needsReviewReason: string | null
+  createdAt: Generated<string>
+  updatedAt: Generated<string>
+}
+
+export interface InteractionEventFlightSegments {
+  interactionId: string
+  segmentIndex: number
+  carrierName: string | null
+  carrierCode: string | null
+  flightNumber: string | null
+  serviceClass: string | null
+  originCode: string | null
+  originName: string | null
+  originTimezone: string | null
+  destinationCode: string | null
+  destinationName: string | null
+  destinationTimezone: string | null
+  departureLocalAt: string | null
+  arrivalLocalAt: string | null
+  departureAt: string | null
+  arrivalAt: string | null
+  durationMinutes: number | null
+  confirmationReference: string | null
+  ticketNumbersJson: string | null
+  passengersJson: string | null
+  createdAt: Generated<string>
+  updatedAt: Generated<string>
+}
+
+export interface InteractionEventLodgingStays {
+  interactionId: string
+  propertyName: string | null
+  checkInLocalAt: string | null
+  checkOutLocalAt: string | null
+  nights: number | null
+  roomCount: number | null
+  roomsJson: string | null
+  guestsJson: string | null
+  benefitsJson: string | null
+  policiesJson: string | null
+  arrivalNotes: string | null
+  createdAt: Generated<string>
+  updatedAt: Generated<string>
+}
+
 export interface InteractionOrganizations {
   id: string
   interactionId: string
@@ -620,6 +695,10 @@ export interface Database {
   evidenceRefs: EvidenceRefs
   externalIdentities: ExternalIdentities
   extractedFacts: ExtractedFacts
+  interactionEventBookings: InteractionEventBookings
+  interactionEventDetails: InteractionEventDetails
+  interactionEventFlightSegments: InteractionEventFlightSegments
+  interactionEventLodgingStays: InteractionEventLodgingStays
   interactionOrganizations: InteractionOrganizations
   interactionParticipants: InteractionParticipants
   interactionTranscripts: InteractionTranscripts

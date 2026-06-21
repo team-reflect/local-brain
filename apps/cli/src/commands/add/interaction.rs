@@ -5,7 +5,8 @@
 //! than re-created.
 
 use rusqlite::{params, Connection, OptionalExtension};
-use serde_json::json;
+use serde::Deserialize;
+use serde_json::{json, Value};
 
 use super::identity::{
     external_kind, find_duplicate, find_external_identity, insert_external_identity,
@@ -31,6 +32,8 @@ pub struct AddInteractionArgs<'a> {
     pub original_url: Option<&'a str>,
     pub summary: Option<&'a str>,
     pub body: Option<String>,
+    pub metadata_json: Option<String>,
+    pub event_json: Option<String>,
     pub links: Vec<LinkRef>,
     pub raw_participants: Vec<&'a str>,
     pub self_participants: Vec<&'a str>,
@@ -40,6 +43,95 @@ pub struct AddInteractionArgs<'a> {
     /// `--replace-body` instead of only filling blank fields. A no-op when the
     /// stored body already matches, so a daily automation can pass it freely.
     pub refresh: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EventPayload {
+    details: Option<EventDetailsPayload>,
+    booking: Option<EventBookingPayload>,
+    lodging_stay: Option<EventLodgingStayPayload>,
+    flight_segments: Option<Vec<EventFlightSegmentPayload>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EventDetailsPayload {
+    subtype: Option<String>,
+    status: Option<String>,
+    start_local_at: Option<String>,
+    start_timezone: Option<String>,
+    end_local_at: Option<String>,
+    end_timezone: Option<String>,
+    is_all_day: Option<bool>,
+    venue_name: Option<String>,
+    address: Option<String>,
+    provider_name: Option<String>,
+    provider_record_kind: Option<String>,
+    source_completeness: Option<String>,
+    needs_review_reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EventBookingPayload {
+    booking_type: Option<String>,
+    confirmation_reference: Option<String>,
+    booking_channel: Option<String>,
+    provider_name: Option<String>,
+    party_count: Option<i64>,
+    guest_count: Option<i64>,
+    #[serde(alias = "contactJson")]
+    contact: Option<Value>,
+    #[serde(alias = "costJson")]
+    cost: Option<Value>,
+    #[serde(alias = "cancellationPolicyJson")]
+    cancellation_policy: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EventLodgingStayPayload {
+    property_name: Option<String>,
+    check_in_local_at: Option<String>,
+    check_out_local_at: Option<String>,
+    nights: Option<i64>,
+    room_count: Option<i64>,
+    #[serde(alias = "roomsJson")]
+    rooms: Option<Value>,
+    #[serde(alias = "guestsJson")]
+    guests: Option<Value>,
+    #[serde(alias = "benefitsJson")]
+    benefits: Option<Value>,
+    #[serde(alias = "policiesJson")]
+    policies: Option<Value>,
+    arrival_notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EventFlightSegmentPayload {
+    segment_index: Option<i64>,
+    carrier_name: Option<String>,
+    carrier_code: Option<String>,
+    flight_number: Option<String>,
+    service_class: Option<String>,
+    origin_code: Option<String>,
+    origin_name: Option<String>,
+    origin_timezone: Option<String>,
+    destination_code: Option<String>,
+    destination_name: Option<String>,
+    destination_timezone: Option<String>,
+    departure_local_at: Option<String>,
+    arrival_local_at: Option<String>,
+    departure_at: Option<String>,
+    arrival_at: Option<String>,
+    duration_minutes: Option<i64>,
+    confirmation_reference: Option<String>,
+    #[serde(alias = "ticketNumbersJson")]
+    ticket_numbers: Option<Value>,
+    #[serde(alias = "passengersJson")]
+    passengers: Option<Value>,
 }
 
 /// Whether the stored interaction's body differs from the incoming one, so a
@@ -69,6 +161,298 @@ fn body_changed(
         .filter(|body| !body.is_empty())
         .map(|body| content_hash(&body));
     Ok(stored_hash.as_deref() != Some(incoming_hash))
+}
+
+fn normalize_json(raw: Option<&str>, field: &str) -> Result<Option<String>, CliError> {
+    let Some(value) = normalize_optional(raw) else {
+        return Ok(None);
+    };
+    serde_json::from_str::<Value>(&value)
+        .map_err(|e| CliError::Runtime(format!("{field} must be valid JSON: {e}")))?;
+    Ok(Some(value))
+}
+
+fn parse_event_payload(
+    raw: Option<&str>,
+    interaction_kind: &str,
+) -> Result<Option<EventPayload>, CliError> {
+    let Some(value) = normalize_optional(raw) else {
+        return Ok(None);
+    };
+    if interaction_kind != "event" {
+        return Err(CliError::Runtime(
+            "--event-json requires --kind event".into(),
+        ));
+    }
+    let payload = serde_json::from_str::<EventPayload>(&value)
+        .map_err(|e| CliError::Runtime(format!("--event-json must match the event schema: {e}")))?;
+    validate_event_payload(&payload)?;
+    Ok(Some(payload))
+}
+
+fn validate_event_payload(payload: &EventPayload) -> Result<(), CliError> {
+    if let Some(details) = payload.details.as_ref() {
+        if let Some(subtype) = details.subtype.as_deref() {
+            let valid = matches!(
+                subtype,
+                "flight"
+                    | "lodging"
+                    | "dining_reservation"
+                    | "transport"
+                    | "travel_block"
+                    | "appointment"
+                    | "generic"
+            );
+            if !valid {
+                return Err(CliError::Runtime(format!(
+                    "--event-json details.subtype '{subtype}' is not supported"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn json_column(value: Option<&Value>) -> Option<String> {
+    value.map(Value::to_string)
+}
+
+fn optional_nonnegative(value: Option<i64>, field: &str) -> Result<Option<i64>, CliError> {
+    if let Some(value) = value {
+        if value < 0 {
+            return Err(CliError::Runtime(format!(
+                "--event-json {field} must be non-negative"
+            )));
+        }
+    }
+    Ok(value)
+}
+
+fn upsert_event_details(
+    conn: &Connection,
+    interaction_id: &str,
+    details: &EventDetailsPayload,
+) -> Result<(), CliError> {
+    let subtype = details.subtype.as_deref().unwrap_or("generic");
+    let has_subtype = if details.subtype.is_some() {
+        1_i64
+    } else {
+        0_i64
+    };
+    let is_all_day = if details.is_all_day.unwrap_or(false) {
+        1_i64
+    } else {
+        0_i64
+    };
+    let has_is_all_day = if details.is_all_day.is_some() {
+        1_i64
+    } else {
+        0_i64
+    };
+    conn.execute(
+        "INSERT INTO interaction_event_details
+         (interaction_id, subtype, status, start_local_at, start_timezone,
+          end_local_at, end_timezone, is_all_day, venue_name, address,
+          provider_name, provider_record_kind, source_completeness,
+          needs_review_reason)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
+         ON CONFLICT(interaction_id) DO UPDATE SET
+           subtype = CASE WHEN ?15 = 1 THEN excluded.subtype ELSE interaction_event_details.subtype END,
+           status = COALESCE(excluded.status, interaction_event_details.status),
+           start_local_at = COALESCE(excluded.start_local_at, interaction_event_details.start_local_at),
+           start_timezone = COALESCE(excluded.start_timezone, interaction_event_details.start_timezone),
+           end_local_at = COALESCE(excluded.end_local_at, interaction_event_details.end_local_at),
+           end_timezone = COALESCE(excluded.end_timezone, interaction_event_details.end_timezone),
+           is_all_day = CASE WHEN ?16 = 1 THEN excluded.is_all_day ELSE interaction_event_details.is_all_day END,
+           venue_name = COALESCE(excluded.venue_name, interaction_event_details.venue_name),
+           address = COALESCE(excluded.address, interaction_event_details.address),
+           provider_name = COALESCE(excluded.provider_name, interaction_event_details.provider_name),
+           provider_record_kind = COALESCE(excluded.provider_record_kind, interaction_event_details.provider_record_kind),
+           source_completeness = COALESCE(excluded.source_completeness, interaction_event_details.source_completeness),
+           needs_review_reason = COALESCE(excluded.needs_review_reason, interaction_event_details.needs_review_reason),
+           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+        params![
+            interaction_id,
+            subtype,
+            normalize_optional(details.status.as_deref()),
+            normalize_optional(details.start_local_at.as_deref()),
+            normalize_optional(details.start_timezone.as_deref()),
+            normalize_optional(details.end_local_at.as_deref()),
+            normalize_optional(details.end_timezone.as_deref()),
+            is_all_day,
+            normalize_optional(details.venue_name.as_deref()),
+            normalize_optional(details.address.as_deref()),
+            normalize_optional(details.provider_name.as_deref()),
+            normalize_optional(details.provider_record_kind.as_deref()),
+            normalize_optional(details.source_completeness.as_deref()),
+            normalize_optional(details.needs_review_reason.as_deref()),
+            has_subtype,
+            has_is_all_day,
+        ],
+    )?;
+    Ok(())
+}
+
+fn upsert_event_booking(
+    conn: &Connection,
+    interaction_id: &str,
+    booking: &EventBookingPayload,
+) -> Result<(), CliError> {
+    let contact_json = json_column(booking.contact.as_ref());
+    let cost_json = json_column(booking.cost.as_ref());
+    let cancellation_policy_json = json_column(booking.cancellation_policy.as_ref());
+    conn.execute(
+        "INSERT INTO interaction_event_bookings
+         (interaction_id, booking_type, confirmation_reference, booking_channel,
+          provider_name, party_count, guest_count, contact_json, cost_json,
+          cancellation_policy_json)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
+         ON CONFLICT(interaction_id) DO UPDATE SET
+           booking_type = COALESCE(excluded.booking_type, interaction_event_bookings.booking_type),
+           confirmation_reference = COALESCE(excluded.confirmation_reference, interaction_event_bookings.confirmation_reference),
+           booking_channel = COALESCE(excluded.booking_channel, interaction_event_bookings.booking_channel),
+           provider_name = COALESCE(excluded.provider_name, interaction_event_bookings.provider_name),
+           party_count = COALESCE(excluded.party_count, interaction_event_bookings.party_count),
+           guest_count = COALESCE(excluded.guest_count, interaction_event_bookings.guest_count),
+           contact_json = COALESCE(excluded.contact_json, interaction_event_bookings.contact_json),
+           cost_json = COALESCE(excluded.cost_json, interaction_event_bookings.cost_json),
+           cancellation_policy_json = COALESCE(excluded.cancellation_policy_json, interaction_event_bookings.cancellation_policy_json),
+           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+        params![
+            interaction_id,
+            normalize_optional(booking.booking_type.as_deref()),
+            normalize_optional(booking.confirmation_reference.as_deref()),
+            normalize_optional(booking.booking_channel.as_deref()),
+            normalize_optional(booking.provider_name.as_deref()),
+            optional_nonnegative(booking.party_count, "booking.partyCount")?,
+            optional_nonnegative(booking.guest_count, "booking.guestCount")?,
+            contact_json.as_deref(),
+            cost_json.as_deref(),
+            cancellation_policy_json.as_deref(),
+        ],
+    )?;
+    Ok(())
+}
+
+fn upsert_event_lodging_stay(
+    conn: &Connection,
+    interaction_id: &str,
+    stay: &EventLodgingStayPayload,
+) -> Result<(), CliError> {
+    let rooms_json = json_column(stay.rooms.as_ref());
+    let guests_json = json_column(stay.guests.as_ref());
+    let benefits_json = json_column(stay.benefits.as_ref());
+    let policies_json = json_column(stay.policies.as_ref());
+    conn.execute(
+        "INSERT INTO interaction_event_lodging_stays
+         (interaction_id, property_name, check_in_local_at, check_out_local_at,
+          nights, room_count, rooms_json, guests_json, benefits_json,
+          policies_json, arrival_notes)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
+         ON CONFLICT(interaction_id) DO UPDATE SET
+           property_name = COALESCE(excluded.property_name, interaction_event_lodging_stays.property_name),
+           check_in_local_at = COALESCE(excluded.check_in_local_at, interaction_event_lodging_stays.check_in_local_at),
+           check_out_local_at = COALESCE(excluded.check_out_local_at, interaction_event_lodging_stays.check_out_local_at),
+           nights = COALESCE(excluded.nights, interaction_event_lodging_stays.nights),
+           room_count = COALESCE(excluded.room_count, interaction_event_lodging_stays.room_count),
+           rooms_json = COALESCE(excluded.rooms_json, interaction_event_lodging_stays.rooms_json),
+           guests_json = COALESCE(excluded.guests_json, interaction_event_lodging_stays.guests_json),
+           benefits_json = COALESCE(excluded.benefits_json, interaction_event_lodging_stays.benefits_json),
+           policies_json = COALESCE(excluded.policies_json, interaction_event_lodging_stays.policies_json),
+           arrival_notes = COALESCE(excluded.arrival_notes, interaction_event_lodging_stays.arrival_notes),
+           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+        params![
+            interaction_id,
+            normalize_optional(stay.property_name.as_deref()),
+            normalize_optional(stay.check_in_local_at.as_deref()),
+            normalize_optional(stay.check_out_local_at.as_deref()),
+            optional_nonnegative(stay.nights, "lodgingStay.nights")?,
+            optional_nonnegative(stay.room_count, "lodgingStay.roomCount")?,
+            rooms_json.as_deref(),
+            guests_json.as_deref(),
+            benefits_json.as_deref(),
+            policies_json.as_deref(),
+            normalize_optional(stay.arrival_notes.as_deref()),
+        ],
+    )?;
+    Ok(())
+}
+
+fn replace_event_flight_segments(
+    conn: &Connection,
+    interaction_id: &str,
+    segments: &[EventFlightSegmentPayload],
+) -> Result<(), CliError> {
+    conn.execute(
+        "DELETE FROM interaction_event_flight_segments WHERE interaction_id = ?1",
+        params![interaction_id],
+    )?;
+    for (index, segment) in segments.iter().enumerate() {
+        let segment_index = segment.segment_index.unwrap_or(index as i64);
+        if segment_index < 0 {
+            return Err(CliError::Runtime(
+                "--event-json flightSegments[].segmentIndex must be non-negative".into(),
+            ));
+        }
+        let ticket_numbers_json = json_column(segment.ticket_numbers.as_ref());
+        let passengers_json = json_column(segment.passengers.as_ref());
+        conn.execute(
+            "INSERT INTO interaction_event_flight_segments
+             (interaction_id, segment_index, carrier_name, carrier_code,
+              flight_number, service_class, origin_code, origin_name,
+              origin_timezone, destination_code, destination_name,
+              destination_timezone, departure_local_at, arrival_local_at,
+              departure_at, arrival_at, duration_minutes,
+              confirmation_reference, ticket_numbers_json, passengers_json)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)",
+            params![
+                interaction_id,
+                segment_index,
+                normalize_optional(segment.carrier_name.as_deref()),
+                normalize_optional(segment.carrier_code.as_deref()),
+                normalize_optional(segment.flight_number.as_deref()),
+                normalize_optional(segment.service_class.as_deref()),
+                normalize_optional(segment.origin_code.as_deref()),
+                normalize_optional(segment.origin_name.as_deref()),
+                normalize_optional(segment.origin_timezone.as_deref()),
+                normalize_optional(segment.destination_code.as_deref()),
+                normalize_optional(segment.destination_name.as_deref()),
+                normalize_optional(segment.destination_timezone.as_deref()),
+                normalize_optional(segment.departure_local_at.as_deref()),
+                normalize_optional(segment.arrival_local_at.as_deref()),
+                normalize_optional(segment.departure_at.as_deref()),
+                normalize_optional(segment.arrival_at.as_deref()),
+                optional_nonnegative(segment.duration_minutes, "flightSegments[].durationMinutes")?,
+                normalize_optional(segment.confirmation_reference.as_deref()),
+                ticket_numbers_json.as_deref(),
+                passengers_json.as_deref(),
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+fn apply_event_payload(
+    conn: &Connection,
+    interaction_id: &str,
+    payload: Option<&EventPayload>,
+) -> Result<(), CliError> {
+    let Some(payload) = payload else {
+        return Ok(());
+    };
+    if let Some(details) = payload.details.as_ref() {
+        upsert_event_details(conn, interaction_id, details)?;
+    }
+    if let Some(booking) = payload.booking.as_ref() {
+        upsert_event_booking(conn, interaction_id, booking)?;
+    }
+    if let Some(stay) = payload.lodging_stay.as_ref() {
+        upsert_event_lodging_stay(conn, interaction_id, stay)?;
+    }
+    if let Some(segments) = payload.flight_segments.as_ref() {
+        replace_event_flight_segments(conn, interaction_id, segments)?;
+    }
+    Ok(())
 }
 
 fn find_duplicate_interaction(
@@ -135,6 +519,14 @@ fn enrich_duplicate_interaction(
     )
 }
 
+struct ExistingInteractionEnrichment<'a> {
+    source_id: Option<&'a str>,
+    identity_kind: &'a str,
+    replace_body: bool,
+    metadata_json: Option<&'a str>,
+    event_payload: Option<&'a EventPayload>,
+}
+
 /// Apply a duplicate import onto an existing interaction: fill blank fields, add
 /// any new links/participants, and (re)assert the external identity. The two
 /// dedupe paths (external-identity match and content-hash match) both funnel
@@ -143,13 +535,11 @@ fn enrich_existing_interaction(
     tx: &Connection,
     existing: &str,
     args: &AddInteractionArgs,
-    source_id: Option<&str>,
-    identity_kind: &str,
-    replace_body: bool,
+    enrichment: ExistingInteractionEnrichment<'_>,
 ) -> Result<usize, CliError> {
     enrich_duplicate_interaction(tx, existing, args)?;
     let mut chunk_count = 0;
-    if replace_body {
+    if enrichment.replace_body {
         let body = args
             .body
             .as_deref()
@@ -162,22 +552,38 @@ fn enrich_existing_interaction(
              SET body_text = ?1,
                  summary = CASE WHEN ?2 IS NOT NULL THEN ?2 ELSE summary END,
                  content_hash = ?3,
+                 metadata_json = CASE WHEN ?4 IS NOT NULL THEN ?4 ELSE metadata_json END,
                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-             WHERE id = ?4",
-            params![&body, normalize_optional(args.summary), hash, existing,],
+             WHERE id = ?5",
+            params![
+                &body,
+                normalize_optional(args.summary),
+                hash,
+                enrichment.metadata_json,
+                existing,
+            ],
         )?;
         chunk_count = replace_chunks(tx, "interaction", existing, &body)?;
+    } else if enrichment.metadata_json.is_some() {
+        tx.execute(
+            "UPDATE interactions
+             SET metadata_json = ?1,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             WHERE id = ?2",
+            params![enrichment.metadata_json, existing],
+        )?;
     }
+    apply_event_payload(tx, existing, enrichment.event_payload)?;
     insert_links(tx, "interaction", existing, &args.links)?;
-    insert_raw_participants(tx, existing, source_id, &args.raw_participants)?;
-    insert_self_participants(tx, existing, source_id, &args.self_participants)?;
+    insert_raw_participants(tx, existing, enrichment.source_id, &args.raw_participants)?;
+    insert_self_participants(tx, existing, enrichment.source_id, &args.self_participants)?;
     insert_external_identity(
         tx,
         ExternalIdentityWrite {
             entity_type: "interaction",
             entity_id: existing,
-            source_id,
-            kind: identity_kind,
+            source_id: enrichment.source_id,
+            kind: enrichment.identity_kind,
             external_id: args.external_id,
             url: args.original_url,
             force_duplicate: false,
@@ -189,7 +595,7 @@ fn enrich_existing_interaction(
             record_type: "interaction",
             record_id: existing,
             provenance_kind: "imported",
-            source_id,
+            source_id: enrichment.source_id,
             original_path: None,
             original_url: args.original_url,
             model: None,
@@ -533,6 +939,8 @@ pub fn add_interaction(
             "an interaction needs a title or body text".into(),
         ));
     }
+    let metadata_json = normalize_json(args.metadata_json.as_deref(), "--metadata-json")?;
+    let event_payload = parse_event_payload(args.event_json.as_deref(), args.kind)?;
     let hash = body.as_deref().map(content_hash);
     let source_id = source_id(conn, args.source_slug)?;
     let identity_kind = external_kind(args.external_kind);
@@ -563,9 +971,13 @@ pub fn add_interaction(
                 &tx,
                 existing,
                 &args,
-                source_id.as_deref(),
-                &identity_kind,
-                do_replace,
+                ExistingInteractionEnrichment {
+                    source_id: source_id.as_deref(),
+                    identity_kind: &identity_kind,
+                    replace_body: do_replace,
+                    metadata_json: metadata_json.as_deref(),
+                    event_payload: event_payload.as_ref(),
+                },
             )?;
             tx.commit()?;
             // Surface staleness only when we didn't already re-digest the body.
@@ -599,9 +1011,13 @@ pub fn add_interaction(
                 &tx,
                 existing,
                 &args,
-                source_id.as_deref(),
-                &identity_kind,
-                args.replace_body,
+                ExistingInteractionEnrichment {
+                    source_id: source_id.as_deref(),
+                    identity_kind: &identity_kind,
+                    replace_body: args.replace_body,
+                    metadata_json: metadata_json.as_deref(),
+                    event_payload: event_payload.as_ref(),
+                },
             )?;
             tx.commit()?;
             return report_interaction(
@@ -621,8 +1037,9 @@ pub fn add_interaction(
     let tx = conn.transaction()?;
     tx.execute(
         "INSERT INTO interactions
-         (id, kind, title, body_text, summary, occurred_at, ended_at, location, external_id, original_url, content_hash)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+         (id, kind, title, body_text, summary, occurred_at, ended_at, location,
+          external_id, original_url, content_hash, metadata_json)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
         params![
             id,
             args.kind,
@@ -634,7 +1051,8 @@ pub fn add_interaction(
             normalize_optional(args.location),
             normalize_optional(args.external_id),
             normalize_optional(args.original_url),
-            hash.as_deref()
+            hash.as_deref(),
+            metadata_json.as_deref()
         ],
     )?;
     let count = match body.as_deref() {
@@ -642,6 +1060,7 @@ pub fn add_interaction(
         None => 0,
     };
     insert_links(&tx, "interaction", &id, &args.links)?;
+    apply_event_payload(&tx, &id, event_payload.as_ref())?;
     insert_raw_participants(&tx, &id, source_id.as_deref(), &args.raw_participants)?;
     insert_self_participants(&tx, &id, source_id.as_deref(), &args.self_participants)?;
     insert_external_identity(
@@ -732,6 +1151,8 @@ mod tests {
             original_url: None,
             summary: None,
             body: Some(body.to_string()),
+            metadata_json: None,
+            event_json: None,
             links: vec![],
             raw_participants: vec![],
             self_participants: vec![],

@@ -110,10 +110,12 @@ brain --json add interaction --kind email --title "Intro" --text-file body.txt
 ```
 
 Use `brain --json import finalize --record kind:id` after an import. Complete
-imports have source identity, entities/participants, raw text when available, AI
-note, extracted facts, project/task links when relevant, evidence-backed tasks or
-memories, tags, and chunks. If a good import intentionally lacks a stage, finalize
-with the narrow waiver that explains it: `--raw-text-unavailable`,
+imports have source identity, entities/participants, complete readable source
+text when the source has text, AI note, extracted facts, project/task links when
+relevant, evidence-backed tasks or memories, tags, and chunks. Do not redact
+imported source bodies; skip and ledger the whole source record if it should not
+be stored locally. If a good import intentionally lacks a stage, finalize with
+the narrow waiver that explains it: `--raw-text-unavailable`,
 `--no-entities`, `--no-project-or-task-link`, `--no-derived-actions`, or
 `--no-extracted-facts`.
 
@@ -194,13 +196,13 @@ not create the project. Use `brain suggest project` with evidence instead.
 
 ## Email, Calendar, And Meetings
 
-Gmail thread digest:
+Gmail thread:
 
 ```bash
 brain --json import interaction --kind email \
   --title "Gmail: Everlywell Integration" \
   --summary "Production credential setup and go-live readiness." \
-  --text-file digest.md \
+  --text-file full-thread.md \
   --source gmail --external-kind thread --external-id <thread-id> \
   --participant "from:Maya Chen <maya@example.com>" \
   --link project:<id>
@@ -213,6 +215,9 @@ brain --json import interaction --kind event \
   --title "Calendar: Stay at Louma" \
   --occurred-at 2026-07-09 --ended-at 2026-07-12 \
   --location "Louma Country Shepherd's Hut" \
+  --text-file full-calendar-event.txt \
+  --metadata-json-file raw-google-calendar-event.json \
+  --event-json-file event-details.json \
   --source google_calendar --external-id event-123 \
   --original-url "https://www.google.com/calendar/event?eid=..." \
   --participant "organizer:Alice Wyatt <alice@example.com>" \
@@ -223,6 +228,8 @@ brain --json import interaction --kind event \
 Use `event` for travel, lodging, reservations, reminders, all-day blocks, and
 non-meeting schedule context even if attendees exist. Use `meeting` for
 people-centered appointments.
+Calendar events that only say "see Gmail for details" are incomplete unless the
+importer fetches the linked Gmail source or records `--raw-text-unavailable`.
 
 Granola meeting:
 

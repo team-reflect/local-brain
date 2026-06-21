@@ -6,7 +6,7 @@
 //! place. Narrow waivers keep source limitations explicit instead of silently
 //! weakening the default audit.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 
 use super::identity::{insert_record_provenance, RecordProvenanceWrite};
@@ -236,23 +236,6 @@ fn is_finalized(conn: &Connection, kind: &str, id: &str) -> Result<bool, CliErro
     )?)
 }
 
-fn interaction_kind(conn: &Connection, id: &str) -> Result<Option<String>, CliError> {
-    conn.query_row(
-        "SELECT kind FROM interactions WHERE id = ?1",
-        params![id],
-        |row| row.get::<_, String>(0),
-    )
-    .optional()
-    .map_err(CliError::from)
-}
-
-fn interaction_can_lack_raw_text(conn: &Connection, id: &str) -> Result<bool, CliError> {
-    Ok(matches!(
-        interaction_kind(conn, id)?.as_deref(),
-        Some("event")
-    ))
-}
-
 fn has_raw_text(
     conn: &Connection,
     kind: &str,
@@ -263,7 +246,6 @@ fn has_raw_text(
         return Ok(true);
     }
     match kind {
-        "interaction" if interaction_can_lack_raw_text(conn, id)? => Ok(true),
         "interaction" => conn
             .query_row(
                 "SELECT EXISTS(
@@ -499,9 +481,6 @@ fn has_chunks(
         return Ok(true);
     }
     if policy.raw_text_unavailable {
-        return Ok(true);
-    }
-    if kind == "interaction" && interaction_can_lack_raw_text(conn, id)? {
         return Ok(true);
     }
     Ok(false)

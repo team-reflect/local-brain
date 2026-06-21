@@ -15,6 +15,7 @@ mod id;
 mod output;
 mod text;
 
+use std::io::Read;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -430,6 +431,18 @@ struct AddInteractionArgs {
     /// Optional file containing body text, or '-' to read stdin.
     #[arg(long, value_name = "PATH")]
     text_file: Option<PathBuf>,
+    /// Raw provider payload JSON stored on the interaction.
+    #[arg(long)]
+    metadata_json: Option<String>,
+    /// File containing raw provider payload JSON, or '-' to read stdin.
+    #[arg(long, value_name = "PATH")]
+    metadata_json_file: Option<PathBuf>,
+    /// Structured event payload JSON; valid only with --kind event.
+    #[arg(long)]
+    event_json: Option<String>,
+    /// File containing structured event payload JSON, or '-' to read stdin.
+    #[arg(long, value_name = "PATH")]
+    event_json_file: Option<PathBuf>,
     /// Typed link to an existing record, e.g. person:01ABC or project:01XYZ.
     #[arg(long = "link", value_name = "KIND:ID")]
     links: Vec<String>,
@@ -995,6 +1008,34 @@ impl AddDocumentArgs {
     }
 }
 
+fn resolve_optional_payload(
+    inline: Option<&str>,
+    file: Option<&PathBuf>,
+    inline_flag: &str,
+    file_flag: &str,
+) -> Result<Option<String>, CliError> {
+    match (inline, file) {
+        (Some(value), None) => Ok(Some(value.to_string())),
+        (None, Some(path)) => {
+            if path.as_os_str() == "-" {
+                let mut buf = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut buf)
+                    .map_err(|e| CliError::Runtime(format!("could not read stdin: {e}")))?;
+                Ok(Some(buf))
+            } else {
+                std::fs::read_to_string(path).map(Some).map_err(|e| {
+                    CliError::Runtime(format!("could not read {}: {e}", path.display()))
+                })
+            }
+        }
+        (Some(_), Some(_)) => Err(CliError::Runtime(format!(
+            "provide only one of {inline_flag} / {file_flag}"
+        ))),
+        (None, None) => Ok(None),
+    }
+}
+
 impl AddInteractionArgs {
     fn to_command(&self) -> Result<add::AddInteractionArgs<'_>, CliError> {
         Ok(add::AddInteractionArgs {
@@ -1009,6 +1050,18 @@ impl AddInteractionArgs {
             original_url: self.original_url.as_deref(),
             summary: self.summary.as_deref(),
             body: resolve_optional_text(self.text.as_deref(), self.text_file.as_deref())?,
+            metadata_json: resolve_optional_payload(
+                self.metadata_json.as_deref(),
+                self.metadata_json_file.as_ref(),
+                "--metadata-json",
+                "--metadata-json-file",
+            )?,
+            event_json: resolve_optional_payload(
+                self.event_json.as_deref(),
+                self.event_json_file.as_ref(),
+                "--event-json",
+                "--event-json-file",
+            )?,
             links: parse_links(&self.links)?,
             raw_participants: self.participants.iter().map(String::as_str).collect(),
             self_participants: self.self_participants.iter().map(String::as_str).collect(),
@@ -1658,7 +1711,9 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
             "Projects are user-agreed structure: create them only after explicit user sign-off, otherwise link existing projects or suggest inferred candidates.",
             "Preserve provider provenance with --source, --external-id, and --original-url.",
             "Do not create people for every raw sender or attendee; preserve unresolved handles with --participant.",
-            "Use --text-file or --text-file - for large text bodies; structured calendar events may omit body text.",
+            "Use --text-file or --text-file - for large source bodies. Imported source records must store complete local readable evidence; do not redact imported body text.",
+            "If a source record is too sensitive or not worth storing, skip the whole record and ledger it instead of importing a partial redaction.",
+            "Concise summaries belong in summary or ai-note records, not as replacements for source body text.",
         ],
         "commands": {
             "status": {
@@ -1690,20 +1745,29 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
                 "useFor": ["reference notes", "PDF text", "webpages", "receipts", "long-form material"],
             },
             "addInteraction": {
-                "usage": "brain --json add interaction --kind <kind> --title <title> [--text <text>|--text-file <path|->] [--occurred-at <iso>] [--ended-at <iso>] [--location <label>] [--source <slug> --external-id <id>] [--original-url <url>] [--participant 'role:Name <email>'...] [--self-participant 'role:Name <email>'...] [--link kind:id...] [--replace-body|--refresh]",
+                "usage": "brain --json add interaction --kind <kind> --title <title> [--text <text>|--text-file <path|->] [--metadata-json <json>|--metadata-json-file <path|->] [--event-json <json>|--event-json-file <path|->] [--occurred-at <iso>] [--ended-at <iso>] [--location <label>] [--source <slug> --external-id <id>] [--original-url <url>] [--participant 'role:Name <email>'...] [--self-participant 'role:Name <email>'...] [--link kind:id...] [--replace-body|--refresh]",
                 "kinds": ["note", "meeting", "call", "email", "message", "event"],
-                "bodyText": "Optional for structured calendar events; title or body text is still required.",
-                "freshness": "On a source-backed re-import (e.g. a Gmail thread digest), a matched record returns bodyChanged:true when the upstream body differs from the stored one. Pass --refresh to re-digest only when it changed (a no-op otherwise), or --replace-body to always re-chunk.",
+                "bodyText": "Imported source records need full readable body text when the source has readable content. Use import finalize --raw-text-unavailable only after a good-faith fetch proves raw text is unavailable.",
+                "metadataJson": "Raw provider payload JSON stored on interactions.metadata_json. Do not duplicate the full payload in event child tables.",
+                "eventJson": {
+                    "validOnlyWith": "--kind event",
+                    "sections": ["details", "booking", "lodgingStay", "flightSegments"],
+                    "detailsSubtype": ["flight", "lodging", "dining_reservation", "transport", "travel_block", "appointment", "generic"],
+                    "reimport": "On source-backed reimport, supplied details, booking, and lodgingStay sections are upserted; supplied flightSegments replace existing segments.",
+                },
+                "freshness": "On a source-backed re-import (e.g. a Gmail thread body), a matched record returns bodyChanged:true when the upstream body differs from the stored one. Pass --refresh to re-digest only when it changed (a no-op otherwise), or --replace-body to always re-chunk.",
                 "kindGuidance": "Use event for travel, lodging, reservations, reminders, and all-day schedule blocks even if they have attendees. Use meeting for people-centered appointments.",
                 "calendarMapping": {
                     "start": "--occurred-at",
                     "end": "--ended-at",
+                    "typedDetails": "--event-json or --event-json-file",
+                    "rawProviderPayload": "--metadata-json or --metadata-json-file",
                     "venueOrAddress": "--location",
                     "providerUrl": "--original-url",
                     "attendees": "--participant",
                     "selfAttendees": "--self-participant",
                     "knownPeople": "--link person:<id> or matching participant email",
-                    "notes": "Only source-specific leftovers that do not have typed fields.",
+                    "notes": "Calendar placeholders such as 'see Gmail for details' are incomplete unless the importer fetches the linked Gmail source or uses --raw-text-unavailable with a ledger note.",
                 },
             },
             "importInteraction": {

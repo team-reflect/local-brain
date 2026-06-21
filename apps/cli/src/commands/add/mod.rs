@@ -93,9 +93,7 @@ pub(super) fn fill_blanks(
 pub use affiliation::{affiliate, AffiliateArgs};
 pub use asset::{add_asset, set_asset_text, AddAssetArgs};
 pub use document::{add_document, AddDocumentArgs};
-pub use import_completion::{
-    import_audit, import_finalize, ImportAuditArgs, ImportFinalizeArgs,
-};
+pub use import_completion::{import_audit, import_finalize, ImportAuditArgs, ImportFinalizeArgs};
 pub use intelligence::{
     add_ai_note, add_fact, add_transcript, attach_tag, enrich_organization, enrich_person,
     ensure_tag, promote_fact, AddAiNoteArgs, AddFactArgs, AddTranscriptArgs,
