@@ -54,9 +54,9 @@ export function PersonDetail({ id }: { id: string }): ReactNode {
     <DetailPage query={person} notFoundTitle="Person not found">
       {(p) => {
         const currentAffiliation = affiliations.data?.find((affiliation) => affiliation.isCurrent)
-        const currentOrganization = currentAffiliation?.organizationName ?? p.currentOrganizationId
+        const currentOrganization = currentAffiliation?.organizationName
         const currentRole =
-          [p.currentTitle, currentOrganization].filter(Boolean).join(' at ') || null
+          [p.currentTitle ?? currentAffiliation?.title, currentOrganization].filter(Boolean).join(' at ') || null
         return (
           <>
             <PageHead eyebrow={p.isSelf ? 'You' : 'Person'} title={p.fullName} />

@@ -35,6 +35,15 @@ const personRow = {
   archived_at: null,
 }
 
+const personWithoutCurrentAffiliationRow = {
+  ...personRow,
+  id: 'p2',
+  full_name: 'Grace Hopper',
+  preferred_name: null,
+  current_title: 'Compiler lead',
+  current_organization_id: 'org-secret-id',
+}
+
 const organizationRow = {
   id: 'org1',
   name: 'Acme Labs',
@@ -58,7 +67,9 @@ function installProfileBridge(): void {
   installFakeBridge({
     query: (sql, params) => {
       if (sql.includes('from "people"') && sql.includes('where "people"."id" = ?')) {
-        return params[0] === 'p1' ? [personRow] : []
+        if (params[0] === 'p1') return [personRow]
+        if (params[0] === 'p2') return [personWithoutCurrentAffiliationRow]
+        return []
       }
       if (sql.includes('from "person_emails"')) {
         return [
@@ -102,6 +113,7 @@ function installProfileBridge(): void {
         ]
       }
       if (sql.includes('from "affiliations"') && sql.includes('left join "organizations"')) {
+        if (params[0] === 'p2') return []
         return [
           {
             id: 'aff1',
@@ -212,6 +224,15 @@ describe('network detail profile sheets', () => {
     expect(screen.getByText('Prefers concise project updates.')).toBeDefined()
     expect(screen.getByText('Primary company relationship.')).toBeDefined()
     expect(screen.getAllByText('external-1').length).toBeGreaterThan(0)
+  })
+
+  it('does not expose raw organization ids in the current role field', async () => {
+    installProfileBridge()
+    renderWithProviders(<PersonDetail id="p2" />)
+
+    expect(await screen.findByRole('heading', { name: 'Grace Hopper' })).toBeDefined()
+    expect(screen.getByText('Compiler lead')).toBeDefined()
+    expect(screen.queryByText(/org-secret-id/)).toBeNull()
   })
 
   it('renders rich organization fields, research profile, and sources', async () => {
