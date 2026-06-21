@@ -33,15 +33,16 @@ export function NetworkSurface({ tab, detail }: { tab: NetworkTab; detail?: Netw
     {
       key: 'name',
       header: 'Name',
-      width: 'minmax(14rem, 1fr)',
+      width: 'minmax(12rem, 0.9fr)',
       render: (org) => <span className="text-foreground">{org.name}</span>,
     },
     {
-      key: 'kind',
-      header: 'Kind',
-      width: '7rem',
-      className: 'w-28',
-      render: (org) => <span className="text-muted-foreground">{org.kind ?? '—'}</span>,
+      key: 'headline',
+      header: 'Headline',
+      width: 'minmax(14rem, 1.1fr)',
+      render: (org) => (
+        <span className="text-muted-foreground">{org.headline ?? '—'}</span>
+      ),
     },
     {
       key: 'domain',
