@@ -394,7 +394,19 @@ pub(crate) fn list_brain_infos(db: &DbState, brains: &BrainState) -> AppResult<V
     let live_active = active_paths.as_ref().map(|paths| paths.root_path.as_path());
     let schema_version = db.schema_version().ok();
     let conn = brains.lock()?;
-    let mut list = infos(&conn, live_active, schema_version)?;
+    let list = infos(&conn, live_active, schema_version)?;
+    Ok(include_uncatalogued_active(
+        list,
+        active_paths,
+        schema_version,
+    ))
+}
+
+fn include_uncatalogued_active(
+    mut list: Vec<BrainInfo>,
+    active_paths: Option<brain_schema::BrainPaths>,
+    schema_version: Option<i64>,
+) -> Vec<BrainInfo> {
     if let Some(paths) = active_paths {
         let active = paths.root_path.display().to_string();
         if !list.iter().any(|brain| brain.root_path == active) {
@@ -414,7 +426,7 @@ pub(crate) fn list_brain_infos(db: &DbState, brains: &BrainState) -> AppResult<V
             );
         }
     }
-    Ok(list)
+    list
 }
 
 fn log_manifest_sync(result: AppResult<bool>) {
@@ -800,8 +812,9 @@ fn forget_brain_impl(
     // Guard against forgetting the *live* active brain (the one reads/writes hit),
     // and derive the returned list's active flag from it too, so a stale registry
     // pointer can neither block a valid forget nor mislabel the survivors.
-    let live_active = db.active_root_path().ok();
-    let live_active_str = live_active.as_ref().map(|path| path.display().to_string());
+    let active_paths = db.active_paths().ok();
+    let live_active = active_paths.as_ref().map(|paths| paths.root_path.as_path());
+    let live_active_str = live_active.map(|path| path.display().to_string());
     if live_active_str.as_deref() == Some(key.as_str()) {
         return Err(AppError::parse(
             "cannot forget the active brain — switch to another brain first",
@@ -841,7 +854,8 @@ fn forget_brain_impl(
         }
     }
     tx.commit()?;
-    let list = infos(&conn, live_active.as_deref(), schema_version)?;
+    let list = infos(&conn, live_active, schema_version)?;
+    let list = include_uncatalogued_active(list, active_paths, schema_version);
     log_manifest_sync(crate::skill::sync_brain_manifest_from_infos(&list));
     Ok(list)
 }
@@ -1166,7 +1180,7 @@ mod tests {
         // non-active catalogue row still succeeds and drops it.
         let dir = tempdir().unwrap();
         let active = dir.path().join("active.sqlite");
-        let (db, _) = live_db(&active);
+        let (db, active_key) = live_db(&active);
         let brains = memory_state();
         {
             let conn = brains.lock().unwrap();
@@ -1179,6 +1193,14 @@ mod tests {
                 .iter()
                 .all(|info| info.root_path != "/a/brain.sqlite"),
             "the forgotten brain must not appear in the returned list"
+        );
+        assert_eq!(
+            remaining
+                .iter()
+                .filter(|info| info.root_path == active_key && info.is_active)
+                .count(),
+            1,
+            "the uncatalogued live brain must still appear as active"
         );
         let conn = brains.lock().unwrap();
         assert!(
