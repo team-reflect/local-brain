@@ -597,7 +597,7 @@ fn switch_to(
     let info = brains.active_info(db)?.ok_or_else(|| {
         AppError::no_database("the brain switch completed without an active brain")
     })?;
-    let _ = crate::skill::sync_brain_manifest(db, brains);
+    crate::skill::sync_brain_manifest(db, brains)?;
     Ok(info)
 }
 
@@ -710,7 +710,7 @@ fn edit_metadata(
     let info = brains
         .active_info(db)?
         .ok_or_else(|| AppError::no_database("no active brain"))?;
-    let _ = crate::skill::sync_brain_manifest(db, brains);
+    crate::skill::sync_brain_manifest(db, brains)?;
     Ok(info)
 }
 
@@ -815,7 +815,7 @@ fn forget_brain_impl(
     }
     tx.commit()?;
     let list = infos(&conn, live_active.as_deref(), schema_version)?;
-    let _ = crate::skill::sync_brain_manifest_from_infos(&list);
+    crate::skill::sync_brain_manifest_from_infos(&list)?;
     Ok(list)
 }
 

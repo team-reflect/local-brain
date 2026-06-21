@@ -37,7 +37,9 @@ pub fn run() {
     } else {
         db::DbState::empty()
     };
-    let _ = skill::sync_brain_manifest(&db_state, &brains);
+    if let Err(err) = skill::sync_brain_manifest(&db_state, &brains) {
+        eprintln!("Could not sync agent skill brain manifest at startup: {err}");
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
