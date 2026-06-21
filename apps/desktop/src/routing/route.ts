@@ -19,7 +19,7 @@ export type Route =
   | { kind: 'document'; id: string }
   | { kind: 'interaction'; id: string }
   | { kind: 'asset'; id: string }
-  | { kind: 'ask'; conversationId?: string }
+  | { kind: 'chat'; conversationId?: string }
   | { kind: 'settings'; section?: string }
 
 export const HOME_ROUTE: Route = { kind: 'today' }
@@ -67,8 +67,8 @@ export function routesEqual(a: Route, b: Route): boolean {
       return a.id === (b as { id: string }).id
     case 'settings':
       return a.section === (b as Extract<Route, { kind: 'settings' }>).section
-    case 'ask':
-      return a.conversationId === (b as Extract<Route, { kind: 'ask' }>).conversationId
+    case 'chat':
+      return a.conversationId === (b as Extract<Route, { kind: 'chat' }>).conversationId
     default:
       return true
   }
@@ -99,8 +99,8 @@ export function routeToPath(route: Route): string {
       return `/interactions/${encodeURIComponent(route.id)}`
     case 'asset':
       return `/assets/${encodeURIComponent(route.id)}`
-    case 'ask':
-      return route.conversationId ? `/ask?conversation=${encodeURIComponent(route.conversationId)}` : '/ask'
+    case 'chat':
+      return route.conversationId ? `/chat?conversation=${encodeURIComponent(route.conversationId)}` : '/chat'
     case 'settings':
       return route.section ? `/settings?section=${encodeURIComponent(route.section)}` : '/settings'
   }
@@ -140,9 +140,10 @@ export function routeFromPath(pathWithQuery: string): Route {
       return id ? { kind: 'asset', id: decodeURIComponent(id) } : { kind: 'today' }
     case 'graph':
       return { kind: 'network', tab: 'graph' }
-    case 'ask': {
+    case 'ask':
+    case 'chat': {
       const conversationId = query.get('conversation')
-      return conversationId ? { kind: 'ask', conversationId } : { kind: 'ask' }
+      return conversationId ? { kind: 'chat', conversationId } : { kind: 'chat' }
     }
     case 'settings': {
       const section = query.get('section')
@@ -172,8 +173,8 @@ export function sectionForRoute(route: Route): string {
     case 'interaction':
     case 'asset':
       return 'today'
-    case 'ask':
-      return 'ask'
+    case 'chat':
+      return 'chat'
     case 'settings':
       return 'settings'
   }

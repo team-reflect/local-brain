@@ -31,7 +31,7 @@ interface NavItem {
 
 const NAV: readonly NavItem[] = [
   { section: 'today', label: 'Today', icon: CalendarDays, route: { kind: 'today' } },
-  { section: 'ask', label: 'Ask', icon: MessageSquare, route: { kind: 'ask' } },
+  { section: 'chat', label: 'Chat', icon: MessageSquare, route: { kind: 'chat' } },
   { section: 'tasks', label: 'Tasks', icon: ListTodo, route: { kind: 'tasks' } },
   { section: 'network', label: 'Network', icon: Users, route: { kind: 'network', tab: 'graph' } },
 ]

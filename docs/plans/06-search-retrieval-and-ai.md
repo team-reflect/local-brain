@@ -1,6 +1,6 @@
 # Plan 06 - Search, Retrieval, and AI
 
-**Goal:** Provide fast local search, grounded Ask, model-backed extraction, and
+**Goal:** Provide fast local search, grounded Chat, model-backed extraction, and
 agent-readable report generation over the personal-CRM records.
 
 **Depends on:** Plans 01-05.
@@ -10,7 +10,7 @@ agent-readable report generation over the personal-CRM records.
 ## Scope
 
 **In:** FTS5, optional vector search, retrieval policy, citations, record lookup,
-Ask conversations, daily report/todo retrieval, and model boundary settings.
+Chat conversations, daily report/todo retrieval, and model boundary settings.
 
 **Out:** hosted sync, browser extension search, automatic external app connectors.
 
@@ -21,9 +21,10 @@ Ask conversations, daily report/todo retrieval, and model boundary settings.
 - Global search ranks visible records, including assets.
 - Retrieval ranks visible records and chunks from documents and interactions.
 - One `retrieve()` API serves daily reports, graph context, search enrichment, and CLI
-  reads, plus grounded Ask in the desktop.
-- Ask persists conversations and AI SDK message JSON in SQLite, but retrieved Ask
+  reads, plus grounded Chat in the desktop.
+- Chat persists conversations and AI SDK message JSON in SQLite, but retrieved Chat
   sources are request-local and not stored as `evidence_refs`.
+- Chat can perform core CRM writes only through user-approved AI SDK write tools.
 - Extracted memories and tasks cite `content_chunks` through `evidence_refs`.
 - Daily reports and todo lists should use retrieval/citation machinery where useful.
 - Settings controls AI providers.
@@ -35,7 +36,7 @@ Ask conversations, daily report/todo retrieval, and model boundary settings.
 - FTS uses title/body weighting, snippets, small result caps, and no filesystem scan.
 - Embeddings run locally in Rust, off the UI thread, with lexical fallback.
 - Hybrid retrieval uses one shared contract rather than separate AI/search indexes.
-- AI context assembly is transparent; extraction is cited, while Ask keeps its
+- AI context assembly is transparent; extraction is cited, while Chat keeps its
   retrieved sources request-local.
 - External model payloads pass through one typed boundary so unchecked context cannot be
   sent accidentally.
@@ -83,19 +84,20 @@ Ask conversations, daily report/todo retrieval, and model boundary settings.
    - vectors stored in `sqlite-vec` (`chunk_embeddings` + `chunk_vectors` vec0, cosine)
    - chunk text hashes skip unchanged work; a model change re-embeds
    - failure means semantic unavailable, not app failure (lexical fallback)
-7. Add retrieval API for agent and Ask workflows:
+7. Add retrieval API for agent and Chat workflows:
    - question
    - selected filters/context
    - ranked chunks
    - linked records
    - mode: lexical, semantic, or hybrid
    - citations/evidence payload
-8. Build Ask:
+8. Build Chat:
    - top-level route and sidebar item
    - durable chat conversations and messages in SQLite
    - Vercel AI SDK client-side streaming with BYOK provider keys fetched from the
      keychain per request
    - retrieved document/interaction chunks included only in the live model request
+   - write tools for core CRM records require explicit user approval before mutation
 9. Add model boundary checks:
    - require configured key or local model
    - show when external calls are disabled
@@ -117,8 +119,10 @@ Ask conversations, daily report/todo retrieval, and model boundary settings.
   link captions, linked record titles, and optional local asset text.
 - Cmd/Ctrl+K provides one keyboard-native surface for find, navigate, and command
   execution.
-- Ask can answer questions using local documents and interactions, and its
+- Chat can answer questions using local documents and interactions, and its
   conversations survive relaunch.
+- Chat can create or update people, organizations, projects, tasks, interactions, and
+  memories only after the user approves the specific tool call.
 - An agent can request enough structured context to generate a daily report and todo
   list.
 - Daily brief retrieval includes relationship-linked waiting items, recent
@@ -136,7 +140,7 @@ Ask conversations, daily report/todo retrieval, and model boundary settings.
 - Unit test command registry execution and keyboard-result behavior.
 - Unit test chunk hash stability and lexical fallback when embeddings are unavailable.
 - Integration test cited task/memory evidence persistence.
-- Render test Ask empty/no-provider states and unit test the client transport with
+- Render test Chat empty/no-provider states and unit test the client transport with
   mocked retrieval, keychain, and AI SDK streaming.
 
 ## Open Questions

@@ -39,7 +39,7 @@ function uiMessageJson(message: UIMessage): Record<string, unknown> {
 
 function titleForQuestion(question: string): string {
   const compact = question.replace(/\s+/g, ' ').trim()
-  if (!compact) return 'Ask'
+  if (!compact) return 'Chat'
   return compact.length > 60 ? `${compact.slice(0, 57)}...` : compact
 }
 
@@ -85,7 +85,7 @@ async function persistAssistant(conversationId: string, message: UIMessage, mode
 
 async function persistLatestUser(conversationId: string, messages: readonly UIMessage[]): Promise<string> {
   const latest = messages[messages.length - 1]
-  if (!latest || latest.role !== 'user') throw new Error('Ask needs a user message to send.')
+  if (!latest || latest.role !== 'user') throw new Error('Chat needs a user message to send.')
   const text = uiMessageText(latest).trim()
   await ensureConversation(conversationId, titleForQuestion(text))
   await appendChatMessage({
@@ -99,6 +99,21 @@ async function persistLatestUser(conversationId: string, messages: readonly UIMe
   return text
 }
 
+async function questionForTurn(
+  trigger: string,
+  conversationId: string,
+  messages: readonly UIMessage[],
+): Promise<string> {
+  const latest = messages[messages.length - 1]
+  const latestUser = messages.filter((message) => message.role === 'user').at(-1)
+  if (trigger === 'submit-message' && latest?.role === 'user') {
+    return persistLatestUser(conversationId, messages)
+  }
+  const question = uiMessageText(latestUser ?? latest ?? assistantMessage(createChatId(), '')).trim()
+  await ensureConversation(conversationId, titleForQuestion(question))
+  return question
+}
+
 async function loadChatContext(): Promise<{ system: string }> {
   const today = localDateString()
   const projects = await listProjects({ activeOnly: true, limit: 40 })
@@ -107,14 +122,10 @@ async function loadChatContext(): Promise<{ system: string }> {
   }
 }
 
-export function createAskTransport(): ChatTransport<UIMessage> {
+export function createChatTransport(): ChatTransport<UIMessage> {
   return {
     async sendMessages({ trigger, chatId, messages, abortSignal }) {
-      const latestUser = messages.filter((message) => message.role === 'user').at(-1)
-      const question =
-        trigger === 'submit-message'
-          ? await persistLatestUser(chatId, messages)
-          : uiMessageText(latestUser ?? messages[messages.length - 1] ?? assistantMessage(createChatId(), ''))
+      const question = await questionForTurn(trigger, chatId, messages)
 
       if (trigger === 'regenerate-message') {
         await ensureConversation(chatId, titleForQuestion(question))

@@ -8,7 +8,7 @@ import {
 } from '../index'
 import { freshDatabase, installSqliteBridge } from './sqlite-harness.mjs'
 
-describe('Ask chat persistence', () => {
+describe('Chat persistence', () => {
   beforeEach(() => installSqliteBridge(freshDatabase()))
 
   it('stores conversations and projected AI SDK messages', async () => {

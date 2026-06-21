@@ -11,16 +11,16 @@ import { useChat } from '@ai-sdk/react'
 import { MessageSquare, Plus, Send } from 'lucide-react'
 import { z } from 'zod'
 import { createChatId, type ChatMessage } from '@local-brain/core'
-import type { UIMessage } from 'ai'
+import { lastAssistantMessageIsCompleteWithApprovalResponses, type UIMessage } from 'ai'
+import { useQueryClient } from '@tanstack/react-query'
 import { Alert } from '../components/alert'
 import { Button } from '../components/button'
 import { EmptyState } from '../components/empty-state'
 import { Loading } from '../components/loading'
 import { ChatMarkdown } from '../components/chat/chat-markdown'
-import { ChatToolChip, type ToolPart } from '../components/chat/chat-tool-chip'
-import { createAskTransport } from '../lib/ai/ask-transport'
-import { useConversations, useMessages, useModelSettings, useModelStatus } from '../lib/queries'
-import { useQueryClient } from '@tanstack/react-query'
+import { ChatToolChip, type ToolApprovalResponse, type ToolPart } from '../components/chat/chat-tool-chip'
+import { createChatTransport } from '../lib/ai/chat-transport'
+import { invalidateChatTurnQueries, useConversations, useMessages, useModelSettings, useModelStatus } from '../lib/queries'
 import { cn } from '../lib/utils'
 import { useRouter } from '../routing/router'
 
@@ -63,7 +63,7 @@ function streamingMessageHasContent(message: UIMessage | undefined): boolean {
   })
 }
 
-export function AskSurface({ conversationId }: { conversationId: string | undefined }): ReactNode {
+export function ChatSurface({ conversationId }: { conversationId: string | undefined }): ReactNode {
   const [draftConversationId, setDraftConversationId] = useState(() => createChatId())
   const [hydratedConversationId, setHydratedConversationId] = useState<string | null>(null)
   const chatId = conversationId ?? draftConversationId
@@ -73,7 +73,7 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
   const modelStatus = useModelStatus()
   const queryClient = useQueryClient()
   const { navigate } = useRouter()
-  const transport = useMemo(() => createAskTransport(), [])
+  const transport = useMemo(() => createChatTransport(), [])
   const initialMessages = useMemo(() => persistedMessages(storedMessages.data), [storedMessages.data])
   const [draft, setDraft] = useState('')
 
@@ -81,12 +81,12 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
     id: chatId,
     transport,
     messages: initialMessages,
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
     onFinish: () => {
-      void queryClient.invalidateQueries({ queryKey: ['chat-conversations'] })
-      void queryClient.invalidateQueries({ queryKey: ['chat-messages', chatId] })
+      invalidateChatTurnQueries(queryClient, chatId)
     },
   })
-  const { error, messages, sendMessage, setMessages, status } = chat
+  const { addToolApprovalResponse, error, messages, sendMessage, setMessages, status } = chat
 
   useEffect(() => {
     if (!conversationId) setHydratedConversationId(null)
@@ -127,7 +127,7 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
     try {
       if (!conversationId) {
         setHydratedConversationId(chatId)
-        navigate({ kind: 'ask', conversationId: chatId })
+        navigate({ kind: 'chat', conversationId: chatId })
       }
       await sendMessage({
         id: createChatId(),
@@ -153,29 +153,29 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
     setDraftConversationId(nextConversationId)
     setHydratedConversationId(null)
     if (conversationId) {
-      navigate({ kind: 'ask' })
+      navigate({ kind: 'chat' })
     }
   }
 
   const displayedMessages = conversationHydrated ? messages : []
   const showInitialLoading = waitingForHydration
-  let askContent: ReactNode
+  let chatContent: ReactNode
   if (providerSetupState === 'loading') {
-    askContent = (
+    chatContent = (
       <div className="flex min-h-0 flex-1 items-center justify-center">
         <Loading />
       </div>
     )
   } else if (providerSetupState === 'error') {
-    askContent = (
+    chatContent = (
       <ProviderSettingsError onConfigure={() => navigate({ kind: 'settings', section: 'ai-providers' })} />
     )
   } else if (providerSetupState === 'missing') {
-    askContent = (
+    chatContent = (
       <ConfigureProviderPrompt onConfigure={() => navigate({ kind: 'settings', section: 'ai-providers' })} />
     )
   } else {
-    askContent = (
+    chatContent = (
       <>
         {providerClosed ? <Alert className="mb-3">{providerClosed}</Alert> : null}
         {historyUnavailable ? (
@@ -193,6 +193,7 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
             messages={displayedMessages}
             streamingMessageId={streamingMessageId}
             showThinking={showThinking}
+            onToolApprovalResponse={addToolApprovalResponse}
           />
         )}
         {error ? <Alert variant="error" className="mx-auto mb-3 w-full max-w-2xl">{error.message}</Alert> : null}
@@ -207,10 +208,10 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
         activeId={conversationId}
         conversations={conversations.data ?? []}
         onNew={startNewChat}
-        onOpen={(id) => navigate({ kind: 'ask', conversationId: id })}
+        onOpen={(id) => navigate({ kind: 'chat', conversationId: id })}
       />
       <div className="flex min-w-0 flex-1 flex-col">
-        {askContent}
+        {chatContent}
       </div>
     </div>
   )
@@ -234,7 +235,7 @@ function ConfigureProviderPrompt({ onConfigure }: { onConfigure: () => void }): 
     <div className="flex min-h-0 flex-1 items-center justify-center px-6">
       <div className="flex max-w-sm flex-col items-center text-center">
         <MessageSquare aria-hidden strokeWidth={1.5} className="size-8 text-muted-foreground" />
-        <h2 className="mt-4 text-lg font-semibold text-foreground">Ask your local brain</h2>
+        <h2 className="mt-4 text-lg font-semibold text-foreground">Chat with your local brain</h2>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
           Add an AI provider to start chatting. Local Brain calls the provider directly with
           your own key, stored in the OS keychain.
@@ -261,7 +262,7 @@ function ConversationRail({
   return (
     <aside className="mr-6 hidden w-56 shrink-0 border-r border-border pr-4 lg:block">
       <div className="mb-3 flex items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-foreground">Ask</h2>
+        <h2 className="text-sm font-semibold text-foreground">Chat</h2>
         <button
           type="button"
           onClick={onNew}
@@ -301,10 +302,12 @@ function MessageList({
   messages,
   streamingMessageId,
   showThinking,
+  onToolApprovalResponse,
 }: {
   messages: UIMessage[]
   streamingMessageId: string | null
   showThinking: boolean
+  onToolApprovalResponse: (response: ToolApprovalResponse) => void | PromiseLike<void>
 }): ReactNode {
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const pinnedRef = useRef(true)
@@ -321,8 +324,8 @@ function MessageList({
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center">
         <EmptyState
-          title="Ask your local brain"
-          hint="Questions are answered from local documents and interactions, then saved in this brain."
+          title="Chat with your local brain"
+          hint="Questions are answered from local records, and approved changes are saved in this brain."
         />
       </div>
     )
@@ -340,7 +343,11 @@ function MessageList({
       <ol className="mx-auto flex w-full max-w-2xl flex-col gap-5 py-2">
         {messages.map((message) => (
           <li key={message.id}>
-            <MessageRow message={message} streamingMessageId={streamingMessageId} />
+            <MessageRow
+              message={message}
+              streamingMessageId={streamingMessageId}
+              onToolApprovalResponse={onToolApprovalResponse}
+            />
           </li>
         ))}
         {showThinking ? (
@@ -356,9 +363,11 @@ function MessageList({
 function MessageRow({
   message,
   streamingMessageId,
+  onToolApprovalResponse,
 }: {
   message: UIMessage
   streamingMessageId: string | null
+  onToolApprovalResponse: (response: ToolApprovalResponse) => void | PromiseLike<void>
 }): ReactNode {
   const isStreaming = message.id === streamingMessageId
 
@@ -417,6 +426,7 @@ function MessageRow({
             <ChatToolChip
               key={`${message.id}-${index}`}
               part={partRecord as unknown as ToolPart}
+              onApprovalResponse={onToolApprovalResponse}
             />
           )
         }
@@ -465,8 +475,8 @@ function Composer({
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={onKeyDown}
           rows={2}
-          placeholder="Ask about your people, projects, documents, or interactions..."
-          aria-label="Ask message"
+          placeholder="Chat about your people, projects, documents, interactions, or tasks..."
+          aria-label="Chat message"
           disabled={pending}
           className="field-sizing-content max-h-60 min-h-24 w-full resize-none overflow-y-auto bg-transparent px-3 py-2 pb-12 pr-28 text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
         />

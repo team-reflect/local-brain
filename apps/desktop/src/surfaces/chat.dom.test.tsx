@@ -2,24 +2,30 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import type { UIMessage } from 'ai'
-import { AskSurface } from './ask'
+import { ChatSurface } from './chat'
 import { installFakeBridge, renderWithProviders } from '../test/utils'
 
 const chatMocks = vi.hoisted(() => ({
+  addToolApprovalResponse: vi.fn(),
   sendMessage: vi.fn(),
   setMessages: vi.fn(),
   messages: [] as UIMessage[],
   status: 'ready' as string,
+  useChatConfig: null as unknown,
 }))
 
 vi.mock('@ai-sdk/react', () => ({
-  useChat: () => ({
-    error: undefined,
-    messages: chatMocks.messages,
-    sendMessage: chatMocks.sendMessage,
-    setMessages: chatMocks.setMessages,
-    status: chatMocks.status,
-  }),
+  useChat: (config: unknown) => {
+    chatMocks.useChatConfig = config
+    return {
+      addToolApprovalResponse: chatMocks.addToolApprovalResponse,
+      error: undefined,
+      messages: chatMocks.messages,
+      sendMessage: chatMocks.sendMessage,
+      setMessages: chatMocks.setMessages,
+      status: chatMocks.status,
+    }
+  },
 }))
 
 const assistantMessage = (id: string, text: string, state: 'done' | 'streaming' = 'done'): UIMessage => ({
@@ -28,7 +34,14 @@ const assistantMessage = (id: string, text: string, state: 'done' | 'streaming' 
   parts: [{ type: 'text', text, state }],
 })
 
-const toolMessage = (id: string, toolName: string, state: string, input: Record<string, unknown>, output?: Record<string, unknown>): UIMessage =>
+const toolMessage = (
+  id: string,
+  toolName: string,
+  state: string,
+  input: Record<string, unknown>,
+  output?: Record<string, unknown>,
+  approval?: Record<string, unknown>,
+): UIMessage =>
   ({
     id,
     role: 'assistant',
@@ -39,11 +52,12 @@ const toolMessage = (id: string, toolName: string, state: string, input: Record<
         state,
         input,
         ...(output ? { output } : {}),
+        ...(approval ? { approval } : {}),
       },
     ],
   }) as unknown as UIMessage
 
-function installAskBridgeWithProvider(): void {
+function installChatBridgeWithProvider(): void {
   installFakeBridge({
     query: (_sql, params) => {
       const key = params[0]
@@ -64,37 +78,38 @@ function installAskBridgeWithProvider(): void {
   })
 }
 
-async function renderReadyAsk(): Promise<void> {
-  renderWithProviders(<AskSurface conversationId={undefined} />)
-  await screen.findByLabelText('Ask message')
+async function renderReadyChat(): Promise<void> {
+  renderWithProviders(<ChatSurface conversationId={undefined} />)
+  await screen.findByLabelText('Chat message')
 }
 
-describe('AskSurface', () => {
+describe('ChatSurface', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    window.history.replaceState({}, '', '/ask')
+    window.history.replaceState({}, '', '/chat')
     chatMocks.messages = []
     chatMocks.status = 'ready'
+    chatMocks.useChatConfig = null
     chatMocks.sendMessage.mockResolvedValue(undefined)
-    installAskBridgeWithProvider()
+    installChatBridgeWithProvider()
   })
 
   it('prompts users to add an AI provider before chatting', async () => {
     installFakeBridge({ queryRows: [] })
-    renderWithProviders(<AskSurface conversationId={undefined} />)
+    renderWithProviders(<ChatSurface conversationId={undefined} />)
 
-    expect(screen.queryByLabelText('Ask message')).toBeNull()
+    expect(screen.queryByLabelText('Chat message')).toBeNull()
     expect(await screen.findByText(/Add an AI provider to start chatting/)).not.toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'Add an AI provider' }))
     await waitFor(() => expect(window.location.pathname + window.location.search).toBe('/settings?section=ai-providers'))
-    expect(screen.queryByLabelText('Ask message')).toBeNull()
+    expect(screen.queryByLabelText('Chat message')).toBeNull()
   })
 
   it('sends a new UI message instead of replacing a missing message id', async () => {
-    await renderReadyAsk()
+    await renderReadyChat()
 
-    fireEvent.change(screen.getByLabelText('Ask message'), {
+    fireEvent.change(screen.getByLabelText('Chat message'), {
       target: { value: 'What changed this week?' },
     })
     fireEvent.click(screen.getByRole('button', { name: /Send/ }))
@@ -109,11 +124,18 @@ describe('AskSurface', () => {
     expect(message).not.toHaveProperty('messageId')
   })
 
+  it('configures automatic continuation after tool approval', async () => {
+    await renderReadyChat()
+
+    const config = chatMocks.useChatConfig as Record<string, unknown>
+    expect(config['sendAutomaticallyWhen']).toEqual(expect.any(Function))
+  })
+
   it('renders settled assistant text as markdown (bold and list)', async () => {
     chatMocks.messages = [
       assistantMessage('a1', '**Bold** answer.\n\n- item one\n- item two'),
     ]
-    await renderReadyAsk()
+    await renderReadyChat()
 
     // react-markdown should turn **Bold** into a <strong> element
     expect(screen.getByText('Bold')).not.toBeNull()
@@ -127,7 +149,7 @@ describe('AskSurface', () => {
     chatMocks.messages = [
       assistantMessage('a1', '**Bold** text still streaming', 'streaming'),
     ]
-    await renderReadyAsk()
+    await renderReadyChat()
 
     // Should be in a plain pre-wrap div, not converted to <strong>
     const boldEl = screen.queryByText('Bold')
@@ -140,7 +162,7 @@ describe('AskSurface', () => {
     chatMocks.messages = [
       assistantMessage('a1', 'Here is what I found…', 'streaming'),
     ]
-    await renderReadyAsk()
+    await renderReadyChat()
 
     expect(screen.queryByLabelText('Thinking')).toBeNull()
   })
@@ -154,7 +176,7 @@ describe('AskSurface', () => {
         parts: [{ type: 'reasoning', text: 'Checking local context…' }],
       } as unknown as UIMessage,
     ]
-    await renderReadyAsk()
+    await renderReadyChat()
 
     expect(screen.getByText('Checking local context…')).not.toBeNull()
     expect(screen.queryByLabelText('Thinking')).toBeNull()
@@ -165,7 +187,7 @@ describe('AskSurface', () => {
     chatMocks.messages = [
       { id: 'a1', role: 'assistant', parts: [] } as unknown as UIMessage,
     ]
-    await renderReadyAsk()
+    await renderReadyChat()
 
     expect(screen.getByLabelText('Thinking')).not.toBeNull()
   })
@@ -173,7 +195,7 @@ describe('AskSurface', () => {
   it('shows Thinking indicator when submitted (before streaming starts)', async () => {
     chatMocks.status = 'submitted'
     chatMocks.messages = []
-    await renderReadyAsk()
+    await renderReadyChat()
 
     expect(screen.getByLabelText('Thinking')).not.toBeNull()
   })
@@ -195,7 +217,7 @@ describe('AskSurface', () => {
         ],
       } as unknown as UIMessage,
     ]
-    await renderReadyAsk()
+    await renderReadyChat()
 
     // Earlier text part should still be plain (not parsed as markdown) while streaming
     expect(screen.queryByText('Bold')).toBeNull()
@@ -206,7 +228,7 @@ describe('AskSurface', () => {
     chatMocks.messages = [
       toolMessage('a1', 'search_records', 'input-available', { query: 'Maya budget' }),
     ]
-    await renderReadyAsk()
+    await renderReadyChat()
 
     expect(screen.getByText(/Searched "Maya budget"/)).not.toBeNull()
   })
@@ -221,7 +243,7 @@ describe('AskSurface', () => {
         { hits: [{ recordType: 'interaction', recordId: 'i1', title: 'Call with Maya', snippet: 'budget' }], count: 1 },
       ),
     ]
-    await renderReadyAsk()
+    await renderReadyChat()
 
     expect(screen.getByText(/Searched "Maya budget"/)).not.toBeNull()
     expect(screen.getByText(/1 result/)).not.toBeNull()
@@ -231,10 +253,28 @@ describe('AskSurface', () => {
     chatMocks.messages = [
       toolMessage('a1', 'list_projects', 'output-available', {}, { projects: [], count: 3 }),
     ]
-    await renderReadyAsk()
+    await renderReadyChat()
 
     expect(screen.getByText(/Listed projects/)).not.toBeNull()
     expect(screen.getByText(/3 projects/)).not.toBeNull()
+  })
+
+  it('renders approval controls and sends approval responses', async () => {
+    chatMocks.messages = [
+      toolMessage(
+        'a1',
+        'create_task',
+        'approval-requested',
+        { title: 'Send budget' },
+        undefined,
+        { id: 'approval-1' },
+      ),
+    ]
+    await renderReadyChat()
+
+    expect(screen.getByText('Create task needs approval')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Approve/ }))
+    expect(chatMocks.addToolApprovalResponse).toHaveBeenCalledWith({ id: 'approval-1', approved: true })
   })
 
   it('renders persisted tool chip correctly (reloaded conversation)', async () => {
@@ -249,7 +289,7 @@ describe('AskSurface', () => {
         { hits: [], count: 0 },
       ),
     ]
-    await renderReadyAsk()
+    await renderReadyChat()
 
     expect(screen.getByText(/Searched "Atlas deadline"/)).not.toBeNull()
     expect(screen.getByText(/0 results/)).not.toBeNull()

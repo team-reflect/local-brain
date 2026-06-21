@@ -209,10 +209,14 @@ export {
   type ListMemoriesOptions,
 } from './domains/memories/getters'
 export {
+  createMemory,
   updateMemory,
   archiveMemory,
   unlinkMemoryFromRecord,
   linkMemoryToRecord,
+  type CreatedMemory,
+  type MemoryLinkInput,
+  type NewMemory,
   type MemoryPatch,
 } from './domains/memories/setters'
 
@@ -247,7 +251,7 @@ export {
   type EvidencePatch,
 } from './domains/citations/setters'
 
-// Chat (Ask)
+// Chat
 export {
   listConversations,
   getConversation,

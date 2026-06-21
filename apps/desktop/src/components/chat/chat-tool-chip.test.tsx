@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
-import { render, screen } from '@testing-library/react'
-import { ChatToolChip, isToolPartPending, toolNameFromPart, type ToolPart } from './chat-tool-chip'
+import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
+import {
+  ChatToolChip,
+  isToolPartAwaitingApproval,
+  isToolPartPending,
+  toolNameFromPart,
+  type ToolPart,
+} from './chat-tool-chip'
 
 function renderChip(part: ToolPart): void {
   render(<ChatToolChip part={part} />)
@@ -33,6 +39,26 @@ describe('isToolPartPending', () => {
 
   it('is not pending for output-error state', () => {
     expect(isToolPartPending({ type: 'tool-x', state: 'output-error' })).toBe(false)
+  })
+})
+
+describe('isToolPartAwaitingApproval', () => {
+  it('is awaiting approval only when approval-requested has an approval id', () => {
+    expect(
+      isToolPartAwaitingApproval({
+        type: 'tool-create_task',
+        state: 'approval-requested',
+        approval: { id: 'approval-1' },
+      }),
+    ).toBe(true)
+    expect(isToolPartAwaitingApproval({ type: 'tool-create_task', state: 'approval-requested' })).toBe(false)
+    expect(
+      isToolPartAwaitingApproval({
+        type: 'tool-create_task',
+        state: 'output-available',
+        approval: { id: 'approval-1' },
+      }),
+    ).toBe(false)
   })
 })
 
@@ -124,6 +150,54 @@ describe('ChatToolChip — list_projects', () => {
       output: { projects: [{}], count: 1 },
     })
     expect(screen.getByText(/1 project\b/)).not.toBeNull()
+  })
+})
+
+describe('ChatToolChip — write tools', () => {
+  it('renders approval buttons and calls the approval responder', () => {
+    const onApprovalResponse = vi.fn()
+    render(
+      <ChatToolChip
+        part={{
+          type: 'tool-create_task',
+          toolCallId: 'tc-4',
+          state: 'approval-requested',
+          input: { title: 'Send budget' },
+          approval: { id: 'approval-1' },
+        }}
+        onApprovalResponse={onApprovalResponse}
+      />,
+    )
+
+    expect(screen.getByText('Create task needs approval')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Approve/ }))
+    expect(onApprovalResponse).toHaveBeenCalledWith({ id: 'approval-1', approved: true })
+    fireEvent.click(screen.getByRole('button', { name: /Deny/ }))
+    expect(onApprovalResponse).toHaveBeenCalledWith({ id: 'approval-1', approved: false })
+  })
+
+  it('renders settled write output with action and id', () => {
+    renderChip({
+      type: 'tool-remember_fact',
+      toolCallId: 'tc-5',
+      state: 'output-available',
+      input: { claim: 'Alex prefers async updates.' },
+      output: { kind: 'memory', action: 'existing', id: 'memory-1' },
+    })
+
+    expect(screen.getByText(/Remember fact existing/)).not.toBeNull()
+    expect(screen.getByText(/memory-1/)).not.toBeNull()
+  })
+
+  it('renders denied write output', () => {
+    renderChip({
+      type: 'tool-update_task',
+      toolCallId: 'tc-6',
+      state: 'output-denied',
+      input: { id: 'task-1', status: 'done' },
+    })
+
+    expect(screen.getByText(/Denied update task/)).not.toBeNull()
   })
 })
 

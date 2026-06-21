@@ -1,9 +1,11 @@
 import type { Memories } from '@local-brain/db'
 import { db } from '../../db/client'
-import { execute } from '../../db/commands'
+import { batch, execute } from '../../db/commands'
 import { newId } from '../../db/id'
-import type { RecordPatch } from '../../db/records'
+import type { NewRecord, RecordPatch } from '../../db/records'
 import { nowIso } from '../../db/time'
+import { requireText } from '../../validation'
+import { squish, trimToNull } from '../../text/normalize'
 
 /**
  * Correction setters for hidden memories (Plan 05 step 8). Extraction creates
@@ -15,6 +17,70 @@ import { nowIso } from '../../db/time'
  */
 
 export type MemoryPatch = RecordPatch<Memories>
+export type NewMemory = NewRecord<Memories>
+
+export interface MemoryLinkInput {
+  recordType: string
+  recordId: string
+  role?: string | null
+}
+
+export interface CreatedMemory {
+  id: string
+  created: boolean
+}
+
+function normalizeClaim(claim: string): string {
+  return squish(requireText('claim', claim))
+}
+
+function normalizeMemory(input: NewMemory): NewMemory {
+  const out: NewMemory = { ...input, claim: normalizeClaim(input.claim) }
+  if (input.kind !== undefined) out.kind = trimToNull(input.kind) ?? undefined
+  return out
+}
+
+function memoryClaimKey(claim: string): string {
+  return claim.trim().toLowerCase()
+}
+
+async function findActiveMemoryByClaim(claim: string): Promise<string | null> {
+  const key = memoryClaimKey(claim)
+  const rows = await db
+    .selectFrom('memories')
+    .select(['id', 'claim'])
+    .where('archivedAt', 'is', null)
+    .execute()
+  return rows.find((row) => memoryClaimKey(row.claim) === key)?.id ?? null
+}
+
+/**
+ * Create a durable memory and optional subject links. Exact active duplicate
+ * claims return the existing memory id instead of inserting a second row.
+ */
+export async function createMemory(
+  input: NewMemory,
+  links: readonly MemoryLinkInput[] = [],
+): Promise<CreatedMemory> {
+  const values = normalizeMemory(input)
+  const existingId = await findActiveMemoryByClaim(values.claim)
+  if (existingId) return { id: existingId, created: false }
+
+  const id = newId()
+  await batch([
+    db.insertInto('memories').values({ ...values, id }),
+    ...links.map((link) =>
+      db.insertInto('memoryLinks').values({
+        id: newId(),
+        memoryId: id,
+        recordType: link.recordType,
+        recordId: link.recordId,
+        role: link.role ?? null,
+      }),
+    ),
+  ])
+  return { id, created: true }
+}
 
 /** Edit a memory's claim / kind / confidence / validity window. */
 export function updateMemory(id: string, patch: MemoryPatch): Promise<number> {
