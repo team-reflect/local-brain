@@ -84,7 +84,8 @@ For large backfills, split by source and month. Each worker must:
 - write through the CLI only;
 - use source identity for idempotence;
 - maintain its own ledger shard;
-- run `brain --json import finalize --record kind:id` on every imported record;
+- run `brain --json import finalize --record kind:id` on every imported record,
+  adding only narrow explicit waivers when source data is truly absent;
 - report incomplete records instead of hiding them.
 
 Merge ledger shards at the end and run one global audit.
@@ -221,8 +222,10 @@ For every imported interaction/document:
 brain --brain "$BRAIN_ROOT" --json import finalize --record interaction:<id>
 ```
 
-If `complete:false`, either finish the missing stages or record `incomplete` with
-the missing array in the ledger.
+If `complete:false`, either finish the missing stages, rerun finalize with the
+narrow applicable waiver (`--raw-text-unavailable`, `--no-entities`,
+`--no-project-or-task-link`, `--no-derived-actions`, or `--no-extracted-facts`),
+or record `incomplete` with the missing array in the ledger.
 
 End with:
 

@@ -67,7 +67,7 @@ pub(super) fn replace_chunks(
     Ok(chunks.len())
 }
 
-/// Attach exact chunk evidence to a memory or task.
+/// Attach exact chunk evidence to a memory, task, fact, or AI artifact.
 pub(super) fn insert_evidence_refs(
     conn: &Connection,
     subject_type: &str,
@@ -75,14 +75,7 @@ pub(super) fn insert_evidence_refs(
     evidence: &[EvidenceRef],
 ) -> Result<(), CliError> {
     for reference in evidence {
-        let record_type = match reference.kind {
-            LinkKind::Document | LinkKind::Interaction => reference.kind.as_str(),
-            _ => {
-                return Err(CliError::Runtime(format!(
-                    "{subject_type} evidence must cite a document or interaction"
-                )));
-            }
-        };
+        let record_type = reference.record_type.as_str();
         let chunk_id = match &reference.locator {
             EvidenceLocator::Chunk(chunk_index) => conn
                 .query_row(
@@ -246,7 +239,7 @@ mod tests {
         let conn = brain_schema::open_in_memory().unwrap();
         seed_two_chunks(&conn);
         let evidence = vec![EvidenceRef {
-            kind: LinkKind::Interaction,
+            record_type: "interaction".into(),
             id: "i1".into(),
             locator: EvidenceLocator::Quote("powder bathroom SINK".into()),
         }];
@@ -269,7 +262,7 @@ mod tests {
         let conn = brain_schema::open_in_memory().unwrap();
         seed_two_chunks(&conn);
         let evidence = vec![EvidenceRef {
-            kind: LinkKind::Interaction,
+            record_type: "interaction".into(),
             id: "i1".into(),
             locator: EvidenceLocator::Quote("a phrase that appears nowhere".into()),
         }];

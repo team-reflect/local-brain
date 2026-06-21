@@ -3380,3 +3380,349 @@ fn import_context_bundles_everything_an_import_needs() {
     assert_eq!(gmail["count"], 1);
     assert_eq!(ctx["counts"]["interactions"], 1);
 }
+
+#[test]
+fn import_document_records_identity_provenance_and_finalizes() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let person = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Maya Chen",
+            "--email",
+            "maya@example.com",
+        ],
+    );
+    let project = run_json(
+        &db,
+        &["--json", "add", "project", "--name", "Project Alpha"],
+    );
+    let person_link = format!("person:{}", person["id"].as_str().unwrap());
+    let project_link = format!("project:{}", project["id"].as_str().unwrap());
+
+    let document = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "document",
+            "--title",
+            "Reflect note: Project Alpha",
+            "--text",
+            "Maya Chen confirmed Project Alpha should launch with the new credential flow.",
+            "--source",
+            "reflect_notes",
+            "--external-kind",
+            "note",
+            "--external-id",
+            "reflect-note-1",
+            "--original-path",
+            "/Users/alex/Documents/reflect-maccman2/project-alpha.md",
+            "--original-url",
+            "reflect://note/reflect-note-1",
+            "--link",
+            &person_link,
+            "--link",
+            &project_link,
+        ],
+    );
+    let document_id = document["id"].as_str().unwrap();
+    let document_ref = format!("document:{document_id}");
+    let evidence = format!("{document_ref}~credential flow");
+
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "ai-note",
+            "--kind",
+            "summary",
+            "--document",
+            document_id,
+            "--text",
+            "Project Alpha should launch with the credential flow.",
+            "--evidence",
+            &evidence,
+        ],
+    );
+    let fact = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "fact",
+            "--subject",
+            &document_ref,
+            "--key",
+            "decision",
+            "--value-text",
+            "Project Alpha should launch with the credential flow.",
+            "--source-record",
+            &document_ref,
+            "--confidence",
+            "0.9",
+            "--evidence",
+            &evidence,
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "promote",
+            "fact",
+            fact["id"].as_str().unwrap(),
+            "--memory-kind",
+            "decision",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "tag",
+            "ensure",
+            "--name",
+            "Project Alpha",
+            "--slug",
+            "project-alpha",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "tag",
+            "attach",
+            "--tag",
+            "project-alpha",
+            "--record",
+            &document_ref,
+        ],
+    );
+
+    let finalized = run_json(
+        &db,
+        &["--json", "import", "finalize", "--record", &document_ref],
+    );
+    assert_eq!(finalized["complete"], true);
+    assert!(finalized["missing"].as_array().unwrap().is_empty());
+
+    let conn = Connection::open(&db).unwrap();
+    let identity_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM external_identities
+             WHERE entity_type = 'document'
+               AND entity_id = ?1
+               AND kind = 'note'
+               AND external_id = 'reflect-note-1'",
+            [document_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(identity_count, 1);
+    let provenance_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM record_provenance
+             WHERE record_type = 'document'
+               AND record_id = ?1
+               AND provenance_kind IN ('imported', 'finalized')",
+            [document_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(provenance_count, 2);
+}
+
+#[test]
+fn evidence_refs_accept_transcript_chunks() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let interaction = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Granola sync",
+            "--text",
+            "Meeting shell imported from Granola.",
+            "--source",
+            "granola",
+            "--external-id",
+            "granola-meeting-1",
+            "--participant",
+            "speaker:Alex MacCaw <alex@example.com>",
+        ],
+    );
+    let interaction_id = interaction["id"].as_str().unwrap();
+    let transcript = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "transcript",
+            "--interaction",
+            interaction_id,
+            "--text",
+            "Alex: The credential flow needs to be ready before Friday.",
+            "--source",
+            "granola",
+            "--external-kind",
+            "transcript",
+            "--external-id",
+            "granola-transcript-1",
+            "--transcribed-by",
+            "granola",
+        ],
+    );
+    let transcript_id = transcript["id"].as_str().unwrap();
+    let interaction_ref = format!("interaction:{interaction_id}");
+    let transcript_ref = format!("interaction_transcript:{transcript_id}");
+    let evidence = format!("{transcript_ref}~credential flow");
+
+    let fact = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "fact",
+            "--subject",
+            &interaction_ref,
+            "--key",
+            "follow_up",
+            "--value-text",
+            "Credential flow needs to be ready before Friday.",
+            "--source-record",
+            &transcript_ref,
+            "--evidence",
+            &evidence,
+        ],
+    );
+
+    let conn = Connection::open(&db).unwrap();
+    let transcript_evidence: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM evidence_refs er
+             JOIN content_chunks cc ON cc.id = er.chunk_id
+             WHERE er.subject_type = 'extracted_fact'
+               AND er.subject_id = ?1
+               AND cc.record_type = 'interaction_transcript'
+               AND cc.record_id = ?2",
+            (fact["id"].as_str().unwrap(), transcript_id),
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(transcript_evidence, 1);
+    let transcript_provenance: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM record_provenance
+             WHERE record_type = 'interaction_transcript'
+               AND record_id = ?1
+               AND provenance_kind = 'imported'",
+            [transcript_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(transcript_provenance, 1);
+}
+
+#[test]
+fn import_finalize_supports_explicit_waivers_for_structured_events() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let event = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "interaction",
+            "--kind",
+            "event",
+            "--title",
+            "Calendar: flight to SFO",
+            "--occurred-at",
+            "2026-07-09T09:00:00Z",
+            "--source",
+            "google_calendar",
+            "--external-kind",
+            "event",
+            "--external-id",
+            "calendar-event-waived-1",
+        ],
+    );
+    assert_eq!(event["chunkCount"], 0);
+    let event_id = event["id"].as_str().unwrap();
+    let event_ref = format!("interaction:{event_id}");
+
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "ai-note",
+            "--kind",
+            "summary",
+            "--interaction",
+            event_id,
+            "--text",
+            "Structured calendar travel block.",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json", "tag", "ensure", "--name", "Travel", "--slug", "travel",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json", "tag", "attach", "--tag", "travel", "--record", &event_ref,
+        ],
+    );
+
+    let before = run_json(
+        &db,
+        &["--json", "import", "finalize", "--record", &event_ref],
+    );
+    assert_eq!(before["complete"], false);
+    assert!(before["missing"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|missing| missing == "participantsOrEntities"));
+
+    let finalized = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "finalize",
+            "--record",
+            &event_ref,
+            "--no-entities",
+            "--no-project-or-task-link",
+            "--no-derived-actions",
+            "--no-extracted-facts",
+        ],
+    );
+    assert_eq!(finalized["complete"], true);
+    assert_eq!(finalized["waivers"]["noEntities"], true);
+    assert_eq!(finalized["waivers"]["noExtractedFacts"], true);
+
+    let audit = run_json(&db, &["--json", "import", "audit", "--limit", "10"]);
+    assert_eq!(audit["incompleteCount"], 0);
+}

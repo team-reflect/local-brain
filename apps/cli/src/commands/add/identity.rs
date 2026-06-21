@@ -175,6 +175,43 @@ pub(super) struct ExternalIdentityWrite<'a> {
     pub force_duplicate: bool,
 }
 
+pub(super) struct RecordProvenanceWrite<'a> {
+    pub record_type: &'a str,
+    pub record_id: &'a str,
+    pub provenance_kind: &'a str,
+    pub source_id: Option<&'a str>,
+    pub original_path: Option<&'a str>,
+    pub original_url: Option<&'a str>,
+    pub model: Option<&'a str>,
+    pub prompt_fingerprint: Option<&'a str>,
+    pub metadata_json: Option<&'a str>,
+}
+
+pub(super) fn insert_record_provenance(
+    conn: &Connection,
+    write: RecordProvenanceWrite,
+) -> Result<(), CliError> {
+    conn.execute(
+        "INSERT INTO record_provenance
+           (id, record_type, record_id, provenance_kind, source_id, original_path,
+            original_url, imported_at, model, prompt_fingerprint, metadata_json)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),?8,?9,?10)",
+        params![
+            new_id(),
+            write.record_type,
+            write.record_id,
+            write.provenance_kind,
+            write.source_id,
+            normalize_optional(write.original_path),
+            normalize_optional(write.original_url),
+            normalize_optional(write.model),
+            normalize_optional(write.prompt_fingerprint),
+            normalize_optional(write.metadata_json),
+        ],
+    )?;
+    Ok(())
+}
+
 /// Upsert the `(source, kind, external_id)` identity for `entity_id`, honoring
 /// the active/archived and forced-duplicate rules described inline.
 pub(super) fn insert_external_identity(

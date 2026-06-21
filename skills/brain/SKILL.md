@@ -75,7 +75,7 @@ Preferred import flow:
 
 ```bash
 brain --json import interaction ...
-brain --json import document ...
+brain --json import document --source <slug> --external-kind <kind> --external-id <id> ...
 brain --json import transcript --interaction <id> --text-file transcript.txt ...
 brain --json add ai-note --interaction <id> --text-file summary.md
 brain --json add fact --subject interaction:<id> --key decision --value-text "..." \
@@ -93,10 +93,13 @@ brain --json add document --title "Pricing model v2" --text-file note.md
 brain --json add interaction --kind email --title "Intro" --text-file body.txt
 ```
 
-Use `brain import finalize --record kind:id --json` after an import. Complete
+Use `brain --json import finalize --record kind:id` after an import. Complete
 imports have source identity, entities/participants, raw text when available, AI
 note, extracted facts, project/task links when relevant, evidence-backed tasks or
-memories, tags, and chunks.
+memories, tags, and chunks. If a good import intentionally lacks a stage, finalize
+with the narrow waiver that explains it: `--raw-text-unavailable`,
+`--no-entities`, `--no-project-or-task-link`, `--no-derived-actions`, or
+`--no-extracted-facts`.
 
 ## People And Organizations
 
@@ -201,10 +204,18 @@ brain --json add fact --subject person:<id> --key preference \
   --value-text "Prefers async updates before Friday." \
   --source-record interaction:<id> \
   --evidence interaction:<id>~"async updates before Friday"
+
+brain --json add fact --subject interaction:<id> --key follow_up \
+  --value-text "Credential flow needs to be ready before Friday." \
+  --source-record interaction_transcript:<transcript-id> \
+  --evidence interaction_transcript:<transcript-id>~"credential flow"
 ```
 
-Quote evidence is case-insensitive and literal against stored chunk text. Use a
-short distinctive phrase.
+Evidence refs resolve against universal `content_chunks`; use
+`record_type:id#0` or `record_type:id~"quote"` for `document`, `interaction`,
+`interaction_transcript`, `ai_note`, `extracted_fact`, profiles, tasks, projects,
+memories, and assets. Quote evidence is case-insensitive and literal against
+stored chunk text. Use a short distinctive phrase.
 
 ## Assets
 

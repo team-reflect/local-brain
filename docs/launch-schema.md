@@ -158,7 +158,11 @@ An imported meeting, email, or document is incomplete until it has:
 - evidence-backed tasks or memories when claims/actions were derived;
 - tags;
 - retrieval chunks;
-- a passing `brain import finalize --record kind:id --json` result.
+- a passing `brain --json import finalize --record kind:id` result.
 
 `brain import audit --json` reports records that still miss these staged import
-requirements.
+requirements. `brain import finalize` supports narrow explicit waivers for
+source limitations (`--raw-text-unavailable`, `--no-entities`,
+`--no-project-or-task-link`, `--no-derived-actions`, and
+`--no-extracted-facts`) and writes durable `finalized` provenance when a record
+passes.

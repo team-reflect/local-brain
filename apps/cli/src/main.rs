@@ -373,6 +373,16 @@ struct AddDocumentArgs {
     #[arg(long)]
     kind: Option<String>,
     #[arg(long)]
+    source: Option<String>,
+    #[arg(long, default_value = "record")]
+    external_kind: String,
+    #[arg(long)]
+    external_id: Option<String>,
+    #[arg(long)]
+    original_path: Option<String>,
+    #[arg(long)]
+    original_url: Option<String>,
+    #[arg(long)]
     text: Option<String>,
     #[arg(long, value_name = "PATH")]
     text_file: Option<PathBuf>,
@@ -483,10 +493,7 @@ struct AddTaskArgs {
     links: Vec<String>,
     /// Source chunk evidence by index `interaction:01ABC#0` or by quote
     /// `interaction:01ABC~"a phrase from the chunk"`.
-    #[arg(
-        long = "evidence",
-        value_name = "DOC_OR_INTERACTION:ID#CHUNK_OR_~QUOTE"
-    )]
+    #[arg(long = "evidence", value_name = "RECORD_TYPE:ID#CHUNK_OR_~QUOTE")]
     evidence: Vec<String>,
     /// Person ID to assign this task to (repeatable; creates task_people row with role='assignee').
     #[arg(long, value_name = "PERSON_ID")]
@@ -551,10 +558,7 @@ struct AddAiNoteArgs {
     source: Option<String>,
     #[arg(long)]
     metadata_json: Option<String>,
-    #[arg(
-        long = "evidence",
-        value_name = "DOC_OR_INTERACTION:ID#CHUNK_OR_~QUOTE"
-    )]
+    #[arg(long = "evidence", value_name = "RECORD_TYPE:ID#CHUNK_OR_~QUOTE")]
     evidence: Vec<String>,
 }
 
@@ -582,10 +586,7 @@ struct AddFactArgs {
     prompt_fingerprint: Option<String>,
     #[arg(long)]
     metadata_json: Option<String>,
-    #[arg(
-        long = "evidence",
-        value_name = "DOC_OR_INTERACTION:ID#CHUNK_OR_~QUOTE"
-    )]
+    #[arg(long = "evidence", value_name = "RECORD_TYPE:ID#CHUNK_OR_~QUOTE")]
     evidence: Vec<String>,
 }
 
@@ -718,6 +719,21 @@ struct ImportAuditArgs {
 struct ImportFinalizeArgs {
     #[arg(long, value_name = "KIND:ID")]
     record: String,
+    /// Mark raw source text unavailable after a good-faith fetch attempt.
+    #[arg(long)]
+    raw_text_unavailable: bool,
+    /// Mark the record as having no useful participants/entities to link.
+    #[arg(long)]
+    no_entities: bool,
+    /// Mark the record as not belonging to a current project or task.
+    #[arg(long)]
+    no_project_or_task_link: bool,
+    /// Mark the record as having no actionable tasks or durable memories.
+    #[arg(long)]
+    no_derived_actions: bool,
+    /// Mark the record as having no structured facts worth extracting.
+    #[arg(long)]
+    no_extracted_facts: bool,
 }
 
 #[derive(Parser)]
@@ -728,12 +744,9 @@ struct RememberArgs {
     claim: String,
     #[arg(long = "link", value_name = "KIND:ID")]
     links: Vec<String>,
-    /// Source chunk evidence by index `interaction:01ABC#0` or by quote
-    /// `interaction:01ABC~"a phrase from the chunk"`.
-    #[arg(
-        long = "evidence",
-        value_name = "DOC_OR_INTERACTION:ID#CHUNK_OR_~QUOTE"
-    )]
+    /// Source chunk evidence by index `record_type:01ABC#0` or by quote
+    /// `record_type:01ABC~"a phrase from the chunk"`.
+    #[arg(long = "evidence", value_name = "RECORD_TYPE:ID#CHUNK_OR_~QUOTE")]
     evidence: Vec<String>,
 }
 
@@ -971,6 +984,11 @@ impl AddDocumentArgs {
             title: self.title.as_deref(),
             kind: self.kind.as_deref(),
             body: resolve_text(self.text.as_deref(), self.text_file.as_deref())?,
+            source_slug: self.source.as_deref(),
+            external_kind: &self.external_kind,
+            external_id: self.external_id.as_deref(),
+            original_path: self.original_path.as_deref(),
+            original_url: self.original_url.as_deref(),
             links: parse_links(&self.links)?,
             allow_duplicate: self.allow_duplicate,
         })
@@ -1213,6 +1231,11 @@ impl ImportFinalizeArgs {
     fn to_command(&self) -> add::ImportFinalizeArgs<'_> {
         add::ImportFinalizeArgs {
             record: &self.record,
+            raw_text_unavailable: self.raw_text_unavailable,
+            no_entities: self.no_entities,
+            no_project_or_task_link: self.no_project_or_task_link,
+            no_derived_actions: self.no_derived_actions,
+            no_extracted_facts: self.no_extracted_facts,
         }
     }
 }
@@ -1605,6 +1628,12 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
             "acceptedKinds": ["person", "organization", "org", "project", "task", "document", "doc", "interaction"],
             "examples": ["person:01ABC", "project:01XYZ", "task:01TODO"],
         },
+        "evidenceSyntax": {
+            "format": "record_type:id#chunk_index or record_type:id~quote",
+            "acceptedRecordTypes": ["person", "organization", "organization_profile", "project", "task", "document", "interaction", "interaction_transcript", "ai_note", "extracted_fact", "memory", "asset"],
+            "aliases": { "doc": "document", "org": "organization" },
+            "examples": ["document:01ABC#0", "interaction_transcript:01XYZ~\"ship the credential flow\""],
+        },
         "sources": {
             "builtInSlugs": [
                 "manual",
@@ -1657,7 +1686,7 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
                 "purpose": "Safely create people from untrusted sender/display-name pairs; machine senders are skipped with reasonCodes.",
             },
             "addDocument": {
-                "usage": "brain --json add document --title <title> (--text <text>|--text-file <path|->) [--link kind:id...]",
+                "usage": "brain --json add document --title <title> (--text <text>|--text-file <path|->) [--source <slug> --external-kind <kind> --external-id <id>] [--original-path <path>] [--original-url <url>] [--link kind:id...]",
                 "useFor": ["reference notes", "PDF text", "webpages", "receipts", "long-form material"],
             },
             "addInteraction": {
@@ -1690,8 +1719,8 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
                 "purpose": "Store full raw transcript text for an interaction and create universal retrieval chunks.",
             },
             "importFinalize": {
-                "usage": "brain --json import finalize --record <kind:id>",
-                "returns": "complete flag plus missing staged-import requirements.",
+                "usage": "brain --json import finalize --record <kind:id> [--raw-text-unavailable] [--no-entities] [--no-project-or-task-link] [--no-derived-actions] [--no-extracted-facts]",
+                "returns": "complete flag plus missing staged-import requirements; complete records get finalized provenance.",
             },
             "importAudit": {
                 "usage": "brain --json import audit --limit 100",
@@ -1727,15 +1756,15 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
                 "kinds": ["create_project", "create_organization"],
             },
             "addTask": {
-                "usage": "brain --json add task --title <title> [--due-at <iso>] [--link kind:id...] [--assignee <person-id>...]",
+                "usage": "brain --json add task --title <title> [--due-at <iso>] [--link kind:id...] [--evidence record_type:id#0] [--assignee <person-id>...]",
                 "assigneeFlag": "Use --assignee <person-id> (repeatable) to mark someone as responsible for the task. Creates a task_people row with role='assignee'. Distinct from generic --link person:<id> which creates a generic person link.",
             },
             "addAiNote": {
-                "usage": "brain --json add ai-note --kind <summary|action_items|decisions|risks|highlights|coaching|other> (--interaction <id>|--document <id>|--subject <kind:id>) (--text <text>|--text-file <path|->) [--evidence interaction:<id>#0]",
+                "usage": "brain --json add ai-note --kind <summary|action_items|decisions|risks|highlights|coaching|other> (--interaction <id>|--document <id>|--subject <kind:id>) (--text <text>|--text-file <path|->) [--evidence record_type:id#0]",
                 "purpose": "Store narrative AI artifacts separately from raw evidence.",
             },
             "addFact": {
-                "usage": "brain --json add fact --subject <kind:id> --key <key> (--value-text <text>|--value-json <json>) [--source-record <kind:id>] [--confidence <0..1>] [--evidence interaction:<id>~\"quote\"]",
+                "usage": "brain --json add fact --subject <kind:id> --key <key> (--value-text <text>|--value-json <json>) [--source-record <kind:id>] [--confidence <0..1>] [--evidence record_type:id~\"quote\"]",
                 "purpose": "Append a structured claim without automatically promoting it to memory.",
             },
             "promoteFact": {
@@ -1747,9 +1776,9 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
                 "purpose": "Ensure tags and attach them to typed records.",
             },
             "remember": {
-                "usage": "brain --json remember --kind <fact|preference|decision|commitment|instruction|risk|idea> --claim <atomic claim> --link kind:id... [--evidence interaction:<id>#<chunk>|interaction:<id>~\"quote\"]",
+                "usage": "brain --json remember --kind <fact|preference|decision|commitment|instruction|risk|idea> --claim <atomic claim> --link kind:id... [--evidence record_type:<id>#<chunk>|record_type:<id>~\"quote\"]",
                 "rule": "Memories should be atomic and linked to visible evidence records.",
-                "evidence": "Cite a chunk by index (#0) or by a quote substring (~\"a phrase\") resolved against the record's chunks at write time, so you need not know chunk boundaries. Works for `remember` and `add task`.",
+                "evidence": "Cite a universal content chunk by index (#0) or by a quote substring (~\"a phrase\") resolved against the record's chunks at write time, so you need not know chunk boundaries. Works for `remember`, `add task`, `add ai-note`, and `add fact`.",
             },
             "self": {
                 "usage": "brain --json self show | brain --json self set --full-name <name> [--email <email>...] [--phone <phone>...]",

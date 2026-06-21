@@ -121,6 +121,17 @@ brain --json add ai-note --kind summary \
   --source granola
 ```
 
+Import a Reflect note as a source-backed document:
+
+```bash
+brain --json import document \
+  --title "Reflect: Project Alpha" \
+  --text-file note.md \
+  --source reflect_notes --external-kind note --external-id <note-id> \
+  --original-path "$HOME/Documents/reflect-maccman2/Project Alpha.md" \
+  --link project:<id> --link person:<id>
+```
+
 Add a fact, promote a selected fact, and tag the record:
 
 ```bash
@@ -129,6 +140,13 @@ brain --json add fact --subject interaction:<id> \
   --value-text "The team agreed to ship the credential flow before launch." \
   --source-record interaction:<id> \
   --evidence interaction:<id>~"ship the credential flow"
+
+# Transcript evidence works the same way through universal chunks.
+brain --json add fact --subject interaction:<id> \
+  --key "follow_up" \
+  --value-text "Credential flow needs to be ready before Friday." \
+  --source-record interaction_transcript:<transcript-id> \
+  --evidence interaction_transcript:<transcript-id>~"credential flow"
 
 brain --json promote fact <fact-id> --memory-kind decision
 brain --json tag ensure --name "Picardo"
@@ -163,6 +181,11 @@ brain --json add task --title "Send Maya the revised budget" \
   --evidence interaction:<id>#0
 ```
 
+Evidence refs point at universal `content_chunks`, not just documents and
+interactions. Use `record_type:id#0` or `record_type:id~"quote"` for
+`document`, `interaction`, `interaction_transcript`, `ai_note`,
+`extracted_fact`, profiles, tasks, projects, memories, and assets.
+
 ## Completion Rule
 
 A meeting, email, or document import is incomplete until it has:
@@ -185,7 +208,11 @@ brain --json import audit --limit 100
 ```
 
 `finalize` returns `complete:false` with a `missing` array until the staged
-requirements are satisfied.
+requirements are satisfied. When a good import intentionally lacks something,
+use an explicit waiver such as `--raw-text-unavailable`, `--no-entities`,
+`--no-project-or-task-link`, `--no-derived-actions`, or
+`--no-extracted-facts`; a successful finalize writes durable `finalized`
+provenance so audit does not re-raise the record.
 
 ## Guardrails
 
