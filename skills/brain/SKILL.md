@@ -119,6 +119,30 @@ with the narrow waiver that explains it: `--raw-text-unavailable`,
 
 ## People And Organizations
 
+Create person/org records when evidence shows repeated meaningful contact, a
+known relationship, or durable future relevance. Do not create a person for
+every imported handle or a company for every domain. Preserve weak or one-off
+entities as participants, suggestions, or tags until more evidence appears.
+
+Before large imports, register the user's known handles with `brain self set` so
+self participants normalize automatically. Use `--self-participant` for a
+source-specific user handle that is not registered yet.
+
+Keep headlines and affiliations conservative. Prefer "works on", "contact for",
+or "appears affiliated with" over exact titles unless the source states the
+title. Mark affiliations current only when current evidence supports it.
+
+Skip machine/shared mailboxes and low-signal domains as entities:
+
+- no-reply, notifications, support, billing, receipts, calendar, mailer-daemon
+- personal or email-provider domains such as gmail.com, icloud.com, outlook.com
+
+Creating people/orgs improves future participant normalization. Existing
+imported participant rows may still need a CLI repair/relink command before old
+records point at the new canonical entities. Use read-only SQL only for audits
+and candidate discovery; all creates, enrichments, affiliations, and repairs go
+through `brain`.
+
 Trusted contact:
 
 ```bash

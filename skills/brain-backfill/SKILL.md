@@ -66,12 +66,32 @@ brain --brain "$BRAIN_ROOT" --json self set \
   --email alex@maccaw.org --email alex@picardo.health
 ```
 
+After project sign-off and self setup, rerun `import-context` and save a
+baseline snapshot from that fresh output before importing. Do not reuse the
+earlier setup output.
+
+```bash
+brain --brain "$BRAIN_ROOT" --json import-context --limit 300
+```
+
+```text
+baseline_projects=<count>    baseline_people=<count>    baseline_orgs=<count>
+accepted_projects=<ids/names from import-context>
+```
+
 ## Ledger
 
 Use a scratch file such as `.codex-imports/backfill-ledger.tsv`:
 
 ```text
 source    external_id    date    title    status    project    reason    local_record
+```
+
+Also keep compact normalization ledgers:
+
+```text
+person_candidate    source    handle_or_name    count    action    person_id_or_reason
+org_candidate       source    domain_or_name     count    action    org_id_or_reason
 ```
 
 Statuses:
@@ -85,24 +105,42 @@ Statuses:
 - `incomplete`
 
 Final reports must include considered/imported/refreshed/duplicate/skipped/
-needs-review/incomplete counts by source and notable gaps.
+needs-review/incomplete counts by source and notable gaps. Source workers must
+also report person/org records created and unresolved person/org candidates.
 
 ## Parallelization
 
-For large backfills, split by source and month. Each worker must:
+For large backfills, use subagents/workers when available. Split independent
+import lanes by source and month. After import, use subagents for read-only
+normalization/audit candidate lanes such as people candidates, org/domain
+candidates, and project surprises.
+Every subagent/worker must:
 
 - receive the same `BRAIN_ROOT`;
-- read `brain --json import-context` at start;
+- read `brain --json import-context` and the read-first context at start;
+- maintain its own disjoint ledger shard.
+
+Import workers must:
+
+- own a disjoint write scope with no overlapping source records;
 - write through the CLI only;
 - use source identity for idempotence;
 - use `--refresh` for routine source-backed reimports, and `--replace-body`
   only when intentionally overwriting stale imported body text;
-- maintain its own ledger shard;
 - run `brain --json import finalize --record kind:id` on every imported record,
   adding only narrow explicit waivers when source data is truly absent;
 - report incomplete records instead of hiding them.
 
-Merge ledger shards at the end and run one global audit.
+Normalization/audit workers must:
+
+- avoid writes; they produce candidate ledgers only;
+- own a disjoint read-only candidate scope, such as people, org/domain, or
+  project-surprise candidates;
+- audit recurring unresolved participants, domains, and project count surprises;
+- report unresolved participants, unresolved domains, and recommended actions.
+
+The main coordinator merges ledger shards, performs any people/org/affiliation
+normalization writes through the CLI, then runs one global audit.
 
 ## Source Passes
 
@@ -316,6 +354,41 @@ brain --brain "$BRAIN_ROOT" --json tag ensure --name "Picardo"
 brain --brain "$BRAIN_ROOT" --json tag attach --tag picardo --record interaction:<id>
 ```
 
+## Entity Normalization Gate
+
+After source passes and before declaring completion, merge worker candidate
+ledgers and normalize people/orgs. This is mandatory, not optional cleanup.
+The coordinator owns normalization writes; worker ledgers are inputs.
+
+People ledger:
+
+```text
+candidate    evidence_count    source_handles    action
+Jane Doe     9                 jane@example.com  linked person:<id>
+J. Doe       3                 jdoe@example.com  duplicate of person:<id>
+Unknown      5                 no email          unresolved: weak identity
+```
+
+Org/domain ledger:
+
+```text
+candidate         evidence_count    domains              action
+Example Labs      12                example.com          linked org:<id>
+consultant.co     6                 consultant.co        suggested:<id>
+gmail.com         40                gmail.com            unresolved: consumer domain
+```
+
+Audit for recurring unresolved participants/domains across all imported records.
+Create/enrich only when evidence is sufficient; otherwise create
+evidence-backed suggestions or leave unresolved with a reason. If normalization
+changes an entity after imports are linked, relink affected records when the CLI
+has a repair command; otherwise report the relink caveat and affected records.
+
+Run a no-surprise-project audit: compare final projects to the baseline plus
+explicitly user-approved creations. Any unapproved project created during the
+backfill blocks completion; convert it to an evidence-backed suggestion when the
+CLI supports repair, otherwise report the project and linked records as a gap.
+
 ## Completion And Audit
 
 For every imported interaction/document:
@@ -342,13 +415,26 @@ brain --brain "$BRAIN_ROOT" --json tasks plan-day --limit 25
 Also run targeted searches for each accepted project, top people/orgs, and a few
 known facts from every source.
 
+Completion is blocked until:
+
+- every imported record is finalized or ledgered incomplete;
+- people/org normalization ledgers are complete;
+- recurring unresolved participants/domains are audited;
+- project count changes match approved creations only;
+- a fresh final `import-context` is compared to the baseline snapshot.
+
 Final report:
 
 - target brain path verified;
 - date/source coverage;
 - ledger counts by source;
+- baseline vs final project/person/org counts;
 - documents/interactions/people/organizations/projects/tasks/facts/memories counts;
 - person headline coverage;
+- people/orgs created during import and coordinator normalization;
+- unresolved participant/domain gaps and reasons;
+- no-surprise-project audit result;
+- relink caveat and affected records if the CLI lacks a repair command;
 - incomplete import audit results;
 - suggestions created;
 - known gaps and recommended next pass.
