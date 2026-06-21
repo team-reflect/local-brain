@@ -187,10 +187,10 @@ function DailyBriefPanel({
   )
 
   return (
-    <section className="rounded-lg border border-border bg-card px-4 py-3.5">
-      <div className="flex items-center justify-between gap-3">
+    <section className="flex flex-col gap-2">
+      <div className="flex items-end justify-between gap-3">
         <div>
-          <p className={sectionLabel}>Daily brief</p>
+          <h2 className={sectionLabel}>Daily brief</h2>
           {note?.generatedAt ? (
             <p className={cn(metaText, 'mt-1')}>Generated {formatGeneratedAt(note.generatedAt)}</p>
           ) : null}
@@ -198,31 +198,33 @@ function DailyBriefPanel({
         {action}
       </div>
 
-      {error ? (
-        <Alert variant="error" className="mt-3">
-          {error.message}
-        </Alert>
-      ) : null}
+      <div className="rounded-lg border border-border bg-card px-4 py-3.5">
+        {error ? (
+          <Alert variant="error">
+            {error.message}
+          </Alert>
+        ) : null}
 
-      {generating && !hasBrief ? (
-        <div
-          role="status"
-          aria-label="Generating daily brief"
-          className="mt-3 flex items-center gap-2 text-sm text-muted-foreground"
-        >
-          <LoaderCircle aria-hidden className="size-4 animate-spin" />
-          <span>Generating brief...</span>
-        </div>
-      ) : loading ? (
-        <Loading className="mt-3" />
-      ) : hasBrief ? (
-        <ChatMarkdown text={note.content} className="mt-3" />
-      ) : (
-        <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          Generate a grounded brief from today&apos;s tasks, active projects, and recent
-          interactions.
-        </p>
-      )}
+        {generating && !hasBrief ? (
+          <div
+            role="status"
+            aria-label="Generating daily brief"
+            className="flex items-center gap-2 text-sm text-muted-foreground"
+          >
+            <LoaderCircle aria-hidden className="size-4 animate-spin" />
+            <span>Generating brief...</span>
+          </div>
+        ) : loading ? (
+          <Loading />
+        ) : hasBrief ? (
+          <ChatMarkdown text={note.content} />
+        ) : (
+          <p className="text-sm leading-6 text-muted-foreground">
+            Generate a grounded brief from today&apos;s tasks, active projects, and recent
+            interactions.
+          </p>
+        )}
+      </div>
     </section>
   )
 }
