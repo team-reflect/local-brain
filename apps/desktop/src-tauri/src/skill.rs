@@ -49,7 +49,10 @@ pub fn skill_install(
 ) -> AppResult<SkillStatus> {
     let paths = runtime_paths();
     install_for(&paths)?;
-    sync_brain_manifest(&db, &brains)?;
+    if let Err(err) = sync_brain_manifest(&db, &brains) {
+        let _ = uninstall_for(&paths);
+        return Err(err);
+    }
     status_for(&paths)
 }
 
@@ -146,8 +149,8 @@ fn uninstall_for(paths: &SkillPaths) -> AppResult<SkillStatus> {
     let status = status_for(paths)?;
     match status.install_state {
         SkillInstallState::Current | SkillInstallState::Stale => {
-            fs::remove_file(&paths.install_target)?;
             remove_brain_manifest(paths)?;
+            fs::remove_file(&paths.install_target)?;
         }
         SkillInstallState::Conflict => {
             return Err(AppError::io(format!(
