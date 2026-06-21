@@ -190,11 +190,35 @@ describe('GraphSurface', () => {
     expect(root?.className).toContain('min-h-0')
   })
 
-  it('still opens a node on click', async () => {
+  it('opens a person node on click', async () => {
     window.history.pushState({}, '', '/network?tab=graph')
     renderWithProviders(<GraphSurface showHeader={false} />)
 
-    fireEvent.click(screen.getByText('Ada Lovelace'))
+    fireEvent.click(screen.getByRole('link', { name: 'Open person Ada Lovelace' }))
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/people/p1')
+    })
+  })
+
+  it('opens an organization node on click', async () => {
+    window.history.pushState({}, '', '/network?tab=graph')
+    renderWithProviders(<GraphSurface showHeader={false} />)
+
+    fireEvent.click(screen.getByRole('link', { name: 'Open organization Analytical Engines' }))
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/organizations/org1')
+    })
+  })
+
+  it('opens a node from the keyboard', async () => {
+    window.history.pushState({}, '', '/network?tab=graph')
+    renderWithProviders(<GraphSurface showHeader={false} />)
+
+    fireEvent.keyDown(screen.getByRole('link', { name: 'Open person Ada Lovelace' }), {
+      key: 'Enter',
+    })
 
     await waitFor(() => {
       expect(window.location.pathname).toBe('/people/p1')

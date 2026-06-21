@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react'
@@ -53,6 +54,7 @@ const DEFAULT_VIEWPORT = { offsetX: 0, offsetY: 0, scale: 1 }
 const MIN_ZOOM = 0.45
 const MAX_ZOOM = 3
 const DRAG_CLICK_THRESHOLD = 3
+const MIN_NODE_HIT_RADIUS = 16
 
 interface GraphViewport {
   offsetX: number
@@ -87,6 +89,25 @@ function routeForNode(node: PositionedNode): Route | null {
       return { kind: 'document', id: node.id }
     case 'memory':
       return null
+  }
+}
+
+function actionLabelForNode(node: PositionedNode): string {
+  switch (node.kind) {
+    case 'self':
+      return `Open person ${node.label}`
+    case 'person':
+      return `Open person ${node.label}`
+    case 'organization':
+      return `Open organization ${node.label}`
+    case 'project':
+      return `Open project ${node.label}`
+    case 'task':
+      return `Open task ${node.label}`
+    case 'document':
+      return `Open document ${node.label}`
+    case 'memory':
+      return `Memory ${node.label}`
   }
 }
 
@@ -307,6 +328,15 @@ export function GraphSurface({
     [navigate],
   )
 
+  const handleNodeKeyDown = useCallback(
+    (event: KeyboardEvent<SVGGElement>, route: Route): void => {
+      if (event.key !== 'Enter' && event.key !== ' ') return
+      event.preventDefault()
+      navigate(route)
+    },
+    [navigate],
+  )
+
   return (
     <div className={cn('mx-auto flex h-full min-h-0 w-full max-w-5xl flex-col gap-4', className)}>
       {showHeader ? <PageHead eyebrow="Graph" title="Graph" /> : null}
@@ -427,7 +457,18 @@ export function GraphSurface({
                       transform={`translate(${node.x} ${node.y})`}
                       className={route ? 'cursor-pointer' : undefined}
                       onClick={route ? () => handleNodeClick(route) : undefined}
+                      onKeyDown={route ? (event) => handleNodeKeyDown(event, route) : undefined}
+                      role={route ? 'link' : undefined}
+                      tabIndex={route ? 0 : undefined}
+                      aria-label={route ? actionLabelForNode(node) : undefined}
                     >
+                      {route ? (
+                        <circle
+                          r={Math.max(node.radius, MIN_NODE_HIT_RADIUS)}
+                          fill="transparent"
+                          pointerEvents="all"
+                        />
+                      ) : null}
                       <circle r={node.radius} fill={KIND_COLOR[node.kind]} />
                       <text
                         x={0}
