@@ -202,7 +202,7 @@ function NetworkDetailDrawer({
       onOpenChange={(next) => (next ? undefined : onClose())}
     >
       <DrawerContent
-        className="h-full max-h-full w-[min(40rem,calc(100vw-4rem))] max-w-none rounded-none rounded-l-lg border-y-0 border-r-0 bg-popover text-popover-foreground shadow-[0_18px_48px_rgba(2,6,23,0.22)] sm:max-w-none"
+        className="h-full max-h-full min-w-[36rem] w-[min(40rem,calc(100vw-4rem))] max-w-none rounded-none rounded-l-lg border-y-0 border-r-0 bg-popover text-popover-foreground shadow-[0_18px_48px_rgba(2,6,23,0.22)] sm:max-w-none"
         aria-describedby={undefined}
       >
         <DrawerTitle className="sr-only">Network detail</DrawerTitle>

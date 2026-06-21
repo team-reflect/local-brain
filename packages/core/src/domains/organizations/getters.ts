@@ -1,8 +1,9 @@
 import type { Selectable } from 'kysely'
-import type { Organizations } from '@local-brain/db'
+import type { OrganizationProfiles, Organizations } from '@local-brain/db'
 import { db } from '../../db/client'
 
 export type Organization = Selectable<Organizations>
+export type OrganizationProfile = Selectable<OrganizationProfiles>
 
 export interface ListOrganizationsOptions {
   /** Include archived organizations (default: false). */
@@ -25,4 +26,15 @@ export function listOrganizations(options: ListOrganizationsOptions = {}): Promi
 
 export function getOrganization(id: string): Promise<Organization | undefined> {
   return db.selectFrom('organizations').selectAll().where('id', '=', id).executeTakeFirst()
+}
+
+/** AI/research enrichment profiles for an organization, newest research first. */
+export function listOrganizationProfiles(organizationId: string): Promise<OrganizationProfile[]> {
+  return db
+    .selectFrom('organizationProfiles')
+    .selectAll()
+    .where('organizationId', '=', organizationId)
+    .orderBy('researchedAt', 'desc')
+    .orderBy('createdAt', 'desc')
+    .execute()
 }
