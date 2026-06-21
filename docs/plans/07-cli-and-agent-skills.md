@@ -25,8 +25,8 @@ path resolution, sidecar bundling, installation checks.
   running and does not use Tauri IPC.
 - Agents can add people, documents, interactions, assets, tasks, and memories with direct
   provenance.
-- Agents can add projects only when the user explicitly requests a project, then link
-  imports and tasks to those manually curated projects.
+- Agents can add projects only after explicit user agreement/sign-off, then link
+  imports and tasks to those user-agreed projects.
 - Importers use provider-neutral `sources` and `external_identities`; no upstream API
   concepts land in `brain`.
 - Importers should use `external_identities.kind` to distinguish upstream identifier
@@ -153,7 +153,7 @@ path resolution, sidecar bundling, installation checks.
   summary, then refresh that body and its chunks idempotently.
 - An agent can import a redacted email or meeting digest as `summary` plus searchable
   body text without storing unsafe raw quote chains.
-- An agent can create a project on explicit user instruction, and imports can link
+- An agent can create a project after explicit user sign-off, and imports can link
   interactions or tasks to existing projects without auto-creating topic buckets.
 - An agent can add a reference note as a document.
 - An agent can add an avatar, image, or attachment as a linked asset.

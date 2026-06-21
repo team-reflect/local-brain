@@ -156,7 +156,7 @@ enum AddCommand {
     Interaction(AddInteractionArgs),
     /// Add an organization.
     Organization(AddOrganizationArgs),
-    /// Add a manually curated project.
+    /// Add a user-agreed project.
     Project(AddProjectArgs),
     /// Add a task.
     Task(AddTaskArgs),
@@ -1655,7 +1655,7 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
             "Search before writing likely duplicates.",
             "Prefer typed fields over burying structure in notes/body text.",
             "Reuse and link existing people, organizations, projects, and tasks when possible.",
-            "Projects are manually curated user structure: importers may link existing projects, but must not auto-create projects from source topics.",
+            "Projects are user-agreed structure: create them only after explicit user sign-off, otherwise link existing projects or suggest inferred candidates.",
             "Preserve provider provenance with --source, --external-id, and --original-url.",
             "Do not create people for every raw sender or attendee; preserve unresolved handles with --participant.",
             "Use --text-file or --text-file - for large text bodies; structured calendar events may omit body text.",
@@ -1734,6 +1734,11 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
                 "usage": "brain --json add organization --name <name> [--domain <domain>] [--kind <kind>] [--headline <one-line>] [--website <url>] [--industry <industry>] [--location <loc>] [--source <slug> --external-id <id>]",
                 "dedupe": "external identity, then normalized name, then normalized domain (www-stripped)",
             },
+            "addProject": {
+                "usage": "brain --json add project --name <name> [--status active|waiting|paused|done] [--kind <kind>] [--summary <summary>] [--source <slug> --external-id <id>] [--link kind:id...]",
+                "purpose": "Create or enrich a durable project only after the user has explicitly agreed to the project boundary. Without user sign-off, link existing projects or use suggest project for inferred candidates.",
+                "dedupe": "external identity, then normalized name",
+            },
             "enrichPerson": {
                 "usage": "brain --json enrich person <id> [--headline <headline>] [--summary <summary>] [--city <city>] [--timezone <tz>] [--current-title <title>] [--role-family <family>] [--seniority <level>]",
                 "purpose": "Update rich person profile fields and regenerate person chunks.",
@@ -1752,7 +1757,7 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
             },
             "suggest": {
                 "usage": "brain --json suggest project --title <name> [--rationale <r>] [--link interaction:<id>...] | suggest organization --title <name> [--domain <d>] | suggest list [--status open] | suggest accept <id> | suggest dismiss <id>",
-                "purpose": "Durable curation queue for structure the importer must not auto-create (a new project or organization). Accepting performs the typed write and relinks the cited records; dismissals persist so a proposal is never re-raised. Use this instead of auto-creating projects/orgs from inferred source topics.",
+                "purpose": "Durable curation queue for inferred or not-yet-approved structure, such as a possible project boundary or high-impact organization. Accepting performs the typed write and relinks the cited records; dismissals persist so a proposal is never re-raised.",
                 "kinds": ["create_project", "create_organization"],
             },
             "addTask": {

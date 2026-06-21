@@ -17,6 +17,7 @@ const DOCUMENTED: &[&[&str]] = &[
     &["add", "document"],
     &["add", "interaction"],
     &["add", "organization"],
+    &["add", "project"],
     &["add", "task"],
     &["add", "ai-note"],
     &["add", "fact"],
@@ -100,5 +101,13 @@ fn skill_doc_exists_and_covers_the_nouns() {
     assert!(
         text.contains("Use `event`") && text.contains("travel, lodging"),
         "skill must teach event-vs-meeting calendar guidance"
+    );
+    assert!(
+        text.contains("brain --json add project") && text.contains("user has signed off"),
+        "skill must teach user sign-off before project creation"
+    );
+    assert!(
+        text.contains("brain suggest project"),
+        "skill must keep project suggestions as the fallback"
     );
 }

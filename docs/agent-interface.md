@@ -23,7 +23,8 @@ translated into generic Local Brain commands.
 - Treat extracted claims as facts first; promote only durable, useful claims to
   memories.
 - Cite exact evidence chunks when creating tasks, facts, AI notes, and memories.
-- Link existing projects; suggest new projects instead of auto-creating them.
+- Create projects only after explicit user agreement; otherwise link existing
+  projects or suggest inferred project candidates.
 - Treat `brain --json contract` as the discoverable source of truth for command
   shapes, exit codes, source slugs, and link syntax.
 
@@ -69,6 +70,13 @@ brain --json import finalize --record interaction:<id>
 The older `brain add document` and `brain add interaction` commands remain valid
 aliases for direct typed writes. Prefer `brain import ...` in import harnesses so
 the staged workflow is obvious in logs.
+
+Use `brain add project` only after the user has agreed to the project boundary:
+
+```bash
+brain --json add project --name "House" \
+  --summary "Renovation and property work for 701 W Elizabeth St and 700 Jewell St"
+```
 
 ## Identity And Provenance
 
@@ -233,9 +241,10 @@ Person-from-email and organization-from-email paths are cautious. Use
 skip reasons for machine senders, no-reply addresses, invalid emails, token-like
 names, and email-as-name values.
 
-Do not infer new projects or high-impact organizations from a single weak clue.
-Use `brain suggest project` or `brain suggest organization` with evidence and let
-the user accept or dismiss.
+Do not create projects that the user has not signed off on, and do not infer
+high-impact organizations from a single weak clue. Use `brain suggest project`
+or `brain suggest organization` with evidence and let the user accept or
+dismiss.
 
 Do not store provider-specific logic in the CLI. Agents own upstream pagination,
 filtering, credential handling, transcript retrieval, attachment extraction, and
