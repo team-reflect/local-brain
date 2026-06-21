@@ -41,6 +41,7 @@ export function TodaySurface(): ReactNode {
   useEffect(() => {
     if (
       dailyBrief.isPending ||
+      dailyBrief.isFetching ||
       dailyBrief.isError ||
       dailyBrief.data !== null ||
       !providersReady ||
@@ -54,6 +55,7 @@ export function TodaySurface(): ReactNode {
   }, [
     dailyBrief.data,
     dailyBrief.isError,
+    dailyBrief.isFetching,
     dailyBrief.isPending,
     generateBrief,
     providersReady,
