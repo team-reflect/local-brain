@@ -31,11 +31,21 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
         ("documents", "documents_fts", "document"),
         ("interactions", "interactions_fts", "interaction"),
     ] {
+        // Columns: 0=title, 1=body_text, 2=summary. Weight title highest, then the
+        // summary (a curated digest / Granola note), then the raw body. Snippet from
+        // body, falling back to summary then title so a summary-only record (no body)
+        // still shows useful matched text.
         let sql = format!(
-            "SELECT t.id, t.title, snippet({fts}, 1, '[', ']', '…', 10), bm25({fts}, 10.0, 1.0)
+            "SELECT t.id, t.title,
+                    COALESCE(
+                      NULLIF(snippet({fts}, 1, '[', ']', '…', 10), ''),
+                      NULLIF(snippet({fts}, 2, '[', ']', '…', 10), ''),
+                      NULLIF(snippet({fts}, 0, '[', ']', '…', 10), '')
+                    ),
+                    bm25({fts}, 10.0, 1.0, 2.0)
              FROM {fts} JOIN {table} t ON t.rowid = {fts}.rowid
              WHERE {fts} MATCH ?1 AND t.archived_at IS NULL
-             ORDER BY bm25({fts}, 10.0, 1.0) LIMIT ?2"
+             ORDER BY bm25({fts}, 10.0, 1.0, 2.0) LIMIT ?2"
         );
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params![mq, limit as i64], |row| {
@@ -43,7 +53,7 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
                 "kind": kind,
                 "id": row.get::<_, String>(0)?,
                 "title": row.get::<_, Option<String>>(1)?.unwrap_or_else(|| "(untitled)".into()),
-                "snippet": row.get::<_, String>(2)?,
+                "snippet": row.get::<_, Option<String>>(2)?.unwrap_or_default(),
                 "score": lexical_score(row.get::<_, f64>(3)?),
             }))
         })?;

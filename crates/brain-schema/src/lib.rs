@@ -21,7 +21,7 @@ pub const SUPPORT_DIRNAME: &str = ".local-brain";
 
 /// Bumped whenever a migration is appended below. Asserted against the applied
 /// `user_version` in tests so the constant can never drift from the list.
-pub const LATEST_SCHEMA_VERSION: usize = 12;
+pub const LATEST_SCHEMA_VERSION: usize = 13;
 
 /// The canonical filesystem layout for one Local Brain root directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,6 +65,7 @@ static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
         M::up(include_str!(
             "../migrations/0012_one_current_affiliation.sql"
         )),
+        M::up(include_str!("../migrations/0013_fts_summary.sql")),
     ])
 });
 
@@ -756,6 +757,77 @@ mod tests {
             )
             .unwrap();
         assert_eq!(id, "d1");
+    }
+
+    #[test]
+    fn fts_indexes_interaction_and_document_summary() {
+        let conn = open_in_memory().unwrap();
+        // A transcript whose distinctive term lives ONLY in the summary, not the
+        // raw body — it must still be findable (migration 0013).
+        conn.execute(
+            "INSERT INTO interactions (id, title, body_text, summary)
+             VALUES ('i1', 'Kickoff', 'umm yeah so anyway', 'Decided to ship the Northwind pilot in Q3')",
+            [],
+        )
+        .unwrap();
+        let interaction: String = conn
+            .query_row(
+                "SELECT i.id FROM interactions_fts f JOIN interactions i ON i.rowid = f.rowid \
+                 WHERE interactions_fts MATCH 'northwind'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(interaction, "i1", "interaction summary is searchable");
+
+        // The same for documents, and an UPDATE to the summary must re-index.
+        conn.execute(
+            "INSERT INTO documents (id, title, body_text) VALUES ('d1', 'Note', 'placeholder')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE documents SET summary = 'budget approved for the kitchen remodel' WHERE id = 'd1'",
+            [],
+        )
+        .unwrap();
+        let document: String = conn
+            .query_row(
+                "SELECT d.id FROM documents_fts f JOIN documents d ON d.rowid = f.rowid \
+                 WHERE documents_fts MATCH 'remodel'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(document, "d1", "document summary is searchable after update");
+    }
+
+    #[test]
+    fn migration_0013_reindexes_existing_summaries() {
+        register_sqlite_vec().unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        MIGRATIONS.to_version(&mut conn, 12).unwrap();
+        // A row that existed BEFORE 0013, with a distinctive term only in its summary.
+        conn.execute(
+            "INSERT INTO interactions (id, kind, title, body_text, summary)
+             VALUES ('i1', 'meeting', 'Sync', 'filler body', 'Northwind pilot greenlit')",
+            [],
+        )
+        .unwrap();
+
+        MIGRATIONS.to_latest(&mut conn).unwrap();
+
+        // 0013's `rebuild` re-indexes the pre-existing summary, so it is now findable.
+        let id: String = conn
+            .query_row(
+                "SELECT i.id FROM interactions_fts f JOIN interactions i ON i.rowid = f.rowid \
+                 WHERE interactions_fts MATCH 'greenlit'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(id, "i1", "rebuild re-indexes summaries written before 0013");
     }
 
     #[test]

@@ -83,6 +83,22 @@ describe('Plan 06 retrieval + search', () => {
     expect(kinds.has('document')).toBe(true)
     expect(hits.find((h) => h.kind === 'document')?.snippet).toBeTruthy()
   })
+
+  it('global search matches an interaction by its summary, not just the body', async () => {
+    // The distinctive term lives only in the summary (a digest / Granola note),
+    // never in the raw transcript body or title.
+    await ingestInteraction({
+      kind: 'meeting',
+      title: 'Kickoff',
+      bodyText: 'um yeah anyway lots of filler and cross-talk',
+      summary: 'Decided to ship the Babylonstoren pilot in Q3',
+      occurredAt: '2026-06-11T17:00:00Z',
+    })
+    const hits = await globalSearch('babylonstoren')
+    const interaction = hits.find((h) => h.kind === 'interaction')
+    expect(interaction?.title).toBe('Kickoff')
+    expect(interaction?.snippet).toBeTruthy()
+  })
 })
 
 describe('Plan 06 model boundary', () => {

@@ -164,6 +164,13 @@ Notes:
 - Use `--text-file <path>` (or `--text-file -` for stdin) for long content; `--text`
   for short strings. Structured calendar events can omit body text when title and
   typed fields carry the record.
+- **Always give a transcript a `--summary`.** When you store a meeting/call transcript
+  (or any long body) in `--text`/`--text-file`, also pass a concise `--summary`:
+  generate a short digest of the decisions and follow-ups, or use the source's own AI
+  note (e.g. Granola's summary). The raw transcript stays the durable evidence in the
+  body; the summary is the high-signal recap. Both the title/body **and the summary are
+  full-text searchable**, so a good summary makes the meeting findable by its key points
+  even when the wording isn't in the transcript verbatim.
 - Identical document/interaction content dedupes automatically (`isDuplicate:true`);
   source-backed interactions dedupe by `--source` + `--external-kind` +
   `--external-id` first; people dedupe by external identity, any known email handle,
@@ -259,7 +266,10 @@ provider-neutral and must not know about helper tools such as `gws`:
 
 Every imported transcript must get an immediate enrichment pass:
 
-1. Generate or preserve a concise `summary` separate from the raw transcript body.
+1. Always set a concise `summary`, separate from the raw transcript body — generate a
+   short digest of the decisions and follow-ups, or carry the source's AI note (e.g.
+   Granola's). Store it with `--summary`; the raw transcript stays the body. The summary
+   is full-text searchable, so it is how the meeting is later found by its key points.
 2. Link participants and high-signal mentioned people. Prefer existing people by email
    or exact name; create a new person only when the transcript/title gives a clear
    durable identity.
