@@ -80,13 +80,17 @@ export async function globalSearch(query: string, options: SearchOptions = {}): 
     tasks.push(
       sql<FtsRecordRow>`
         SELECT d.id AS "id", d.title AS "title", d.kind AS "subtitle",
-               snippet(documents_fts, 1, '[', ']', '…', 10) AS "snippet",
+               COALESCE(
+                 NULLIF(snippet(documents_fts, 1, '[', ']', '…', 10), ''),
+                 NULLIF(snippet(documents_fts, 2, '[', ']', '…', 10), ''),
+                 NULLIF(snippet(documents_fts, 0, '[', ']', '…', 10), '')
+               ) AS "snippet",
                d.updated_at AS "recordDate",
-               bm25(documents_fts, 10.0, 1.0) AS "bm25"
+               bm25(documents_fts, 10.0, 1.0, 2.0) AS "bm25"
         FROM documents_fts
         JOIN documents d ON d.rowid = documents_fts.rowid
         WHERE documents_fts MATCH ${match} AND d.archived_at IS NULL
-        ORDER BY bm25(documents_fts, 10.0, 1.0) LIMIT ${perKind}
+        ORDER BY bm25(documents_fts, 10.0, 1.0, 2.0) LIMIT ${perKind}
       `
         .execute(db)
         .then((r) => r.rows.map((row) => ftsHit('document', row, now))),
@@ -97,13 +101,17 @@ export async function globalSearch(query: string, options: SearchOptions = {}): 
     tasks.push(
       sql<FtsRecordRow>`
         SELECT i.id AS "id", i.title AS "title", i.kind AS "subtitle",
-               snippet(interactions_fts, 1, '[', ']', '…', 10) AS "snippet",
+               COALESCE(
+                 NULLIF(snippet(interactions_fts, 1, '[', ']', '…', 10), ''),
+                 NULLIF(snippet(interactions_fts, 2, '[', ']', '…', 10), ''),
+                 NULLIF(snippet(interactions_fts, 0, '[', ']', '…', 10), '')
+               ) AS "snippet",
                i.occurred_at AS "recordDate",
-               bm25(interactions_fts, 10.0, 1.0) AS "bm25"
+               bm25(interactions_fts, 10.0, 1.0, 2.0) AS "bm25"
         FROM interactions_fts
         JOIN interactions i ON i.rowid = interactions_fts.rowid
         WHERE interactions_fts MATCH ${match} AND i.archived_at IS NULL
-        ORDER BY bm25(interactions_fts, 10.0, 1.0) LIMIT ${perKind}
+        ORDER BY bm25(interactions_fts, 10.0, 1.0, 2.0) LIMIT ${perKind}
       `
         .execute(db)
         .then((r) => r.rows.map((row) => ftsHit('interaction', row, now))),

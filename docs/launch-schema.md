@@ -563,10 +563,11 @@ Each join table should include:
 
 ## Derived Indexes
 
-- FTS5 tables over document title/body, interaction title/body, `content_chunks.text`,
-  and a derived asset projection (`assets_fts`) covering filename/title, kind, MIME
-  type, storage path, original URL, link captions, linked record titles, and
-  `asset_texts.text`.
+- FTS5 tables over document title/body/summary, interaction title/body/summary,
+  `content_chunks.text`, and a derived asset projection (`assets_fts`) covering
+  filename/title, kind, MIME type, storage path, original URL, link captions, linked
+  record titles, and `asset_texts.text`. Indexing `summary` lets a transcript or email
+  digest be found by its recap even when those words aren't in the raw body.
 - People, organizations, projects, and tasks currently use deterministic name/title
   matching for global search; they do not have dedicated FTS tables yet. Extraction
   uses project name matching only to link existing, manually created projects.
