@@ -7,6 +7,7 @@
 export * from './brains'
 export * from './records'
 export * from './corrections'
+export * from './suggestions'
 export * from './ingest'
 export * from './search'
 export * from './model'

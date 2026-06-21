@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- the public API barrel; grows one block per domain */
 export { type AppError, type AppErrorKind, isAppError, toAppError } from './errors'
 export { ValidationError, requireText } from './validation'
 // Field normalization shared by the write boundary, extraction matching, and the
@@ -61,6 +62,17 @@ export {
   type NewProject,
   type ProjectPatch,
 } from './domains/projects/setters'
+export {
+  listOpenSuggestions,
+  type CurationSuggestion,
+  type SuggestionLink,
+  type SuggestionPayload,
+} from './domains/suggestions/getters'
+export {
+  acceptSuggestion,
+  dismissSuggestion,
+  type AcceptedSuggestion,
+} from './domains/suggestions/setters'
 
 // Tasks
 export {
