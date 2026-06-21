@@ -102,7 +102,7 @@ export function NetworkSurface({ tab, detail }: { tab: NetworkTab; detail?: Netw
           <NetworkTabs
             tab={tab}
             onSelect={(nextTab) => navigate({ kind: 'network', tab: nextTab })}
-            className="absolute left-0 top-0 z-10 w-40 rounded-md border border-border bg-background/95 py-1"
+            className="absolute left-0 top-0 z-10 w-40 border-l border-border bg-background/95 py-1"
           />
           <GraphSurface showHeader={false} className="max-w-none" />
         </div>
