@@ -19,12 +19,9 @@ import { layoutGraph, type GraphLayout, type PositionedNode } from './graph-layo
 import type { Route } from '../routing/route'
 import { useRouter } from '../routing/router'
 
-/**
- * The graph legend mixes node kinds with one edge category: interactions are
- * drawn as the links between people, not as their own nodes, but they still get
- * a toggle and a swatch.
- */
 type GraphFilterKind = GraphNodeKind | 'interaction'
+type VisibleGraphNodeKind = Exclude<GraphNodeKind, 'memory'>
+type VisibleGraphFilterKind = VisibleGraphNodeKind | 'interaction'
 
 /** A calm, distinguishable color per kind (Reflect cool palette, indigo self). */
 const KIND_COLOR: Record<GraphFilterKind, string> = {
@@ -38,7 +35,7 @@ const KIND_COLOR: Record<GraphFilterKind, string> = {
   memory: '#d97706',
 }
 
-const KIND_LABEL: Record<GraphFilterKind, string> = {
+const KIND_LABEL: Record<VisibleGraphFilterKind, string> = {
   self: 'You',
   person: 'People',
   organization: 'Organizations',
@@ -46,10 +43,10 @@ const KIND_LABEL: Record<GraphFilterKind, string> = {
   task: 'Tasks',
   document: 'Documents',
   interaction: 'Interactions',
-  memory: 'Known context',
 }
 
-const ALL_KINDS = Object.keys(KIND_LABEL) as GraphFilterKind[]
+const ALL_KINDS = Object.keys(KIND_LABEL) as VisibleGraphFilterKind[]
+const HIDDEN_NODE_KINDS = new Set<GraphNodeKind>(['memory'])
 const DEFAULT_VIEWPORT = { offsetX: 0, offsetY: 0, scale: 1 }
 const MIN_ZOOM = 0.45
 const MAX_ZOOM = 3
@@ -87,14 +84,13 @@ function routeForNode(node: PositionedNode): Route | null {
       return { kind: 'task', id: node.id }
     case 'document':
       return { kind: 'document', id: node.id }
-    case 'memory':
-      return null
+    case 'memory': return null
   }
 }
 
 function actionLabelForNode(node: PositionedNode): string {
   const kind = node.kind === 'self' ? 'person' : node.kind
-  return kind === 'memory' ? `Context ${node.label}` : `Open ${kind} ${node.label}`
+  return `Open ${kind} ${node.label}`
 }
 
 function clip(label: string): string {
@@ -178,7 +174,7 @@ export function GraphSurface({
 } = {}): ReactNode {
   const { navigate } = useRouter()
   const graph = useGraph()
-  const [visibleKinds, setVisibleKinds] = useState<ReadonlySet<GraphFilterKind>>(
+  const [visibleKinds, setVisibleKinds] = useState<ReadonlySet<VisibleGraphFilterKind>>(
     () => new Set(ALL_KINDS),
   )
   const [viewport, setViewport] = useState<GraphViewport>(DEFAULT_VIEWPORT)
@@ -187,8 +183,13 @@ export function GraphSurface({
   const suppressNextNodeClickRef = useRef(false)
 
   const presentKinds = useMemo(() => {
-    if (!graph.data) return [] as GraphFilterKind[]
-    const seen = new Set<GraphFilterKind>(graph.data.nodes.map((node) => node.kind))
+    if (!graph.data) return [] as VisibleGraphFilterKind[]
+    const seen = new Set<VisibleGraphFilterKind>()
+    for (const node of graph.data.nodes) {
+      if (!HIDDEN_NODE_KINDS.has(node.kind) && node.kind in KIND_LABEL) {
+        seen.add(node.kind as VisibleGraphNodeKind)
+      }
+    }
     if (graph.data.edges.some((edge) => edge.kind === 'interaction')) seen.add('interaction')
     return ALL_KINDS.filter((kind) => seen.has(kind))
   }, [graph.data])
@@ -196,18 +197,24 @@ export function GraphSurface({
   const filteredGraph = useMemo<Graph | null>(() => {
     if (!graph.data) return null
     const showInteractions = visibleKinds.has('interaction')
+    const nodes = graph.data.nodes.filter((node) => !HIDDEN_NODE_KINDS.has(node.kind))
+      .filter((node) => visibleKinds.has(node.kind as VisibleGraphNodeKind))
+    const nodeIds = new Set(nodes.map((node) => node.id))
     return {
       ...graph.data,
-      nodes: graph.data.nodes.filter((node) => visibleKinds.has(node.kind)),
-      edges: showInteractions
-        ? graph.data.edges
-        : graph.data.edges.filter((edge) => edge.kind !== 'interaction'),
+      nodes,
+      edges: graph.data.edges.filter(
+        (edge) =>
+          (showInteractions || edge.kind !== 'interaction') &&
+          nodeIds.has(edge.source) &&
+          nodeIds.has(edge.target),
+      ),
     }
   }, [graph.data, visibleKinds])
 
   const layout = useMemo(() => (filteredGraph ? layoutGraph(filteredGraph) : null), [filteredGraph])
 
-  const toggleKind = (kind: GraphFilterKind): void => {
+  const toggleKind = (kind: VisibleGraphFilterKind): void => {
     setVisibleKinds((current) => {
       const next = new Set(current)
       if (next.has(kind)) {
