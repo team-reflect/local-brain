@@ -43,13 +43,46 @@ const toolMessage = (id: string, toolName: string, state: string, input: Record<
     ],
   }) as unknown as UIMessage
 
+function installAskBridgeWithProvider(): void {
+  installFakeBridge({
+    query: (_sql, params) => {
+      const key = params[0]
+      if (key === 'model.aiProviders') {
+        return [
+          {
+            valueJson: JSON.stringify([
+              { id: 'provider-1', provider: 'openai', model: 'gpt-5.1', keyHint: '12345' },
+            ]),
+          },
+        ]
+      }
+      if (key === 'model.defaultAiProviderId') {
+        return [{ valueJson: JSON.stringify('provider-1') }]
+      }
+      return []
+    },
+  })
+}
+
 describe('AskSurface', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    window.history.replaceState({}, '', '/ask')
     chatMocks.messages = []
     chatMocks.status = 'ready'
     chatMocks.sendMessage.mockResolvedValue(undefined)
+    installAskBridgeWithProvider()
+  })
+
+  it('prompts users to add an AI provider before chatting', async () => {
     installFakeBridge({ queryRows: [] })
+    renderWithProviders(<AskSurface conversationId={undefined} />)
+
+    expect(await screen.findByText(/Add an AI provider to start chatting/)).not.toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add an AI provider' }))
+    await waitFor(() => expect(window.location.pathname + window.location.search).toBe('/settings?section=ai-providers'))
+    expect(screen.queryByLabelText('Ask message')).toBeNull()
   })
 
   it('sends a new UI message instead of replacing a missing message id', async () => {

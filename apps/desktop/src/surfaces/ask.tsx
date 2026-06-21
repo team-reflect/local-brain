@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import { useChat } from '@ai-sdk/react'
-import { Plus, Send } from 'lucide-react'
+import { MessageSquare, Plus, Send } from 'lucide-react'
 import { z } from 'zod'
 import { createChatId, type ChatMessage } from '@local-brain/core'
 import type { UIMessage } from 'ai'
@@ -19,7 +19,7 @@ import { Loading } from '../components/loading'
 import { ChatMarkdown } from '../components/chat/chat-markdown'
 import { ChatToolChip, type ToolPart } from '../components/chat/chat-tool-chip'
 import { createAskTransport } from '../lib/ai/ask-transport'
-import { useConversations, useMessages, useModelStatus } from '../lib/queries'
+import { useConversations, useMessages, useModelSettings, useModelStatus } from '../lib/queries'
 import { useQueryClient } from '@tanstack/react-query'
 import { cn } from '../lib/utils'
 import { useRouter } from '../routing/router'
@@ -69,6 +69,7 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
   const chatId = conversationId ?? draftConversationId
   const storedMessages = useMessages(conversationId)
   const conversations = useConversations()
+  const modelSettings = useModelSettings()
   const modelStatus = useModelStatus()
   const queryClient = useQueryClient()
   const { navigate } = useRouter()
@@ -98,6 +99,7 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
   }, [conversationId, hydratedConversationId, initialMessages, setMessages, status, storedMessages.data])
 
   const providerClosed = modelStatus.data && !modelStatus.data.canRun ? modelStatus.data.reason : null
+  const needsProvider = modelSettings.isSuccess && modelSettings.data.providers.length === 0
   const pending = status === 'submitted' || status === 'streaming'
   const conversationHydrated = !conversationId || hydratedConversationId === conversationId
   const historyUnavailable = Boolean(conversationId && storedMessages.isError)
@@ -151,6 +153,32 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
 
   const displayedMessages = conversationHydrated ? messages : []
   const showInitialLoading = waitingForHydration
+  const askContent = needsProvider ? (
+    <ConfigureProviderPrompt onConfigure={() => navigate({ kind: 'settings', section: 'ai-providers' })} />
+  ) : (
+    <>
+      {providerClosed ? <Alert className="mb-3">{providerClosed}</Alert> : null}
+      {historyUnavailable ? (
+        <Alert variant="error" className="mb-3">
+          Could not load this chat history.
+        </Alert>
+      ) : null}
+      {showInitialLoading ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center">
+          <Loading />
+        </div>
+      ) : (
+        <MessageList
+          key={chatId}
+          messages={displayedMessages}
+          streamingMessageId={streamingMessageId}
+          showThinking={showThinking}
+        />
+      )}
+      {error ? <Alert variant="error" className="mx-auto mb-3 w-full max-w-2xl">{error.message}</Alert> : null}
+      <Composer draft={draft} setDraft={setDraft} pending={composerPending} onSubmit={onSubmit} />
+    </>
+  )
 
   return (
     <div className="flex h-full min-h-0">
@@ -161,26 +189,25 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
         onOpen={(id) => navigate({ kind: 'ask', conversationId: id })}
       />
       <div className="flex min-w-0 flex-1 flex-col">
-        {providerClosed ? <Alert className="mb-3">{providerClosed}</Alert> : null}
-        {historyUnavailable ? (
-          <Alert variant="error" className="mb-3">
-            Could not load this chat history.
-          </Alert>
-        ) : null}
-        {showInitialLoading ? (
-          <div className="flex min-h-0 flex-1 items-center justify-center">
-            <Loading />
-          </div>
-        ) : (
-          <MessageList
-            key={chatId}
-            messages={displayedMessages}
-            streamingMessageId={streamingMessageId}
-            showThinking={showThinking}
-          />
-        )}
-        {error ? <Alert variant="error" className="mx-auto mb-3 w-full max-w-2xl">{error.message}</Alert> : null}
-        <Composer draft={draft} setDraft={setDraft} pending={composerPending} onSubmit={onSubmit} />
+        {askContent}
+      </div>
+    </div>
+  )
+}
+
+function ConfigureProviderPrompt({ onConfigure }: { onConfigure: () => void }): ReactNode {
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center px-6">
+      <div className="flex max-w-sm flex-col items-center text-center">
+        <MessageSquare aria-hidden strokeWidth={1.5} className="size-8 text-muted-foreground" />
+        <h2 className="mt-4 text-lg font-semibold text-foreground">Ask your local brain</h2>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          Add an AI provider to start chatting. Local Brain calls the provider directly with
+          your own key, stored in the OS keychain.
+        </p>
+        <Button className="mt-5" variant="primary" onClick={onConfigure}>
+          Add an AI provider
+        </Button>
       </div>
     </div>
   )
