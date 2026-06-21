@@ -2,6 +2,8 @@
 //! the same FTS5 contract as the app (the SQL is the shared layer), reimplemented
 //! here in Rust so the CLI runs standalone.
 
+use std::collections::HashMap;
+
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 
@@ -94,6 +96,74 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
         hits.push(row?);
     }
 
+    let mut chunk_stmt = conn.prepare(
+        "SELECT cc.record_type,
+                cc.record_id,
+                COALESCE(
+                  p.full_name,
+                  o.name,
+                  op.one_line_description,
+                  pr.name,
+                  t.title,
+                  ti.title,
+                  an.title,
+                  ef.key,
+                  m.claim,
+                  '(untitled)'
+                ) AS title,
+                snippet(content_chunks_fts, 0, '[', ']', '…', 10),
+                bm25(content_chunks_fts)
+         FROM content_chunks_fts
+         JOIN content_chunks cc ON cc.rowid = content_chunks_fts.rowid
+         LEFT JOIN people p
+           ON cc.record_type = 'person' AND p.id = cc.record_id
+         LEFT JOIN organizations o
+           ON cc.record_type = 'organization' AND o.id = cc.record_id
+         LEFT JOIN organization_profiles op
+           ON cc.record_type = 'organization_profile' AND op.id = cc.record_id
+         LEFT JOIN projects pr
+           ON cc.record_type = 'project' AND pr.id = cc.record_id
+         LEFT JOIN tasks t
+           ON cc.record_type = 'task' AND t.id = cc.record_id
+         LEFT JOIN interaction_transcripts tr
+           ON cc.record_type = 'interaction_transcript' AND tr.id = cc.record_id
+         LEFT JOIN interactions ti
+           ON ti.id = tr.interaction_id
+         LEFT JOIN ai_notes an
+           ON cc.record_type = 'ai_note' AND an.id = cc.record_id
+         LEFT JOIN extracted_facts ef
+           ON cc.record_type = 'extracted_fact' AND ef.id = cc.record_id
+         LEFT JOIN memories m
+           ON cc.record_type = 'memory' AND m.id = cc.record_id
+         WHERE content_chunks_fts MATCH ?1
+           AND cc.record_type NOT IN ('document', 'interaction', 'asset')
+           AND (
+             (cc.record_type = 'person' AND p.archived_at IS NULL)
+             OR (cc.record_type = 'organization' AND o.archived_at IS NULL)
+             OR (cc.record_type = 'organization_profile' AND op.id IS NOT NULL)
+             OR (cc.record_type = 'project' AND pr.archived_at IS NULL)
+             OR (cc.record_type = 'task' AND t.archived_at IS NULL)
+             OR (cc.record_type = 'interaction_transcript' AND tr.id IS NOT NULL AND ti.archived_at IS NULL)
+             OR (cc.record_type = 'ai_note' AND an.id IS NOT NULL)
+             OR (cc.record_type = 'extracted_fact' AND ef.archived_at IS NULL)
+             OR (cc.record_type = 'memory' AND m.archived_at IS NULL)
+           )
+         ORDER BY bm25(content_chunks_fts)
+         LIMIT ?2",
+    )?;
+    let chunk_rows = chunk_stmt.query_map(params![mq, limit as i64], |row| {
+        Ok(json!({
+            "kind": row.get::<_, String>(0)?,
+            "id": row.get::<_, String>(1)?,
+            "title": row.get::<_, Option<String>>(2)?.unwrap_or_else(|| "(untitled)".into()),
+            "snippet": row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+            "score": lexical_score(row.get::<_, f64>(4)?),
+        }))
+    })?;
+    for row in chunk_rows {
+        hits.push(row?);
+    }
+
     for (table, name_col, kind) in [
         ("people", "full_name", "person"),
         ("organizations", "name", "organization"),
@@ -120,6 +190,25 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
 
     // Merge all kinds, rank by score, and apply one final cap — like the app's
     // `globalSearch`, instead of returning up to `limit` rows per source table.
+    let mut unique_hits: Vec<Value> = Vec::new();
+    let mut seen: HashMap<(String, String), usize> = HashMap::new();
+    for hit in hits {
+        let key = (
+            hit["kind"].as_str().unwrap_or("").to_string(),
+            hit["id"].as_str().unwrap_or("").to_string(),
+        );
+        if let Some(index) = seen.get(&key).copied() {
+            let existing_score = unique_hits[index]["score"].as_f64().unwrap_or(0.0);
+            let new_score = hit["score"].as_f64().unwrap_or(0.0);
+            if new_score > existing_score {
+                unique_hits[index] = hit;
+            }
+        } else {
+            seen.insert(key, unique_hits.len());
+            unique_hits.push(hit);
+        }
+    }
+    let mut hits = unique_hits;
     hits.sort_by(|a, b| {
         let sb = b["score"].as_f64().unwrap_or(0.0);
         let sa = a["score"].as_f64().unwrap_or(0.0);

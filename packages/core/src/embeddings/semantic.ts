@@ -1,5 +1,6 @@
 import { sql } from 'kysely'
 import { db } from '../db/client'
+import { chunkRecordJoins, chunkRecordTitle, chunkVisibilityFilter } from '../retrieval/chunk-sources'
 import type { RetrievedChunk, SourceRecordType } from '../retrieval/retrieve'
 import { EMBEDDING_MODEL_ID } from './model'
 
@@ -70,15 +71,13 @@ export async function semanticHits(
       cc.record_type  AS "recordType",
       cc.record_id    AS "recordId",
       cc.chunk_index  AS "chunkIndex",
-      COALESCE(d.title, i.title) AS "recordTitle",
+      ${chunkRecordTitle} AS "recordTitle",
       knn.distance               AS "distance"
     FROM knn
     JOIN chunk_embeddings ce ON ce.id = knn.rowid AND ce.model_id = ${EMBEDDING_MODEL_ID}
     JOIN content_chunks cc   ON cc.id = ce.chunk_id
-    LEFT JOIN documents d    ON d.id = cc.record_id AND cc.record_type = 'document'
-    LEFT JOIN interactions i ON i.id = cc.record_id AND cc.record_type = 'interaction'
-    WHERE (d.archived_at IS NULL)
-      AND (i.archived_at IS NULL)
+    ${chunkRecordJoins}
+    WHERE ${chunkVisibilityFilter}
       ${recordTypeFilter}
     ORDER BY knn.distance
   `.execute(db)

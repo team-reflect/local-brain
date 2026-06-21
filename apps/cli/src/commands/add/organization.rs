@@ -48,8 +48,14 @@ pub struct AddOrganizationArgs<'a> {
     pub name: &'a str,
     pub kind: Option<&'a str>,
     pub domain: Option<&'a str>,
+    pub headline: Option<&'a str>,
     pub location: Option<&'a str>,
     pub summary: Option<&'a str>,
+    pub website: Option<&'a str>,
+    pub industry: Option<&'a str>,
+    pub hq_city: Option<&'a str>,
+    pub hq_region: Option<&'a str>,
+    pub hq_country: Option<&'a str>,
     pub notes: Option<&'a str>,
     pub source_slug: Option<&'a str>,
     pub external_kind: &'a str,
@@ -103,8 +109,14 @@ fn enrich_duplicate_organization(
         &[
             ("kind", normalize_optional(args.kind)),
             ("domain", normalize_domain(args.domain)),
+            ("headline", normalize_optional(args.headline)),
             ("location", normalize_optional(args.location)),
             ("summary", normalize_optional(args.summary)),
+            ("website", normalize_optional(args.website)),
+            ("industry", normalize_optional(args.industry)),
+            ("hq_city", normalize_optional(args.hq_city)),
+            ("hq_region", normalize_optional(args.hq_region)),
+            ("hq_country", normalize_optional(args.hq_country)),
             ("notes", normalize_optional(args.notes)),
         ],
     )
@@ -189,15 +201,23 @@ pub fn add_organization(
     let id = new_id();
     let tx = conn.transaction()?;
     tx.execute(
-        "INSERT INTO organizations (id, name, kind, domain, location, summary, notes)
-         VALUES (?1,?2,?3,?4,?5,?6,?7)",
+        "INSERT INTO organizations (
+           id, name, kind, domain, headline, location, summary, website,
+           industry, hq_city, hq_region, hq_country, notes
+         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
         params![
             id,
             name,
             normalize_optional(args.kind),
             normalize_domain(args.domain),
+            normalize_optional(args.headline),
             normalize_optional(args.location),
             normalize_optional(args.summary),
+            normalize_optional(args.website),
+            normalize_optional(args.industry),
+            normalize_optional(args.hq_city),
+            normalize_optional(args.hq_region),
+            normalize_optional(args.hq_country),
             normalize_optional(args.notes),
         ],
     )?;
@@ -230,8 +250,14 @@ mod tests {
             name,
             kind: None,
             domain,
+            headline: None,
             location: None,
             summary: None,
+            website: None,
+            industry: None,
+            hq_city: None,
+            hq_region: None,
+            hq_country: None,
             notes: None,
             source_slug: Some("manual"),
             external_kind: "record",

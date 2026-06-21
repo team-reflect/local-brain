@@ -52,15 +52,61 @@ pub(super) fn find_duplicate(
 /// Map an `external_identities.entity_type` to its owning table. Every typed
 /// record table carries an `archived_at` column, so callers can scope an
 /// external-id lookup to active records.
-fn entity_table(entity_type: &str) -> Option<&'static str> {
+struct EntityTable {
+    table: &'static str,
+    has_archived_at: bool,
+}
+
+fn entity_table(entity_type: &str) -> Option<EntityTable> {
     match entity_type {
-        "person" => Some("people"),
-        "organization" => Some("organizations"),
-        "project" => Some("projects"),
-        "task" => Some("tasks"),
-        "document" => Some("documents"),
-        "interaction" => Some("interactions"),
-        "asset" => Some("assets"),
+        "person" => Some(EntityTable {
+            table: "people",
+            has_archived_at: true,
+        }),
+        "organization" => Some(EntityTable {
+            table: "organizations",
+            has_archived_at: true,
+        }),
+        "organization_profile" => Some(EntityTable {
+            table: "organization_profiles",
+            has_archived_at: false,
+        }),
+        "project" => Some(EntityTable {
+            table: "projects",
+            has_archived_at: true,
+        }),
+        "task" => Some(EntityTable {
+            table: "tasks",
+            has_archived_at: true,
+        }),
+        "document" => Some(EntityTable {
+            table: "documents",
+            has_archived_at: true,
+        }),
+        "interaction" => Some(EntityTable {
+            table: "interactions",
+            has_archived_at: true,
+        }),
+        "interaction_transcript" => Some(EntityTable {
+            table: "interaction_transcripts",
+            has_archived_at: false,
+        }),
+        "ai_note" => Some(EntityTable {
+            table: "ai_notes",
+            has_archived_at: false,
+        }),
+        "extracted_fact" => Some(EntityTable {
+            table: "extracted_facts",
+            has_archived_at: true,
+        }),
+        "memory" => Some(EntityTable {
+            table: "memories",
+            has_archived_at: true,
+        }),
+        "asset" => Some(EntityTable {
+            table: "assets",
+            has_archived_at: true,
+        }),
         _ => None,
     }
 }
@@ -84,11 +130,16 @@ pub(super) fn find_external_identity(
     // `archived_at IS NULL`; without the join here a re-import with the same
     // --source/--external-id would enrich an archived record and report a
     // duplicate, leaving the data off normal active lists.
-    let table = entity_table(entity_type).ok_or_else(|| {
+    let entity = entity_table(entity_type).ok_or_else(|| {
         CliError::Runtime(format!(
             "unknown external identity entity type '{entity_type}'"
         ))
     })?;
+    let archived_filter = if entity.has_archived_at {
+        "AND t.archived_at IS NULL"
+    } else {
+        ""
+    };
     let sql = format!(
         "SELECT ei.entity_id
          FROM external_identities ei
@@ -97,8 +148,9 @@ pub(super) fn find_external_identity(
            AND ei.source_id = ?2
            AND ei.kind = ?3
            AND ei.external_id = ?4
-           AND t.archived_at IS NULL
+           {archived_filter}
          LIMIT 1",
+        table = entity.table,
     );
     let id = conn
         .query_row(
@@ -123,6 +175,49 @@ pub(super) struct ExternalIdentityWrite<'a> {
     pub force_duplicate: bool,
 }
 
+/// One durable provenance event for a typed record.
+///
+/// Importers use this for source imports, AI-generated/enriched artifacts, fact
+/// extraction, memory promotion, and finalization. It is intentionally separate
+/// from `external_identities`: an identity says "what upstream row is this?",
+/// while provenance says "how did this Local Brain record get here?".
+pub(super) struct RecordProvenanceWrite<'a> {
+    pub record_type: &'a str,
+    pub record_id: &'a str,
+    pub provenance_kind: &'a str,
+    pub source_id: Option<&'a str>,
+    pub original_path: Option<&'a str>,
+    pub original_url: Option<&'a str>,
+    pub model: Option<&'a str>,
+    pub prompt_fingerprint: Option<&'a str>,
+    pub metadata_json: Option<&'a str>,
+}
+
+pub(super) fn insert_record_provenance(
+    conn: &Connection,
+    write: RecordProvenanceWrite,
+) -> Result<(), CliError> {
+    conn.execute(
+        "INSERT INTO record_provenance
+           (id, record_type, record_id, provenance_kind, source_id, original_path,
+            original_url, imported_at, model, prompt_fingerprint, metadata_json)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),?8,?9,?10)",
+        params![
+            new_id(),
+            write.record_type,
+            write.record_id,
+            write.provenance_kind,
+            write.source_id,
+            normalize_optional(write.original_path),
+            normalize_optional(write.original_url),
+            normalize_optional(write.model),
+            normalize_optional(write.prompt_fingerprint),
+            normalize_optional(write.metadata_json),
+        ],
+    )?;
+    Ok(())
+}
+
 /// Upsert the `(source, kind, external_id)` identity for `entity_id`, honoring
 /// the active/archived and forced-duplicate rules described inline.
 pub(super) fn insert_external_identity(
@@ -144,7 +239,7 @@ pub(super) fn insert_external_identity(
     ) else {
         return Ok(());
     };
-    let table = entity_table(entity_type).ok_or_else(|| {
+    let entity = entity_table(entity_type).ok_or_else(|| {
         CliError::Runtime(format!(
             "unknown external identity entity type '{entity_type}'"
         ))
@@ -176,6 +271,24 @@ pub(super) fn insert_external_identity(
         //      record would skip the update entirely and a fresh URL (including
         //      filling a previously null one) would never land. `COALESCE` keeps a
         //      real URL from being clobbered with NULL on a URL-less re-import.
+        let inactive_guard = if entity.has_archived_at {
+            format!(
+                "NOT EXISTS (
+                   SELECT 1 FROM {table} t
+                   WHERE t.id = external_identities.entity_id
+                     AND t.archived_at IS NULL
+                 )",
+                table = entity.table
+            )
+        } else {
+            format!(
+                "NOT EXISTS (
+                   SELECT 1 FROM {table} t
+                   WHERE t.id = external_identities.entity_id
+                 )",
+                table = entity.table
+            )
+        };
         format!(
             "DO UPDATE SET
                entity_type = excluded.entity_type,
@@ -184,11 +297,7 @@ pub(super) fn insert_external_identity(
                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
              WHERE (
                  external_identities.entity_id <> excluded.entity_id
-                 AND NOT EXISTS (
-                   SELECT 1 FROM {table} t
-                   WHERE t.id = external_identities.entity_id
-                     AND t.archived_at IS NULL
-                 )
+                 AND {inactive_guard}
                )
                OR (
                  external_identities.entity_id = excluded.entity_id
