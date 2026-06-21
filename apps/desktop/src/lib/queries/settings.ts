@@ -2,6 +2,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   aiKeySecretName,
   apiKeyHint,
+  cliInstall,
+  cliStatus,
+  cliUninstall,
   databasePath,
   getModelSettings,
   hardDeleteRecord,
@@ -25,6 +28,26 @@ import {
 
 export function useDatabasePath() {
   return useQuery({ queryKey: ['database-path'], queryFn: databasePath })
+}
+
+export function useCliStatus() {
+  return useQuery({ queryKey: ['cli-status'], queryFn: cliStatus })
+}
+
+export function useInstallCli() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: cliInstall,
+    onSuccess: (status) => queryClient.setQueryData(['cli-status'], status),
+  })
+}
+
+export function useUninstallCli() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: cliUninstall,
+    onSuccess: (status) => queryClient.setQueryData(['cli-status'], status),
+  })
 }
 
 export function useModelSettings() {

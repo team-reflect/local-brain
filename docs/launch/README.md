@@ -34,6 +34,23 @@ compiles the macOS app. The runnable bundle is
 at `Contents/MacOS/brain`. (DMG packaging needs a GUI session; see
 [checklist.md](checklist.md).)
 
+### Installing the `brain` command
+
+From the app, open **Settings → CLI & agents** and install the command. The app
+symlinks the bundled sidecar to `~/.local/bin/brain`; it never needs sudo and
+does not edit shell profile files. If `~/.local/bin` is not already on your
+`PATH`, add this line to your shell profile:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+For source/development checkouts, install directly from Cargo instead:
+
+```bash
+cargo install --path apps/cli --locked
+```
+
 ## Local storage
 
 Each **brain** is one root folder — your top-level workspace:
@@ -89,6 +106,8 @@ brain tasks plan-day --json
 brain graph --center self --json
 brain doctor --json     # health: database and schema
 ```
+
+After installing the command, verify the agent path with `brain doctor --json`.
 
 For question answering, the desktop **Ask** surface uses the Vercel AI SDK with the
 configured BYOK provider and persists chat history in SQLite. Agents using the CLI

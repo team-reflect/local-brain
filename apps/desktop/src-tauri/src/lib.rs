@@ -6,6 +6,7 @@
 //! on schema or SQLite version.
 
 mod brains;
+mod cli;
 mod commands;
 mod db;
 mod embed;
@@ -45,6 +46,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::app_version,
             commands::database_path,
+            cli::cli_status,
+            cli::cli_install,
+            cli::cli_uninstall,
             db::db_query,
             db::db_execute,
             db::db_batch,

@@ -4,6 +4,7 @@ import { cn } from '../../lib/utils'
 import { useRouter } from '../../routing/router'
 import { AboutSettings } from './about'
 import { BrainSettings } from './brain'
+import { CliAgentsSettings } from './cli-agents'
 import { SemanticSearchSettings } from './semantic-search'
 
 interface SettingsSection {
@@ -14,6 +15,7 @@ interface SettingsSection {
 const SECTIONS: readonly SettingsSection[] = [
   { key: 'about', label: 'About' },
   { key: 'brain', label: 'Brain' },
+  { key: 'cli-agents', label: 'CLI & agents' },
   { key: 'ai-providers', label: 'AI providers' },
   { key: 'search', label: 'Semantic search' },
 ]
@@ -83,6 +85,8 @@ function SectionBody({ section }: { section: string }): ReactNode {
   switch (section) {
     case 'brain':
       return <BrainSettings />
+    case 'cli-agents':
+      return <CliAgentsSettings />
     case 'model-keys':
     case 'ai-providers':
       return <AiProvidersSettings />
