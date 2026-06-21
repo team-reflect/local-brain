@@ -221,7 +221,8 @@ fn uninstall_for(paths: &SkillPaths) -> AppResult<SkillStatus> {
     }
 
     let status = status_for(paths)?;
-    if status.install_state == SkillInstallState::Conflict {
+    let removable = status.skills.iter().any(is_removable_skill);
+    if !removable && status.install_state == SkillInstallState::Conflict {
         let conflict = status
             .skills
             .iter()
@@ -235,27 +236,41 @@ fn uninstall_for(paths: &SkillPaths) -> AppResult<SkillStatus> {
         )));
     }
 
-    let removable = status.skills.iter().any(|skill| {
-        matches!(
-            skill.install_state,
-            SkillInstallState::Current | SkillInstallState::Stale
-        )
-    });
-
     if removable {
-        remove_brain_manifest(paths)?;
-        for skill_status in &status.skills {
-            if matches!(
-                skill_status.install_state,
-                SkillInstallState::Current | SkillInstallState::Stale
-            ) {
-                let skill = managed_skill_by_id(&skill_status.id)?;
-                fs::remove_file(install_target(paths, skill))?;
+        let snapshot = snapshot_install_files(paths)?;
+        if let Err(err) = remove_managed_skill_files(paths, &status) {
+            if let Err(rollback_err) = restore_file_snapshot(&snapshot) {
+                return Err(AppError::io(format!(
+                    "{err}; also failed to roll back agent skill uninstall: {rollback_err}"
+                )));
             }
+            return Err(err);
         }
     }
 
     status_for(paths)
+}
+
+fn is_removable_skill(skill: &ManagedSkillStatus) -> bool {
+    matches!(
+        skill.install_state,
+        SkillInstallState::Current | SkillInstallState::Stale
+    )
+}
+
+fn remove_managed_skill_files(paths: &SkillPaths, status: &SkillStatus) -> AppResult<()> {
+    for skill_status in status
+        .skills
+        .iter()
+        .filter(|skill| is_removable_skill(skill))
+    {
+        let skill = managed_skill_by_id(&skill_status.id)?;
+        fs::remove_file(install_target(paths, skill))?;
+        if skill.sync_brain_manifest {
+            remove_brain_manifest(paths)?;
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -833,6 +848,35 @@ mod tests {
         assert!(!install_target(&paths, brain_skill()).exists());
         assert!(!install_target(&paths, backfill_skill()).exists());
         assert!(!brain_manifest_target(&paths, brain_skill()).exists());
+    }
+
+    #[test]
+    fn uninstalls_managed_skill_when_sibling_conflicts() {
+        let temp = TempDir::new().unwrap();
+        let paths = paths_for(temp.path());
+        fs::create_dir_all(install_dir(&paths, brain_skill())).unwrap();
+        fs::write(
+            install_target(&paths, brain_skill()),
+            managed_skill_content(brain_skill()),
+        )
+        .unwrap();
+        fs::write(brain_manifest_target(&paths, brain_skill()), "{}").unwrap();
+        fs::create_dir_all(install_dir(&paths, backfill_skill())).unwrap();
+        fs::write(
+            install_target(&paths, backfill_skill()),
+            BRAIN_BACKFILL_SKILL_SOURCE,
+        )
+        .unwrap();
+
+        let status = uninstall_for(&paths).unwrap();
+
+        assert_eq!(status.install_state, SkillInstallState::Conflict);
+        assert!(!install_target(&paths, brain_skill()).exists());
+        assert!(!brain_manifest_target(&paths, brain_skill()).exists());
+        assert_eq!(
+            fs::read_to_string(install_target(&paths, backfill_skill())).unwrap(),
+            BRAIN_BACKFILL_SKILL_SOURCE
+        );
     }
 
     #[test]

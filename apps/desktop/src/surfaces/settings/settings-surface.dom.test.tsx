@@ -314,6 +314,45 @@ describe('SettingsSurface (Plan 08)', () => {
     )
   })
 
+  it('offers removal when a managed skill exists beside a conflicting sibling', async () => {
+    installFakeBridge({
+      respond: (command) => {
+        if (command === 'skill_status') {
+          return {
+            supported: true,
+            installTargetDir: '/Users/alex/.agents/skills',
+            installState: 'conflict',
+            skills: [
+              {
+                id: 'brain',
+                installTargetDir: '/Users/alex/.agents/skills/brain',
+                bundledHash: 'abc123abc123abc123',
+                installedHash: 'abc123abc123abc123',
+                installState: 'current',
+              },
+              {
+                id: 'brain-backfill',
+                installTargetDir: '/Users/alex/.agents/skills/brain-backfill',
+                bundledHash: 'def456def456def456',
+                installedHash: null,
+                installState: 'conflict',
+              },
+            ],
+          }
+        }
+        return undefined
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="cli-agents" />)
+
+    expect(await screen.findByText('Agent skills have a conflict')).toBeDefined()
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Install skills' }).disabled).toBe(
+      true,
+    )
+    expect(screen.getByRole('button', { name: 'Remove skills' })).toBeDefined()
+  })
+
   it('removes a current managed agent skill', async () => {
     const commands: string[] = []
     installFakeBridge({

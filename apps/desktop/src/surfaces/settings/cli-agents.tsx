@@ -158,7 +158,6 @@ function SkillInstallCard({
   const busy = install.isPending || uninstall.isPending
   const canRemove =
     data?.supported &&
-    data.installState !== 'conflict' &&
     data.skills.some((skill) => skill.installState === 'current' || skill.installState === 'stale')
 
   return (
