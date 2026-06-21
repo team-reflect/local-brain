@@ -1,17 +1,27 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { X } from 'lucide-react'
+import type { ProjectIntelligence } from '@local-brain/core'
 import { StatusBadge } from '../../components/badge'
 import { DetailFields } from '../../components/detail-fields'
 import { DetailPage } from '../../components/detail-page'
 import { LinkedRecords } from '../../components/linked-records'
 import { PageHead } from '../../components/page-head'
+import { ProjectKnowledge } from '../../components/project-knowledge'
 import { Drawer, DrawerContent, DrawerTitle } from '../../components/ui/drawer'
-import { useProject, useProjectLinks, useUnlinkFrom } from '../../lib/queries'
+import { useProject, useProjectIntelligence, useProjectLinks, useUnlinkFrom } from '../../lib/queries'
 import { TaskDetail } from './task'
+
+const EMPTY_INTELLIGENCE: ProjectIntelligence = {
+  tags: [],
+  memories: [],
+  extractedFacts: [],
+  aiNotes: [],
+}
 
 export function ProjectDetail({ id }: { id: string }): ReactNode {
   const project = useProject(id)
   const links = useProjectLinks(id)
+  const intelligence = useProjectIntelligence(id)
   const onUnlink = useUnlinkFrom({ kind: 'project', id })
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
 
@@ -35,6 +45,7 @@ export function ProjectDetail({ id }: { id: string }): ReactNode {
               ]}
             />
             {p.summary ? <p className="text-sm text-foreground">{p.summary}</p> : null}
+            <ProjectKnowledge notes={p.notes} intelligence={intelligence.data ?? EMPTY_INTELLIGENCE} />
             {links.data ? (
               <>
                 <LinkedRecords

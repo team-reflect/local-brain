@@ -5,7 +5,22 @@ import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { ProjectDetail } from './project'
 import { installFakeBridge, renderWithProviders } from '../../test/utils'
 
-const projectRow = {
+interface ProjectRow {
+  id: string
+  name: string
+  summary: string | null
+  status: string
+  target_date: string | null
+  completed_on: string | null
+  archived_at: string | null
+  created_at: string
+  updated_at: string
+  kind: string | null
+  notes: string | null
+  started_on: string | null
+}
+
+const projectRow: ProjectRow = {
   id: 'pr1',
   name: 'Launch',
   summary: 'Ship the first version',
@@ -44,11 +59,12 @@ const taskRow = {
   archived_at: null,
 }
 
-function installProjectBridge(): void {
+function installProjectBridge(overrides: Partial<ProjectRow> = {}): void {
+  const row = { ...projectRow, ...overrides }
   installFakeBridge({
     query: (sql, params) => {
       if (sql.includes('from "projects"') && sql.includes('where "id" = ?')) {
-        return params[0] === 'pr2' ? [secondProjectRow] : [projectRow]
+        return params[0] === 'pr2' ? [secondProjectRow] : [row]
       }
       if (sql.includes('from "tasks"') && sql.includes('where "id" = ?')) return [taskRow]
       if (sql.includes('from "tasks"') && sql.includes('"tasks"."project_id" = ?')) {
@@ -57,7 +73,83 @@ function installProjectBridge(): void {
       if (sql.includes('from "people"') && sql.includes('inner join "project_people"')) {
         return [{ id: 'p1', title: 'Ada Lovelace', subtitle: 'advisor' }]
       }
-      if (sql.includes('from "projects"') && !sql.includes('inner join')) return [projectRow]
+      if (sql.includes('from "tags"') && sql.includes('inner join "taggings"')) {
+        return [{ id: 'tag1', name: 'launch', slug: 'launch', color: '#4f46e5', description: 'Launch work' }]
+      }
+      if (sql.includes('from "memories"') && sql.includes('inner join "memory_links"')) {
+        return [
+          {
+            id: 'm1',
+            kind: 'decision',
+            claim: 'Launch should stay invite-only.',
+            confidence: 0.86,
+            valid_from: null,
+            valid_to: null,
+            promoted_from_fact_id: null,
+            created_at: '2026-06-03T00:00:00.000Z',
+            updated_at: '2026-06-03T00:00:00.000Z',
+            archived_at: null,
+          },
+        ]
+      }
+      if (sql.includes('from "extracted_facts"')) {
+        return [
+          {
+            id: 'f1',
+            subject_type: 'project',
+            subject_id: 'pr1',
+            key: 'risk',
+            value_text: 'Credential review is the launch blocker.',
+            value_json: null,
+            confidence: 0.72,
+            source_record_type: 'interaction',
+            source_record_id: 'i1',
+            source_excerpt: 'Credential review still needs a security pass.',
+            observed_at: '2026-06-02',
+            model: null,
+            prompt_fingerprint: null,
+            metadata_json: null,
+            created_at: '2026-06-03T00:00:00.000Z',
+            updated_at: '2026-06-03T00:00:00.000Z',
+            archived_at: null,
+          },
+        ]
+      }
+      if (sql.includes('from "ai_notes"')) {
+        return [
+          {
+            id: 'a1',
+            kind: 'risk',
+            interaction_id: null,
+            document_id: null,
+            subject_type: 'project',
+            subject_id: 'pr1',
+            title: 'Launch risks',
+            content: 'Credential work and onboarding copy need one more pass.',
+            content_format: 'markdown',
+            model: 'test-model',
+            prompt_fingerprint: null,
+            source_id: null,
+            metadata_json: null,
+            generated_at: '2026-06-04T00:00:00.000Z',
+            created_at: '2026-06-04T00:00:00.000Z',
+            updated_at: '2026-06-04T00:00:00.000Z',
+          },
+        ]
+      }
+      if (sql.includes('from "evidence_refs"')) {
+        return [
+          {
+            id: 'e1',
+            note: 'Kickoff call',
+            quote: 'We agreed to keep launch invite-only.',
+            sourceType: 'interaction',
+            sourceId: 'i1',
+            sourceTitle: 'Launch kickoff',
+          },
+        ]
+      }
+      if (sql.includes('from "projects"') && !sql.includes('inner join')) return [row]
       return []
     },
   })
@@ -112,5 +204,18 @@ describe('ProjectDetail task drawer', () => {
 
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Close task details' })).toBeNull())
     expect(await screen.findByRole('heading', { name: 'Second project' })).toBeDefined()
+  })
+
+  it('shows project notes, tags, memories, facts, and AI notes', async () => {
+    installProjectBridge({ notes: 'Keep launch narrow and evidence-backed.' })
+    renderWithProviders(<ProjectDetail id="pr1" />)
+
+    expect(await screen.findByText('Keep launch narrow and evidence-backed.')).toBeDefined()
+    expect(screen.getByText('launch')).toBeDefined()
+    expect(screen.getByText('Launch should stay invite-only.')).toBeDefined()
+    expect(screen.getByText('Credential review is the launch blocker.')).toBeDefined()
+    expect(screen.getByText('Launch risks')).toBeDefined()
+    expect(screen.getByText('Credential work and onboarding copy need one more pass.')).toBeDefined()
+    await waitFor(() => expect(screen.getAllByText('Launch kickoff')).toHaveLength(3))
   })
 })
