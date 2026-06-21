@@ -29,7 +29,11 @@ personal intelligence database, not a dump of every byte.
    facts, links, evidence-backed tasks/memories, tags, chunks, finalize.
 6. People need conservative headlines and affiliations during the import, not as
    unspecified cleanup.
-7. Skip deliberately: secrets, passwords, one-time links, medical/financial
+7. Organizations need compact headlines and, when evidence supports it,
+   `brain enrich organization` profile rows during the import.
+8. Attach imported files as assets and provide searchable extracted text when
+   useful; binary PDFs/images are otherwise metadata-only.
+9. Skip deliberately: secrets, passwords, one-time links, medical/financial
    boilerplate, promos, alerts, receipts, and private material usually do not
    belong in the brain.
 
@@ -83,6 +87,8 @@ For large backfills, split by source and month. Each worker must:
 - read `brain --json import-context` at start;
 - write through the CLI only;
 - use source identity for idempotence;
+- use `--refresh` for routine source-backed reimports, and `--replace-body`
+  only when intentionally overwriting stale imported body text;
 - maintain its own ledger shard;
 - run `brain --json import finalize --record kind:id` on every imported record,
   adding only narrow explicit waivers when source data is truly absent;
@@ -119,7 +125,8 @@ brain --brain "$BRAIN_ROOT" --json import transcript \
 
 brain --brain "$BRAIN_ROOT" --json add ai-note \
   --kind summary --interaction <interaction-id> \
-  --title "Meeting summary" --text-file summary.md --source granola
+  --title "Meeting summary" --text-file summary.md --source granola \
+  --evidence interaction_transcript:<transcript-id>~"<short distinctive quote>"
 ```
 
 Then add facts, tasks, memories, and tags with evidence. Skip meetings that are
@@ -146,12 +153,14 @@ brain --brain "$BRAIN_ROOT" --json import interaction --kind email \
   --summary "<digest>" \
   --text-file digest.md \
   --source gmail --external-kind thread --external-id <thread-id> \
-  --participant "from:Name <email>" \
+  --participant "from:Name <email>" --participant "to:Alex <email>" \
   --link project:<id>
 ```
 
 Skip credentials, codes, receipts, promos, alerts, long quoted chains, and
 legal/medical boilerplate unless they contain durable project intelligence.
+Use `--refresh` for repeat passes over the same thread so unchanged digests stay
+idempotent.
 
 ### Reflect Notes
 
@@ -168,11 +177,10 @@ Use stable source identity:
 brain --brain "$BRAIN_ROOT" --json import document \
   --title "Reflect: <note title>" \
   --text-file digest.md \
+  --source reflect_notes --external-kind note --external-id <stable-note-id> \
+  --original-path "$HOME/Documents/reflect-maccman2/<note>.md" \
   --link project:<id>
 ```
-
-If the CLI does not yet expose source identity on documents, rely on content
-dedupe and note the gap in the ledger.
 
 ### Calendar
 
@@ -197,7 +205,20 @@ non-meeting schedule context. Use `meeting` for people-centered appointments.
 ### Contacts And People
 
 Import trusted contacts with `brain add person` or cautious senders with
-`brain add person-from-email`. Enrich existing people:
+`brain add person-from-email`. When evidence supports it, include headline,
+phone, location, organization, title, and current-employer hints at creation time
+so profiles are not left blank:
+
+```bash
+brain --brain "$BRAIN_ROOT" --json add person-from-email \
+  --full-name "Name" --email name@example.com \
+  --source gmail --external-id <message-or-thread-id> \
+  --headline "Picardo contact from Gmail correspondence" \
+  --org "Example Labs" --org-domain example.com --title "Operations lead" \
+  --current
+```
+
+Enrich existing people:
 
 ```bash
 brain --brain "$BRAIN_ROOT" --json enrich person <id> \
@@ -215,6 +236,63 @@ brain --brain "$BRAIN_ROOT" --json affiliate --person <person-id> --org <org-id>
 
 Avoid speculative bios. Weak evidence can still support a weak headline such as
 `Picardo contact from Gmail correspondence`.
+
+### Organizations
+
+Ensure durable organizations for accepted projects, recurring counterparties,
+employers, vendors, venues, schools, and institutions. Use suggestions for weak
+or high-impact inferred organizations.
+
+```bash
+brain --brain "$BRAIN_ROOT" --json add organization \
+  --name "Example Labs" --domain example.com \
+  --headline "Clinical lab partner" --source gmail --external-id example.com
+
+brain --brain "$BRAIN_ROOT" --json enrich organization <org-id> \
+  --headline "Clinical lab partner" \
+  --one-line-description "Clinical testing provider for launch workflows." \
+  --why-it-matters "Relevant to credentialing and ordering paths." \
+  --source-urls-json '["https://example.com"]' \
+  --model "agent-research" --prompt-fingerprint "org-profile-v1" \
+  --source gmail
+```
+
+For companies, keep one company-level project unless the user explicitly accepts
+subprojects. Do not create project-like organizations or organization-like
+projects just because the same name appears in both roles.
+
+### Assets And Attachments
+
+Attach useful files to the record they came from. Provide extracted text when an
+importer can safely read it; otherwise record the asset metadata and ledger the
+text extraction gap.
+
+```bash
+brain --brain "$BRAIN_ROOT" --json add asset \
+  --file ./attachment.pdf --kind attachment \
+  --link interaction:<id> --text-file extracted.txt --text-source importer
+```
+
+Do not import sensitive attachments by default.
+
+### Intelligence Writes
+
+Every high-signal import should have narrative and structured intelligence with
+citations. Prefer facts first, then promote only durable facts to memories.
+
+```bash
+brain --brain "$BRAIN_ROOT" --json add fact \
+  --subject interaction:<id> --key decision \
+  --value-text "<specific claim>" \
+  --source-record interaction:<id> \
+  --evidence interaction:<id>~"<short distinctive quote>"
+
+brain --brain "$BRAIN_ROOT" --json promote fact <fact-id> \
+  --memory-kind decision
+
+brain --brain "$BRAIN_ROOT" --json tag ensure --name "Picardo"
+brain --brain "$BRAIN_ROOT" --json tag attach --tag picardo --record interaction:<id>
+```
 
 ## Completion And Audit
 
