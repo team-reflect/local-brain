@@ -34,6 +34,19 @@ pub struct AddDocumentArgs<'a> {
     pub allow_duplicate: bool,
 }
 
+fn existing_chunk_count(
+    conn: &Connection,
+    record_type: &str,
+    record_id: &str,
+) -> Result<usize, CliError> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM content_chunks WHERE record_type = ?1 AND record_id = ?2",
+        params![record_type, record_id],
+        |row| row.get(0),
+    )?;
+    Ok(count as usize)
+}
+
 pub fn add_document(
     conn: &mut Connection,
     json: bool,
@@ -66,7 +79,7 @@ pub fn add_document(
     if let Some(existing) = existing {
         if !args.allow_duplicate {
             let tx = conn.transaction()?;
-            let mut chunk_count = 0;
+            let chunk_count;
             if matched_by_external && !body.is_empty() {
                 tx.execute(
                     "UPDATE documents
@@ -77,6 +90,8 @@ pub fn add_document(
                     params![existing, body.as_str(), hash],
                 )?;
                 chunk_count = replace_chunks(&tx, "document", existing, &body)?;
+            } else {
+                chunk_count = existing_chunk_count(&tx, "document", existing)?;
             }
             super::fill_blanks(
                 &tx,

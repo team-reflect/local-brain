@@ -2,6 +2,8 @@
 //! the same FTS5 contract as the app (the SQL is the shared layer), reimplemented
 //! here in Rust so the CLI runs standalone.
 
+use std::collections::HashMap;
+
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 
@@ -188,6 +190,25 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
 
     // Merge all kinds, rank by score, and apply one final cap — like the app's
     // `globalSearch`, instead of returning up to `limit` rows per source table.
+    let mut unique_hits: Vec<Value> = Vec::new();
+    let mut seen: HashMap<(String, String), usize> = HashMap::new();
+    for hit in hits {
+        let key = (
+            hit["kind"].as_str().unwrap_or("").to_string(),
+            hit["id"].as_str().unwrap_or("").to_string(),
+        );
+        if let Some(index) = seen.get(&key).copied() {
+            let existing_score = unique_hits[index]["score"].as_f64().unwrap_or(0.0);
+            let new_score = hit["score"].as_f64().unwrap_or(0.0);
+            if new_score > existing_score {
+                unique_hits[index] = hit;
+            }
+        } else {
+            seen.insert(key, unique_hits.len());
+            unique_hits.push(hit);
+        }
+    }
+    let mut hits = unique_hits;
     hits.sort_by(|a, b| {
         let sb = b["score"].as_f64().unwrap_or(0.0);
         let sa = a["score"].as_f64().unwrap_or(0.0);

@@ -269,6 +269,7 @@ fn add_dedupes_identical_content() {
     );
     assert_eq!(second["isDuplicate"], true);
     assert_eq!(second["id"], first["id"]); // points back at the original
+    assert_eq!(second["chunkCount"], 1);
 }
 
 #[test]
@@ -2390,11 +2391,38 @@ fn search_finds_added_records_by_full_text() {
             "We discussed the Northwind partnership proposal.",
         ],
     );
+    let org = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "organization",
+            "--name",
+            "Northwind Partnership",
+        ],
+    );
+    let org_id = org["id"].as_str().unwrap();
+    run_json(
+        &db,
+        &[
+            "--json",
+            "enrich",
+            "organization",
+            org_id,
+            "--summary",
+            "Northwind Partnership is a distribution relationship.",
+        ],
+    );
     let results = run_json(&db, &["--json", "search", "partnership"]);
     let hits = results["results"].as_array().unwrap();
     assert!(hits
         .iter()
         .any(|h| h["kind"] == "interaction" && h["title"] == "Kickoff"));
+    let org_hits = hits
+        .iter()
+        .filter(|h| h["kind"] == "organization" && h["id"] == org_id)
+        .count();
+    assert_eq!(org_hits, 1);
 }
 
 #[test]
@@ -3529,6 +3557,11 @@ fn import_document_records_identity_provenance_and_finalizes() {
     );
     assert_eq!(finalized["complete"], true);
     assert!(finalized["missing"].as_array().unwrap().is_empty());
+    let finalized_again = run_json(
+        &db,
+        &["--json", "import", "finalize", "--record", &document_ref],
+    );
+    assert_eq!(finalized_again["complete"], true);
 
     let conn = Connection::open(&db).unwrap();
     let identity_count: i64 = conn
@@ -3544,18 +3577,20 @@ fn import_document_records_identity_provenance_and_finalizes() {
         )
         .unwrap();
     assert_eq!(identity_count, 1);
-    let provenance_count: i64 = conn
+    let (provenance_count, finalized_count): (i64, i64) = conn
         .query_row(
-            "SELECT COUNT(*)
+            "SELECT COUNT(*),
+                    SUM(CASE WHEN provenance_kind = 'finalized' THEN 1 ELSE 0 END)
              FROM record_provenance
              WHERE record_type = 'document'
                AND record_id = ?1
                AND provenance_kind IN ('imported', 'finalized')",
             [document_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
     assert_eq!(provenance_count, 2);
+    assert_eq!(finalized_count, 1);
 }
 
 #[test]

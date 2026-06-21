@@ -93,7 +93,7 @@ pub fn import_finalize(
     require_record(conn, &kind, &id)?;
     let policy = CompletionPolicy::from_finalize(&args);
     let missing = completion_missing(conn, &kind, &id, policy)?;
-    if missing.is_empty() {
+    if missing.is_empty() && !is_finalized(conn, &kind, &id)? {
         let metadata_json = policy.to_json();
         insert_record_provenance(
             conn,
