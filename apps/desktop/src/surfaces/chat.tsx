@@ -481,8 +481,7 @@ function Composer({
           rows={2}
           placeholder="Chat about your people, projects, documents, interactions, or tasks..."
           aria-label="Chat message"
-          disabled={pending}
-          className="field-sizing-content max-h-60 min-h-24 w-full resize-none overflow-y-auto bg-transparent px-3 py-2 pb-12 pr-28 text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+          className="field-sizing-content max-h-60 min-h-24 w-full resize-none overflow-y-auto bg-transparent px-3 py-2 pb-12 pr-28 text-sm text-foreground outline-none placeholder:text-muted-foreground"
         />
         <Button
           type="submit"
