@@ -31,7 +31,7 @@ export interface CreatedMemory {
 }
 
 type MemoryLinkValues = Pick<MemoryLinks, 'recordType' | 'recordId' | 'role'>
-let createMemoryLock: Promise<void> = Promise.resolve()
+let memoryWriteLock: Promise<void> = Promise.resolve()
 
 function normalizeClaim(claim: string): string {
   return squish(requireText('claim', claim))
@@ -97,9 +97,9 @@ async function addMissingMemoryLinks(
   )
 }
 
-async function runCreateMemoryExclusive<T>(fn: () => Promise<T>): Promise<T> {
-  const run = createMemoryLock.then(fn, fn)
-  createMemoryLock = run.then(
+async function runMemoryWriteExclusive<T>(fn: () => Promise<T>): Promise<T> {
+  const run = memoryWriteLock.then(fn, fn)
+  memoryWriteLock = run.then(
     () => undefined,
     () => undefined,
   )
@@ -115,7 +115,7 @@ export function createMemory(
   input: NewMemory,
   links: readonly MemoryLinkInput[] = [],
 ): Promise<CreatedMemory> {
-  return runCreateMemoryExclusive(() => createMemoryUnlocked(input, links))
+  return runMemoryWriteExclusive(() => createMemoryUnlocked(input, links))
 }
 
 async function createMemoryUnlocked(
@@ -148,12 +148,22 @@ async function createMemoryUnlocked(
 
 /** Edit a memory's claim / kind / confidence / validity window. */
 export function updateMemory(id: string, patch: MemoryPatch): Promise<number> {
-  return execute(
-    db
-      .updateTable('memories')
-      .set({ ...patch, updatedAt: nowIso() })
-      .where('id', '=', id),
-  )
+  return runMemoryWriteExclusive(async () => {
+    const values: MemoryPatch = { ...patch }
+    if (patch.claim !== undefined) {
+      values.claim = normalizeClaim(patch.claim)
+      const duplicateId = await findActiveMemoryByClaim(values.claim)
+      if (duplicateId && duplicateId !== id) {
+        throw new Error('An active memory with this claim already exists.')
+      }
+    }
+    return execute(
+      db
+        .updateTable('memories')
+        .set({ ...values, updatedAt: nowIso() })
+        .where('id', '=', id),
+    )
+  })
 }
 
 /** Soft-delete a memory; its links and evidence stay for the record. */

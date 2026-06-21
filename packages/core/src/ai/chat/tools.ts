@@ -70,6 +70,11 @@ function compactObject<T extends object>(input: T): Partial<T> {
   return output
 }
 
+function optionalNonBlank(value: string | undefined): string | undefined {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : undefined
+}
+
 const taskFields = {
   title: z.string().min(1),
   description: nullableString,
@@ -241,7 +246,7 @@ export function buildChatTools() {
       }),
       needsApproval: true,
       execute: async ({ id, completedAt }) => {
-        const affected = await completeTask(id, completedAt)
+        const affected = await completeTask(id, optionalNonBlank(completedAt))
         return { kind: 'task', action: 'completed', id, affected }
       },
     }),

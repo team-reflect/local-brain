@@ -7,6 +7,7 @@ import {
   listPeople,
   setBridge,
   setAiProvidersState,
+  updateMemory,
   updateTask,
 } from '../index'
 import { captureDbBridge, type CapturedCall } from '../test/bridge'
@@ -165,6 +166,26 @@ describe('domain actions', () => {
     expect(created).toEqual({ id: createdMemoryId, created: true })
     expect(duplicate).toEqual({ id: createdMemoryId, created: false })
     expect(commands).toEqual(['db_query', 'db_batch', 'db_query'])
+  })
+
+  it('updateMemory normalizes claim patches', async () => {
+    await updateMemory('memory-1', { claim: '  Same   claim  ' })
+
+    expect(calls[0]?.command).toBe('db_query')
+    expect(calls[1]?.command).toBe('db_execute')
+    expect(String(calls[1]?.args['sql'])).toContain('update "memories"')
+    expect(calls[1]?.args['params']).toContain('Same claim')
+  })
+
+  it('updateMemory rejects duplicate active claims', async () => {
+    calls = captureDbBridge([{ id: 'memory-2', claim: 'Same   claim' }])
+
+    await expect(updateMemory('memory-1', { claim: ' same claim ' })).rejects.toThrow(
+      'An active memory with this claim already exists.',
+    )
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.command).toBe('db_query')
   })
 
   it('setAiProvidersState writes provider list and default in one batch', async () => {

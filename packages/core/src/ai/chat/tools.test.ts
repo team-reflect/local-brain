@@ -150,10 +150,14 @@ describe('buildChatTools', () => {
     await expect(
       completeTaskTool.execute(completeTaskTool.inputSchema.parse({ id: 'task-1' })),
     ).resolves.toEqual({ kind: 'task', action: 'completed', id: 'task-1', affected: 1 })
+    await expect(
+      completeTaskTool.execute(completeTaskTool.inputSchema.parse({ id: 'task-2', completedAt: '   ' })),
+    ).resolves.toEqual({ kind: 'task', action: 'completed', id: 'task-2', affected: 1 })
 
     expect(coreMocks.createTask).toHaveBeenCalledWith({ title: 'Send budget' })
     expect(coreMocks.updateTask).toHaveBeenCalledWith('task-1', { status: 'waiting' })
     expect(coreMocks.completeTask).toHaveBeenCalledWith('task-1', undefined)
+    expect(coreMocks.completeTask).toHaveBeenCalledWith('task-2', undefined)
   })
 
   it('logs interactions with participants', async () => {
