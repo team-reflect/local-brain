@@ -396,6 +396,12 @@ pub(crate) fn list_brain_infos(db: &DbState, brains: &BrainState) -> AppResult<V
     infos(&conn, live_active.as_deref(), schema_version)
 }
 
+fn log_manifest_sync(result: AppResult<bool>) {
+    if let Err(err) = result {
+        eprintln!("Could not sync agent skill brain manifest: {err}");
+    }
+}
+
 // ---- State ----------------------------------------------------------------
 
 /// The process-wide brain registry, backed by its own SQLite database.
@@ -597,7 +603,7 @@ fn switch_to(
     let info = brains.active_info(db)?.ok_or_else(|| {
         AppError::no_database("the brain switch completed without an active brain")
     })?;
-    crate::skill::sync_brain_manifest(db, brains)?;
+    log_manifest_sync(crate::skill::sync_brain_manifest(db, brains));
     Ok(info)
 }
 
@@ -710,7 +716,7 @@ fn edit_metadata(
     let info = brains
         .active_info(db)?
         .ok_or_else(|| AppError::no_database("no active brain"))?;
-    crate::skill::sync_brain_manifest(db, brains)?;
+    log_manifest_sync(crate::skill::sync_brain_manifest(db, brains));
     Ok(info)
 }
 
@@ -815,7 +821,7 @@ fn forget_brain_impl(
     }
     tx.commit()?;
     let list = infos(&conn, live_active.as_deref(), schema_version)?;
-    crate::skill::sync_brain_manifest_from_infos(&list)?;
+    log_manifest_sync(crate::skill::sync_brain_manifest_from_infos(&list));
     Ok(list)
 }
 
