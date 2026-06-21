@@ -6,7 +6,7 @@
 //! re-raises something the user already accepted or declined. This is a curation
 //! queue awaiting ratification, not an automation log.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -108,33 +108,40 @@ pub fn suggest(conn: &mut Connection, json: bool, args: SuggestArgs) -> Result<(
     let key = normalize_name(&title);
 
     // Dedupe by (kind, normalized title) across ALL statuses so a dismissed or
-    // accepted proposal is never re-raised.
-    let mut stmt = conn.prepare("SELECT id, title, status FROM suggestions WHERE kind = ?1")?;
-    let rows = stmt.query_map(params![kind], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-        ))
-    })?;
-    let mut matched = None;
-    for row in rows {
-        let (id, existing_title, status) = row?;
-        if normalize_name(&existing_title) == key {
-            matched = Some((id, status));
-            break;
+    // accepted proposal is never re-raised. The dedupe key is a Rust-side
+    // normalization (no SQL-expressible column to put a unique index on), so the
+    // scan and the insert run inside ONE immediate write transaction: SQLite
+    // serializes IMMEDIATE writers, so a concurrent caller blocks until this
+    // commits and then sees the inserted row instead of racing past the scan and
+    // forking a duplicate.
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let matched = {
+        let mut stmt = tx.prepare("SELECT id, title, status FROM suggestions WHERE kind = ?1")?;
+        let rows = stmt.query_map(params![kind], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        let mut found = None;
+        for row in rows {
+            let (id, existing_title, status) = row?;
+            if normalize_name(&existing_title) == key {
+                found = Some((id, status));
+                break;
+            }
         }
-    }
-    drop(stmt);
+        found
+    };
     if let Some((id, status)) = matched {
         // Merge any newly cited evidence into an existing *open* proposal
         // (INSERT OR IGNORE dedupes the pairs); a resolved proposal is left
         // untouched so an accepted/dismissed decision is never reopened or grown.
         if status == "open" && !args.links.is_empty() {
-            let tx = conn.transaction()?;
             insert_suggestion_links(&tx, &id, &args.links)?;
-            tx.commit()?;
         }
+        tx.commit()?;
         return report_suggestion(json, &id, kind, &status, true);
     }
 
@@ -146,7 +153,6 @@ pub fn suggest(conn: &mut Connection, json: bool, args: SuggestArgs) -> Result<(
     };
     let payload_json = serde_json::to_string(&payload)?;
     let id = new_id();
-    let tx = conn.transaction()?;
     tx.execute(
         "INSERT INTO suggestions (id, kind, title, payload_json, rationale)
          VALUES (?1,?2,?3,?4,?5)",
@@ -614,6 +620,34 @@ mod tests {
             )
             .unwrap();
         assert_eq!(links, 2, "new evidence merged into the open proposal");
+    }
+
+    #[test]
+    fn suggest_dedupes_across_separate_connections() {
+        // Two connections to the same file stand in for two CLI processes. The
+        // second proposing the same (kind, normalized title) must dedupe onto the
+        // first's committed row rather than fork — the cross-process guarantee the
+        // immediate-transaction scan+insert provides.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brain.sqlite");
+        let mut a = brain_schema::open_and_migrate(&path).unwrap();
+        suggest(&mut a, true, project_suggestion("West Elizabeth", vec![])).unwrap();
+
+        let mut b = brain_schema::open_and_migrate(&path).unwrap();
+        suggest(
+            &mut b,
+            true,
+            project_suggestion("  west   elizabeth ", vec![]),
+        )
+        .unwrap();
+
+        let count: i64 = b
+            .query_row("SELECT COUNT(*) FROM suggestions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "a second connection dedupes against the first's committed proposal"
+        );
     }
 
     #[test]
