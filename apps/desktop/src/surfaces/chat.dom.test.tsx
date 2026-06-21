@@ -277,6 +277,28 @@ describe('ChatSurface', () => {
     expect(chatMocks.addToolApprovalResponse).toHaveBeenCalledWith({ id: 'approval-1', approved: true })
   })
 
+  it('disables the composer while tool approval is pending', async () => {
+    chatMocks.messages = [
+      toolMessage(
+        'a1',
+        'create_task',
+        'approval-requested',
+        { title: 'Send budget' },
+        undefined,
+        { id: 'approval-1' },
+      ),
+    ]
+    await renderReadyChat()
+
+    const textarea = screen.getByLabelText('Chat message')
+    const sendButton = screen.getByRole('button', { name: /Send/ })
+    expect(textarea).toHaveProperty('disabled', true)
+    expect(sendButton).toHaveProperty('disabled', true)
+    fireEvent.change(textarea, { target: { value: 'Start a new turn' } })
+    fireEvent.click(sendButton)
+    expect(chatMocks.sendMessage).not.toHaveBeenCalled()
+  })
+
   it('renders persisted tool chip correctly (reloaded conversation)', async () => {
     // Simulates messages already hydrated (e.g. restored from DB via setMessages).
     // conversationId is undefined here so displayedMessages = messages immediately.

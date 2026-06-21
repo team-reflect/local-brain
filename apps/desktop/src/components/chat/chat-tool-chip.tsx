@@ -40,6 +40,17 @@ export function isToolPartAwaitingApproval(part: ToolPart): boolean {
   return part.state === 'approval-requested' && typeof part.approval?.id === 'string'
 }
 
+export function messageHasAwaitingToolApproval(message: {
+  role?: string
+  parts?: readonly unknown[]
+}): boolean {
+  return message.role === 'assistant' && (message.parts ?? []).some((part) => {
+    const record = part as Record<string, unknown>
+    return String(record['type'] ?? '').startsWith('tool-') &&
+      isToolPartAwaitingApproval(record as unknown as ToolPart)
+  })
+}
+
 /** A small inline spinner — 12 px, no dependency. */
 function Spinner(): ReactNode {
   return (

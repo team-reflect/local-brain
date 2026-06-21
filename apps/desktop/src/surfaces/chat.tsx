@@ -18,7 +18,12 @@ import { Button } from '../components/button'
 import { EmptyState } from '../components/empty-state'
 import { Loading } from '../components/loading'
 import { ChatMarkdown } from '../components/chat/chat-markdown'
-import { ChatToolChip, type ToolApprovalResponse, type ToolPart } from '../components/chat/chat-tool-chip'
+import {
+  ChatToolChip,
+  messageHasAwaitingToolApproval,
+  type ToolApprovalResponse,
+  type ToolPart,
+} from '../components/chat/chat-tool-chip'
 import { createChatTransport } from '../lib/ai/chat-transport'
 import { invalidateChatTurnQueries, useConversations, useMessages, useModelSettings, useModelStatus } from '../lib/queries'
 import { cn } from '../lib/utils'
@@ -49,7 +54,6 @@ function persistedMessages(messages: ChatMessage[] | undefined): UIMessage[] {
   return (messages ?? []).map(toUiMessage)
 }
 
-/** True when the streaming assistant message has any visible content. */
 function streamingMessageHasContent(message: UIMessage | undefined): boolean {
   if (!message || message.role !== 'assistant') return false
   return message.parts.some((p) => {
@@ -110,7 +114,8 @@ export function ChatSurface({ conversationId }: { conversationId: string | undef
   const conversationHydrated = !conversationId || hydratedConversationId === conversationId
   const historyUnavailable = Boolean(conversationId && storedMessages.isError)
   const waitingForHydration = Boolean(conversationId && !conversationHydrated && !historyUnavailable)
-  const composerPending = pending || waitingForHydration || historyUnavailable
+  const composerPending = pending || waitingForHydration || historyUnavailable ||
+    messages.some(messageHasAwaitingToolApproval)
 
   // Show the generic Thinking indicator only before the first assistant content arrives.
   const lastMessage = messages[messages.length - 1]
@@ -390,7 +395,6 @@ function MessageRow({
     )
   }
 
-  // Assistant message — interleave text and tool chips
   return (
     <div className="flex flex-col gap-2">
       {message.parts.map((part, index) => {

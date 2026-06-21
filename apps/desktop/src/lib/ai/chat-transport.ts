@@ -1,6 +1,7 @@
 import {
   convertToModelMessages,
   createUIMessageStream,
+  readUIMessageStream,
   stepCountIs,
   streamText,
   type ChatTransport,
@@ -20,6 +21,7 @@ import {
 import { resolveLanguageModel } from './provider'
 
 const TOOL_STEPS = 5
+type PersistedChatStatus = 'submitted' | 'streaming' | 'done' | 'error'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -75,7 +77,26 @@ function staticAssistantStream(message: UIMessage, finishReason: 'error' | 'stop
   })
 }
 
-async function persistAssistant(conversationId: string, message: UIMessage, model: string | null, error: string | null): Promise<void> {
+function messageHasPendingApproval(message: UIMessage): boolean {
+  return message.role === 'assistant' && message.parts.some((part) => {
+    const record = part as Record<string, unknown>
+    const approval = record['approval']
+    return (
+      String(record['type'] ?? '').startsWith('tool-') &&
+      record['state'] === 'approval-requested' &&
+      isRecord(approval) &&
+      typeof approval['id'] === 'string'
+    )
+  })
+}
+
+async function persistAssistant(
+  conversationId: string,
+  message: UIMessage,
+  model: string | null,
+  status: PersistedChatStatus,
+  error: string | null,
+): Promise<void> {
   await appendChatMessage({
     id: message.id,
     conversationId,
@@ -83,9 +104,35 @@ async function persistAssistant(conversationId: string, message: UIMessage, mode
     contentText: uiMessageText(message),
     uiMessageJson: uiMessageJson(message),
     model,
-    status: error ? 'error' : 'done',
+    status,
     error,
   })
+}
+
+function watchPendingApprovalPersistence({
+  conversationId,
+  latestAssistant,
+  model,
+  stream,
+}: {
+  conversationId: string
+  latestAssistant: UIMessage | undefined
+  model: string
+  stream: ReadableStream<UIMessageChunk>
+}): void {
+  void (async () => {
+    const readerOptions = {
+      stream,
+      onError: () => undefined,
+      ...(latestAssistant ? { message: latestAssistant } : {}),
+    }
+    for await (const message of readUIMessageStream(readerOptions)) {
+      if (messageHasPendingApproval(message)) {
+        await persistAssistant(conversationId, message, model, 'streaming', null)
+        return
+      }
+    }
+  })()
 }
 
 async function persistLatestUser(conversationId: string, messages: readonly UIMessage[]): Promise<string> {
@@ -152,7 +199,7 @@ export function createChatTransport(): ChatTransport<UIMessage> {
           ...(abortSignal ? { abortSignal } : {}),
         })
         const responseId = responseMessageIdForTurn(messages)
-        return result.toUIMessageStream<UIMessage>({
+        const stream = result.toUIMessageStream<UIMessage>({
           originalMessages: messages,
           generateMessageId: () => responseId,
           onFinish: async ({ responseMessage, finishReason }) => {
@@ -160,14 +207,24 @@ export function createChatTransport(): ChatTransport<UIMessage> {
               chatId,
               responseMessage,
               label,
+              finishReason === 'error' ? 'error' : 'done',
               finishReason === 'error' ? 'The model response ended with an error.' : null,
             )
           },
         })
+        const [uiStream, persistenceStream] = stream.tee()
+        const latest = messages[messages.length - 1]
+        watchPendingApprovalPersistence({
+          conversationId: chatId,
+          latestAssistant: latest?.role === 'assistant' ? latest : undefined,
+          model: label,
+          stream: persistenceStream,
+        })
+        return uiStream
       } catch (error) {
         const messageText = error instanceof Error ? error.message : String(error)
         const message = assistantMessage(createChatId(), `I couldn't answer that yet: ${messageText}`)
-        await persistAssistant(chatId, message, null, messageText)
+        await persistAssistant(chatId, message, null, 'error', messageText)
         return staticAssistantStream(message, 'error')
       }
     },
