@@ -90,9 +90,8 @@ export function useSetEmbeddingsEnabled() {
     },
     // Invalidate on settle, not just success: `setEmbeddingsEnabled` /
     // `setBackfillError` persist durable state before `embedEnsure` can throw, so
-    // a failed run still changed the DB. With `refetchOnWindowFocus` off, an
-    // onSuccess-only refresh would leave the UI showing stale enabled/error state
-    // until the next slow poll.
+    // a failed run still changed the DB. Invalidate immediately instead of relying
+    // on a later focus refetch or slow poll to correct stale enabled/error state.
     onSettled: () => queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY }),
   })
 }
