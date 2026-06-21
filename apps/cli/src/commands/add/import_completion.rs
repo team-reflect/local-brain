@@ -326,12 +326,20 @@ fn has_ai_note(conn: &Connection, kind: &str, id: &str) -> Result<bool, CliError
     match kind {
         "interaction" => exists(
             conn,
-            "SELECT EXISTS(SELECT 1 FROM ai_notes WHERE interaction_id = ?1)",
+            "SELECT EXISTS(
+               SELECT 1 FROM ai_notes
+               WHERE interaction_id = ?1
+                  OR (subject_type = 'interaction' AND subject_id = ?1)
+             )",
             id,
         ),
         "document" => exists(
             conn,
-            "SELECT EXISTS(SELECT 1 FROM ai_notes WHERE document_id = ?1)",
+            "SELECT EXISTS(
+               SELECT 1 FROM ai_notes
+               WHERE document_id = ?1
+                  OR (subject_type = 'document' AND subject_id = ?1)
+             )",
             id,
         ),
         _ => exists2(

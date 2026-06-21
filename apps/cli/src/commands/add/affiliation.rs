@@ -105,7 +105,7 @@ pub(super) fn upsert_affiliation(
             }
         }
     };
-    let _affiliation_id = match existing {
+    let affiliation_id = match existing {
         Some(id) => {
             conn.execute(
                 "UPDATE affiliations
@@ -165,20 +165,13 @@ pub(super) fn upsert_affiliation(
         conn.execute(
             "UPDATE people
              SET current_organization_id = ?1,
-                 current_title = COALESCE(?3, current_title),
-                 current_department = COALESCE(?4, current_department),
-                 role_family = COALESCE(?5, role_family),
-                 seniority = COALESCE(?6, seniority),
+                 current_title = (SELECT title FROM affiliations WHERE id = ?3),
+                 current_department = (SELECT department FROM affiliations WHERE id = ?3),
+                 role_family = (SELECT role_family FROM affiliations WHERE id = ?3),
+                 seniority = (SELECT seniority FROM affiliations WHERE id = ?3),
                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
              WHERE id = ?2",
-            params![
-                organization_id,
-                person_id,
-                normalize_optional(title),
-                normalize_optional(department),
-                normalize_optional(role_family),
-                normalize_optional(seniority),
-            ],
+            params![organization_id, person_id, affiliation_id],
         )?;
     }
     Ok(())
@@ -368,7 +361,16 @@ mod tests {
         )
         .unwrap();
         upsert_affiliation(
-            &conn, &person, &org_a, None, None, None, None, None, true, true,
+            &conn,
+            &person,
+            &org_a,
+            Some("Founder"),
+            None,
+            None,
+            None,
+            None,
+            true,
+            true,
         )
         .unwrap();
         upsert_affiliation(
@@ -383,14 +385,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(current_count, 1, "only one current affiliation at a time");
-        let current_org: Option<String> = conn
+        let (current_org, current_title): (Option<String>, Option<String>) = conn
             .query_row(
-                "SELECT current_organization_id FROM people WHERE id = ?1",
+                "SELECT current_organization_id, current_title FROM people WHERE id = ?1",
                 params![person],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
         assert_eq!(current_org.as_deref(), Some(org_b.as_str()));
+        assert_eq!(current_title, None);
     }
 
     #[test]
