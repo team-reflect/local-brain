@@ -31,6 +31,7 @@ export interface CreatedMemory {
 }
 
 type MemoryLinkValues = Pick<MemoryLinks, 'recordType' | 'recordId' | 'role'>
+let createMemoryLock: Promise<void> = Promise.resolve()
 
 function normalizeClaim(claim: string): string {
   return squish(requireText('claim', claim))
@@ -96,14 +97,30 @@ async function addMissingMemoryLinks(
   )
 }
 
+async function runCreateMemoryExclusive<T>(fn: () => Promise<T>): Promise<T> {
+  const run = createMemoryLock.then(fn, fn)
+  createMemoryLock = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  return run
+}
+
 /**
  * Create a durable memory and optional subject links. Exact active duplicate
  * claims return the existing memory id instead of inserting a second row, while
  * still applying any requested links that are not already present.
  */
-export async function createMemory(
+export function createMemory(
   input: NewMemory,
   links: readonly MemoryLinkInput[] = [],
+): Promise<CreatedMemory> {
+  return runCreateMemoryExclusive(() => createMemoryUnlocked(input, links))
+}
+
+async function createMemoryUnlocked(
+  input: NewMemory,
+  links: readonly MemoryLinkInput[],
 ): Promise<CreatedMemory> {
   const values = normalizeMemory(input)
   const normalizedLinks = links.map(normalizeMemoryLink)

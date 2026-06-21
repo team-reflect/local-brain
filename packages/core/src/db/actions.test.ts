@@ -5,6 +5,7 @@ import {
   createPerson,
   completeTask,
   listPeople,
+  setBridge,
   setAiProvidersState,
   updateTask,
 } from '../index'
@@ -113,6 +114,57 @@ describe('domain actions', () => {
     expect(statements[0]?.sql).toContain('insert into "memory_links"')
     expect(statements[0]?.params).toContain('memory-1')
     expect(statements[0]?.params).toContain('p2')
+  })
+
+  it('createMemory serializes duplicate checks before inserting', async () => {
+    const commands: string[] = []
+    let memoryQueryCount = 0
+    let createdMemoryId = ''
+    let releaseFirstQuery!: () => void
+    let firstQueryStarted!: () => void
+    const firstQueryStartedPromise = new Promise<void>((resolve) => {
+      firstQueryStarted = resolve
+    })
+    const firstQueryGate = new Promise<void>((resolve) => {
+      releaseFirstQuery = resolve
+    })
+
+    setBridge({
+      invoke: (command, args) => {
+        commands.push(command)
+        if (command === 'db_query' && String(args['sql']).includes('from "memories"')) {
+          memoryQueryCount += 1
+          if (memoryQueryCount === 1) {
+            firstQueryStarted()
+            return firstQueryGate.then(() => [])
+          }
+          return Promise.resolve([{ id: createdMemoryId, claim: 'Same claim' }])
+        }
+        if (command === 'db_batch') {
+          const statements = args['statements'] as Array<{ params: readonly unknown[] }>
+          const firstStringParam = statements[0]?.params.find(
+            (param) => typeof param === 'string' && param.length === 26,
+          )
+          createdMemoryId = typeof firstStringParam === 'string' ? firstStringParam : 'memory-1'
+          return Promise.resolve(statements.map(() => 1))
+        }
+        return Promise.resolve(1)
+      },
+    })
+
+    const first = createMemory({ claim: 'Same claim' })
+    await firstQueryStartedPromise
+    const second = createMemory({ claim: ' same   claim ' })
+    await Promise.resolve()
+
+    expect(memoryQueryCount).toBe(1)
+    expect(commands).toEqual(['db_query'])
+    releaseFirstQuery()
+    const [created, duplicate] = await Promise.all([first, second])
+
+    expect(created).toEqual({ id: createdMemoryId, created: true })
+    expect(duplicate).toEqual({ id: createdMemoryId, created: false })
+    expect(commands).toEqual(['db_query', 'db_batch', 'db_query'])
   })
 
   it('setAiProvidersState writes provider list and default in one batch', async () => {

@@ -1,5 +1,6 @@
 import { db } from '../db/client'
 import { newId } from '../db/id'
+import { squish } from '../text/normalize'
 import type { ExtractionResult } from './contracts'
 import { loadMemoryClaims } from './apply-store'
 import type { ApplyContext } from './apply-context'
@@ -25,7 +26,7 @@ export async function applyMemories(
       ctx.suggest('memory', memory.ref, memory.claim, memory.confidence)
       continue
     }
-    const claimKey = memory.claim.trim().toLowerCase()
+    const claimKey = squish(memory.claim).toLowerCase()
     if (existingClaims.has(claimKey)) {
       ctx.summary.memories.duplicate++
       continue
