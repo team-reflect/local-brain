@@ -72,6 +72,7 @@ describe('TodaySurface daily brief', () => {
     expect(await screen.findByText('Focus:')).not.toBeNull()
     expect(screen.getByText('ship the launch checklist.')).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Regenerate' })).not.toBeNull()
+    expect(screen.getByText(/^Generated /)).not.toBeNull()
     expect(aiMocks.generateTodayDailyBrief).not.toHaveBeenCalled()
   })
 

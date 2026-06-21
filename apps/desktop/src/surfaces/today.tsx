@@ -177,7 +177,7 @@ function DailyBriefPanel({
   const hasBrief = note !== null
   const disabled = loading || generating || settingsLoading
   const action = providersReady ? (
-    <Button size="sm" variant={hasBrief ? 'outline' : 'primary'} disabled={disabled} onClick={onGenerate}>
+    <Button size="sm" variant={hasBrief ? 'ghost' : 'primary'} disabled={disabled} onClick={onGenerate}>
       {generating ? <LoaderCircle aria-hidden className="size-3.5 animate-spin" /> : null}
       {!generating && hasBrief ? <RefreshCw aria-hidden className="size-3.5" /> : null}
       {generating ? 'Generating' : hasBrief ? 'Regenerate' : 'Generate'}
@@ -193,9 +193,6 @@ function DailyBriefPanel({
       <div className="flex items-end justify-between gap-3">
         <div>
           <h2 className={sectionLabel}>Daily brief</h2>
-          {note?.generatedAt ? (
-            <p className={cn(metaText, 'mt-1')}>Generated {formatGeneratedAt(note.generatedAt)}</p>
-          ) : null}
         </div>
         {action}
       </div>
@@ -227,6 +224,10 @@ function DailyBriefPanel({
           </p>
         )}
       </div>
+
+      {note?.generatedAt ? (
+        <p className={cn(metaText, '-mt-0.5 text-right')}>Generated {formatGeneratedAt(note.generatedAt)}</p>
+      ) : null}
     </section>
   )
 }
