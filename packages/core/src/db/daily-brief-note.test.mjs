@@ -5,7 +5,7 @@ import { freshDatabase, installSqliteBridge } from './sqlite-harness.mjs'
 describe('daily brief AI notes', () => {
   beforeEach(() => installSqliteBridge(freshDatabase()))
 
-  it('stores the latest generated daily brief and indexes chunks', async () => {
+  it('replaces the generated daily brief for a date and indexes only fresh chunks', async () => {
     await saveDailyBriefNote({
       date: '2026-06-21',
       title: 'Daily brief - 2026-06-21',
@@ -27,11 +27,10 @@ describe('daily brief AI notes', () => {
     expect(latest?.subjectType).toBe('daily_brief')
     expect(latest?.subjectId).toBe('2026-06-21')
 
-    const chunks = await db
-      .selectFrom('contentChunks')
-      .select(['recordType', 'recordId', 'text'])
-      .where('recordId', '=', latest?.id ?? '')
-      .execute()
+    const notes = await db.selectFrom('aiNotes').select(['id', 'content']).execute()
+    expect(notes).toEqual([{ id: latest?.id, content: 'Second brief.\n\n- Follow up on launch.' }])
+
+    const chunks = await db.selectFrom('contentChunks').select(['recordType', 'recordId', 'text']).execute()
     expect(chunks).toEqual([
       {
         recordType: 'ai_note',

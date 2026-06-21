@@ -174,6 +174,7 @@ describe('Plan 06 agent report endpoints', () => {
 
     const now = new Date('2026-06-17T12:00:00Z')
     const brief = await getDailyBrief({ now })
+    expect(brief.date).toBe(now.toLocaleDateString('en-CA'))
     expect(brief.tasks.overdue.map((t) => t.title)).toContain('Overdue thing')
     expect(brief.tasks.today.map((t) => t.title)).toContain('Due today')
     expect(brief.counts.openTasks).toBe(4)

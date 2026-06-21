@@ -40,6 +40,13 @@ export async function saveDailyBriefNote(input: SaveDailyBriefNoteInput): Promis
   const generatedAt = input.generatedAt ?? nowIso()
   const content = normalizeText(input.content)
   const metadataJson = input.metadata ? JSON.stringify(input.metadata) : null
+  const previous = await db
+    .selectFrom('aiNotes')
+    .select('id')
+    .where('kind', '=', DAILY_BRIEF_NOTE_KIND)
+    .where('subjectType', '=', DAILY_BRIEF_SUBJECT_TYPE)
+    .where('subjectId', '=', input.date)
+    .execute()
   const chunks = await Promise.all(
     chunkText(content).map(async (chunk) => ({
       ...chunk,
@@ -49,6 +56,10 @@ export async function saveDailyBriefNote(input: SaveDailyBriefNoteInput): Promis
   )
 
   await batch([
+    ...previous.map((note) =>
+      db.deleteFrom('contentChunks').where('recordType', '=', 'ai_note').where('recordId', '=', note.id),
+    ),
+    ...previous.map((note) => db.deleteFrom('aiNotes').where('id', '=', note.id)),
     db.insertInto('aiNotes').values({
       id,
       kind: DAILY_BRIEF_NOTE_KIND,
