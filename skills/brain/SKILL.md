@@ -16,21 +16,13 @@ operate it through the `brain` CLI — never by touching the database file direc
    don't create duplicates.
 2. **Discover the contract.** Run `brain --json contract` when you need command
    shapes, link syntax, exit codes, or import mappings.
-3. **Verify the target brain.** Always pass the intended `--brain <dir>` (or verify
-   `$BRAIN_ROOT`) before writes. Run `brain doctor --json` and `brain path` when a
-   setup has more than one brain folder; accidental writes to the default app brain
-   are hard to clean up because the CLI intentionally has no general delete/merge
-   escape hatch.
-4. **stdout is data, stderr is diagnostics.** Always pass `--json` for machine
+3. **stdout is data, stderr is diagnostics.** Always pass `--json` for machine
    output; parse success data from stdout and JSON errors from stderr.
-5. **Pick the right noun** (below). Documents ≠ interactions ≠ tasks ≠ memories.
-6. **Cite, don't invent.** Answers and memories are grounded in real records.
-7. **Store evidence, not noise.** Raw Granola transcripts are durable meeting
+4. **Pick the right noun** (below). Documents ≠ interactions ≠ tasks ≠ memories.
+5. **Cite, don't invent.** Answers and memories are grounded in real records.
+6. **Store evidence, not noise.** Raw Granola transcripts are durable meeting
    evidence; low-signal logs, quoted email chains, generic chat logs, and secrets
    are not.
-8. **Import source-led, not search-led.** For backfills, enumerate source records
-   first and then decide import/skip/duplicate. Keyword hunting alone creates a
-   useful but non-comprehensive memory layer.
 
 ## The nouns
 
@@ -227,59 +219,37 @@ the self person has no email, set it before importing email or calendar data.
 External fetchers read upstream systems, then call `brain`. The CLI stays
 provider-neutral and must not know about helper tools such as `gws`:
 
-1. Resolve and verify the target database before writing:
-
-   ```bash
-   brain --brain "$BRAIN_ROOT" --json doctor
-   brain --brain "$BRAIN_ROOT" path
-   ```
-
-   If you are using `cargo run`, put global CLI flags after the binary separator:
-   `cargo run -p brain-cli -- --brain "$BRAIN_ROOT" --json import-context`.
-   Do not rely on the default app brain during imports unless the user explicitly
-   named it.
-2. Run `brain import-context` first. One call returns everything you need to honor
+1. Run `brain import-context` first. One call returns everything you need to honor
    query-before-write: your `self` identity (with a `configured` flag), registered
    `sources`, existing `projects` and `organizations` to link instead of fork, open
    `openSuggestions` (so you don't re-propose), and per-source `imports[].latestAt`
    watermarks (resume incrementally — e.g. Gmail `newer_than` the latest). Read
    `brain --json contract` too if a command shape is unclear.
-3. If `self.configured` is false (or `self` is null), register the user's handles
+2. If `self.configured` is false (or `self` is null), register the user's handles
    with `brain self set` before importing, so participants resolve to them.
-4. Ensure a stable source slug with `brain source ensure` (skip if already in
+3. Ensure a stable source slug with `brain source ensure` (skip if already in
    `sources`).
-5. Import likely-human contacts with `brain add person` when the source is trusted,
+4. Import likely-human contacts with `brain add person` when the source is trusted,
    or `brain add person-from-email` for untrusted sender/display-name pairs. Capture
    the structured fields a signature gives you — `--headline`/`--phone`/`--location`
    and the employer via `--org`/`--org-domain`/`--title` — rather than discarding
    them; both person commands accept these and apply them only when a person is
    actually created or has blank fields to fill.
-6. Treat `people.headline` as a first-class field, not a nicety. A useful Network
-   surface depends on short, conservative headlines such as "Picardo vendor contact
-   for lab logistics", "House design contact", or "IEQ advisor/contact". When a
-   person dedupes, re-running `brain add person` with the same email/source identity
-   and `--headline` may fill blank fields; test this before a batch and never invent
-   resume-like bios from weak evidence.
-7. Import meaningful email conversations as `brain add interaction --kind email`.
+5. Import meaningful email conversations as `brain add interaction --kind email`.
    Prefer thread-level digests with `--external-kind thread` for long Gmail threads.
    Use `--external-kind message` for standalone messages.
-8. Redact or summarize when raw source text contains secrets, passwords, credential
+6. Redact or summarize when raw source text contains secrets, passwords, credential
    setup, legal/medical boilerplate, repeated quote chains, or low-signal notification
    noise. Store a concise digest in `--summary` and pass searchable digest/body text
    through `--text-file` or `--text`.
-9. Search existing projects and link imports to them when there is a clear match.
+7. Search existing projects and link imports to them when there is a clear match.
    Do not create projects during import or post-analysis. When a thread or meeting
    looks project-shaped, record a durable proposal with `brain suggest project
    --title "<name>" --rationale "<why>" --link interaction:<id>` instead of
    creating one; the user accepts it later with `brain suggest accept <id>` (which
    creates the project and relinks the cited records). The same applies to a likely
    new organization via `brain suggest organization`.
-10. Keep an import ledger during any non-trivial import, even if it is just a local
-    markdown/CSV scratch file outside the brain: source, external id, date, title,
-    status (`imported`, `refreshed`, `duplicate`, `skipped`, `needs_review`), and
-    reason. At the end, report considered/imported/skipped counts. Without this,
-    you can only prove what landed, not what coverage was missed.
-11. Import calendar items as `brain add interaction --kind meeting|event`. Use `event`
+8. Import calendar items as `brain add interaction --kind meeting|event`. Use `event`
    for travel, lodging, reservations, reminders, and all-day schedule blocks even
    when they have attendees; use `meeting` for people-centered appointments. Map
    start to `--occurred-at`, end to `--ended-at`, venue/address to `--location`,
@@ -287,9 +257,9 @@ provider-neutral and must not know about helper tools such as `gws`:
    to `--self-participant`, and known people to `--link person:<id>` or matching
    participant email. Notes/body text are only for readable source leftovers that
    do not have typed fields.
-12. Import original attachments with `brain add asset --link interaction:<id>`, passing
+9. Import original attachments with `brain add asset --link interaction:<id>`, passing
    extracted plain text with `--text-file`/`--text-source importer` when available.
-13. Preserve raw participant handles with `--participant` instead of creating people
+10. Preserve raw participant handles with `--participant` instead of creating people
    for every address seen in an email or calendar event.
 
 ## Transcript post-analysis
@@ -316,43 +286,17 @@ Every imported transcript must get an immediate enrichment pass:
 
 ## Import source rules
 
-- **Gmail:** for daily imports, search narrowly, skip obvious machine/noise messages,
-  group recurring conversations by thread, and use `--external-kind thread` for thread
-  digests. For backfills, do not rely only on keyword queries: page thread metadata by
-  time window, cluster by domain/correspondent/subject, then import representative
-  or high-signal thread digests with explicit skip reasons for noise.
+- **Gmail:** search narrowly, skip obvious machine/noise messages, group recurring
+  conversations by thread, and use `--external-kind thread` for thread digests.
 - **Granola:** always fetch and store the raw transcript as the interaction body when
   it is available. Store Granola's AI note/summary in `--summary`, never as a
   replacement for the transcript. On re-import, use `--replace-body` with the same
   `--source granola --external-id <meeting-id>` so chunks match the current transcript.
   Then run transcript post-analysis before considering the import done.
-- **Reflect notes:** for a few hand-picked notes, import the source markdown as a
-  document. For a backfill, enumerate every daily note in the date window and every
-  named note matching project terms; import a full document, a redacted digest, or
-  record a skip reason. Do not mistake a handful of useful digests for daily-note
-  coverage.
-- **Calendar:** import missing project meetings and project-linked events with typed
-  fields. Skip travel, family, routine holds, birthdays, and reminders unless they
-  directly support an accepted project.
 - **Contacts:** use trusted contact imports (`brain add person`) with source-backed
   stable ids. Page/stream contacts; do not export a giant one-shot blob. Import names,
-  emails, phones, org/title, conservative headline, and stable ids for launch; skip
-  notes, addresses, and photos unless explicitly requested.
-
-## Backfill expectations
-
-Use the dedicated `brain-backfill` skill for first setup or large historical imports.
-The regular `brain` skill is enough for daily/targeted work, but it is not a complete
-backfill procedure by itself. A credible backfill must be source-led and auditable:
-
-- enumerate available source records before deciding what to import;
-- write source-backed records with stable external ids so reruns dedupe;
-- maintain imported/duplicate/skipped/needs-review counts by source and month;
-- import or explicitly skip every Granola meeting in scope;
-- cluster Gmail threads by domain/correspondent/subject instead of keyword-only search;
-- cover Reflect daily notes with imported full notes, redacted digests, or skip reasons;
-- run a people enrichment pass so most durable people have headlines and affiliations;
-- verify final `brain doctor`, source counts, searchability, and headline coverage.
+  emails, phones, org/title, and stable ids for launch; skip notes, addresses, and
+  photos unless explicitly requested.
 
 ## Running a daily automation
 
