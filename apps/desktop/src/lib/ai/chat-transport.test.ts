@@ -80,6 +80,20 @@ const approvalResponseMessage = {
   ],
 } as unknown as UIMessage
 
+const pendingApprovalMessage = {
+  id: 'assistant-pending-approval',
+  role: 'assistant',
+  parts: [
+    {
+      type: 'tool-create_task',
+      toolCallId: 'tool-1',
+      state: 'approval-requested',
+      input: { title: 'Send budget' },
+      approval: { id: 'approval-1' },
+    },
+  ],
+} as unknown as UIMessage
+
 describe('createChatTransport', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -194,6 +208,43 @@ describe('createChatTransport', () => {
         role: 'assistant',
         status: 'error',
         error: expect.stringContaining('No AI provider'),
+      }),
+    )
+  })
+
+  it('keeps approval-paused assistant turns streaming when the model stream finishes', async () => {
+    aiMocks.streamText.mockReturnValueOnce({
+      toUIMessageStream: (options: {
+        generateMessageId?: () => string
+        onFinish?: (event: {
+          responseMessage: UIMessage
+          finishReason?: 'stop'
+        }) => void | PromiseLike<void>
+      }) => {
+        void options.generateMessageId?.()
+        void options.onFinish?.({
+          responseMessage: pendingApprovalMessage,
+          finishReason: 'stop',
+        })
+        return new ReadableStream({ start: (controller) => controller.close() })
+      },
+    })
+    const transport = createChatTransport()
+
+    await transport.sendMessages({
+      trigger: 'submit-message',
+      chatId: 'chat-1',
+      messageId: undefined,
+      messages: [userMessage],
+      abortSignal: undefined,
+    })
+
+    expect(coreMocks.appendChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'assistant-pending-approval',
+        conversationId: 'chat-1',
+        role: 'assistant',
+        status: 'streaming',
       }),
     )
   })

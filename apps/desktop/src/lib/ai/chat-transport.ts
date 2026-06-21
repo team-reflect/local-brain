@@ -126,10 +126,11 @@ function watchPendingApprovalPersistence({
       onError: () => undefined,
       ...(latestAssistant ? { message: latestAssistant } : {}),
     }
+    let persistedPendingApproval = false
     for await (const message of readUIMessageStream(readerOptions)) {
-      if (messageHasPendingApproval(message)) {
+      if (!persistedPendingApproval && messageHasPendingApproval(message)) {
+        persistedPendingApproval = true
         await persistAssistant(conversationId, message, model, 'streaming', null)
-        return
       }
     }
   })()
@@ -203,11 +204,13 @@ export function createChatTransport(): ChatTransport<UIMessage> {
           originalMessages: messages,
           generateMessageId: () => responseId,
           onFinish: async ({ responseMessage, finishReason }) => {
+            const status = finishReason === 'error' ? 'error' :
+              messageHasPendingApproval(responseMessage) ? 'streaming' : 'done'
             await persistAssistant(
               chatId,
               responseMessage,
               label,
-              finishReason === 'error' ? 'error' : 'done',
+              status,
               finishReason === 'error' ? 'The model response ended with an error.' : null,
             )
           },
