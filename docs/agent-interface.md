@@ -191,6 +191,10 @@ brain --json tag attach --tag picardo --record interaction:<id>
 brain --json import finalize --record interaction:<id>
 ```
 
+Promoting a fact stores the fact value as the memory claim. The fact key,
+subject, source record, and evidence remain available through the extracted fact,
+memory links, and citations.
+
 Enrich a person and organization:
 
 ```bash

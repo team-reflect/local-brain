@@ -124,7 +124,9 @@ text/JSON value, confidence, observed time, source record, source excerpt, model
 prompt fingerprint, and metadata.
 
 `memories` stores curated hidden claims, either written directly or promoted from
-facts. Memories are not a dump of all extracted claims.
+facts. Promoted memory claims use the fact value as readable text; the fact key,
+subject, and source identity stay on `extracted_facts`, links, and evidence.
+Memories are not a dump of all extracted claims.
 
 `evidence_refs` cites exact chunks/spans from tasks, memories, facts, AI notes,
 profile fields, and other typed subjects.
