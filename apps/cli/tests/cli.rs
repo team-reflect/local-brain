@@ -1534,8 +1534,21 @@ fn import_interaction_writes_structured_event_payload_and_metadata() {
     assert_eq!(reimported["isDuplicate"], true);
     assert_eq!(reimported["id"], id);
 
-    let (detail_rows, updated_status, updated_confirmation, segment_count): (
+    let (
+        detail_rows,
+        updated_status,
+        preserved_venue,
+        preserved_start_timezone,
+        updated_confirmation,
+        preserved_booking_type,
+        preserved_cost_json,
+        segment_count,
+    ): (
         i64,
+        String,
+        String,
+        String,
+        String,
         String,
         String,
         i64,
@@ -1544,15 +1557,37 @@ fn import_interaction_writes_structured_event_payload_and_metadata() {
             "SELECT
                (SELECT COUNT(*) FROM interaction_event_details WHERE interaction_id = ?1),
                (SELECT status FROM interaction_event_details WHERE interaction_id = ?1),
+               (SELECT venue_name FROM interaction_event_details WHERE interaction_id = ?1),
+               (SELECT start_timezone FROM interaction_event_details WHERE interaction_id = ?1),
                (SELECT confirmation_reference FROM interaction_event_bookings WHERE interaction_id = ?1),
+               (SELECT booking_type FROM interaction_event_bookings WHERE interaction_id = ?1),
+               (SELECT cost_json FROM interaction_event_bookings WHERE interaction_id = ?1),
                (SELECT COUNT(*) FROM interaction_event_flight_segments WHERE interaction_id = ?1)",
             [id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                ))
+            },
         )
         .unwrap();
     assert_eq!(detail_rows, 1);
     assert_eq!(updated_status, "schedule_updated");
+    assert_eq!(preserved_venue, "London Heathrow");
+    assert_eq!(preserved_start_timezone, "Europe/London");
     assert_eq!(updated_confirmation, "UPDATED");
+    assert_eq!(preserved_booking_type, "flight");
+    assert_eq!(
+        serde_json::from_str::<Value>(&preserved_cost_json).unwrap()["total"],
+        1200
+    );
     assert_eq!(segment_count, 2);
 
     let updated_metadata: String = conn

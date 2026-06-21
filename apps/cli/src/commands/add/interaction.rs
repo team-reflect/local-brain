@@ -234,7 +234,17 @@ fn upsert_event_details(
     details: &EventDetailsPayload,
 ) -> Result<(), CliError> {
     let subtype = details.subtype.as_deref().unwrap_or("generic");
+    let has_subtype = if details.subtype.is_some() {
+        1_i64
+    } else {
+        0_i64
+    };
     let is_all_day = if details.is_all_day.unwrap_or(false) {
+        1_i64
+    } else {
+        0_i64
+    };
+    let has_is_all_day = if details.is_all_day.is_some() {
         1_i64
     } else {
         0_i64
@@ -247,19 +257,19 @@ fn upsert_event_details(
           needs_review_reason)
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
          ON CONFLICT(interaction_id) DO UPDATE SET
-           subtype = excluded.subtype,
-           status = excluded.status,
-           start_local_at = excluded.start_local_at,
-           start_timezone = excluded.start_timezone,
-           end_local_at = excluded.end_local_at,
-           end_timezone = excluded.end_timezone,
-           is_all_day = excluded.is_all_day,
-           venue_name = excluded.venue_name,
-           address = excluded.address,
-           provider_name = excluded.provider_name,
-           provider_record_kind = excluded.provider_record_kind,
-           source_completeness = excluded.source_completeness,
-           needs_review_reason = excluded.needs_review_reason,
+           subtype = CASE WHEN ?15 = 1 THEN excluded.subtype ELSE interaction_event_details.subtype END,
+           status = COALESCE(excluded.status, interaction_event_details.status),
+           start_local_at = COALESCE(excluded.start_local_at, interaction_event_details.start_local_at),
+           start_timezone = COALESCE(excluded.start_timezone, interaction_event_details.start_timezone),
+           end_local_at = COALESCE(excluded.end_local_at, interaction_event_details.end_local_at),
+           end_timezone = COALESCE(excluded.end_timezone, interaction_event_details.end_timezone),
+           is_all_day = CASE WHEN ?16 = 1 THEN excluded.is_all_day ELSE interaction_event_details.is_all_day END,
+           venue_name = COALESCE(excluded.venue_name, interaction_event_details.venue_name),
+           address = COALESCE(excluded.address, interaction_event_details.address),
+           provider_name = COALESCE(excluded.provider_name, interaction_event_details.provider_name),
+           provider_record_kind = COALESCE(excluded.provider_record_kind, interaction_event_details.provider_record_kind),
+           source_completeness = COALESCE(excluded.source_completeness, interaction_event_details.source_completeness),
+           needs_review_reason = COALESCE(excluded.needs_review_reason, interaction_event_details.needs_review_reason),
            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
         params![
             interaction_id,
@@ -276,6 +286,8 @@ fn upsert_event_details(
             normalize_optional(details.provider_record_kind.as_deref()),
             normalize_optional(details.source_completeness.as_deref()),
             normalize_optional(details.needs_review_reason.as_deref()),
+            has_subtype,
+            has_is_all_day,
         ],
     )?;
     Ok(())
@@ -296,15 +308,15 @@ fn upsert_event_booking(
           cancellation_policy_json)
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
          ON CONFLICT(interaction_id) DO UPDATE SET
-           booking_type = excluded.booking_type,
-           confirmation_reference = excluded.confirmation_reference,
-           booking_channel = excluded.booking_channel,
-           provider_name = excluded.provider_name,
-           party_count = excluded.party_count,
-           guest_count = excluded.guest_count,
-           contact_json = excluded.contact_json,
-           cost_json = excluded.cost_json,
-           cancellation_policy_json = excluded.cancellation_policy_json,
+           booking_type = COALESCE(excluded.booking_type, interaction_event_bookings.booking_type),
+           confirmation_reference = COALESCE(excluded.confirmation_reference, interaction_event_bookings.confirmation_reference),
+           booking_channel = COALESCE(excluded.booking_channel, interaction_event_bookings.booking_channel),
+           provider_name = COALESCE(excluded.provider_name, interaction_event_bookings.provider_name),
+           party_count = COALESCE(excluded.party_count, interaction_event_bookings.party_count),
+           guest_count = COALESCE(excluded.guest_count, interaction_event_bookings.guest_count),
+           contact_json = COALESCE(excluded.contact_json, interaction_event_bookings.contact_json),
+           cost_json = COALESCE(excluded.cost_json, interaction_event_bookings.cost_json),
+           cancellation_policy_json = COALESCE(excluded.cancellation_policy_json, interaction_event_bookings.cancellation_policy_json),
            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
         params![
             interaction_id,
@@ -338,16 +350,16 @@ fn upsert_event_lodging_stay(
           policies_json, arrival_notes)
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
          ON CONFLICT(interaction_id) DO UPDATE SET
-           property_name = excluded.property_name,
-           check_in_local_at = excluded.check_in_local_at,
-           check_out_local_at = excluded.check_out_local_at,
-           nights = excluded.nights,
-           room_count = excluded.room_count,
-           rooms_json = excluded.rooms_json,
-           guests_json = excluded.guests_json,
-           benefits_json = excluded.benefits_json,
-           policies_json = excluded.policies_json,
-           arrival_notes = excluded.arrival_notes,
+           property_name = COALESCE(excluded.property_name, interaction_event_lodging_stays.property_name),
+           check_in_local_at = COALESCE(excluded.check_in_local_at, interaction_event_lodging_stays.check_in_local_at),
+           check_out_local_at = COALESCE(excluded.check_out_local_at, interaction_event_lodging_stays.check_out_local_at),
+           nights = COALESCE(excluded.nights, interaction_event_lodging_stays.nights),
+           room_count = COALESCE(excluded.room_count, interaction_event_lodging_stays.room_count),
+           rooms_json = COALESCE(excluded.rooms_json, interaction_event_lodging_stays.rooms_json),
+           guests_json = COALESCE(excluded.guests_json, interaction_event_lodging_stays.guests_json),
+           benefits_json = COALESCE(excluded.benefits_json, interaction_event_lodging_stays.benefits_json),
+           policies_json = COALESCE(excluded.policies_json, interaction_event_lodging_stays.policies_json),
+           arrival_notes = COALESCE(excluded.arrival_notes, interaction_event_lodging_stays.arrival_notes),
            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
         params![
             interaction_id,
