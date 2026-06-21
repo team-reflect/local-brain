@@ -4,6 +4,26 @@ import { screen, within } from '@testing-library/react'
 import { installFakeBridge, renderWithProviders } from '../test/utils'
 import { NetworkSurface } from './network'
 
+Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+  configurable: true,
+  get: () => 1024,
+})
+Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+  configurable: true,
+  get: () => 768,
+})
+Element.prototype.getBoundingClientRect = () => ({
+  width: 1024,
+  height: 768,
+  top: 0,
+  left: 0,
+  right: 1024,
+  bottom: 768,
+  x: 0,
+  y: 0,
+  toJSON: () => ({}),
+})
+
 describe('NetworkSurface', () => {
   it('lets the graph use the full network content width', async () => {
     installFakeBridge({ queryRows: [] })
@@ -27,6 +47,40 @@ describe('NetworkSurface', () => {
     expect(await screen.findByText('No people yet')).toBeDefined()
     expect(container.querySelector('[data-testid="network-list-layout"]')).toBeDefined()
     expect(container.querySelector('[data-testid="network-graph-layout"]')).toBeNull()
+  })
+
+  it('shows organization headlines in the organizations table', async () => {
+    installFakeBridge({
+      query: (sql) =>
+        sql.includes('from "organizations"')
+          ? [
+              {
+                id: 'org-1',
+                name: 'Northwind Labs',
+                kind: 'company',
+                domain: 'northwind.example',
+                headline: 'Local-first research studio',
+                summary: null,
+                website: null,
+                industry: null,
+                location: null,
+                hqCity: null,
+                hqRegion: null,
+                hqCountry: null,
+                notes: null,
+                createdAt: '2026-06-21T00:00:00.000Z',
+                updatedAt: '2026-06-21T00:00:00.000Z',
+                archivedAt: null,
+              },
+            ]
+          : [],
+    })
+
+    renderWithProviders(<NetworkSurface tab="organizations" />)
+
+    expect(await screen.findByRole('columnheader', { name: 'Headline' })).toBeDefined()
+    expect(await screen.findByText('Local-first research studio')).toBeDefined()
+    expect(screen.queryByRole('columnheader', { name: 'Kind' })).toBeNull()
   })
 
   it('bounds the graph layout to the available route height', async () => {
