@@ -35,12 +35,13 @@ at `Contents/MacOS/brain`. (DMG packaging needs a GUI session; see
 
 ### Installing the `brain` command and agent skill
 
-From the app, open **Settings → CLI & agents** and install both the command and
-the agent skill. The app symlinks the bundled sidecar to `~/.local/bin/brain`,
-copies the managed skill to `~/.agents/skills/brain/SKILL.md`, and writes the
-known brain list to `~/.agents/skills/brain/brains.json`; it never needs sudo and
-does not edit shell profile files. If `~/.local/bin` is not already on your
-`PATH`, add this line to your shell profile:
+From the app, open **Settings → CLI & agents** and install the command and the
+agent skills. The app symlinks the bundled sidecar to `~/.local/bin/brain`,
+installs the managed skills at `~/.agents/skills/brain` and
+`~/.agents/skills/brain-backfill`, and writes the known brain list to
+`~/.agents/skills/brain/brains.json`; it never needs sudo and does not edit
+shell profile files. If `~/.local/bin` is not already on your `PATH`, add this
+line to your shell profile:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
@@ -52,8 +53,9 @@ For source/development checkouts, install directly from Cargo instead:
 cargo install --path apps/cli --locked
 ```
 
-If you need to install the skill manually, copy `skills/brain/SKILL.md` to
-`~/.agents/skills/brain/SKILL.md`. The app-generated `brains.json` is optional
+If you need to install the skills manually, copy `skills/brain` to
+`~/.agents/skills/brain` and `skills/brain-backfill` to
+`~/.agents/skills/brain-backfill`. The app-generated `brains.json` is optional
 but lets local agents pick the active brain without asking.
 
 ## Local storage
@@ -99,10 +101,12 @@ brain add document --title "Pricing model" --text "..." --json
 
 ## Using it with a local agent
 
-The agent contract is the `brain` CLI plus the agent skill installed from
-[`skills/brain/SKILL.md`](../../skills/brain/SKILL.md). The skill teaches the
-nouns, query-before-write, the stdout/stderr contract, and daily-automation
-recipes. Core commands:
+The agent contract is the `brain` CLI plus the agent skills installed from
+[`skills/brain`](../../skills/brain) and
+[`skills/brain-backfill`](../../skills/brain-backfill). The main skill teaches
+the nouns, query-before-write, the stdout/stderr contract, and daily-automation
+recipes; the backfill skill guides first-run and large historical imports. Core
+commands:
 
 ```bash
 brain search "northwind" --json

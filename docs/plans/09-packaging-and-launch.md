@@ -39,7 +39,7 @@ update-path decision.
    - bootstrap `brain.sqlite`, `assets/`, and `.local-brain/`
    - record/open recent brain folders
    - configure optional AI provider key
-   - optionally install agent skill
+   - optionally install agent skills
 4. Add keyboard and accessibility pass:
    - sidebar
    - command palette
@@ -94,7 +94,7 @@ update-path decision.
 - The user can browse Today, Tasks, Network Graph/People/Organizations, and Projects.
 - The user can search records and inspect citations.
 - The user can use the `brain` CLI from a terminal.
-- The user can install/use the agent skill.
+- The user can install/use the agent skills.
 - A local agent automation can update records and produce a daily report/todo list.
 - Diagnostics report common setup failures clearly.
 - Packaged app includes a runnable `brain` sidecar.
@@ -110,7 +110,7 @@ update-path decision.
 - Run accessibility smoke pass.
 - Run performance smoke pass against seed-large data.
 - Manual launch script: first run, choose a brain folder, relaunch recent auto-open,
-  install skill, import document, import interaction, extract, graph, CLI search,
+  install skills, import document, import interaction, extract, graph, CLI search,
   daily report, todo list.
 
 ## Open Questions

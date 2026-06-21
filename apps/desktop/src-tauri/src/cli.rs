@@ -53,7 +53,7 @@ pub fn cli_uninstall() -> AppResult<CliStatus> {
 
 fn install_for(paths: &CliPaths) -> AppResult<CliStatus> {
     if !paths.supported {
-        return Ok(status_for(&paths));
+        return Ok(status_for(paths));
     }
     if !paths.bundled_path.is_file() {
         return Err(AppError::not_found(format!(
@@ -62,7 +62,7 @@ fn install_for(paths: &CliPaths) -> AppResult<CliStatus> {
         )));
     }
 
-    let status = status_for(&paths);
+    let status = status_for(paths);
     match status.install_state {
         CliInstallState::Missing => {
             fs::create_dir_all(&paths.install_dir)?;
@@ -82,15 +82,15 @@ fn install_for(paths: &CliPaths) -> AppResult<CliStatus> {
         CliInstallState::Unsupported => {}
     }
 
-    Ok(status_for(&paths))
+    Ok(status_for(paths))
 }
 
 fn uninstall_for(paths: &CliPaths) -> AppResult<CliStatus> {
     if !paths.supported {
-        return Ok(status_for(&paths));
+        return Ok(status_for(paths));
     }
 
-    let status = status_for(&paths);
+    let status = status_for(paths);
     match status.install_state {
         CliInstallState::Current | CliInstallState::Stale => {
             fs::remove_file(&paths.install_target)?;
@@ -104,7 +104,7 @@ fn uninstall_for(paths: &CliPaths) -> AppResult<CliStatus> {
         CliInstallState::Missing | CliInstallState::Unsupported => {}
     }
 
-    Ok(status_for(&paths))
+    Ok(status_for(paths))
 }
 
 #[derive(Debug, Clone)]
