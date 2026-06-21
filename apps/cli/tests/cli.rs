@@ -3542,6 +3542,83 @@ fn import_document_records_identity_provenance_and_finalizes() {
 }
 
 #[test]
+fn import_document_reimport_by_source_identity_refreshes_body_and_chunks() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "document",
+            "--title",
+            "Reflect note",
+            "--text",
+            "Old searchable marker.",
+            "--source",
+            "reflect_notes",
+            "--external-kind",
+            "note",
+            "--external-id",
+            "reflect-note-refresh",
+        ],
+    );
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "document",
+            "--title",
+            "Reflect note",
+            "--text",
+            "New searchable marker.",
+            "--source",
+            "reflect_notes",
+            "--external-kind",
+            "note",
+            "--external-id",
+            "reflect-note-refresh",
+        ],
+    );
+    assert_eq!(second["isDuplicate"], true);
+    assert_eq!(second["id"], first["id"]);
+    assert_eq!(second["chunkCount"], 1);
+
+    let conn = Connection::open(&db).unwrap();
+    let body: String = conn
+        .query_row(
+            "SELECT body_text FROM documents WHERE id = ?1",
+            [first["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(body, "New searchable marker.");
+    let stale_chunks: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM content_chunks
+             WHERE record_type = 'document'
+               AND record_id = ?1
+               AND text LIKE '%Old searchable marker%'",
+            [first["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stale_chunks, 0);
+    let fresh_chunks: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM content_chunks
+             WHERE record_type = 'document'
+               AND record_id = ?1
+               AND text LIKE '%New searchable marker%'",
+            [first["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(fresh_chunks, 1);
+}
+
+#[test]
 fn evidence_refs_accept_transcript_chunks() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
@@ -3637,6 +3714,166 @@ fn evidence_refs_accept_transcript_chunks() {
         )
         .unwrap();
     assert_eq!(transcript_provenance, 1);
+}
+
+#[test]
+fn import_transcript_rejects_external_identity_for_another_interaction() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "First meeting",
+            "--text",
+            "First shell.",
+            "--source",
+            "granola",
+            "--external-id",
+            "meeting-one",
+        ],
+    );
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Second meeting",
+            "--text",
+            "Second shell.",
+            "--source",
+            "granola",
+            "--external-id",
+            "meeting-two",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "transcript",
+            "--interaction",
+            first["id"].as_str().unwrap(),
+            "--text",
+            "First transcript text.",
+            "--source",
+            "granola",
+            "--external-kind",
+            "transcript",
+            "--external-id",
+            "shared-transcript",
+        ],
+    );
+
+    let out = run(
+        &db,
+        &[
+            "--json",
+            "import",
+            "transcript",
+            "--interaction",
+            second["id"].as_str().unwrap(),
+            "--text",
+            "Second transcript text should not overwrite first.",
+            "--source",
+            "granola",
+            "--external-kind",
+            "transcript",
+            "--external-id",
+            "shared-transcript",
+        ],
+    );
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("belongs to interaction"));
+
+    let conn = Connection::open(&db).unwrap();
+    let first_text: String = conn
+        .query_row(
+            "SELECT raw_text FROM interaction_transcripts WHERE interaction_id = ?1",
+            [first["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(first_text, "First transcript text.");
+    let second_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM interaction_transcripts WHERE interaction_id = ?1",
+            [second["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(second_count, 0);
+}
+
+#[test]
+fn enrich_organization_reuses_profile_for_same_prompt_fingerprint() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let org = run_json(
+        &db,
+        &["--json", "add", "organization", "--name", "Example Labs"],
+    );
+    let org_id = org["id"].as_str().unwrap();
+
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "enrich",
+            "organization",
+            org_id,
+            "--one-line-description",
+            "Original profile text.",
+            "--why-it-matters",
+            "Original reason.",
+            "--model",
+            "agent-research",
+            "--prompt-fingerprint",
+            "org-profile-v1",
+        ],
+    );
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "enrich",
+            "organization",
+            org_id,
+            "--one-line-description",
+            "Updated profile text.",
+            "--why-it-matters",
+            "Updated reason.",
+            "--model",
+            "agent-research",
+            "--prompt-fingerprint",
+            "org-profile-v1",
+        ],
+    );
+    assert_eq!(second["profileId"], first["profileId"]);
+
+    let conn = Connection::open(&db).unwrap();
+    let (profile_count, description, why): (i64, String, String) = conn
+        .query_row(
+            "SELECT COUNT(*), one_line_description, why_it_matters
+             FROM organization_profiles
+             WHERE organization_id = ?1",
+            [org_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(profile_count, 1);
+    assert_eq!(description, "Updated profile text.");
+    assert_eq!(why, "Updated reason.");
 }
 
 #[test]

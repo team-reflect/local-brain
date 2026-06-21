@@ -216,6 +216,19 @@ pub fn add_transcript(
         &identity_kind,
         args.external_id,
     )?;
+    if let Some(existing_id) = existing_by_identity.as_deref() {
+        let linked_interaction_id = conn.query_row(
+            "SELECT interaction_id FROM interaction_transcripts WHERE id = ?1",
+            params![existing_id],
+            |row| row.get::<_, String>(0),
+        )?;
+        if linked_interaction_id != args.interaction_id {
+            return Err(CliError::Runtime(format!(
+                "transcript external identity belongs to interaction {linked_interaction_id}, not {}",
+                args.interaction_id
+            )));
+        }
+    }
     let existing_by_interaction = conn
         .query_row(
             "SELECT id FROM interaction_transcripts WHERE interaction_id = ?1 LIMIT 1",
@@ -925,48 +938,78 @@ fn upsert_organization_profile(
             .optional()?,
         None => None,
     };
-    let id = existing.unwrap_or_else(new_id);
-    conn.execute(
-        "INSERT INTO organization_profiles
-           (id, organization_id, model, prompt_fingerprint, canonical_name,
-            website, one_line_description, category, why_it_matters,
-            offerings_json, notable_people_json, suggested_tags_json,
-            review_flags_json, source_urls_json, raw_enrichment_json, researched_at)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
-         ON CONFLICT(organization_id, prompt_fingerprint) DO UPDATE SET
-           model = COALESCE(excluded.model, organization_profiles.model),
-           canonical_name = COALESCE(excluded.canonical_name, organization_profiles.canonical_name),
-           website = COALESCE(excluded.website, organization_profiles.website),
-           one_line_description = COALESCE(excluded.one_line_description, organization_profiles.one_line_description),
-           category = COALESCE(excluded.category, organization_profiles.category),
-           why_it_matters = COALESCE(excluded.why_it_matters, organization_profiles.why_it_matters),
-           offerings_json = COALESCE(excluded.offerings_json, organization_profiles.offerings_json),
-           notable_people_json = COALESCE(excluded.notable_people_json, organization_profiles.notable_people_json),
-           suggested_tags_json = COALESCE(excluded.suggested_tags_json, organization_profiles.suggested_tags_json),
-           review_flags_json = COALESCE(excluded.review_flags_json, organization_profiles.review_flags_json),
-           source_urls_json = COALESCE(excluded.source_urls_json, organization_profiles.source_urls_json),
-           raw_enrichment_json = COALESCE(excluded.raw_enrichment_json, organization_profiles.raw_enrichment_json),
-           researched_at = excluded.researched_at,
-           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
-        params![
-            id,
-            organization_id,
-            normalize_optional(args.model),
-            normalize_optional(args.prompt_fingerprint),
-            normalize_optional(args.canonical_name),
-            normalize_optional(args.website),
-            normalize_optional(args.one_line_description),
-            normalize_optional(args.category),
-            normalize_optional(args.why_it_matters),
-            offerings_json,
-            notable_people_json,
-            suggested_tags_json,
-            review_flags_json,
-            source_urls_json,
-            raw_enrichment_json,
-            now_iso(conn)?,
-        ],
-    )?;
+    let researched_at = now_iso(conn)?;
+    let id = match existing {
+        Some(id) => {
+            conn.execute(
+                "UPDATE organization_profiles
+                 SET model = COALESCE(?2, model),
+                     prompt_fingerprint = COALESCE(?3, prompt_fingerprint),
+                     canonical_name = COALESCE(?4, canonical_name),
+                     website = COALESCE(?5, website),
+                     one_line_description = COALESCE(?6, one_line_description),
+                     category = COALESCE(?7, category),
+                     why_it_matters = COALESCE(?8, why_it_matters),
+                     offerings_json = COALESCE(?9, offerings_json),
+                     notable_people_json = COALESCE(?10, notable_people_json),
+                     suggested_tags_json = COALESCE(?11, suggested_tags_json),
+                     review_flags_json = COALESCE(?12, review_flags_json),
+                     source_urls_json = COALESCE(?13, source_urls_json),
+                     raw_enrichment_json = COALESCE(?14, raw_enrichment_json),
+                     researched_at = ?15,
+                     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                 WHERE id = ?1",
+                params![
+                    id,
+                    normalize_optional(args.model),
+                    normalize_optional(args.prompt_fingerprint),
+                    normalize_optional(args.canonical_name),
+                    normalize_optional(args.website),
+                    normalize_optional(args.one_line_description),
+                    normalize_optional(args.category),
+                    normalize_optional(args.why_it_matters),
+                    offerings_json,
+                    notable_people_json,
+                    suggested_tags_json,
+                    review_flags_json,
+                    source_urls_json,
+                    raw_enrichment_json,
+                    researched_at,
+                ],
+            )?;
+            id
+        }
+        None => {
+            let id = new_id();
+            conn.execute(
+                "INSERT INTO organization_profiles
+                   (id, organization_id, model, prompt_fingerprint, canonical_name,
+                    website, one_line_description, category, why_it_matters,
+                    offerings_json, notable_people_json, suggested_tags_json,
+                    review_flags_json, source_urls_json, raw_enrichment_json, researched_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+                params![
+                    id,
+                    organization_id,
+                    normalize_optional(args.model),
+                    normalize_optional(args.prompt_fingerprint),
+                    normalize_optional(args.canonical_name),
+                    normalize_optional(args.website),
+                    normalize_optional(args.one_line_description),
+                    normalize_optional(args.category),
+                    normalize_optional(args.why_it_matters),
+                    offerings_json,
+                    notable_people_json,
+                    suggested_tags_json,
+                    review_flags_json,
+                    source_urls_json,
+                    raw_enrichment_json,
+                    researched_at,
+                ],
+            )?;
+            id
+        }
+    };
     let text = conn.query_row(
         "SELECT trim(
             COALESCE(canonical_name, '') || ' ' ||

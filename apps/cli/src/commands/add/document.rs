@@ -7,7 +7,7 @@ use super::identity::{
     external_kind, find_duplicate, find_external_identity, insert_external_identity,
     insert_record_provenance, source_id, ExternalIdentityWrite, RecordProvenanceWrite,
 };
-use super::links::{insert_chunks, insert_links};
+use super::links::{insert_chunks, insert_links, replace_chunks};
 use super::report_record;
 use super::text::{normalize_optional, normalize_title};
 use crate::commands::LinkRef;
@@ -58,10 +58,26 @@ pub fn add_document(
         &identity_kind,
         args.external_id,
     )?;
-    let existing = existing_by_external.or(find_duplicate(conn, "documents", &hash)?);
-    if let Some(existing) = existing.as_deref() {
+    let existing_by_hash = find_duplicate(conn, "documents", &hash)?;
+    let matched_by_external = existing_by_external.is_some();
+    let existing = existing_by_external
+        .as_deref()
+        .or(existing_by_hash.as_deref());
+    if let Some(existing) = existing {
         if !args.allow_duplicate {
             let tx = conn.transaction()?;
+            let mut chunk_count = 0;
+            if matched_by_external && !body.is_empty() {
+                tx.execute(
+                    "UPDATE documents
+                     SET body_text = ?2,
+                         content_hash = ?3,
+                         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                     WHERE id = ?1",
+                    params![existing, body.as_str(), hash],
+                )?;
+                chunk_count = replace_chunks(&tx, "document", existing, &body)?;
+            }
             super::fill_blanks(
                 &tx,
                 "documents",
@@ -101,7 +117,7 @@ pub fn add_document(
                 },
             )?;
             tx.commit()?;
-            return report_record(json, "document", existing, true, 0);
+            return report_record(json, "document", existing, true, chunk_count);
         }
     }
     let body_text = if body.is_empty() {
