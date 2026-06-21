@@ -79,7 +79,14 @@ pub fn skill_install(
 ) -> AppResult<SkillStatus> {
     let paths = runtime_paths();
     let snapshot = snapshot_install_files(&paths)?;
-    install_for(&paths)?;
+    if let Err(err) = install_for(&paths) {
+        if let Err(rollback_err) = restore_file_snapshot(&snapshot) {
+            return Err(AppError::io(format!(
+                "{err}; also failed to roll back agent skill install: {rollback_err}"
+            )));
+        }
+        return Err(err);
+    }
     if let Err(err) = sync_brain_manifest(&db, &brains) {
         if let Err(rollback_err) = restore_file_snapshot(&snapshot) {
             return Err(AppError::io(format!(
