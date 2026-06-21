@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react'
@@ -53,6 +54,7 @@ const DEFAULT_VIEWPORT = { offsetX: 0, offsetY: 0, scale: 1 }
 const MIN_ZOOM = 0.45
 const MAX_ZOOM = 3
 const DRAG_CLICK_THRESHOLD = 3
+const MIN_NODE_HIT_RADIUS = 16
 
 interface GraphViewport {
   offsetX: number
@@ -88,6 +90,11 @@ function routeForNode(node: PositionedNode): Route | null {
     case 'memory':
       return null
   }
+}
+
+function actionLabelForNode(node: PositionedNode): string {
+  const kind = node.kind === 'self' ? 'person' : node.kind
+  return kind === 'memory' ? `Memory ${node.label}` : `Open ${kind} ${node.label}`
 }
 
 function clip(label: string): string {
@@ -307,6 +314,15 @@ export function GraphSurface({
     [navigate],
   )
 
+  const handleNodeKeyDown = useCallback(
+    (event: KeyboardEvent<SVGGElement>, route: Route): void => {
+      if (event.key !== 'Enter' && event.key !== ' ') return
+      event.preventDefault()
+      navigate(route)
+    },
+    [navigate],
+  )
+
   return (
     <div className={cn('mx-auto flex h-full min-h-0 w-full max-w-5xl flex-col gap-4', className)}>
       {showHeader ? <PageHead eyebrow="Graph" title="Graph" /> : null}
@@ -385,40 +401,60 @@ export function GraphSurface({
                       />
                     ))}
                 </g>
-                {layout.edges
-                  .filter((edge) => edge.kind === 'interaction')
-                  .map((edge, index) => {
-                    const route: Route | null = edge.interactionId
-                      ? { kind: 'interaction', id: edge.interactionId }
-                      : null
+                <g data-testid="graph-node-hit-layer">
+                  {layout.nodes.map((node) => {
+                    const route = routeForNode(node)
+                    if (!route) return null
                     return (
-                      <g
-                        key={`interaction-${edge.source.id}-${edge.target.id}-${index}`}
-                        className={route ? 'cursor-pointer' : undefined}
-                        onClick={route ? () => handleNodeClick(route) : undefined}
-                      >
-                        {/* Wide transparent hit area so thin links are easy to click. */}
-                        <line
-                          x1={edge.source.x}
-                          y1={edge.source.y}
-                          x2={edge.target.x}
-                          y2={edge.target.y}
-                          stroke="transparent"
-                          strokeWidth={12}
-                        />
-                        <line
-                          x1={edge.source.x}
-                          y1={edge.source.y}
-                          x2={edge.target.x}
-                          y2={edge.target.y}
-                          stroke={KIND_COLOR.interaction}
-                          strokeWidth={interactionEdgeWidth(edge.weight)}
-                          strokeOpacity={0.55}
-                          strokeLinecap="round"
-                        />
-                      </g>
+                      <circle
+                        key={`hit-${node.id}`}
+                        cx={node.x}
+                        cy={node.y}
+                        r={Math.max(node.radius, MIN_NODE_HIT_RADIUS)}
+                        fill="transparent"
+                        pointerEvents="all"
+                        className="cursor-pointer"
+                        onClick={() => handleNodeClick(route)}
+                      />
                     )
                   })}
+                </g>
+                <g data-testid="graph-interaction-edge-layer">
+                  {layout.edges
+                    .filter((edge) => edge.kind === 'interaction')
+                    .map((edge, index) => {
+                      const route: Route | null = edge.interactionId
+                        ? { kind: 'interaction', id: edge.interactionId }
+                        : null
+                      return (
+                        <g
+                          key={`interaction-${edge.source.id}-${edge.target.id}-${index}`}
+                          className={route ? 'cursor-pointer' : undefined}
+                          onClick={route ? () => handleNodeClick(route) : undefined}
+                        >
+                          {/* Wide transparent hit area so thin links are easy to click. */}
+                          <line
+                            x1={edge.source.x}
+                            y1={edge.source.y}
+                            x2={edge.target.x}
+                            y2={edge.target.y}
+                            stroke="transparent"
+                            strokeWidth={12}
+                          />
+                          <line
+                            x1={edge.source.x}
+                            y1={edge.source.y}
+                            x2={edge.target.x}
+                            y2={edge.target.y}
+                            stroke={KIND_COLOR.interaction}
+                            strokeWidth={interactionEdgeWidth(edge.weight)}
+                            strokeOpacity={0.55}
+                            strokeLinecap="round"
+                          />
+                        </g>
+                      )
+                    })}
+                </g>
                 {layout.nodes.map((node) => {
                   const route = routeForNode(node)
                   return (
@@ -427,6 +463,10 @@ export function GraphSurface({
                       transform={`translate(${node.x} ${node.y})`}
                       className={route ? 'cursor-pointer' : undefined}
                       onClick={route ? () => handleNodeClick(route) : undefined}
+                      onKeyDown={route ? (event) => handleNodeKeyDown(event, route) : undefined}
+                      role={route ? 'link' : undefined}
+                      tabIndex={route ? 0 : undefined}
+                      aria-label={route ? actionLabelForNode(node) : undefined}
                     >
                       <circle r={node.radius} fill={KIND_COLOR[node.kind]} />
                       <text

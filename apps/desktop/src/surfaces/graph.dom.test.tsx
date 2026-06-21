@@ -190,11 +190,35 @@ describe('GraphSurface', () => {
     expect(root?.className).toContain('min-h-0')
   })
 
-  it('still opens a node on click', async () => {
+  it('opens a person node on click', async () => {
     window.history.pushState({}, '', '/network?tab=graph')
     renderWithProviders(<GraphSurface showHeader={false} />)
 
-    fireEvent.click(screen.getByText('Ada Lovelace'))
+    fireEvent.click(screen.getByRole('link', { name: 'Open person Ada Lovelace' }))
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/people/p1')
+    })
+  })
+
+  it('opens an organization node on click', async () => {
+    window.history.pushState({}, '', '/network?tab=graph')
+    renderWithProviders(<GraphSurface showHeader={false} />)
+
+    fireEvent.click(screen.getByRole('link', { name: 'Open organization Analytical Engines' }))
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/organizations/org1')
+    })
+  })
+
+  it('opens a node from the keyboard', async () => {
+    window.history.pushState({}, '', '/network?tab=graph')
+    renderWithProviders(<GraphSurface showHeader={false} />)
+
+    fireEvent.keyDown(screen.getByRole('link', { name: 'Open person Ada Lovelace' }), {
+      key: 'Enter',
+    })
 
     await waitFor(() => {
       expect(window.location.pathname).toBe('/people/p1')
@@ -213,6 +237,17 @@ describe('GraphSurface', () => {
     await waitFor(() => {
       expect(window.location.pathname).toBe('/interactions/int1')
     })
+  })
+
+  it('keeps enlarged node hit targets below interaction links', () => {
+    renderWithProviders(<GraphSurface showHeader={false} />)
+
+    const hitLayer = screen.getByTestId('graph-node-hit-layer')
+    const interactionLayer = screen.getByTestId('graph-interaction-edge-layer')
+
+    expect(hitLayer.compareDocumentPosition(interactionLayer) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(
+      0,
+    )
   })
 
   it('hides interaction links when the Interactions filter is turned off', () => {
