@@ -8,8 +8,8 @@ describe('skillStatus', () => {
     setBridge(
       bridgeReturning({
         supported: true,
-        installTargetPath: '/Users/alex/.codex/skills/brain/SKILL.md',
-        installTargetDir: '/Users/alex/.codex/skills/brain',
+        installTargetPath: '/Users/alex/.agents/skills/brain/SKILL.md',
+        installTargetDir: '/Users/alex/.agents/skills/brain',
         bundledHash: 'abc123abc123',
         installedHash: null,
         installState: 'missing',
@@ -17,7 +17,7 @@ describe('skillStatus', () => {
     )
 
     await expect(skillStatus()).resolves.toMatchObject({
-      installTargetPath: '/Users/alex/.codex/skills/brain/SKILL.md',
+      installTargetPath: '/Users/alex/.agents/skills/brain/SKILL.md',
       installState: 'missing',
     })
   })
@@ -26,8 +26,8 @@ describe('skillStatus', () => {
     setBridge(
       bridgeReturning({
         supported: true,
-        installTargetPath: '/Users/alex/.codex/skills/brain/SKILL.md',
-        installTargetDir: '/Users/alex/.codex/skills/brain',
+        installTargetPath: '/Users/alex/.agents/skills/brain/SKILL.md',
+        installTargetDir: '/Users/alex/.agents/skills/brain',
         bundledHash: 'abc123abc123',
         installedHash: null,
         installState: 'weird',

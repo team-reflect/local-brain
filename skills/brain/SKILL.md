@@ -24,6 +24,19 @@ operate it through the `brain` CLI — never by touching the database file direc
    evidence; low-signal logs, quoted email chains, generic chat logs, and secrets
    are not.
 
+## Brain selection
+
+When this skill is installed by Local Brain, the app writes a generated
+`brains.json` file next to this `SKILL.md`. Read it before running `brain`:
+
+- Use the entry with `isActive: true` by default.
+- Pass `--brain <rootPath>` on CLI calls, or set `BRAIN_ROOT=<rootPath>` for a
+  sequence of calls.
+- If there is no active brain or the user names a different brain, choose the
+  matching `name` / `rootPath` from `brains.json`.
+- If `brains.json` is missing or ambiguous, ask the user which brain folder to
+  use instead of guessing.
+
 ## The nouns
 
 - **document** — reference material you read: a note, spec, article, transcript

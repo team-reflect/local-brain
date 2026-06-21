@@ -37,6 +37,7 @@ pub fn run() {
     } else {
         db::DbState::empty()
     };
+    let _ = skill::sync_brain_manifest(&db_state, &brains);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())

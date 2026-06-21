@@ -1,9 +1,9 @@
 # Agent Interface
 
 Local Brain is primarily operated by local agents. The first agent contract is a
-`brain` CLI plus a local Codex skill.
+`brain` CLI plus a local agent skill.
 
-The desktop UI exists, but agents should not scrape it. A Codex daily automation should
+The desktop UI exists, but agents should not scrape it. A local agent automation should
 be able to update the brain, generate a report, and produce a todo list through the CLI
 or approved local database access.
 

@@ -389,6 +389,13 @@ fn infos(
         .collect())
 }
 
+pub(crate) fn list_brain_infos(db: &DbState, brains: &BrainState) -> AppResult<Vec<BrainInfo>> {
+    let live_active = db.active_root_path().ok();
+    let schema_version = db.schema_version().ok();
+    let conn = brains.lock()?;
+    infos(&conn, live_active.as_deref(), schema_version)
+}
+
 // ---- State ----------------------------------------------------------------
 
 /// The process-wide brain registry, backed by its own SQLite database.
@@ -587,9 +594,11 @@ fn switch_to(
     let paths = paths.into_active_paths();
     let root = paths.root_path.clone();
     db.swap_after(conn, paths, || brains.register_active(&root, name))?;
-    brains
-        .active_info(db)?
-        .ok_or_else(|| AppError::no_database("the brain switch completed without an active brain"))
+    let info = brains.active_info(db)?.ok_or_else(|| {
+        AppError::no_database("the brain switch completed without an active brain")
+    })?;
+    let _ = crate::skill::sync_brain_manifest(db, brains);
+    Ok(info)
 }
 
 // ---- Tauri commands -------------------------------------------------------
@@ -600,12 +609,7 @@ pub fn list_brains(
     db: State<'_, DbState>,
     brains: State<'_, BrainState>,
 ) -> AppResult<Vec<BrainInfo>> {
-    // Derive the active flag from the live connection, not the registry pointer,
-    // so a stale `active_path` can't mark the wrong brain active (see [`infos`]).
-    let live_active = db.active_root_path().ok();
-    let schema_version = db.schema_version().ok();
-    let conn = brains.lock()?;
-    infos(&conn, live_active.as_deref(), schema_version)
+    list_brain_infos(&db, &brains)
 }
 
 /// The currently open brain.
@@ -703,9 +707,11 @@ fn edit_metadata(
             )));
         }
     }
-    brains
+    let info = brains
         .active_info(db)?
-        .ok_or_else(|| AppError::no_database("no active brain"))
+        .ok_or_else(|| AppError::no_database("no active brain"))?;
+    let _ = crate::skill::sync_brain_manifest(db, brains);
+    Ok(info)
 }
 
 /// Rename a brain in the catalogue.
@@ -808,7 +814,9 @@ fn forget_brain_impl(
         }
     }
     tx.commit()?;
-    infos(&conn, live_active.as_deref(), schema_version)
+    let list = infos(&conn, live_active.as_deref(), schema_version)?;
+    let _ = crate::skill::sync_brain_manifest_from_infos(&list);
+    Ok(list)
 }
 
 /// Reveal a brain's root folder in the OS file manager (best effort).
