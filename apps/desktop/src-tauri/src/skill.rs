@@ -33,7 +33,7 @@ pub struct SkillStatus {
 
 #[tauri::command]
 pub fn skill_status() -> AppResult<SkillStatus> {
-    Ok(status_for(&runtime_paths()))
+    status_for(&runtime_paths())
 }
 
 #[tauri::command]
@@ -73,25 +73,40 @@ fn home_dir() -> Option<PathBuf> {
         .filter(|path| !path.as_os_str().is_empty())
 }
 
-fn status_for(paths: &SkillPaths) -> SkillStatus {
+fn status_for(paths: &SkillPaths) -> AppResult<SkillStatus> {
     let bundled_hash = source_hash();
-    let installed = fs::read_to_string(&paths.install_target).ok();
-    SkillStatus {
+    let installed = read_installed_skill(paths)?;
+    Ok(SkillStatus {
         supported: paths.supported,
         install_target_path: display_path(&paths.install_target),
         install_target_dir: display_path(&paths.install_dir),
         bundled_hash: bundled_hash.clone(),
         installed_hash: installed.as_deref().and_then(managed_hash),
         install_state: classify_install(installed.as_deref(), &bundled_hash, paths.supported),
+    })
+}
+
+fn read_installed_skill(paths: &SkillPaths) -> AppResult<Option<String>> {
+    if !paths.supported {
+        return Ok(None);
+    }
+
+    match fs::read_to_string(&paths.install_target) {
+        Ok(content) => Ok(Some(content)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(AppError::io(format!(
+            "Could not read installed skill at {}: {err}",
+            paths.install_target.display()
+        ))),
     }
 }
 
 fn install_for(paths: &SkillPaths) -> AppResult<SkillStatus> {
     if !paths.supported {
-        return Ok(status_for(paths));
+        return status_for(paths);
     }
 
-    let status = status_for(paths);
+    let status = status_for(paths)?;
     match status.install_state {
         SkillInstallState::Missing | SkillInstallState::Stale => {
             fs::create_dir_all(&paths.install_dir)?;
@@ -107,15 +122,15 @@ fn install_for(paths: &SkillPaths) -> AppResult<SkillStatus> {
         SkillInstallState::Unsupported => {}
     }
 
-    Ok(status_for(paths))
+    status_for(paths)
 }
 
 fn uninstall_for(paths: &SkillPaths) -> AppResult<SkillStatus> {
     if !paths.supported {
-        return Ok(status_for(paths));
+        return status_for(paths);
     }
 
-    let status = status_for(paths);
+    let status = status_for(paths)?;
     match status.install_state {
         SkillInstallState::Current | SkillInstallState::Stale => {
             fs::remove_file(&paths.install_target)?;
@@ -129,7 +144,7 @@ fn uninstall_for(paths: &SkillPaths) -> AppResult<SkillStatus> {
         SkillInstallState::Missing | SkillInstallState::Unsupported => {}
     }
 
-    Ok(status_for(paths))
+    status_for(paths)
 }
 
 fn classify_install(
@@ -302,6 +317,17 @@ mod tests {
         fs::write(&paths.install_target, SKILL_SOURCE).unwrap();
 
         assert!(install_for(&paths).is_err());
+    }
+
+    #[test]
+    fn refuses_to_install_when_existing_skill_cannot_be_read() {
+        let temp = TempDir::new().unwrap();
+        let paths = paths_for(temp.path());
+        fs::create_dir_all(&paths.install_target).unwrap();
+
+        assert!(status_for(&paths).is_err());
+        assert!(install_for(&paths).is_err());
+        assert!(paths.install_target.is_dir());
     }
 
     #[test]
