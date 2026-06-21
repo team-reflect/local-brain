@@ -10,7 +10,7 @@ demonstration.
 - Establish app layout, package boundaries, and quality commands.
 - Open a local SQLite database from Rust.
 - Let the user choose a brain folder and create `brain.sqlite` plus `assets/` inside it.
-- Render the Picardo-inspired shell with Today, Tasks, Network, Projects, Ask, and
+- Render the Picardo-inspired shell with Today, Tasks, Network, Projects, Chat, and
   Settings.
 
 ## Phase 2 - Durable Schema
@@ -50,8 +50,8 @@ demonstration.
   as the default tab.
 - Projects supports a list and detail pages with tasks, people, organizations,
   interactions, and documents.
-- Ask supports grounded chat over local documents and interactions, with durable
-  conversations and messages in SQLite.
+- Chat supports grounded conversation over local documents and interactions, with
+  durable conversations in SQLite and user-approved tools for core CRM writes.
 - The Network Graph tab shows a user-centered node map derived from typed records and
   links. Filters by node type, time, strength, and project are optional follow-up.
 - Settings owns about, brain identity, AI providers, and semantic search.
@@ -77,7 +77,7 @@ demonstration.
 - A user can add a meeting transcript, email body, note, or reference document.
 - The app extracts useful tasks, people, organizations, existing project links, and
   memories.
-- The user can browse by Today, Tasks, Network, Projects, and Ask.
+- The user can browse by Today, Tasks, Network, Projects, and Chat.
 - The user can inspect a graph view centered on themselves.
 - The user can relaunch into the most recent brain folder.
 - A local agent can add and query context through the CLI.

@@ -55,7 +55,7 @@ See [Design System](../design-system.md).
 - **FTS5:** first lexical search path.
 - **Local embeddings runtime:** follow Reflect Open's Rust-side embedding direction when
   possible.
-- **Vercel AI SDK:** BYOK provider calls and streaming from the desktop Ask
+- **Vercel AI SDK:** BYOK provider calls and streaming from the desktop Chat
   surface (`ai`, `@ai-sdk/react`, `@ai-sdk/openai`, `@ai-sdk/anthropic`,
   `@ai-sdk/google`). Do not add a hosted Local Brain model proxy for MVP.
 

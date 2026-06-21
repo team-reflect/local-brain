@@ -69,11 +69,11 @@ Top-level navigation:
 - Tasks
 - Network
 - Projects
-- Ask
+- Chat
 - Settings
 
 Documents and interactions are first-class data, but not top-level navigation. They
-appear inside detail pages and through search or Ask.
+appear inside detail pages and through search or Chat.
 The graph is the default Network tab, alongside People and Organizations.
 
 ## Technical Bet

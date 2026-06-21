@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { db } from '../../db/client'
 
 /**
- * Durable Ask conversations. The UI stores the full AI SDK UIMessage JSON so
+ * Durable Chat conversations. The UI stores the full AI SDK UIMessage JSON so
  * future SDK parts remain round-trippable, while these projection fields keep
  * thread lists and message rendering cheap.
  */

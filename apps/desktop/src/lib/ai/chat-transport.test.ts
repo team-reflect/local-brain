@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { UIMessage } from 'ai'
-import { createAskTransport } from './ask-transport'
+import { createChatTransport } from './chat-transport'
 
 const coreMocks = vi.hoisted(() => ({
   appendChatMessage: vi.fn(),
@@ -66,7 +66,35 @@ const userMessage: UIMessage = {
   parts: [{ type: 'text', text: 'What did Maya promise?', state: 'done' }],
 }
 
-describe('createAskTransport', () => {
+const approvalResponseMessage = {
+  id: 'assistant-approval',
+  role: 'assistant',
+  parts: [
+    {
+      type: 'tool-create_task',
+      toolCallId: 'tool-1',
+      state: 'approval-responded',
+      input: { title: 'Send budget' },
+      approval: { id: 'approval-1', approved: true },
+    },
+  ],
+} as unknown as UIMessage
+
+const pendingApprovalMessage = {
+  id: 'assistant-pending-approval',
+  role: 'assistant',
+  parts: [
+    {
+      type: 'tool-create_task',
+      toolCallId: 'tool-1',
+      state: 'approval-requested',
+      input: { title: 'Send budget' },
+      approval: { id: 'approval-1' },
+    },
+  ],
+} as unknown as UIMessage
+
+describe('createChatTransport', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     coreMocks.createChatId.mockReturnValueOnce('assistant-1')
@@ -95,14 +123,16 @@ describe('createAskTransport', () => {
     aiMocks.convertToModelMessages.mockResolvedValue([{ role: 'user', content: 'What did Maya promise?' }])
     aiMocks.streamText.mockReturnValue({
       toUIMessageStream: (options: {
+        generateMessageId?: () => string
         onFinish?: (event: {
           responseMessage: UIMessage
           finishReason?: 'stop'
         }) => void | PromiseLike<void>
       }) => {
+        const responseId = options.generateMessageId?.() ?? 'assistant-1'
         void options.onFinish?.({
           responseMessage: {
-            id: 'assistant-1',
+            id: responseId,
             role: 'assistant',
             parts: [{ type: 'text', text: 'Maya promised the revised budget.', state: 'done' }],
           },
@@ -114,7 +144,7 @@ describe('createAskTransport', () => {
   })
 
   it('persists the user turn, loads project context, streams with tools, and persists assistant turn', async () => {
-    const transport = createAskTransport()
+    const transport = createChatTransport()
 
     await transport.sendMessages({
       trigger: 'submit-message',
@@ -162,7 +192,7 @@ describe('createAskTransport', () => {
 
   it('persists an assistant error turn when no provider is configured', async () => {
     coreMocks.defaultAiProvider.mockReturnValue(null)
-    const transport = createAskTransport()
+    const transport = createChatTransport()
 
     await transport.sendMessages({
       trigger: 'submit-message',
@@ -178,6 +208,68 @@ describe('createAskTransport', () => {
         role: 'assistant',
         status: 'error',
         error: expect.stringContaining('No AI provider'),
+      }),
+    )
+  })
+
+  it('keeps approval-paused assistant turns streaming when the model stream finishes', async () => {
+    aiMocks.streamText.mockReturnValueOnce({
+      toUIMessageStream: (options: {
+        generateMessageId?: () => string
+        onFinish?: (event: {
+          responseMessage: UIMessage
+          finishReason?: 'stop'
+        }) => void | PromiseLike<void>
+      }) => {
+        void options.generateMessageId?.()
+        void options.onFinish?.({
+          responseMessage: pendingApprovalMessage,
+          finishReason: 'stop',
+        })
+        return new ReadableStream({ start: (controller) => controller.close() })
+      },
+    })
+    const transport = createChatTransport()
+
+    await transport.sendMessages({
+      trigger: 'submit-message',
+      chatId: 'chat-1',
+      messageId: undefined,
+      messages: [userMessage],
+      abortSignal: undefined,
+    })
+
+    expect(coreMocks.appendChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'assistant-pending-approval',
+        conversationId: 'chat-1',
+        role: 'assistant',
+        status: 'streaming',
+      }),
+    )
+  })
+
+  it('continues after tool approval without persisting a duplicate user turn', async () => {
+    const transport = createChatTransport()
+
+    await transport.sendMessages({
+      trigger: 'submit-message',
+      chatId: 'chat-1',
+      messageId: undefined,
+      messages: [userMessage, approvalResponseMessage],
+      abortSignal: undefined,
+    })
+
+    expect(coreMocks.appendChatMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'user' }),
+    )
+    expect(aiMocks.convertToModelMessages).toHaveBeenCalledWith([userMessage, approvalResponseMessage])
+    expect(coreMocks.appendChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'assistant-approval',
+        conversationId: 'chat-1',
+        role: 'assistant',
+        contentText: 'Maya promised the revised budget.',
       }),
     )
   })

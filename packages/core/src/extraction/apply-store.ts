@@ -1,4 +1,5 @@
 import { db } from '../db/client'
+import { squish } from '../text/normalize'
 import type { LinkEntityType, LinkSource } from './source-links'
 
 /**
@@ -57,5 +58,5 @@ export function loadTaskCandidates(): Promise<{ id: string; title: string }[]> {
 /** Normalized claim text of every non-archived memory, for duplicate avoidance. */
 export async function loadMemoryClaims(): Promise<Set<string>> {
   const rows = await db.selectFrom('memories').where('archivedAt', 'is', null).select('claim').execute()
-  return new Set(rows.map((row) => row.claim.trim().toLowerCase()))
+  return new Set(rows.map((row) => squish(row.claim).toLowerCase()))
 }

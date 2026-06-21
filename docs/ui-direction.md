@@ -35,7 +35,7 @@ Sidebar:
 | Tasks                |  Current view                 |
 | Network              |                               |
 | Projects             |                               |
-| Ask                  |                               |
+| Chat                 |                               |
 | Settings             |                               |
 +----------------------+-------------------------------+
 ```
@@ -47,7 +47,8 @@ Top-level sections:
 - **Tasks:** all open, waiting, scheduled, and completed tasks.
 - **Network:** graph, people, and organizations, with Graph as the default tab.
 - **Projects:** active, waiting, paused, done, and archived projects.
-- **Ask:** grounded chat over local documents and interactions.
+- **Chat:** grounded chat over local records, with approval-gated write tools for
+  core CRM updates.
 - **Settings:** about, the active brain's identity (name, color, location), forgetting
   the active brain from the local catalogue, AI providers, and semantic search.
 
@@ -60,7 +61,7 @@ confuse a *brain* (the container) with the Network
 **Graph** (a visualization of the records inside the current brain).
 
 Document and interaction records are browsed inside Network, Project, and Task detail
-pages, and found through global search or Ask.
+pages, and found through global search or Chat.
 
 ## Information Architecture
 
@@ -116,10 +117,11 @@ Projects
     - interactions
     - documents
     - remembered decisions and risks
-Ask
+Chat
   - grounded chat
   - durable conversations and messages
   - request-local retrieved sources
+  - user-approved writes to people, organizations, projects, tasks, interactions, and memories
 Settings
   - about (description and app version)
   - brain (identity: name, color, folder reveal)
@@ -221,14 +223,16 @@ Settings
 ## Interaction Rules
 
 - Search should be global and available from all main surfaces.
-- Ask should answer from local document and interaction chunks using the configured
+- Chat should answer from local document and interaction chunks using the configured
   BYOK provider.
+- Chat write tools should require explicit approval before creating or updating
+  people, organizations, projects, tasks, interactions, or memories.
 - A user should be able to correct a task, person link, project link, or remembered
   fact from the detail page where it appears.
 - Graph should be a derived navigation and demonstration surface, not the storage
   model.
 - Graph should not render every interaction as a node. Meetings, emails, calls, and
   messages should strengthen or annotate links between people, with individual
-  interactions browsed from detail pages, search, Today, and Ask.
+  interactions browsed from detail pages, search, Today, and Chat.
 - Imported text should become a document or interaction immediately.
 - No mandatory review queue for extracted data.

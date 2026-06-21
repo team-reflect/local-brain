@@ -8,7 +8,7 @@ import {
 } from '../index'
 import { freshDatabase, installSqliteBridge } from './sqlite-harness.mjs'
 
-describe('Ask chat persistence', () => {
+describe('Chat persistence', () => {
   beforeEach(() => installSqliteBridge(freshDatabase()))
 
   it('stores conversations and projected AI SDK messages', async () => {
@@ -46,6 +46,44 @@ describe('Ask chat persistence', () => {
     }))).toEqual([
       { id: 'msg-user', role: 'user', text: 'What happened with Northwind?', model: null },
       { id: 'msg-assistant', role: 'assistant', text: 'I found one local interaction.', model: 'openai/gpt-5.5' },
+    ])
+  })
+
+  it('updates an existing message id instead of duplicating it', async () => {
+    const conversationId = await createConversation({ id: 'chat-1', title: 'Northwind' })
+    await appendChatMessage({
+      id: 'msg-assistant',
+      conversationId,
+      role: 'assistant',
+      contentText: 'Approval needed.',
+      uiMessageJson: {
+        id: 'msg-assistant',
+        role: 'assistant',
+        parts: [{ type: 'tool-create_task', state: 'approval-requested' }],
+      },
+      status: 'streaming',
+    })
+    await appendChatMessage({
+      id: 'msg-assistant',
+      conversationId,
+      role: 'assistant',
+      contentText: 'Task created.',
+      uiMessageJson: {
+        id: 'msg-assistant',
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'Task created.' }],
+      },
+      status: 'done',
+      model: 'openai/gpt-5.5',
+    })
+
+    expect((await listMessages(conversationId)).map((message) => ({
+      id: message.id,
+      text: message.contentText,
+      status: message.status,
+      model: message.model,
+    }))).toEqual([
+      { id: 'msg-assistant', text: 'Task created.', status: 'done', model: 'openai/gpt-5.5' },
     ])
   })
 

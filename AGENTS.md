@@ -51,10 +51,10 @@ Current product shape:
   Codex daily automation that ingests context, updates tasks, and records memories.
 - Most reads should also be agent-driven, for example daily reports, todo lists, and
   briefings generated from the CLI or database access.
-- Main user surfaces are Today, Tasks, Network, Projects, Graph, Ask, and Settings.
+- Main user surfaces are Today, Tasks, Network, Projects, Graph, Chat, and Settings.
 - Network contains People and Organizations.
 - Documents and Interactions are first-class records, but they are browsed inside
-  person, organization, project, and task detail pages, and through search or Ask.
+  person, organization, project, and task detail pages, and through search or Chat.
 - The UI is still important, but mainly for quick browsing, correction, inspection,
   and demonstrating the power of the user's local brain.
 - Relationship intelligence is part of the product model: recency, relationship
@@ -77,9 +77,10 @@ Implementation conventions:
   hosted Local Brain model proxy for MVP.
 - Store model keys, credentials, and integration secrets in the OS keychain, not in
   SQLite, markdown, Git, logs, or local config files.
-- Ask uses the Vercel AI SDK from the desktop webview. Provider keys stay in the
+- Chat uses the Vercel AI SDK from the desktop webview. Provider keys stay in the
   OS keychain at rest, but are fetched into webview memory for the duration of a
-  user-approved Ask request.
+  user-approved Chat request. Chat write tools must require explicit user approval
+  before mutating SQLite.
 - Keep the CLI provider-neutral. It should expose typed Local Brain operations and
   generic source/external identity fields, but it should not know about `gws`, Gmail,
   Granola, Google Contacts, Apple Contacts, or any other upstream connector API. Codex
@@ -87,7 +88,7 @@ Implementation conventions:
   transcript retrieval, credential handling, and translating source records into
   generic `brain` CLI calls.
 - Keep the UI keyboard-friendly, sparse, and oriented around browsing, correction,
-  inspection, Ask, and demonstration. Do not add surfaces that compete with the
+  inspection, Chat, and demonstration. Do not add surfaces that compete with the
   agent-operated workflow.
 - For desktop IPC, define Tauri commands in the native layer, register them in the
   invoke handler, call them from the frontend through Tauri's `invoke`, and grant

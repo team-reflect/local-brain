@@ -1,9 +1,11 @@
-import type { Memories } from '@local-brain/db'
+import type { Memories, MemoryLinks } from '@local-brain/db'
 import { db } from '../../db/client'
-import { execute } from '../../db/commands'
+import { batch, execute } from '../../db/commands'
 import { newId } from '../../db/id'
-import type { RecordPatch } from '../../db/records'
+import type { NewRecord, RecordPatch } from '../../db/records'
 import { nowIso } from '../../db/time'
+import { requireText } from '../../validation'
+import { squish, trimToNull } from '../../text/normalize'
 
 /**
  * Correction setters for hidden memories (Plan 05 step 8). Extraction creates
@@ -15,15 +17,153 @@ import { nowIso } from '../../db/time'
  */
 
 export type MemoryPatch = RecordPatch<Memories>
+export type NewMemory = NewRecord<Memories>
+
+export interface MemoryLinkInput {
+  recordType: string
+  recordId: string
+  role?: string | null
+}
+
+export interface CreatedMemory {
+  id: string
+  created: boolean
+}
+
+type MemoryLinkValues = Pick<MemoryLinks, 'recordType' | 'recordId' | 'role'>
+let memoryWriteLock: Promise<void> = Promise.resolve()
+
+function normalizeClaim(claim: string): string {
+  return squish(requireText('claim', claim))
+}
+
+function normalizeMemory(input: NewMemory): NewMemory {
+  const out: NewMemory = { ...input, claim: normalizeClaim(input.claim) }
+  if (input.kind !== undefined) out.kind = trimToNull(input.kind) ?? undefined
+  return out
+}
+
+function memoryClaimKey(claim: string): string {
+  return squish(claim).toLowerCase()
+}
+
+function normalizeMemoryLink(link: MemoryLinkInput): MemoryLinkValues {
+  return {
+    recordType: requireText('recordType', link.recordType),
+    recordId: requireText('recordId', link.recordId),
+    role: trimToNull(link.role ?? null),
+  }
+}
+
+function memoryLinkKey(link: MemoryLinkValues): string {
+  return `${link.recordType}\0${link.recordId}\0${link.role ?? ''}`
+}
+
+async function findActiveMemoryByClaim(claim: string): Promise<string | null> {
+  const key = memoryClaimKey(claim)
+  const rows = await db
+    .selectFrom('memories')
+    .select(['id', 'claim'])
+    .where('archivedAt', 'is', null)
+    .execute()
+  return rows.find((row) => memoryClaimKey(row.claim) === key)?.id ?? null
+}
+
+async function addMissingMemoryLinks(
+  memoryId: string,
+  links: readonly MemoryLinkValues[],
+): Promise<void> {
+  if (links.length === 0) return
+
+  const existing = await db
+    .selectFrom('memoryLinks')
+    .select(['recordType', 'recordId', 'role'])
+    .where('memoryId', '=', memoryId)
+    .execute()
+  const existingKeys = new Set(existing.map(memoryLinkKey))
+  const missing = links.filter((link) => !existingKeys.has(memoryLinkKey(link)))
+  if (missing.length === 0) return
+
+  await batch(
+    missing.map((link) =>
+      db.insertInto('memoryLinks').values({
+        id: newId(),
+        memoryId,
+        recordType: link.recordType,
+        recordId: link.recordId,
+        role: link.role,
+      }),
+    ),
+  )
+}
+
+async function runMemoryWriteExclusive<T>(fn: () => Promise<T>): Promise<T> {
+  const run = memoryWriteLock.then(fn, fn)
+  memoryWriteLock = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  return run
+}
+
+/**
+ * Create a durable memory and optional subject links. Exact active duplicate
+ * claims return the existing memory id instead of inserting a second row, while
+ * still applying any requested links that are not already present.
+ */
+export function createMemory(
+  input: NewMemory,
+  links: readonly MemoryLinkInput[] = [],
+): Promise<CreatedMemory> {
+  return runMemoryWriteExclusive(() => createMemoryUnlocked(input, links))
+}
+
+async function createMemoryUnlocked(
+  input: NewMemory,
+  links: readonly MemoryLinkInput[],
+): Promise<CreatedMemory> {
+  const values = normalizeMemory(input)
+  const normalizedLinks = links.map(normalizeMemoryLink)
+  const existingId = await findActiveMemoryByClaim(values.claim)
+  if (existingId) {
+    await addMissingMemoryLinks(existingId, normalizedLinks)
+    return { id: existingId, created: false }
+  }
+
+  const id = newId()
+  await batch([
+    db.insertInto('memories').values({ ...values, id }),
+    ...normalizedLinks.map((link) =>
+      db.insertInto('memoryLinks').values({
+        id: newId(),
+        memoryId: id,
+        recordType: link.recordType,
+        recordId: link.recordId,
+        role: link.role ?? null,
+      }),
+    ),
+  ])
+  return { id, created: true }
+}
 
 /** Edit a memory's claim / kind / confidence / validity window. */
 export function updateMemory(id: string, patch: MemoryPatch): Promise<number> {
-  return execute(
-    db
-      .updateTable('memories')
-      .set({ ...patch, updatedAt: nowIso() })
-      .where('id', '=', id),
-  )
+  return runMemoryWriteExclusive(async () => {
+    const values: MemoryPatch = { ...patch }
+    if (patch.claim !== undefined) {
+      values.claim = normalizeClaim(patch.claim)
+      const duplicateId = await findActiveMemoryByClaim(values.claim)
+      if (duplicateId && duplicateId !== id) {
+        throw new Error('An active memory with this claim already exists.')
+      }
+    }
+    return execute(
+      db
+        .updateTable('memories')
+        .set({ ...values, updatedAt: nowIso() })
+        .where('id', '=', id),
+    )
+  })
 }
 
 /** Soft-delete a memory; its links and evidence stay for the record. */

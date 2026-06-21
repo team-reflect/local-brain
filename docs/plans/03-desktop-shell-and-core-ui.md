@@ -9,7 +9,7 @@
 ## Scope
 
 **In:** Tauri app shell, React routes, sidebar, global search entry, Today, Tasks,
-Network (including Graph), Projects, Ask, Settings, first-run brain folder chooser,
+Network (including Graph), Projects, Chat, Settings, first-run brain folder chooser,
 shared UI primitives, basic record detail pages.
 
 **Out:** full extraction, advanced retrieval, packaging.
@@ -22,9 +22,9 @@ shared UI primitives, basic record detail pages.
   correction, inspection, and demo.
 - Shared UI should use shadcn components themed through `globals.css`, following
   [Design System](../design-system.md).
-- Sidebar sections are Today, Tasks, Network, Projects, Ask, and Settings.
+- Sidebar sections are Today, Tasks, Network, Projects, Chat, and Settings.
 - Network has Graph, People, and Organizations tabs, with Graph as the default.
-- Documents and interactions are browsed inside related detail pages and through search or Ask.
+- Documents and interactions are browsed inside related detail pages and through search or Chat.
 - Settings owns about, brain identity, active-brain forgetting, AI providers, and
   semantic search.
 - Startup follows Reflect Open's graph chooser: choose/open a brain folder, show recents,

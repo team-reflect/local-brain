@@ -39,17 +39,30 @@ export async function appendChatMessage(input: NewChatMessage): Promise<string> 
   const id = input.id ?? newId()
   const now = nowIso()
   await batch([
-    db.insertInto('chatMessages').values({
-      id,
-      conversationId: input.conversationId,
-      role: input.role,
-      contentText: input.contentText,
-      uiMessageJson: JSON.stringify(input.uiMessageJson),
-      model: input.model ?? null,
-      status: input.status ?? 'done',
-      error: input.error ?? null,
-      createdAt: now,
-    }),
+    db
+      .insertInto('chatMessages')
+      .values({
+        id,
+        conversationId: input.conversationId,
+        role: input.role,
+        contentText: input.contentText,
+        uiMessageJson: JSON.stringify(input.uiMessageJson),
+        model: input.model ?? null,
+        status: input.status ?? 'done',
+        error: input.error ?? null,
+        createdAt: now,
+      })
+      .onConflict((oc) =>
+        oc.column('id').doUpdateSet({
+          conversationId: input.conversationId,
+          role: input.role,
+          contentText: input.contentText,
+          uiMessageJson: JSON.stringify(input.uiMessageJson),
+          model: input.model ?? null,
+          status: input.status ?? 'done',
+          error: input.error ?? null,
+        }),
+      ),
     db.updateTable('chatConversations').set({ updatedAt: now }).where('id', '=', input.conversationId),
   ])
   return id

@@ -30,9 +30,9 @@ describe('RouteContent', () => {
     await waitFor(() => expect(screen.getByText('v0.1.0')).toBeDefined())
   })
 
-  it('renders the Ask empty state for the ask route', async () => {
-    renderWithProviders(<RouteContent route={{ kind: 'ask' }} />)
-    expect(await screen.findByText('Ask your local brain')).toBeDefined()
+  it('renders the Chat empty state for the chat route', async () => {
+    renderWithProviders(<RouteContent route={{ kind: 'chat' }} />)
+    expect(await screen.findByText('Chat with your local brain')).toBeDefined()
   })
 
   it('shows a not-found state for a missing person', async () => {

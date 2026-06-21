@@ -144,7 +144,7 @@ UI influence the product surfaces:
 - restrained styling
 - powerful search
 
-Local Brain's sidebar is Today, Tasks, Network, Projects, Ask, and Settings. The
+Local Brain's sidebar is Today, Tasks, Network, Projects, Chat, and Settings. The
 graph is the default tab inside Network.
 
 ## Security And Boundaries

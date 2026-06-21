@@ -1,6 +1,7 @@
 import {
   convertToModelMessages,
   createUIMessageStream,
+  readUIMessageStream,
   stepCountIs,
   streamText,
   type ChatTransport,
@@ -20,6 +21,7 @@ import {
 import { resolveLanguageModel } from './provider'
 
 const TOOL_STEPS = 5
+type PersistedChatStatus = 'submitted' | 'streaming' | 'done' | 'error'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -39,7 +41,7 @@ function uiMessageJson(message: UIMessage): Record<string, unknown> {
 
 function titleForQuestion(question: string): string {
   const compact = question.replace(/\s+/g, ' ').trim()
-  if (!compact) return 'Ask'
+  if (!compact) return 'Chat'
   return compact.length > 60 ? `${compact.slice(0, 57)}...` : compact
 }
 
@@ -56,6 +58,11 @@ function assistantMessage(messageId: string, text: string): UIMessage {
   }
 }
 
+function responseMessageIdForTurn(messages: readonly UIMessage[]): string {
+  const latest = messages[messages.length - 1]
+  return latest?.role === 'assistant' ? latest.id : createChatId()
+}
+
 function staticAssistantStream(message: UIMessage, finishReason: 'error' | 'stop'): ReadableStream<UIMessageChunk> {
   const text = uiMessageText(message)
   const textId = `${message.id}-text`
@@ -70,7 +77,26 @@ function staticAssistantStream(message: UIMessage, finishReason: 'error' | 'stop
   })
 }
 
-async function persistAssistant(conversationId: string, message: UIMessage, model: string | null, error: string | null): Promise<void> {
+function messageHasPendingApproval(message: UIMessage): boolean {
+  return message.role === 'assistant' && message.parts.some((part) => {
+    const record = part as Record<string, unknown>
+    const approval = record['approval']
+    return (
+      String(record['type'] ?? '').startsWith('tool-') &&
+      record['state'] === 'approval-requested' &&
+      isRecord(approval) &&
+      typeof approval['id'] === 'string'
+    )
+  })
+}
+
+async function persistAssistant(
+  conversationId: string,
+  message: UIMessage,
+  model: string | null,
+  status: PersistedChatStatus,
+  error: string | null,
+): Promise<void> {
   await appendChatMessage({
     id: message.id,
     conversationId,
@@ -78,14 +104,41 @@ async function persistAssistant(conversationId: string, message: UIMessage, mode
     contentText: uiMessageText(message),
     uiMessageJson: uiMessageJson(message),
     model,
-    status: error ? 'error' : 'done',
+    status,
     error,
   })
 }
 
+function watchPendingApprovalPersistence({
+  conversationId,
+  latestAssistant,
+  model,
+  stream,
+}: {
+  conversationId: string
+  latestAssistant: UIMessage | undefined
+  model: string
+  stream: ReadableStream<UIMessageChunk>
+}): void {
+  void (async () => {
+    const readerOptions = {
+      stream,
+      onError: () => undefined,
+      ...(latestAssistant ? { message: latestAssistant } : {}),
+    }
+    let persistedPendingApproval = false
+    for await (const message of readUIMessageStream(readerOptions)) {
+      if (!persistedPendingApproval && messageHasPendingApproval(message)) {
+        persistedPendingApproval = true
+        await persistAssistant(conversationId, message, model, 'streaming', null)
+      }
+    }
+  })()
+}
+
 async function persistLatestUser(conversationId: string, messages: readonly UIMessage[]): Promise<string> {
   const latest = messages[messages.length - 1]
-  if (!latest || latest.role !== 'user') throw new Error('Ask needs a user message to send.')
+  if (!latest || latest.role !== 'user') throw new Error('Chat needs a user message to send.')
   const text = uiMessageText(latest).trim()
   await ensureConversation(conversationId, titleForQuestion(text))
   await appendChatMessage({
@@ -99,6 +152,21 @@ async function persistLatestUser(conversationId: string, messages: readonly UIMe
   return text
 }
 
+async function questionForTurn(
+  trigger: string,
+  conversationId: string,
+  messages: readonly UIMessage[],
+): Promise<string> {
+  const latest = messages[messages.length - 1]
+  const latestUser = messages.filter((message) => message.role === 'user').at(-1)
+  if (trigger === 'submit-message' && latest?.role === 'user') {
+    return persistLatestUser(conversationId, messages)
+  }
+  const question = uiMessageText(latestUser ?? latest ?? assistantMessage(createChatId(), '')).trim()
+  await ensureConversation(conversationId, titleForQuestion(question))
+  return question
+}
+
 async function loadChatContext(): Promise<{ system: string }> {
   const today = localDateString()
   const projects = await listProjects({ activeOnly: true, limit: 40 })
@@ -107,14 +175,10 @@ async function loadChatContext(): Promise<{ system: string }> {
   }
 }
 
-export function createAskTransport(): ChatTransport<UIMessage> {
+export function createChatTransport(): ChatTransport<UIMessage> {
   return {
     async sendMessages({ trigger, chatId, messages, abortSignal }) {
-      const latestUser = messages.filter((message) => message.role === 'user').at(-1)
-      const question =
-        trigger === 'submit-message'
-          ? await persistLatestUser(chatId, messages)
-          : uiMessageText(latestUser ?? messages[messages.length - 1] ?? assistantMessage(createChatId(), ''))
+      const question = await questionForTurn(trigger, chatId, messages)
 
       if (trigger === 'regenerate-message') {
         await ensureConversation(chatId, titleForQuestion(question))
@@ -135,23 +199,35 @@ export function createAskTransport(): ChatTransport<UIMessage> {
           temperature: 0,
           ...(abortSignal ? { abortSignal } : {}),
         })
-        const responseId = createChatId()
-        return result.toUIMessageStream<UIMessage>({
+        const responseId = responseMessageIdForTurn(messages)
+        const stream = result.toUIMessageStream<UIMessage>({
           originalMessages: messages,
           generateMessageId: () => responseId,
           onFinish: async ({ responseMessage, finishReason }) => {
+            const status = finishReason === 'error' ? 'error' :
+              messageHasPendingApproval(responseMessage) ? 'streaming' : 'done'
             await persistAssistant(
               chatId,
               responseMessage,
               label,
+              status,
               finishReason === 'error' ? 'The model response ended with an error.' : null,
             )
           },
         })
+        const [uiStream, persistenceStream] = stream.tee()
+        const latest = messages[messages.length - 1]
+        watchPendingApprovalPersistence({
+          conversationId: chatId,
+          latestAssistant: latest?.role === 'assistant' ? latest : undefined,
+          model: label,
+          stream: persistenceStream,
+        })
+        return uiStream
       } catch (error) {
         const messageText = error instanceof Error ? error.message : String(error)
         const message = assistantMessage(createChatId(), `I couldn't answer that yet: ${messageText}`)
-        await persistAssistant(chatId, message, null, messageText)
+        await persistAssistant(chatId, message, null, 'error', messageText)
         return staticAssistantStream(message, 'error')
       }
     },

@@ -38,6 +38,14 @@ export function buildChatSystemPrompt({ today, projects }: ChatSystemPromptInput
     '- Use list_projects to answer questions about project statuses, progress, or deadlines.',
     '- Ground answers only in what the tools return. If records do not cover the question, say so directly.',
     '- Do not use outside knowledge or invent facts. Be concise and direct.',
+    '',
+    'Write rules:',
+    '- You may create or update core CRM records only through the available write tools.',
+    '- Write tools require explicit user approval before execution. After requesting a write, wait for the approval result.',
+    '- Never invent Local Brain record ids. Use ids returned by tools or supplied by the user.',
+    '- Before updating an existing record, resolve the target id. If the target is ambiguous, ask a brief clarifying question.',
+    '- If the user denies a write tool, do not retry the same write unless the user asks again.',
+    '- Create projects only when the user explicitly agrees to that project boundary.',
     '- Answer in concise markdown — prefer short paragraphs and bullet lists over long prose.',
   ]
 
