@@ -143,6 +143,8 @@ fn home_dir() -> AppResult<PathBuf> {
 
 fn status_for(paths: &CliPaths) -> CliStatus {
     let installed_path = symlink_target(&paths.install_target).map(|target| display_path(&target));
+    let install_state =
+        classify_install(&paths.install_target, &paths.bundled_path, paths.supported);
     CliStatus {
         supported: paths.supported,
         bundled_path: display_path(&paths.bundled_path),
@@ -150,15 +152,14 @@ fn status_for(paths: &CliPaths) -> CliStatus {
         install_target_path: display_path(&paths.install_target),
         install_target_dir: display_path(&paths.install_dir),
         target_dir_on_path: target_dir_on_path(&paths.install_dir),
-        installed_version: installed_path
-            .as_ref()
-            .and_then(|_| version_for(&paths.install_target)),
+        installed_version: match install_state {
+            CliInstallState::Current | CliInstallState::Stale => version_for(&paths.install_target),
+            CliInstallState::Unsupported | CliInstallState::Missing | CliInstallState::Conflict => {
+                None
+            }
+        },
         installed_path,
-        install_state: classify_install(
-            &paths.install_target,
-            &paths.bundled_path,
-            paths.supported,
-        ),
+        install_state,
     }
 }
 
@@ -398,6 +399,33 @@ mod tests {
             classify_install(&paths.install_target, &paths.bundled_path, true),
             CliInstallState::Conflict
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn status_does_not_execute_conflicting_symlink() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TempDir::new().unwrap();
+        let paths = paths_for(temp.path());
+        let marker = temp.path().join("executed");
+        let other = temp.path().join("other-brain");
+        fs::write(
+            &other,
+            format!("#!/bin/sh\ntouch '{}'\necho other\n", marker.display()),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&other).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&other, permissions).unwrap();
+        fs::create_dir_all(&paths.install_dir).unwrap();
+        create_symlink(&other, &paths.install_target).unwrap();
+
+        let status = status_for(&paths);
+
+        assert_eq!(status.install_state, CliInstallState::Conflict);
+        assert_eq!(status.installed_version, None);
+        assert!(!marker.exists());
     }
 
     #[test]
