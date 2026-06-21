@@ -33,9 +33,6 @@ vi.mock('./lib/queries', async (importOriginal) => {
   return {
     ...actual,
     useActiveBrain: () => activeBrainResult.value,
-    // The seeded workspace runs useEnsureSeed on mount; make it a no-op so the
-    // gate test needs no ingest bridge wiring.
-    useEnsureSeed: () => undefined,
   }
 })
 
