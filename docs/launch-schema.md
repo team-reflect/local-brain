@@ -34,6 +34,8 @@ The clean launch baseline is:
   vectors, and asset search projections.
 - `0003_suggestions.sql` - user-facing curation queue for proposed structure.
 - `0004_seed.sql` - built-in source rows.
+- `0005_event_details.sql` - structured child tables for event semantics,
+  bookings, lodging stays, and flight segments.
 
 Backwards compatibility with old `brain.sqlite` files is not required before
 launch. Reimport from source instead of carrying old incremental migrations.
@@ -93,8 +95,17 @@ derived from these typed records and links, centered on the user's self person.
 ## Evidence And Intelligence
 
 `interactions` stores meetings, calls, emails, messages, events, and notes with a
-readable title, summary, structured timing/location, metadata, and optional body
-text.
+readable title, summary, structured timing/location, metadata, and body text when
+source content is imported. Imported source bodies are never partially redacted:
+skip and ledger the whole source record if it should not be stored locally.
+
+`interaction_event_details`, `interaction_event_bookings`,
+`interaction_event_lodging_stays`, and `interaction_event_flight_segments` add
+queryable structure for calendar and booking records while keeping the parent
+interaction as the canonical event shell. The full raw provider payload belongs
+on `interactions.metadata_json`; child tables store normalized fields such as
+event subtype, local times, booking references, hotel check-in/out, and flight
+segments.
 
 `interaction_transcripts` stores full raw transcript text, speaker segments JSON,
 language, transcript source, recording/storage metadata, content hash, and source
@@ -153,7 +164,8 @@ An imported meeting, email, or document is incomplete until it has:
 
 - source identity;
 - participants or entities where applicable;
-- raw text where available;
+- complete readable source text or transcript, unless a narrow
+  `--raw-text-unavailable` waiver records a real source limitation;
 - at least one AI note;
 - extracted facts;
 - links to existing projects or tasks when relevant;

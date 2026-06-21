@@ -21,7 +21,7 @@ pub const SUPPORT_DIRNAME: &str = ".local-brain";
 
 /// Bumped whenever a migration is appended below. Asserted against the applied
 /// `user_version` in tests so the constant can never drift from the list.
-pub const LATEST_SCHEMA_VERSION: usize = 4;
+pub const LATEST_SCHEMA_VERSION: usize = 5;
 
 /// The canonical filesystem layout for one Local Brain root directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +51,7 @@ static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
         M::up(include_str!("../migrations/0002_search.sql")),
         M::up(include_str!("../migrations/0003_suggestions.sql")),
         M::up(include_str!("../migrations/0004_seed.sql")),
+        M::up(include_str!("../migrations/0005_event_details.sql")),
     ])
 });
 
@@ -478,6 +479,10 @@ mod tests {
             "chat_messages",
             "suggestions",
             "suggestion_links",
+            "interaction_event_details",
+            "interaction_event_bookings",
+            "interaction_event_lodging_stays",
+            "interaction_event_flight_segments",
         ];
         for table in durable {
             let count: i64 = conn
@@ -600,6 +605,151 @@ mod tests {
             [],
         );
         assert!(result.is_err(), "expected a foreign-key violation");
+    }
+
+    #[test]
+    fn event_detail_tables_cascade_from_interaction() {
+        let conn = open_in_memory().unwrap();
+        conn.execute(
+            "INSERT INTO interactions (id, kind, title) VALUES ('i1', 'event', 'Trip')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO interaction_event_details (interaction_id, subtype)
+             VALUES ('i1', 'flight')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO interaction_event_bookings (interaction_id, booking_type)
+             VALUES ('i1', 'flight')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO interaction_event_lodging_stays (interaction_id, property_name)
+             VALUES ('i1', 'Four Seasons')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO interaction_event_flight_segments
+             (interaction_id, segment_index, origin_code, destination_code)
+             VALUES ('i1', 0, 'LHR', 'AUS')",
+            [],
+        )
+        .unwrap();
+
+        conn.execute("DELETE FROM interactions WHERE id = 'i1'", [])
+            .unwrap();
+        for table in [
+            "interaction_event_details",
+            "interaction_event_bookings",
+            "interaction_event_lodging_stays",
+            "interaction_event_flight_segments",
+        ] {
+            let count: i64 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "{table} should cascade with interaction delete");
+        }
+    }
+
+    #[test]
+    fn event_detail_one_row_constraints_hold() {
+        let conn = open_in_memory().unwrap();
+        conn.execute(
+            "INSERT INTO interactions (id, kind, title) VALUES ('i1', 'event', 'Stay')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO interaction_event_details (interaction_id, subtype)
+             VALUES ('i1', 'lodging')",
+            [],
+        )
+        .unwrap();
+        let duplicate_detail = conn.execute(
+            "INSERT INTO interaction_event_details (interaction_id, subtype)
+             VALUES ('i1', 'generic')",
+            [],
+        );
+        assert!(
+            duplicate_detail.is_err(),
+            "details are one row per interaction"
+        );
+
+        conn.execute(
+            "INSERT INTO interaction_event_bookings (interaction_id, booking_type)
+             VALUES ('i1', 'lodging')",
+            [],
+        )
+        .unwrap();
+        let duplicate_booking = conn.execute(
+            "INSERT INTO interaction_event_bookings (interaction_id, booking_type)
+             VALUES ('i1', 'lodging')",
+            [],
+        );
+        assert!(
+            duplicate_booking.is_err(),
+            "bookings are one row per interaction"
+        );
+
+        conn.execute(
+            "INSERT INTO interaction_event_lodging_stays (interaction_id, property_name)
+             VALUES ('i1', 'FORESTIS')",
+            [],
+        )
+        .unwrap();
+        let duplicate_lodging = conn.execute(
+            "INSERT INTO interaction_event_lodging_stays (interaction_id, property_name)
+             VALUES ('i1', 'FORESTIS')",
+            [],
+        );
+        assert!(
+            duplicate_lodging.is_err(),
+            "lodging stays are one row per interaction"
+        );
+    }
+
+    #[test]
+    fn flight_segment_uniqueness_and_subtype_checks_hold() {
+        let conn = open_in_memory().unwrap();
+        conn.execute(
+            "INSERT INTO interactions (id, kind, title) VALUES ('i1', 'event', 'Flight')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO interaction_event_flight_segments
+             (interaction_id, segment_index, origin_code, destination_code)
+             VALUES ('i1', 0, 'LHR', 'AUS')",
+            [],
+        )
+        .unwrap();
+        let duplicate_segment = conn.execute(
+            "INSERT INTO interaction_event_flight_segments
+             (interaction_id, segment_index, origin_code, destination_code)
+             VALUES ('i1', 0, 'AUS', 'LAX')",
+            [],
+        );
+        assert!(
+            duplicate_segment.is_err(),
+            "segment_index is unique per interaction"
+        );
+
+        let invalid_subtype = conn.execute(
+            "INSERT INTO interaction_event_details (interaction_id, subtype)
+             VALUES ('i1', 'concert')",
+            [],
+        );
+        assert!(
+            invalid_subtype.is_err(),
+            "event subtype is intentionally constrained"
+        );
     }
 
     #[test]

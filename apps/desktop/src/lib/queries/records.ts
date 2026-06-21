@@ -8,6 +8,7 @@ import {
   getDocumentLinks,
   getGraph,
   getInteraction,
+  getInteractionEventDetail,
   getInteractionLinks,
   getOrganization,
   getOrganizationLinks,
@@ -135,6 +136,13 @@ export function useInteractionParticipants(id: string) {
   return useQuery({
     queryKey: ['interaction', id, 'participants'],
     queryFn: () => listInteractionParticipants(id),
+  })
+}
+
+export function useInteractionEventDetail(id: string) {
+  return useQuery({
+    queryKey: ['interaction', id, 'event-detail'],
+    queryFn: () => getInteractionEventDetail(id).then((eventDetail) => eventDetail ?? null),
   })
 }
 
