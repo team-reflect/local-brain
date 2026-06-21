@@ -1,12 +1,22 @@
 import type { ReactNode } from 'react'
+import { RefreshCw, Sparkles } from 'lucide-react'
+import type { DailyBriefNote } from '@local-brain/core'
+import { Alert } from '../components/alert'
+import { Button } from '../components/button'
+import { ChatMarkdown } from '../components/chat/chat-markdown'
 import { PageHead } from '../components/page-head'
 import { Section } from '../components/section'
 import { EmptyState } from '../components/empty-state'
+import { Loading } from '../components/loading'
 import { SuggestionsList } from '../components/suggestions-list'
-import { sectionLabel } from '../lib/ui'
+import { metaText, sectionLabel } from '../lib/ui'
+import { cn } from '../lib/utils'
 import { useRouter } from '../routing/router'
 import {
+  useDailyBriefNote,
+  useGenerateDailyBrief,
   useInteractions,
+  useModelSettings,
   useProjects,
   useSelf,
   useTasks,
@@ -19,6 +29,9 @@ export function TodaySurface(): ReactNode {
   const openTasks = useTasks({ status: 'open', limit: 6 })
   const interactions = useInteractions(5)
   const projects = useProjects()
+  const modelSettings = useModelSettings()
+  const dailyBrief = useDailyBriefNote()
+  const generateBrief = useGenerateDailyBrief()
 
   const name = self.data?.preferredName ?? self.data?.fullName ?? 'there'
 
@@ -26,14 +39,16 @@ export function TodaySurface(): ReactNode {
     <div className="mx-auto flex max-w-3xl flex-col gap-7">
       <PageHead eyebrow={todayLabel()} title={`Good to see you, ${name}`} />
 
-      <div className="rounded-lg border border-border bg-card px-4 py-3.5">
-        <p className={sectionLabel}>Daily brief</p>
-        <p className="mt-1.5 text-sm text-foreground">
-          Your AI daily brief lands here once retrieval is wired up (Plan 06). For now,
-          Today reads your open tasks, recent interactions, and active projects straight
-          from the local brain.
-        </p>
-      </div>
+      <DailyBriefPanel
+        note={dailyBrief.data ?? null}
+        loading={dailyBrief.isPending}
+        generating={generateBrief.isPending}
+        error={generateBrief.error}
+        providersReady={Boolean(modelSettings.data && modelSettings.data.providers.length > 0)}
+        settingsLoading={modelSettings.isPending}
+        onGenerate={() => generateBrief.mutate()}
+        onConfigure={() => navigate({ kind: 'settings', section: 'ai-providers' })}
+      />
 
       <Section title="Open tasks">
         {openTasks.data && openTasks.data.length > 0 ? (
@@ -111,6 +126,83 @@ export function TodaySurface(): ReactNode {
       </Section>
     </div>
   )
+}
+
+function DailyBriefPanel({
+  note,
+  loading,
+  generating,
+  error,
+  providersReady,
+  settingsLoading,
+  onGenerate,
+  onConfigure,
+}: {
+  note: DailyBriefNote | null
+  loading: boolean
+  generating: boolean
+  error: Error | null
+  providersReady: boolean
+  settingsLoading: boolean
+  onGenerate: () => void
+  onConfigure: () => void
+}): ReactNode {
+  const hasBrief = note !== null
+  const disabled = loading || generating || settingsLoading
+  const action = providersReady ? (
+    <Button size="sm" variant={hasBrief ? 'outline' : 'primary'} disabled={disabled} onClick={onGenerate}>
+      {hasBrief ? (
+        <RefreshCw aria-hidden className={cn('size-3.5', generating && 'animate-spin')} />
+      ) : (
+        <Sparkles aria-hidden className="size-3.5" />
+      )}
+      {hasBrief ? 'Regenerate' : 'Generate'}
+    </Button>
+  ) : (
+    <Button size="sm" variant="primary" disabled={settingsLoading} onClick={onConfigure}>
+      Add provider
+    </Button>
+  )
+
+  return (
+    <section className="rounded-lg border border-border bg-card px-4 py-3.5">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className={sectionLabel}>Daily brief</p>
+          {note?.generatedAt ? (
+            <p className={cn(metaText, 'mt-1')}>Generated {formatGeneratedAt(note.generatedAt)}</p>
+          ) : null}
+        </div>
+        {action}
+      </div>
+
+      {error ? (
+        <Alert variant="error" className="mt-3">
+          {error.message}
+        </Alert>
+      ) : null}
+
+      {loading ? (
+        <Loading className="mt-3" />
+      ) : hasBrief ? (
+        <ChatMarkdown text={note.content} className="mt-3" />
+      ) : (
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">
+          Generate a grounded brief from today&apos;s tasks, active projects, and recent
+          interactions.
+        </p>
+      )}
+    </section>
+  )
+}
+
+function formatGeneratedAt(value: string): string {
+  return new Date(value).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
 }
 
 function todayLabel(): string {

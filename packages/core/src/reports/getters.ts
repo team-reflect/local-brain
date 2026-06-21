@@ -1,5 +1,5 @@
 import { db } from '../db/client'
-import { nowIso } from '../db/time'
+import { localDateString, nowIso } from '../db/time'
 import type { Task } from '../domains/tasks/getters'
 
 /**
@@ -62,7 +62,7 @@ export interface DailyBriefOptions {
 }
 
 function dayKey(date: Date): string {
-  return date.toISOString().slice(0, 10)
+  return localDateString(date)
 }
 
 function bucketFor(task: { dueAt: string | null; scheduledFor: string | null }, now: Date, soonDays: number): TaskBucket {

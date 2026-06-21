@@ -453,6 +453,14 @@ export {
   type PlanDayOptions,
   type ChangedRecord,
 } from './reports'
+export {
+  DAILY_BRIEF_NOTE_KIND,
+  DAILY_BRIEF_SUBJECT_TYPE,
+  latestDailyBriefNote,
+  saveDailyBriefNote,
+  type DailyBriefNote,
+  type SaveDailyBriefNoteInput,
+} from './reports/daily-brief-note'
 
 // Ingestion (paste/import → document/interaction + chunks + links)
 export { normalizeText, chunkText, type Chunk, type ChunkOptions } from './ingest/chunk'
