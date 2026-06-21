@@ -314,7 +314,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(hash.as_deref(), Some(content_hash("the original body text").as_str()));
+        assert_eq!(
+            hash.as_deref(),
+            Some(content_hash("the original body text").as_str())
+        );
     }
 
     #[test]
@@ -343,7 +346,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(second_text, "a completely different body");
-        assert_ne!(first, second_hash, "changed text must change the stored hash");
+        assert_ne!(
+            first, second_hash,
+            "changed text must change the stored hash"
+        );
         assert_eq!(second_hash, content_hash("a completely different body"));
     }
 }

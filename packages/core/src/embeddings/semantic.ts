@@ -1,5 +1,6 @@
 import { sql } from 'kysely'
 import { db } from '../db/client'
+import { chunkRecordJoins, chunkRecordTitle, chunkVisibilityFilter } from '../retrieval/chunk-sources'
 import type { RetrievedChunk, SourceRecordType } from '../retrieval/retrieve'
 import { EMBEDDING_MODEL_ID } from './model'
 
@@ -70,52 +71,13 @@ export async function semanticHits(
       cc.record_type  AS "recordType",
       cc.record_id    AS "recordId",
       cc.chunk_index  AS "chunkIndex",
-      COALESCE(
-        p.full_name,
-        o.name,
-        op.one_line_description,
-        pr.name,
-        t.title,
-        d.title,
-        i.title,
-        transcript_interaction.title,
-        an.title,
-        ef.key,
-        m.claim,
-        a.original_filename,
-        a.storage_path
-      ) AS "recordTitle",
+      ${chunkRecordTitle} AS "recordTitle",
       knn.distance               AS "distance"
     FROM knn
     JOIN chunk_embeddings ce ON ce.id = knn.rowid AND ce.model_id = ${EMBEDDING_MODEL_ID}
     JOIN content_chunks cc   ON cc.id = ce.chunk_id
-    LEFT JOIN people p ON p.id = cc.record_id AND cc.record_type = 'person'
-    LEFT JOIN organizations o ON o.id = cc.record_id AND cc.record_type = 'organization'
-    LEFT JOIN organization_profiles op ON op.id = cc.record_id AND cc.record_type = 'organization_profile'
-    LEFT JOIN projects pr ON pr.id = cc.record_id AND cc.record_type = 'project'
-    LEFT JOIN tasks t ON t.id = cc.record_id AND cc.record_type = 'task'
-    LEFT JOIN documents d ON d.id = cc.record_id AND cc.record_type = 'document'
-    LEFT JOIN interactions i ON i.id = cc.record_id AND cc.record_type = 'interaction'
-    LEFT JOIN interaction_transcripts tr ON tr.id = cc.record_id AND cc.record_type = 'interaction_transcript'
-    LEFT JOIN interactions transcript_interaction ON transcript_interaction.id = tr.interaction_id
-    LEFT JOIN ai_notes an ON an.id = cc.record_id AND cc.record_type = 'ai_note'
-    LEFT JOIN extracted_facts ef ON ef.id = cc.record_id AND cc.record_type = 'extracted_fact'
-    LEFT JOIN memories m ON m.id = cc.record_id AND cc.record_type = 'memory'
-    LEFT JOIN assets a ON a.id = cc.record_id AND cc.record_type = 'asset'
-    WHERE (
-        (cc.record_type = 'person' AND p.archived_at IS NULL)
-        OR (cc.record_type = 'organization' AND o.archived_at IS NULL)
-        OR (cc.record_type = 'organization_profile' AND op.id IS NOT NULL)
-        OR (cc.record_type = 'project' AND pr.archived_at IS NULL)
-        OR (cc.record_type = 'task' AND t.archived_at IS NULL)
-        OR (cc.record_type = 'document' AND d.archived_at IS NULL)
-        OR (cc.record_type = 'interaction' AND i.archived_at IS NULL)
-        OR (cc.record_type = 'interaction_transcript' AND tr.id IS NOT NULL AND transcript_interaction.archived_at IS NULL)
-        OR (cc.record_type = 'ai_note' AND an.id IS NOT NULL)
-        OR (cc.record_type = 'extracted_fact' AND ef.archived_at IS NULL)
-        OR (cc.record_type = 'memory' AND m.archived_at IS NULL)
-        OR (cc.record_type = 'asset' AND a.archived_at IS NULL)
-      )
+    ${chunkRecordJoins}
+    WHERE ${chunkVisibilityFilter}
       ${recordTypeFilter}
     ORDER BY knn.distance
   `.execute(db)
