@@ -14,6 +14,10 @@ interface CorrectionContext {
   recordId: string
 }
 
+function contextKindLabel(kind: string): string {
+  return kind.replace(/[_-]+/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
 function MemoryCard({
   memory,
   correction,
@@ -32,7 +36,7 @@ function MemoryCard({
         <div>
           <p className="text-sm text-foreground">{memory.claim}</p>
           <div className="mt-0.5 flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
-            <span>{memory.kind}</span>
+            <span>{contextKindLabel(memory.kind)}</span>
             {memory.confidence !== null ? (
               <span>· {Math.round(memory.confidence * 100)}% confidence</span>
             ) : null}
@@ -75,9 +79,9 @@ function MemoryCard({
 }
 
 /**
- * Memories about a record, each with the evidence that grounds it. Pass
+ * Curated context about a record, each with the evidence that grounds it. Pass
  * `recordType`/`recordId` to enable in-place corrections (Plan 05b): unlink the
- * memory from this record, archive it, or remove a wrong citation.
+ * claim from this record, archive it, or remove a wrong citation.
  */
 export function MemoryList({
   records,
@@ -92,7 +96,7 @@ export function MemoryList({
   const correction =
     recordType !== undefined && recordId !== undefined ? { recordType, recordId } : undefined
   return (
-    <Section title="Memories">
+    <Section title="Known context">
       <ul className="flex flex-col gap-3">
         {records.map((memory) => (
           <MemoryCard key={memory.id} memory={memory} correction={correction} />

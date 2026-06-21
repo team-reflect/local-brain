@@ -14,7 +14,6 @@ import {
   getPerson,
   getPersonLinks,
   getProject,
-  getProjectIntelligence,
   getProjectLinks,
   getSelf,
   getTask,
@@ -90,13 +89,6 @@ export function useCreateProject() {
 
 export function useProject(id: string) {
   return useQuery({ queryKey: ['project', id], queryFn: () => getProject(id).then((p) => p ?? null) })
-}
-
-export function useProjectIntelligence(id: string) {
-  return useQuery({
-    queryKey: ['project', id, 'intelligence'],
-    queryFn: () => getProjectIntelligence(id),
-  })
 }
 
 export function useTasks(options: ListTasksOptions = {}) {

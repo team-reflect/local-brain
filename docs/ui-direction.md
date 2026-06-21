@@ -83,7 +83,7 @@ Tasks
 Network
   - Graph tab
     - user-centered graph
-    - people, organizations, projects, tasks, documents, and memories as nodes
+    - people, organizations, projects, tasks, documents, and known context as nodes
     - interactions as weighted links between people, summarized by count and recency
     - optional filters by node type, interaction recency, relationship strength, and project
     - click a node to open the related detail page

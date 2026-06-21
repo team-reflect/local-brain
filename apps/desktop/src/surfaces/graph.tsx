@@ -46,7 +46,7 @@ const KIND_LABEL: Record<GraphFilterKind, string> = {
   task: 'Tasks',
   document: 'Documents',
   interaction: 'Interactions',
-  memory: 'Memories',
+  memory: 'Known context',
 }
 
 const ALL_KINDS = Object.keys(KIND_LABEL) as GraphFilterKind[]
@@ -94,7 +94,7 @@ function routeForNode(node: PositionedNode): Route | null {
 
 function actionLabelForNode(node: PositionedNode): string {
   const kind = node.kind === 'self' ? 'person' : node.kind
-  return kind === 'memory' ? `Memory ${node.label}` : `Open ${kind} ${node.label}`
+  return kind === 'memory' ? `Context ${node.label}` : `Open ${kind} ${node.label}`
 }
 
 function clip(label: string): string {
