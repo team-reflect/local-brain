@@ -161,6 +161,26 @@ function installProfileBridge(): void {
             created_at: '2026-06-10T00:00:00.000Z',
             updated_at: '2026-06-10T00:00:00.000Z',
           },
+          {
+            id: 'op-secret-id',
+            organization_id: 'org1',
+            model: null,
+            prompt_fingerprint: null,
+            canonical_name: null,
+            website: null,
+            one_line_description: null,
+            category: null,
+            why_it_matters: null,
+            offerings_json: null,
+            notable_people_json: null,
+            suggested_tags_json: null,
+            review_flags_json: null,
+            source_urls_json: null,
+            raw_enrichment_json: null,
+            researched_at: null,
+            created_at: '2026-06-09T00:00:00.000Z',
+            updated_at: '2026-06-09T00:00:00.000Z',
+          },
         ]
       }
       if (sql.includes('from "record_provenance"')) {
@@ -248,6 +268,10 @@ describe('network detail profile sheets', () => {
     expect(screen.getByText('Useful context for technical partnerships.')).toBeDefined()
     expect(screen.getByText('Analysis tools')).toBeDefined()
     expect(screen.getByText('verify funding')).toBeDefined()
+    expect(screen.getByText('Profile created 2026-06-10')).toBeDefined()
+    expect(screen.getAllByText('Updated 2026-06-10').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Organization profile').length).toBeGreaterThan(0)
+    expect(screen.queryByText(/op-secret-id/)).toBeNull()
     expect(screen.getAllByText('external-1').length).toBeGreaterThan(0)
   })
 })

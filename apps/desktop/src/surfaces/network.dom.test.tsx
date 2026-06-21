@@ -65,7 +65,7 @@ describe('NetworkSurface', () => {
     expect(listNav.className).not.toContain('top-9')
   })
 
-  it('keeps person and organization detail sheets wide enough for record details', () => {
+  it('sizes person and organization detail sheets for their content density', () => {
     installFakeBridge({ queryRows: [] })
 
     const person = renderWithProviders(
@@ -75,6 +75,7 @@ describe('NetworkSurface', () => {
 
     expect(personDrawer).not.toBeNull()
     expect(personDrawer?.className).toContain('min-w-[36rem]')
+    expect(personDrawer?.className).toContain('w-[min(40rem,calc(100vw-4rem))]')
 
     person.unmount()
 
@@ -84,6 +85,7 @@ describe('NetworkSurface', () => {
     const organizationDrawer = document.querySelector('[data-slot="drawer-content"]')
 
     expect(organizationDrawer).not.toBeNull()
-    expect(organizationDrawer?.className).toContain('min-w-[36rem]')
+    expect(organizationDrawer?.className).toContain('min-w-[44rem]')
+    expect(organizationDrawer?.className).toContain('w-[min(52rem,calc(100vw-4rem))]')
   })
 })

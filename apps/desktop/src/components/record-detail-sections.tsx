@@ -306,6 +306,10 @@ export function OrganizationProfilesSection({
         {latest.promptFingerprint ? (
           <p className={metaText}>Prompt {latest.promptFingerprint}</p>
         ) : null}
+        <div className="flex flex-wrap gap-x-3 gap-y-1">
+          <span className={metaText}>Profile created {trimDate(latest.createdAt)}</span>
+          <span className={metaText}>Updated {trimDate(latest.updatedAt)}</span>
+        </div>
         {older.length > 0 ? (
           <div>
             <p className={sectionLabel}>Older profiles</p>
@@ -313,7 +317,7 @@ export function OrganizationProfilesSection({
               {older.map((profile) => (
                 <li key={profile.id} className="flex items-center justify-between gap-3 py-2">
                   <span className="min-w-0 truncate text-sm text-foreground">
-                    {profile.canonicalName ?? profile.oneLineDescription ?? profile.id}
+                    {profile.canonicalName ?? profile.oneLineDescription ?? 'Organization profile'}
                   </span>
                   <span className={cn('shrink-0', metaText)}>
                     {trimDate(profile.researchedAt) ?? trimDate(profile.createdAt)}
