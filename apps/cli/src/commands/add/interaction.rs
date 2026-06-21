@@ -4,7 +4,7 @@
 //! interaction is enriched (links, participants, identity, blank fields) rather
 //! than re-created.
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::json;
 
 use super::identity::{
@@ -36,6 +36,39 @@ pub struct AddInteractionArgs<'a> {
     pub self_participants: Vec<&'a str>,
     pub allow_duplicate: bool,
     pub replace_body: bool,
+    /// On a source-backed re-import whose body changed, re-chunk like
+    /// `--replace-body` instead of only filling blank fields. A no-op when the
+    /// stored body already matches, so a daily automation can pass it freely.
+    pub refresh: bool,
+}
+
+/// Whether the stored interaction's body differs from the incoming one, so a
+/// re-imported thread/transcript that grew can be detected and re-digested.
+/// Recomputes the stored body's hash rather than trusting `content_hash`: a null
+/// or stale hash column (e.g. a body written without one, or by another writer)
+/// would otherwise falsely report a change even when `body_text` already matches.
+fn body_changed(
+    conn: &Connection,
+    existing: &str,
+    incoming_hash: Option<&str>,
+) -> Result<bool, CliError> {
+    let Some(incoming_hash) = incoming_hash else {
+        return Ok(false);
+    };
+    let stored_body: Option<String> = conn
+        .query_row(
+            "SELECT body_text FROM interactions WHERE id = ?1",
+            params![existing],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten();
+    let stored_hash = stored_body
+        .as_deref()
+        .map(normalize_text)
+        .filter(|body| !body.is_empty())
+        .map(|body| content_hash(&body));
+    Ok(stored_hash.as_deref() != Some(incoming_hash))
 }
 
 fn find_duplicate_interaction(
@@ -87,46 +120,19 @@ fn enrich_duplicate_interaction(
     id: &str,
     args: &AddInteractionArgs,
 ) -> Result<(), CliError> {
-    conn.execute(
-        "UPDATE interactions
-         SET external_id = CASE
-               WHEN (external_id IS NULL OR trim(external_id) = '') AND ?1 IS NOT NULL
-               THEN ?1 ELSE external_id END,
-             original_url = CASE
-               WHEN (original_url IS NULL OR trim(original_url) = '') AND ?2 IS NOT NULL
-               THEN ?2 ELSE original_url END,
-             summary = CASE
-               WHEN (summary IS NULL OR trim(summary) = '') AND ?3 IS NOT NULL
-               THEN ?3 ELSE summary END,
-             occurred_at = CASE
-               WHEN (occurred_at IS NULL OR trim(occurred_at) = '') AND ?4 IS NOT NULL
-               THEN ?4 ELSE occurred_at END,
-             ended_at = CASE
-               WHEN (ended_at IS NULL OR trim(ended_at) = '') AND ?5 IS NOT NULL
-               THEN ?5 ELSE ended_at END,
-             location = CASE
-               WHEN (location IS NULL OR trim(location) = '') AND ?6 IS NOT NULL
-               THEN ?6 ELSE location END,
-             updated_at = CASE
-               WHEN ((external_id IS NULL OR trim(external_id) = '') AND ?1 IS NOT NULL)
-                 OR ((original_url IS NULL OR trim(original_url) = '') AND ?2 IS NOT NULL)
-                 OR ((summary IS NULL OR trim(summary) = '') AND ?3 IS NOT NULL)
-                 OR ((occurred_at IS NULL OR trim(occurred_at) = '') AND ?4 IS NOT NULL)
-                 OR ((ended_at IS NULL OR trim(ended_at) = '') AND ?5 IS NOT NULL)
-                 OR ((location IS NULL OR trim(location) = '') AND ?6 IS NOT NULL)
-               THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE updated_at END
-         WHERE id = ?7",
-        params![
-            normalize_optional(args.external_id),
-            normalize_optional(args.original_url),
-            normalize_optional(args.summary),
-            normalize_optional(args.occurred_at),
-            normalize_optional(args.ended_at),
-            normalize_optional(args.location),
-            id,
+    super::fill_blanks(
+        conn,
+        "interactions",
+        id,
+        &[
+            ("external_id", normalize_optional(args.external_id)),
+            ("original_url", normalize_optional(args.original_url)),
+            ("summary", normalize_optional(args.summary)),
+            ("occurred_at", normalize_optional(args.occurred_at)),
+            ("ended_at", normalize_optional(args.ended_at)),
+            ("location", normalize_optional(args.location)),
         ],
-    )?;
-    Ok(())
+    )
 }
 
 /// Apply a duplicate import onto an existing interaction: fill blank fields, add
@@ -457,6 +463,7 @@ fn report_interaction(
     duplicate: bool,
     chunk_count: usize,
     post_analysis_required: bool,
+    body_changed: bool,
 ) -> Result<(), CliError> {
     if json_output {
         let mut value = json!({
@@ -465,6 +472,11 @@ fn report_interaction(
             "isDuplicate": duplicate,
             "chunkCount": chunk_count,
         });
+        if body_changed {
+            // The upstream body differs from the stored one. Re-import with
+            // --replace-body (or --refresh) to re-digest the grown thread.
+            value["bodyChanged"] = json!(true);
+        }
         if post_analysis_required {
             value["postAnalysisRequired"] = json!(true);
             value["postAnalysisChecklist"] = json!([
@@ -530,6 +542,8 @@ pub fn add_interaction(
     )?;
     if let Some(existing) = existing_by_external.as_deref() {
         if !args.allow_duplicate {
+            let changed = body_changed(conn, existing, hash.as_deref())?;
+            let do_replace = args.replace_body || (args.refresh && changed);
             let tx = conn.transaction()?;
             let count = enrich_existing_interaction(
                 &tx,
@@ -537,10 +551,19 @@ pub fn add_interaction(
                 &args,
                 source_id.as_deref(),
                 &identity_kind,
-                args.replace_body,
+                do_replace,
             )?;
             tx.commit()?;
-            return report_interaction(json, existing, true, count, requires_post_analysis(&args));
+            // Surface staleness only when we didn't already re-digest the body.
+            let still_stale = changed && !do_replace;
+            return report_interaction(
+                json,
+                existing,
+                true,
+                count,
+                requires_post_analysis(&args),
+                still_stale,
+            );
         }
     }
     let existing_by_dup = match hash.as_deref() {
@@ -555,6 +578,8 @@ pub fn add_interaction(
     };
     if let Some(existing) = existing_by_dup.as_deref() {
         if !args.allow_duplicate {
+            // This path matched on identical content_hash, so the body is byte-for-
+            // byte the same — never stale.
             let tx = conn.transaction()?;
             let count = enrich_existing_interaction(
                 &tx,
@@ -565,7 +590,14 @@ pub fn add_interaction(
                 args.replace_body,
             )?;
             tx.commit()?;
-            return report_interaction(json, existing, true, count, requires_post_analysis(&args));
+            return report_interaction(
+                json,
+                existing,
+                true,
+                count,
+                requires_post_analysis(&args),
+                false,
+            );
         }
     }
     // Reaching here past a match means `--allow-duplicate` forced a new record; it
@@ -611,7 +643,14 @@ pub fn add_interaction(
         },
     )?;
     tx.commit()?;
-    report_interaction(json, &id, false, count, requires_post_analysis(&args))
+    report_interaction(
+        json,
+        &id,
+        false,
+        count,
+        requires_post_analysis(&args),
+        false,
+    )
 }
 
 #[cfg(test)]
@@ -670,7 +709,119 @@ mod tests {
             self_participants: vec![],
             allow_duplicate,
             replace_body: false,
+            refresh: false,
         }
+    }
+
+    #[test]
+    fn body_changed_recomputes_from_body_text_ignoring_null_hash() {
+        let conn = brain_schema::open_in_memory().unwrap();
+        // A stored interaction with a body but NULL content_hash (e.g. written by
+        // another writer or a legacy path).
+        conn.execute(
+            "INSERT INTO interactions (id, kind, title, body_text, content_hash)
+             VALUES ('i1', 'email', 'T', 'shared body text', NULL)",
+            [],
+        )
+        .unwrap();
+        let same = content_hash(&normalize_text("shared body text"));
+        assert!(
+            !body_changed(&conn, "i1", Some(&same)).unwrap(),
+            "a matching body must not report a change despite the null stored hash"
+        );
+        let different = content_hash(&normalize_text("a genuinely different body"));
+        assert!(
+            body_changed(&conn, "i1", Some(&different)).unwrap(),
+            "a different body still reports a change"
+        );
+    }
+
+    #[test]
+    fn refresh_redigests_a_changed_thread_body() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // Seed a source-backed thread with an initial body.
+        add_interaction(
+            &mut conn,
+            true,
+            interaction_args("first body", Some("thr-1"), false),
+        )
+        .unwrap();
+        let id: String = conn
+            .query_row(
+                "SELECT entity_id FROM external_identities WHERE external_id = 'thr-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        // Re-import the same thread with a grown body and --refresh: the stored body
+        // and chunks must be replaced.
+        let mut grown = interaction_args("first body. and a new reply.", Some("thr-1"), false);
+        grown.refresh = true;
+        add_interaction(&mut conn, true, grown).unwrap();
+
+        let stored_body: String = conn
+            .query_row(
+                "SELECT body_text FROM interactions WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored_body, "first body. and a new reply.");
+        let chunk_has_reply: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM content_chunks
+                 WHERE record_type = 'interaction' AND record_id = ?1
+                   AND text LIKE '%new reply%'",
+                params![id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(chunk_has_reply, 1, "refresh re-chunks the grown body");
+    }
+
+    #[test]
+    fn registered_self_email_auto_resolves_participant_without_self_flag() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // Register the user's address on the self person.
+        crate::commands::add::set_self(
+            &mut conn,
+            true,
+            crate::commands::add::SetSelfArgs {
+                full_name: Some("Alex MacCaw"),
+                preferred_name: None,
+                emails: vec!["alex@maccaw.org"],
+                phones: vec![],
+                headline: None,
+                location: None,
+            },
+        )
+        .unwrap();
+        let self_id: String = conn
+            .query_row("SELECT id FROM people WHERE is_self = 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+
+        // Import an interaction with the user as a *plain* --participant (no
+        // --self-participant). Resolution by registered email must link it to self.
+        let mut args = interaction_args("body text", Some("ext-self"), false);
+        args.raw_participants = vec!["from:Alex MacCaw <alex@maccaw.org>"];
+        add_interaction(&mut conn, true, args).unwrap();
+
+        let resolved: Option<String> = conn
+            .query_row(
+                "SELECT person_id FROM interaction_participants
+                 WHERE normalized_handle = 'alex@maccaw.org'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            resolved.as_deref(),
+            Some(self_id.as_str()),
+            "a participant on a registered self address must resolve to the self person"
+        );
     }
 
     #[test]

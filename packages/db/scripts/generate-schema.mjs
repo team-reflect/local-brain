@@ -140,7 +140,8 @@ ${databaseFields}
 }
 
 function header() {
-  return `/**
+  return `/* eslint-disable max-lines -- generated; grows with the migration set */
+/**
  * GENERATED FILE — do not edit by hand.
  *
  * Regenerate with \`pnpm --filter @local-brain/db db:codegen\`, which replays

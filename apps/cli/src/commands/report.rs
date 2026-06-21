@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 
 use super::today;
@@ -243,6 +243,172 @@ pub fn changes(conn: &Connection, json: bool, since: &str, limit: usize) -> Resu
     });
     out.truncate(limit);
     emit(json, &json!({ "since": since, "changes": out }))
+}
+
+fn collect_strings(conn: &Connection, sql: &str, id: &str) -> Result<Vec<String>, CliError> {
+    let mut stmt = conn.prepare(sql)?;
+    let rows = stmt.query_map(params![id], |row| row.get::<_, String>(0))?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// `brain import-context` — the read-first context an importing agent needs in one
+/// call, so it can honor "query before you write" without a dozen separate reads:
+///   * `self` — the configured self person + known handles (so participants resolve
+///     to the user, and a `configured: false` flags that `brain self set` is needed),
+///   * `sources` — registered upstream slugs,
+///   * `projects` / `organizations` — existing records to LINK rather than fork
+///     (capped by `limit`; compare against `counts` to see if more exist),
+///   * `openSuggestions` — pending proposals, so nothing is re-suggested,
+///   * `imports` — the latest imported interaction per source (an incremental
+///     watermark to resume from),
+///   * `counts` — orientation totals.
+pub fn import_context(conn: &Connection, json: bool, limit: usize) -> Result<(), CliError> {
+    let limit = limit as i64;
+
+    let self_value = match conn
+        .query_row(
+            "SELECT id, full_name, primary_email FROM people
+             WHERE is_self = 1 AND archived_at IS NULL LIMIT 1",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .optional()?
+    {
+        Some((id, full_name, primary_email)) => {
+            let emails = collect_strings(
+                conn,
+                "SELECT email FROM person_emails WHERE person_id = ?1 ORDER BY is_primary DESC, email",
+                &id,
+            )?;
+            let phones = collect_strings(
+                conn,
+                "SELECT phone FROM person_phones WHERE person_id = ?1 ORDER BY is_primary DESC, phone",
+                &id,
+            )?;
+            let configured = primary_email.is_some() || !emails.is_empty();
+            json!({
+                "id": id,
+                "fullName": full_name,
+                "primaryEmail": primary_email,
+                "emails": emails,
+                "phones": phones,
+                "configured": configured,
+            })
+        }
+        None => Value::Null,
+    };
+
+    let mut stmt = conn.prepare("SELECT slug, name FROM sources ORDER BY slug")?;
+    let sources: Vec<Value> = stmt
+        .query_map([], |row| {
+            Ok(json!({ "slug": row.get::<_, String>(0)?, "name": row.get::<_, String>(1)? }))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    drop(stmt);
+
+    let mut stmt = conn.prepare(
+        "SELECT id, name, status FROM projects
+         WHERE archived_at IS NULL
+         ORDER BY (status = 'active') DESC, name ASC
+         LIMIT ?1",
+    )?;
+    let projects: Vec<Value> = stmt
+        .query_map(params![limit], |row| {
+            Ok(json!({
+                "id": row.get::<_, String>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "status": row.get::<_, String>(2)?,
+            }))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    drop(stmt);
+
+    let mut stmt = conn.prepare(
+        "SELECT id, name, domain FROM organizations
+         WHERE archived_at IS NULL
+         ORDER BY updated_at DESC, name ASC
+         LIMIT ?1",
+    )?;
+    let organizations: Vec<Value> = stmt
+        .query_map(params![limit], |row| {
+            Ok(json!({
+                "id": row.get::<_, String>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "domain": row.get::<_, Option<String>>(2)?,
+            }))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    drop(stmt);
+
+    let mut stmt = conn.prepare(
+        "SELECT id, kind, title FROM suggestions
+         WHERE status = 'open'
+         ORDER BY created_at DESC, id DESC",
+    )?;
+    let open_suggestions: Vec<Value> = stmt
+        .query_map([], |row| {
+            Ok(json!({
+                "id": row.get::<_, String>(0)?,
+                "kind": row.get::<_, String>(1)?,
+                "title": row.get::<_, String>(2)?,
+            }))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    drop(stmt);
+
+    // Per-source import watermark: the newest imported interaction and how many,
+    // so an incremental import knows where to resume (e.g. "gmail newer_than …").
+    let mut stmt = conn.prepare(
+        "SELECT s.slug,
+                MAX(COALESCE(i.occurred_at, i.created_at)) AS latest,
+                COUNT(*) AS imported
+         FROM external_identities ei
+         JOIN sources s ON s.id = ei.source_id
+         JOIN interactions i ON i.id = ei.entity_id
+         WHERE ei.entity_type = 'interaction' AND i.archived_at IS NULL
+         GROUP BY s.slug
+         ORDER BY latest DESC",
+    )?;
+    let imports: Vec<Value> = stmt
+        .query_map([], |row| {
+            Ok(json!({
+                "source": row.get::<_, String>(0)?,
+                "latestAt": row.get::<_, Option<String>>(1)?,
+                "count": row.get::<_, i64>(2)?,
+            }))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    drop(stmt);
+
+    let count =
+        |sql: &str| -> Result<i64, CliError> { Ok(conn.query_row(sql, [], |row| row.get(0))?) };
+    let counts = json!({
+        "people": count("SELECT COUNT(*) FROM people WHERE archived_at IS NULL")?,
+        "organizations": count("SELECT COUNT(*) FROM organizations WHERE archived_at IS NULL")?,
+        "projects": count("SELECT COUNT(*) FROM projects WHERE archived_at IS NULL")?,
+        "interactions": count("SELECT COUNT(*) FROM interactions WHERE archived_at IS NULL")?,
+        "documents": count("SELECT COUNT(*) FROM documents WHERE archived_at IS NULL")?,
+        "openSuggestions": count("SELECT COUNT(*) FROM suggestions WHERE status = 'open'")?,
+    });
+
+    emit(
+        json,
+        &json!({
+            "self": self_value,
+            "sources": sources,
+            "projects": projects,
+            "organizations": organizations,
+            "openSuggestions": open_suggestions,
+            "imports": imports,
+            "counts": counts,
+        }),
+    )
 }
 
 /// Emit a brief either as JSON (stdout data) or a compact human summary.

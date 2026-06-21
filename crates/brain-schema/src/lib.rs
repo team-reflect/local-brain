@@ -21,7 +21,7 @@ pub const SUPPORT_DIRNAME: &str = ".local-brain";
 
 /// Bumped whenever a migration is appended below. Asserted against the applied
 /// `user_version` in tests so the constant can never drift from the list.
-pub const LATEST_SCHEMA_VERSION: usize = 10;
+pub const LATEST_SCHEMA_VERSION: usize = 12;
 
 /// The canonical filesystem layout for one Local Brain root directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,6 +61,10 @@ static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
             "../migrations/0009_remove_duplicate_project_links.sql"
         )),
         M::up(include_str!("../migrations/0010_restore_chat.sql")),
+        M::up(include_str!("../migrations/0011_suggestions.sql")),
+        M::up(include_str!(
+            "../migrations/0012_one_current_affiliation.sql"
+        )),
     ])
 });
 
@@ -419,6 +423,94 @@ mod tests {
     }
 
     #[test]
+    fn affiliations_enforce_a_single_current_employer() {
+        let conn = open_in_memory().unwrap();
+        conn.execute("INSERT INTO people (id, full_name) VALUES ('p1', 'Ada')", [])
+            .unwrap();
+        conn.execute("INSERT INTO organizations (id, name) VALUES ('o1', 'A')", [])
+            .unwrap();
+        conn.execute("INSERT INTO organizations (id, name) VALUES ('o2', 'B')", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO affiliations (id, person_id, organization_id, is_current) VALUES ('a1','p1','o1',1)",
+            [],
+        )
+        .unwrap();
+        // A second *current* affiliation for the same person violates the index.
+        let second = conn.execute(
+            "INSERT INTO affiliations (id, person_id, organization_id, is_current) VALUES ('a2','p1','o2',1)",
+            [],
+        );
+        assert!(
+            second.is_err(),
+            "a second current affiliation must violate the unique index"
+        );
+        // A non-current second affiliation is allowed.
+        conn.execute(
+            "INSERT INTO affiliations (id, person_id, organization_id, is_current) VALUES ('a3','p1','o2',0)",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn migration_0012_demotes_duplicate_current_affiliations() {
+        register_sqlite_vec().unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        MIGRATIONS.to_version(&mut conn, 11).unwrap();
+
+        conn.execute("INSERT INTO people (id, full_name) VALUES ('p1', 'Ada')", [])
+            .unwrap();
+        conn.execute("INSERT INTO organizations (id, name) VALUES ('o1', 'A')", [])
+            .unwrap();
+        conn.execute("INSERT INTO organizations (id, name) VALUES ('o2', 'B')", [])
+            .unwrap();
+        // Two current affiliations exist at v11 (e.g. written by another path).
+        conn.execute(
+            "INSERT INTO affiliations (id, person_id, organization_id, is_current, updated_at)
+             VALUES ('a1','p1','o1',1,'2026-01-01T00:00:00.000Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO affiliations (id, person_id, organization_id, is_current, updated_at)
+             VALUES ('a2','p1','o2',1,'2026-02-01T00:00:00.000Z')",
+            [],
+        )
+        .unwrap();
+
+        MIGRATIONS.to_latest(&mut conn).unwrap();
+
+        let current: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM affiliations WHERE person_id='p1' AND is_current=1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(current, 1, "duplicates are demoted to a single current");
+        // The most-recently-updated affiliation (a2 -> o2) survives, and the
+        // denormalized column is synced to it.
+        let survivor: String = conn
+            .query_row(
+                "SELECT organization_id FROM affiliations WHERE person_id='p1' AND is_current=1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(survivor, "o2");
+        let denorm: Option<String> = conn
+            .query_row(
+                "SELECT current_organization_id FROM people WHERE id='p1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(denorm.as_deref(), Some("o2"));
+    }
+
+    #[test]
     fn open_and_migrate_creates_the_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("brain.sqlite");
@@ -472,6 +564,8 @@ mod tests {
             "asset_search",
             "chat_conversations",
             "chat_messages",
+            "suggestions",
+            "suggestion_links",
         ];
         for table in durable {
             let count: i64 = conn

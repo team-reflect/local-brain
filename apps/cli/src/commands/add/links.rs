@@ -4,7 +4,7 @@
 
 use rusqlite::{params, Connection};
 
-use crate::commands::{EvidenceRef, LinkKind, LinkRef};
+use crate::commands::{to_like_pattern_lower, EvidenceLocator, EvidenceRef, LinkKind, LinkRef};
 use crate::error::CliError;
 use crate::id::new_id;
 use crate::text::chunk_text;
@@ -83,26 +83,75 @@ pub(super) fn insert_evidence_refs(
                 )));
             }
         };
-        let chunk_id = conn
-            .query_row(
-                "SELECT id FROM content_chunks
-                 WHERE record_type = ?1 AND record_id = ?2 AND chunk_index = ?3
-                 LIMIT 1",
-                params![record_type, reference.id, reference.chunk_index],
-                |row| row.get::<_, String>(0),
-            )
-            .map_err(|_| {
-                CliError::Runtime(format!(
-                    "could not find evidence chunk {record_type}:{}#{}",
-                    reference.id, reference.chunk_index
-                ))
-            })?;
+        let chunk_id = match &reference.locator {
+            EvidenceLocator::Chunk(chunk_index) => conn
+                .query_row(
+                    "SELECT id FROM content_chunks
+                     WHERE record_type = ?1 AND record_id = ?2 AND chunk_index = ?3
+                     LIMIT 1",
+                    params![record_type, reference.id, chunk_index],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(|_| {
+                    CliError::Runtime(format!(
+                        "could not find evidence chunk {record_type}:{}#{chunk_index}",
+                        reference.id
+                    ))
+                })?,
+            EvidenceLocator::Quote(quote) => {
+                // Resolve the lowest-index chunk whose text contains the quote
+                // (case-insensitive), so an agent can cite by phrase without
+                // knowing chunk boundaries. LIKE wildcards in the quote are escaped.
+                // A blank pattern or no matching chunk both collapse to the same
+                // "not found" error rather than silently matching everything.
+                let chunk = to_like_pattern_lower(quote).and_then(|pattern| {
+                    conn.query_row(
+                        "SELECT id FROM content_chunks
+                         WHERE record_type = ?1 AND record_id = ?2
+                           AND lower(text) LIKE ?3 ESCAPE '\\'
+                         ORDER BY chunk_index ASC
+                         LIMIT 1",
+                        params![record_type, reference.id, pattern],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .ok()
+                });
+                chunk.ok_or_else(|| {
+                    CliError::Runtime(format!(
+                        "could not find a {record_type}:{} chunk containing quote {quote:?}",
+                        reference.id
+                    ))
+                })?
+            }
+        };
         conn.execute(
             "INSERT INTO evidence_refs (id, subject_type, subject_id, chunk_id)
              VALUES (?1,?2,?3,?4)",
             params![new_id(), subject_type, subject_id, chunk_id],
         )?;
     }
+    Ok(())
+}
+
+/// Insert one `INSERT OR IGNORE` row into a two-id join table, mapping any SQL
+/// error to a readable "could not link {label}" message. `owner_col`/`other_col`
+/// are the table's two id columns. Every typed-link writer (documents,
+/// interactions, projects, organizations) funnels through here so the
+/// INSERT-OR-IGNORE boilerplate lives in one place; each writer keeps its own
+/// kind→table policy match because those policies genuinely differ.
+pub(super) fn insert_join_row(
+    conn: &Connection,
+    table: &str,
+    owner_col: &str,
+    owner_id: &str,
+    other_col: &str,
+    other_id: &str,
+    label: &str,
+) -> Result<(), CliError> {
+    let sql =
+        format!("INSERT OR IGNORE INTO {table} (id, {owner_col}, {other_col}) VALUES (?1,?2,?3)");
+    conn.execute(&sql, params![new_id(), owner_id, other_id])
+        .map_err(|e| CliError::Runtime(format!("could not link {label}: {e}")))?;
     Ok(())
 }
 
@@ -115,11 +164,7 @@ pub(super) fn insert_links(
 ) -> Result<(), CliError> {
     for link in links {
         let (table, owner_col, other_col, other) = link_table(owner, link)?;
-        let sql = format!(
-            "INSERT OR IGNORE INTO {table} (id, {owner_col}, {other_col}) VALUES (?1,?2,?3)"
-        );
-        conn.execute(&sql, params![new_id(), owner_id, link.id])
-            .map_err(|e| CliError::Runtime(format!("could not link {other}: {e}")))?;
+        insert_join_row(conn, table, owner_col, owner_id, other_col, &link.id, other)?;
     }
     Ok(())
 }
@@ -170,4 +215,68 @@ fn link_table(
         }
     };
     Ok(table)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn seed_two_chunks(conn: &Connection) {
+        conn.execute(
+            "INSERT INTO interactions (id, title) VALUES ('i1', 'Thread')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO content_chunks (id, record_type, record_id, chunk_index, text)
+             VALUES ('c0','interaction','i1',0,'intro about the living room light fixture')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO content_chunks (id, record_type, record_id, chunk_index, text)
+             VALUES ('c1','interaction','i1',1,'the Powder Bathroom sink decision and lead times')",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn quote_evidence_resolves_to_the_containing_chunk_case_insensitively() {
+        let conn = brain_schema::open_in_memory().unwrap();
+        seed_two_chunks(&conn);
+        let evidence = vec![EvidenceRef {
+            kind: LinkKind::Interaction,
+            id: "i1".into(),
+            locator: EvidenceLocator::Quote("powder bathroom SINK".into()),
+        }];
+        insert_evidence_refs(&conn, "memory", "m1", &evidence).unwrap();
+        let chunk_id: String = conn
+            .query_row(
+                "SELECT chunk_id FROM evidence_refs WHERE subject_id = 'm1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            chunk_id, "c1",
+            "quote resolves to the chunk that contains it"
+        );
+    }
+
+    #[test]
+    fn quote_with_no_match_errors_clearly() {
+        let conn = brain_schema::open_in_memory().unwrap();
+        seed_two_chunks(&conn);
+        let evidence = vec![EvidenceRef {
+            kind: LinkKind::Interaction,
+            id: "i1".into(),
+            locator: EvidenceLocator::Quote("a phrase that appears nowhere".into()),
+        }];
+        let result = insert_evidence_refs(&conn, "memory", "m1", &evidence);
+        assert!(
+            result.is_err(),
+            "an unmatched quote must error, not silently skip"
+        );
+    }
 }

@@ -2961,3 +2961,422 @@ fn read_commands_fail_clearly_with_no_database() {
     assert_eq!(out.status.code(), Some(4)); // NoDatabase exit code
     assert!(String::from_utf8_lossy(&out.stderr).contains("no brain database"));
 }
+
+#[test]
+fn self_set_and_show_json_contract() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let set = run_json(
+        &db,
+        &[
+            "--json",
+            "self",
+            "set",
+            "--full-name",
+            "Alex MacCaw",
+            "--email",
+            "alex@maccaw.org",
+            "--email",
+            "me@work.com",
+        ],
+    );
+    assert_eq!(set["isSelf"], true);
+    assert_eq!(set["fullName"], "Alex MacCaw");
+    assert_eq!(set["emails"].as_array().unwrap().len(), 2);
+
+    let show = run_json(&db, &["--json", "self", "show"]);
+    assert_eq!(show["primaryEmail"], "alex@maccaw.org");
+    assert_eq!(show["isSelf"], true);
+}
+
+#[test]
+fn add_organization_json_contract_and_dedupe() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "organization",
+            "--name",
+            "Evensen Design",
+            "--domain",
+            "evensendesign.com",
+        ],
+    );
+    assert_eq!(first["kind"], "organization");
+    assert_eq!(first["isDuplicate"], false);
+
+    // Same name (different spacing/casing) dedupes; same domain too.
+    let by_name = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "organization",
+            "--name",
+            "  evensen   design ",
+        ],
+    );
+    assert_eq!(by_name["isDuplicate"], true);
+    assert_eq!(by_name["id"], first["id"]);
+    let by_domain = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "organization",
+            "--name",
+            "Evensen Studio",
+            "--domain",
+            "www.evensendesign.com",
+        ],
+    );
+    assert_eq!(by_domain["id"], first["id"]);
+}
+
+#[test]
+fn affiliate_json_contract_and_missing_person_is_not_found() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let person = run_json(
+        &db,
+        &["--json", "add", "person", "--full-name", "Lisa Freeman"],
+    );
+    let org = run_json(
+        &db,
+        &["--json", "add", "organization", "--name", "Evensen Design"],
+    );
+    let pid = person["id"].as_str().unwrap();
+    let oid = org["id"].as_str().unwrap();
+
+    let aff = run_json(
+        &db,
+        &[
+            "--json",
+            "affiliate",
+            "--person",
+            pid,
+            "--org",
+            oid,
+            "--title",
+            "Lead Designer",
+            "--current",
+        ],
+    );
+    assert_eq!(aff["kind"], "affiliation");
+    assert_eq!(aff["isCurrent"], true);
+
+    let out = run(
+        &db,
+        &["--json", "affiliate", "--person", "nope", "--org", oid],
+    );
+    assert_eq!(out.status.code(), Some(3), "missing person is not_found");
+}
+
+#[test]
+fn suggest_project_accept_and_dedupe_json_contract() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let interaction = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Thread",
+            "--text",
+            "design body",
+        ],
+    );
+    let iid = interaction["id"].as_str().unwrap();
+    let link = format!("interaction:{iid}");
+
+    let suggestion = run_json(
+        &db,
+        &[
+            "--json",
+            "suggest",
+            "project",
+            "--title",
+            "West Elizabeth",
+            "--link",
+            &link,
+        ],
+    );
+    assert_eq!(suggestion["status"], "open");
+    let sid = suggestion["id"].as_str().unwrap().to_string();
+
+    let list = run_json(&db, &["--json", "suggest", "list"]);
+    assert_eq!(list["suggestions"].as_array().unwrap().len(), 1);
+
+    let accepted = run_json(&db, &["--json", "suggest", "accept", &sid]);
+    assert_eq!(accepted["status"], "accepted");
+    assert_eq!(accepted["recordType"], "project");
+
+    // Re-proposing an already-accepted title dedupes rather than forking.
+    let again = run_json(
+        &db,
+        &[
+            "--json",
+            "suggest",
+            "project",
+            "--title",
+            "west   elizabeth",
+        ],
+    );
+    assert_eq!(again["isDuplicate"], true);
+    // Accepting/dismissing a non-open suggestion errors.
+    let out = run(&db, &["--json", "suggest", "dismiss", &sid]);
+    assert!(!out.status.success());
+}
+
+#[test]
+fn interaction_refresh_reports_body_changed_then_redigests() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    // gmail source is seeded by the schema; thread import is source-backed.
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Thread",
+            "--source",
+            "gmail",
+            "--external-kind",
+            "thread",
+            "--external-id",
+            "thr-1",
+            "--text",
+            "first body",
+        ],
+    );
+    assert_eq!(first["isDuplicate"], false);
+
+    // Grown body, no --refresh: detected (bodyChanged) but not mutated.
+    let changed = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Thread",
+            "--source",
+            "gmail",
+            "--external-kind",
+            "thread",
+            "--external-id",
+            "thr-1",
+            "--text",
+            "first body and a new reply",
+        ],
+    );
+    assert_eq!(changed["isDuplicate"], true);
+    assert_eq!(changed["bodyChanged"], true);
+
+    // With --refresh: re-digest, and the staleness flag is consumed.
+    let refreshed = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Thread",
+            "--source",
+            "gmail",
+            "--external-kind",
+            "thread",
+            "--external-id",
+            "thr-1",
+            "--refresh",
+            "--text",
+            "first body and a new reply",
+        ],
+    );
+    assert_eq!(refreshed["isDuplicate"], true);
+    assert!(
+        refreshed.get("bodyChanged").is_none(),
+        "refresh re-digested, so no stale signal: {refreshed}"
+    );
+}
+
+#[test]
+fn remember_evidence_by_quote_resolves_chunk() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let interaction = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "note",
+            "--title",
+            "T",
+            "--text",
+            "intro line. the Powder Bathroom sink decision and lead times.",
+        ],
+    );
+    let iid = interaction["id"].as_str().unwrap();
+    let link = format!("interaction:{iid}");
+    let good = format!("interaction:{iid}~Powder Bathroom sink");
+    let memory = run_json(
+        &db,
+        &[
+            "--json",
+            "remember",
+            "--kind",
+            "fact",
+            "--claim",
+            "Order the sink soon",
+            "--link",
+            &link,
+            "--evidence",
+            &good,
+        ],
+    );
+    assert_eq!(memory["kind"], "memory");
+    assert_eq!(memory["evidence"], 1);
+
+    let bad = format!("interaction:{iid}~a phrase that is not present");
+    let out = run(
+        &db,
+        &[
+            "--json",
+            "remember",
+            "--kind",
+            "fact",
+            "--claim",
+            "x",
+            "--link",
+            &link,
+            "--evidence",
+            &bad,
+        ],
+    );
+    assert!(!out.status.success(), "an unmatched quote must error");
+}
+
+#[test]
+fn import_context_bundles_everything_an_import_needs() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+
+    // Empty brain: self is null, sources are seeded, counts are zero.
+    let empty = run_json(&db, &["--json", "import-context"]);
+    assert!(empty["self"].is_null(), "no self yet");
+    assert!(
+        empty["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["slug"] == "gmail"),
+        "seeded sources are listed"
+    );
+    assert_eq!(empty["counts"]["people"], 0);
+
+    // Populate: self, an existing project + org, a source-backed interaction, and an
+    // open suggestion.
+    run_json(
+        &db,
+        &[
+            "--json",
+            "self",
+            "set",
+            "--full-name",
+            "Alex MacCaw",
+            "--email",
+            "alex@maccaw.org",
+        ],
+    );
+    run_json(
+        &db,
+        &["--json", "add", "project", "--name", "Existing Project"],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "organization",
+            "--name",
+            "Evensen Design",
+            "--domain",
+            "evensendesign.com",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Thread",
+            "--source",
+            "gmail",
+            "--external-kind",
+            "thread",
+            "--external-id",
+            "thr-1",
+            "--occurred-at",
+            "2026-06-19T10:00:00Z",
+            "--text",
+            "body",
+        ],
+    );
+    run_json(
+        &db,
+        &["--json", "suggest", "project", "--title", "West Elizabeth"],
+    );
+
+    let ctx = run_json(&db, &["--json", "import-context"]);
+    assert_eq!(ctx["self"]["configured"], true);
+    assert_eq!(ctx["self"]["fullName"], "Alex MacCaw");
+    assert!(
+        ctx["projects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["name"] == "Existing Project"),
+        "existing projects are listed to link"
+    );
+    assert!(
+        ctx["organizations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|o| o["name"] == "Evensen Design"),
+        "existing organizations are listed to link"
+    );
+    assert_eq!(ctx["openSuggestions"].as_array().unwrap().len(), 1);
+
+    // Per-source watermark from the imported interaction.
+    let gmail = ctx["imports"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["source"] == "gmail")
+        .expect("gmail watermark present");
+    assert_eq!(gmail["latestAt"], "2026-06-19T10:00:00Z");
+    assert_eq!(gmail["count"], 1);
+    assert_eq!(ctx["counts"]["interactions"], 1);
+}

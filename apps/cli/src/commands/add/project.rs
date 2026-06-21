@@ -4,17 +4,15 @@
 //! inferred source topics.
 
 use rusqlite::{params, Connection};
-use serde_json::json;
 
 use super::identity::{
     external_kind, find_external_identity, insert_external_identity, source_id,
     ExternalIdentityWrite,
 };
-use super::text::{normalize_optional, normalize_title};
+use super::text::{normalize_name, normalize_optional, normalize_title};
 use crate::commands::{LinkKind, LinkRef};
 use crate::error::CliError;
 use crate::id::new_id;
-use crate::output::print_json;
 
 pub struct AddProjectArgs<'a> {
     pub name: &'a str,
@@ -33,25 +31,11 @@ pub struct AddProjectArgs<'a> {
 }
 
 fn find_duplicate_project(conn: &Connection, name: &str) -> Result<Option<String>, CliError> {
-    let name = normalize_title(Some(name));
-    let Some(name) = name else {
-        return Ok(None);
-    };
-    let mut stmt = conn.prepare(
-        "SELECT id, name FROM projects
-         WHERE archived_at IS NULL
-         ORDER BY created_at ASC, id ASC",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?;
-    for row in rows {
-        let (id, candidate) = row?;
-        if normalize_title(Some(&candidate)).as_deref() == Some(name.as_str()) {
-            return Ok(Some(id));
-        }
-    }
-    Ok(None)
+    // Dedupe on the case-/punctuation-folded name (`normalize_name`), matching
+    // people and organizations — and the suggestion dedupe key — so accepting a
+    // "west elizabeth" proposal reuses an existing "West Elizabeth" project instead
+    // of forking a case-variant duplicate. The display name keeps its original case.
+    super::find_by_normalized_name(conn, "projects", "name", name, normalize_name)
 }
 
 fn enrich_duplicate_project(
@@ -59,44 +43,21 @@ fn enrich_duplicate_project(
     id: &str,
     args: &AddProjectArgs,
 ) -> Result<(), CliError> {
-    conn.execute(
-        "UPDATE projects
-         SET kind = CASE
-               WHEN (kind IS NULL OR trim(kind) = '') AND ?1 IS NOT NULL
-               THEN ?1 ELSE kind END,
-             summary = CASE
-               WHEN (summary IS NULL OR trim(summary) = '') AND ?2 IS NOT NULL
-               THEN ?2 ELSE summary END,
-             notes = CASE
-               WHEN (notes IS NULL OR trim(notes) = '') AND ?3 IS NOT NULL
-               THEN ?3 ELSE notes END,
-             started_on = CASE
-               WHEN (started_on IS NULL OR trim(started_on) = '') AND ?4 IS NOT NULL
-               THEN ?4 ELSE started_on END,
-             target_date = CASE
-               WHEN (target_date IS NULL OR trim(target_date) = '') AND ?5 IS NOT NULL
-               THEN ?5 ELSE target_date END,
-             updated_at = CASE
-               WHEN ((kind IS NULL OR trim(kind) = '') AND ?1 IS NOT NULL)
-                 OR ((summary IS NULL OR trim(summary) = '') AND ?2 IS NOT NULL)
-                 OR ((notes IS NULL OR trim(notes) = '') AND ?3 IS NOT NULL)
-                 OR ((started_on IS NULL OR trim(started_on) = '') AND ?4 IS NOT NULL)
-                 OR ((target_date IS NULL OR trim(target_date) = '') AND ?5 IS NOT NULL)
-               THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE updated_at END
-         WHERE id = ?6",
-        params![
-            normalize_optional(args.kind),
-            normalize_optional(args.summary),
-            normalize_optional(args.notes),
-            normalize_optional(args.started_on),
-            normalize_optional(args.target_date),
-            id,
+    super::fill_blanks(
+        conn,
+        "projects",
+        id,
+        &[
+            ("kind", normalize_optional(args.kind)),
+            ("summary", normalize_optional(args.summary)),
+            ("notes", normalize_optional(args.notes)),
+            ("started_on", normalize_optional(args.started_on)),
+            ("target_date", normalize_optional(args.target_date)),
         ],
-    )?;
-    Ok(())
+    )
 }
 
-fn insert_project_links(
+pub(super) fn insert_project_links(
     conn: &Connection,
     project_id: &str,
     links: &[LinkRef],
@@ -128,11 +89,15 @@ fn insert_project_links(
                 ));
             }
         };
-        let sql = format!(
-            "INSERT OR IGNORE INTO {table} (id, project_id, {other_col}) VALUES (?1,?2,?3)"
-        );
-        conn.execute(&sql, params![new_id(), project_id, link.id])
-            .map_err(|e| CliError::Runtime(format!("could not link {other}: {e}")))?;
+        super::links::insert_join_row(
+            conn,
+            table,
+            "project_id",
+            project_id,
+            other_col,
+            &link.id,
+            other,
+        )?;
     }
     Ok(())
 }
@@ -159,6 +124,33 @@ fn enrich_existing_project(
         },
     )?;
     Ok(())
+}
+
+/// Find-or-create a project by normalized name, filling a blank summary. Used by
+/// `suggestion accept` so ratifying a proposed project never forks a second row
+/// when the user already created one with the same name.
+pub(super) fn find_or_create_project(
+    conn: &Connection,
+    name: &str,
+    summary: Option<&str>,
+) -> Result<String, CliError> {
+    let name = normalize_title(Some(name))
+        .ok_or_else(|| CliError::Runtime("a project needs a name".into()))?;
+    if let Some(existing) = find_duplicate_project(conn, &name)? {
+        super::fill_blanks(
+            conn,
+            "projects",
+            &existing,
+            &[("summary", normalize_optional(summary))],
+        )?;
+        return Ok(existing);
+    }
+    let id = new_id();
+    conn.execute(
+        "INSERT INTO projects (id, name, status, summary) VALUES (?1,?2,'active',?3)",
+        params![id, name, normalize_optional(summary)],
+    )?;
+    Ok(id)
 }
 
 pub fn add_project(
@@ -234,18 +226,5 @@ pub fn add_project(
 }
 
 fn report_project(json: bool, id: &str, duplicate: bool) -> Result<(), CliError> {
-    if json {
-        print_json(&json!({
-            "kind": "project",
-            "id": id,
-            "isDuplicate": duplicate,
-        }))
-    } else {
-        if duplicate {
-            println!("project {id} (duplicate, enriched)");
-        } else {
-            println!("project {id}");
-        }
-        Ok(())
-    }
+    super::report_entity(json, "project", id, duplicate, "duplicate, enriched")
 }
