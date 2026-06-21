@@ -28,7 +28,7 @@ describe('LinkedRecords', () => {
     const records: LinkedRecord[] = [
       { kind: 'memory', id: 'm1', title: 'Alex founded Northwind', subtitle: null },
     ]
-    renderWithProviders(<LinkedRecords title="Memories" records={records} />)
+    renderWithProviders(<LinkedRecords title="Known context" records={records} />)
     const button = screen.getByRole('button', { name: /Alex founded Northwind/ })
     expect(button.hasAttribute('disabled')).toBe(true)
   })

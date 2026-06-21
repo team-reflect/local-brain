@@ -206,16 +206,14 @@ describe('ProjectDetail task drawer', () => {
     expect(await screen.findByRole('heading', { name: 'Second project' })).toBeDefined()
   })
 
-  it('shows project notes, tags, memories, facts, and AI notes', async () => {
+  it('shows project notes without the project knowledge block', async () => {
     installProjectBridge({ notes: 'Keep launch narrow and evidence-backed.' })
     renderWithProviders(<ProjectDetail id="pr1" />)
 
     expect(await screen.findByText('Keep launch narrow and evidence-backed.')).toBeDefined()
-    expect(screen.getByText('launch')).toBeDefined()
-    expect(screen.getByText('Launch should stay invite-only.')).toBeDefined()
-    expect(screen.getByText('Credential review is the launch blocker.')).toBeDefined()
-    expect(screen.getByText('Launch risks')).toBeDefined()
-    expect(screen.getByText('Credential work and onboarding copy need one more pass.')).toBeDefined()
-    await waitFor(() => expect(screen.getAllByText('Launch kickoff')).toHaveLength(3))
+    expect(screen.queryByText('Knowledge')).toBeNull()
+    expect(screen.queryByText('Launch should stay invite-only.')).toBeNull()
+    expect(screen.queryByText('Credential review is the launch blocker.')).toBeNull()
+    expect(screen.queryByText('Launch risks')).toBeNull()
   })
 })
