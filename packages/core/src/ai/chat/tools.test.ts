@@ -160,6 +160,16 @@ describe('buildChatTools', () => {
     expect(coreMocks.completeTask).toHaveBeenCalledWith('task-2', undefined)
   })
 
+  it('throws when an approved update affects no rows', async () => {
+    coreMocks.updateTask.mockResolvedValue(0)
+    const tools = chatTools()
+    const updateTaskTool = toolByName(tools, 'update_task')
+
+    await expect(
+      updateTaskTool.execute(updateTaskTool.inputSchema.parse({ id: 'missing-task', status: 'waiting' })),
+    ).rejects.toThrow('No task was updated')
+  })
+
   it('logs interactions with participants', async () => {
     coreMocks.createInteraction.mockResolvedValue('interaction-1')
     const tools = chatTools()

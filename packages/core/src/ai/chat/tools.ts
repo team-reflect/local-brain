@@ -75,6 +75,13 @@ function optionalNonBlank(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined
 }
 
+function requireAffected(kind: string, action: string, id: string, affected: number): number {
+  if (affected === 0) {
+    throw new Error(`No ${kind} was ${action}; check that "${id}" is still the correct id.`)
+  }
+  return affected
+}
+
 const taskFields = {
   title: z.string().min(1),
   description: nullableString,
@@ -234,7 +241,7 @@ export function buildChatTools() {
       needsApproval: true,
       execute: async ({ id, ...patch }) => {
         const affected = await updateTask(id, compactObject(patch) as TaskPatch)
-        return { kind: 'task', action: 'updated', id, affected }
+        return { kind: 'task', action: 'updated', id, affected: requireAffected('task', 'updated', id, affected) }
       },
     }),
 
@@ -247,7 +254,7 @@ export function buildChatTools() {
       needsApproval: true,
       execute: async ({ id, completedAt }) => {
         const affected = await completeTask(id, optionalNonBlank(completedAt))
-        return { kind: 'task', action: 'completed', id, affected }
+        return { kind: 'task', action: 'completed', id, affected: requireAffected('task', 'completed', id, affected) }
       },
     }),
 
@@ -269,7 +276,7 @@ export function buildChatTools() {
       needsApproval: true,
       execute: async ({ id, ...patch }) => {
         const affected = await updatePerson(id, compactObject(patch) as PersonPatch)
-        return { kind: 'person', action: 'updated', id, affected }
+        return { kind: 'person', action: 'updated', id, affected: requireAffected('person', 'updated', id, affected) }
       },
     }),
 
@@ -291,7 +298,12 @@ export function buildChatTools() {
       needsApproval: true,
       execute: async ({ id, ...patch }) => {
         const affected = await updateOrganization(id, compactObject(patch) as OrganizationPatch)
-        return { kind: 'organization', action: 'updated', id, affected }
+        return {
+          kind: 'organization',
+          action: 'updated',
+          id,
+          affected: requireAffected('organization', 'updated', id, affected),
+        }
       },
     }),
 
@@ -315,7 +327,7 @@ export function buildChatTools() {
       needsApproval: true,
       execute: async ({ id, ...patch }) => {
         const affected = await updateProject(id, compactObject(patch) as ProjectPatch)
-        return { kind: 'project', action: 'updated', id, affected }
+        return { kind: 'project', action: 'updated', id, affected: requireAffected('project', 'updated', id, affected) }
       },
     }),
 
@@ -384,7 +396,7 @@ export function buildChatTools() {
       needsApproval: true,
       execute: async ({ id, ...patch }) => {
         const affected = await updateMemory(id, compactObject(patch) as MemoryPatch)
-        return { kind: 'memory', action: 'updated', id, affected }
+        return { kind: 'memory', action: 'updated', id, affected: requireAffected('memory', 'updated', id, affected) }
       },
     }),
 
