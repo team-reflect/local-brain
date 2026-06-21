@@ -1,4 +1,4 @@
-import type { Memories } from '@local-brain/db'
+import type { Memories, MemoryLinks } from '@local-brain/db'
 import { db } from '../../db/client'
 import { batch, execute } from '../../db/commands'
 import { newId } from '../../db/id'
@@ -30,6 +30,8 @@ export interface CreatedMemory {
   created: boolean
 }
 
+type MemoryLinkValues = Pick<MemoryLinks, 'recordType' | 'recordId' | 'role'>
+
 function normalizeClaim(claim: string): string {
   return squish(requireText('claim', claim))
 }
@@ -44,6 +46,18 @@ function memoryClaimKey(claim: string): string {
   return claim.trim().toLowerCase()
 }
 
+function normalizeMemoryLink(link: MemoryLinkInput): MemoryLinkValues {
+  return {
+    recordType: requireText('recordType', link.recordType),
+    recordId: requireText('recordId', link.recordId),
+    role: trimToNull(link.role ?? null),
+  }
+}
+
+function memoryLinkKey(link: MemoryLinkValues): string {
+  return `${link.recordType}\0${link.recordId}\0${link.role ?? ''}`
+}
+
 async function findActiveMemoryByClaim(claim: string): Promise<string | null> {
   const key = memoryClaimKey(claim)
   const rows = await db
@@ -54,22 +68,55 @@ async function findActiveMemoryByClaim(claim: string): Promise<string | null> {
   return rows.find((row) => memoryClaimKey(row.claim) === key)?.id ?? null
 }
 
+async function addMissingMemoryLinks(
+  memoryId: string,
+  links: readonly MemoryLinkValues[],
+): Promise<void> {
+  if (links.length === 0) return
+
+  const existing = await db
+    .selectFrom('memoryLinks')
+    .select(['recordType', 'recordId', 'role'])
+    .where('memoryId', '=', memoryId)
+    .execute()
+  const existingKeys = new Set(existing.map(memoryLinkKey))
+  const missing = links.filter((link) => !existingKeys.has(memoryLinkKey(link)))
+  if (missing.length === 0) return
+
+  await batch(
+    missing.map((link) =>
+      db.insertInto('memoryLinks').values({
+        id: newId(),
+        memoryId,
+        recordType: link.recordType,
+        recordId: link.recordId,
+        role: link.role,
+      }),
+    ),
+  )
+}
+
 /**
  * Create a durable memory and optional subject links. Exact active duplicate
- * claims return the existing memory id instead of inserting a second row.
+ * claims return the existing memory id instead of inserting a second row, while
+ * still applying any requested links that are not already present.
  */
 export async function createMemory(
   input: NewMemory,
   links: readonly MemoryLinkInput[] = [],
 ): Promise<CreatedMemory> {
   const values = normalizeMemory(input)
+  const normalizedLinks = links.map(normalizeMemoryLink)
   const existingId = await findActiveMemoryByClaim(values.claim)
-  if (existingId) return { id: existingId, created: false }
+  if (existingId) {
+    await addMissingMemoryLinks(existingId, normalizedLinks)
+    return { id: existingId, created: false }
+  }
 
   const id = newId()
   await batch([
     db.insertInto('memories').values({ ...values, id }),
-    ...links.map((link) =>
+    ...normalizedLinks.map((link) =>
       db.insertInto('memoryLinks').values({
         id: newId(),
         memoryId: id,

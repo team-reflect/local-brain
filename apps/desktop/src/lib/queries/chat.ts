@@ -6,6 +6,7 @@ export function invalidateChatTurnQueries(queryClient: QueryClient, chatId: stri
   for (const queryKey of [
     ['chat-conversations'],
     ['chat-messages', chatId],
+    ['self'],
     ['people'],
     ['person'],
     ['organizations'],

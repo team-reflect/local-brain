@@ -94,6 +94,27 @@ describe('domain actions', () => {
     expect(calls[0]?.command).toBe('db_query')
   })
 
+  it('createMemory links active duplicate claims to new subjects', async () => {
+    calls = captureDbBridge([{ id: 'memory-1', claim: 'Alex prefers async updates.' }])
+
+    const result = await createMemory({ claim: ' alex prefers async updates. ' }, [
+      { recordType: 'person', recordId: 'p2', role: 'subject' },
+    ])
+
+    expect(result).toEqual({ id: 'memory-1', created: false })
+    expect(calls).toHaveLength(3)
+    expect(calls[0]?.command).toBe('db_query')
+    expect(String(calls[0]?.args['sql'])).toContain('from "memories"')
+    expect(calls[1]?.command).toBe('db_query')
+    expect(String(calls[1]?.args['sql'])).toContain('from "memory_links"')
+    expect(calls[2]?.command).toBe('db_batch')
+    const statements = calls[2]?.args['statements'] as Array<{ sql: string; params: unknown[] }>
+    expect(statements).toHaveLength(1)
+    expect(statements[0]?.sql).toContain('insert into "memory_links"')
+    expect(statements[0]?.params).toContain('memory-1')
+    expect(statements[0]?.params).toContain('p2')
+  })
+
   it('setAiProvidersState writes provider list and default in one batch', async () => {
     await setAiProvidersState(
       [{ id: 'cfg-a', provider: 'anthropic', model: 'claude-sonnet-4-6', keyHint: 'abcde' }],
