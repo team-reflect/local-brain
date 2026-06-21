@@ -14,6 +14,9 @@
    - Vitest: `pnpm test --run path/to/test`
    - Rust: `cargo test -p brain-cli`, `cargo test -p brain-schema`, or other relevant
      crate targets — do not run the full workspace test suite by default
+   - Do not perform smoke tests. Do not start the desktop app, run `pnpm tauri dev`,
+     `pnpm tauri build`, or do manual click-through verification unless the user
+     explicitly asks.
 5. Before declaring work done, run `pnpm check` (typecheck + lint + test). For native,
    CLI, migration, or database changes, also run the relevant `cargo fmt`, `cargo
    clippy`, and `cargo test` targets.
