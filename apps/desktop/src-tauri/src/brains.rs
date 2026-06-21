@@ -823,11 +823,18 @@ fn forget_brain_impl(
     if forgetting_live_active {
         db.clear_after(|| {
             let conn = brains.lock()?;
-            delete_brain_record(&conn, &key, root_path, None, true)
+            delete_brain_record(&conn, &key, root_path, None, true, true)
         })?;
     } else {
         let conn = brains.lock()?;
-        delete_brain_record(&conn, &key, root_path, live_active_str.as_deref(), false)?;
+        delete_brain_record(
+            &conn,
+            &key,
+            root_path,
+            live_active_str.as_deref(),
+            false,
+            false,
+        )?;
     }
 
     let list = list_brain_infos(db, brains)?;
@@ -841,6 +848,7 @@ fn delete_brain_record(
     root_path: &str,
     replacement_active_path: Option<&str>,
     allow_missing: bool,
+    clear_recorded_active: bool,
 ) -> AppResult<()> {
     // The DELETE and the active-path reconciliation run in one transaction so a
     // forget can never drop the catalogue row while leaving `active_path` naming
@@ -860,12 +868,15 @@ fn delete_brain_record(
         )));
     }
     // The registry's recorded `active_path` can name the brain we just removed
-    // (stale metadata from a failed startup `register_active`, or the live brain
-    // being forgotten). Forgetting doesn't delete the database file, so leaving
-    // `active_path` pointing at the gone brain would let `active_candidate`
-    // reopen it on the next launch. Reconcile it to the replacement live brain,
-    // or clear it when the live brain itself is being forgotten.
-    if active_path(&tx)?.as_deref() == Some(key) {
+    // (stale metadata from a failed startup `register_active`). Forgetting
+    // doesn't delete the database file, so leaving `active_path` pointing at the
+    // gone brain would let `active_candidate` reopen it on the next launch.
+    // Reconcile it to the replacement live brain. When the live brain itself is
+    // being forgotten there is deliberately no replacement, so clear the pointer
+    // even if it had already drifted to some other brain.
+    if clear_recorded_active {
+        tx.execute("DELETE FROM registry_meta WHERE key = 'active_path'", [])?;
+    } else if active_path(&tx)?.as_deref() == Some(key) {
         match replacement_active_path {
             Some(live) => set_active_path(&tx, live)?,
             None => {
@@ -1254,6 +1265,38 @@ mod tests {
         assert!(
             all_records(&conn).unwrap().is_empty(),
             "the active brain row must be removed from the catalogue"
+        );
+    }
+
+    #[test]
+    fn forget_active_brain_clears_stale_pointer_to_other_brain() {
+        let dir = tempdir().unwrap();
+        let active = dir.path().join("active.sqlite");
+        let (db, active_key) = live_db(&active);
+        let brains = memory_state();
+        {
+            let conn = brains.lock().unwrap();
+            mark_opened(&conn, &active_key, Some("Active")).unwrap();
+            mark_opened(&conn, "/other/brain.sqlite", Some("Other")).unwrap();
+            set_active_path(&conn, "/other/brain.sqlite").unwrap();
+        }
+
+        let remaining = forget_brain_impl(&db, &brains, &active_key).unwrap();
+
+        assert_eq!(remaining.len(), 1, "the other brain remains catalogued");
+        assert_eq!(remaining[0].root_path, "/other/brain.sqlite");
+        assert!(
+            !remaining[0].is_active,
+            "closing the live brain must not promote a stale registry pointer"
+        );
+        assert!(
+            db.active_paths().is_err(),
+            "forgetting the active brain must close the live database"
+        );
+        let conn = brains.lock().unwrap();
+        assert!(
+            active_path(&conn).unwrap().is_none(),
+            "the next launch must return to the chooser instead of opening stale metadata"
         );
     }
 
