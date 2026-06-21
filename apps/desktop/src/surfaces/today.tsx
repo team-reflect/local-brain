@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { PageHead } from '../components/page-head'
 import { Section } from '../components/section'
 import { EmptyState } from '../components/empty-state'
+import { SuggestionsList } from '../components/suggestions-list'
 import { sectionLabel } from '../lib/ui'
 import { useRouter } from '../routing/router'
 import {
@@ -58,6 +59,8 @@ export function TodaySurface(): ReactNode {
           <EmptyState title="No open tasks" hint="Enjoy the calm." />
         )}
       </Section>
+
+      <SuggestionsList />
 
       <Section title="Recent interactions">
         {interactions.data && interactions.data.length > 0 ? (
