@@ -21,7 +21,7 @@ pub const SUPPORT_DIRNAME: &str = ".local-brain";
 
 /// Bumped whenever a migration is appended below. Asserted against the applied
 /// `user_version` in tests so the constant can never drift from the list.
-pub const LATEST_SCHEMA_VERSION: usize = 13;
+pub const LATEST_SCHEMA_VERSION: usize = 4;
 
 /// The canonical filesystem layout for one Local Brain root directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,25 +47,10 @@ impl BrainPaths {
 /// Ordered schema migrations, embedded from `migrations/*.sql`.
 static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
     Migrations::new(vec![
-        M::up(include_str!("../migrations/0001_init.sql")),
-        M::up(include_str!("../migrations/0002_launch_schema.sql")),
-        M::up(include_str!("../migrations/0003_embeddings.sql")),
-        M::up(include_str!(
-            "../migrations/0004_select_only_relationship_strength.sql"
-        )),
-        M::up(include_str!("../migrations/0005_assets.sql")),
-        M::up(include_str!("../migrations/0006_import_identity.sql")),
-        M::up(include_str!("../migrations/0007_remove_chat.sql")),
-        M::up(include_str!("../migrations/0008_asset_search.sql")),
-        M::up(include_str!(
-            "../migrations/0009_remove_duplicate_project_links.sql"
-        )),
-        M::up(include_str!("../migrations/0010_restore_chat.sql")),
-        M::up(include_str!("../migrations/0011_suggestions.sql")),
-        M::up(include_str!(
-            "../migrations/0012_one_current_affiliation.sql"
-        )),
-        M::up(include_str!("../migrations/0013_fts_summary.sql")),
+        M::up(include_str!("../migrations/0001_core.sql")),
+        M::up(include_str!("../migrations/0002_search.sql")),
+        M::up(include_str!("../migrations/0003_suggestions.sql")),
+        M::up(include_str!("../migrations/0004_seed.sql")),
     ])
 });
 
@@ -350,69 +335,6 @@ mod tests {
     }
 
     #[test]
-    fn migration_0009_backfills_project_tasks_before_drop() {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "
-            CREATE TABLE tasks (
-              id TEXT PRIMARY KEY,
-              project_id TEXT
-            );
-            CREATE TABLE project_tasks (
-              id TEXT PRIMARY KEY,
-              project_id TEXT NOT NULL,
-              task_id TEXT NOT NULL,
-              created_at TEXT NOT NULL
-            );
-            CREATE TABLE document_projects (id TEXT PRIMARY KEY);
-            CREATE TABLE interaction_projects (id TEXT PRIMARY KEY);
-
-            INSERT INTO tasks (id, project_id) VALUES ('task-empty', NULL);
-            INSERT INTO tasks (id, project_id) VALUES ('task-kept', 'project-existing');
-            INSERT INTO project_tasks (id, project_id, task_id, created_at)
-              VALUES ('link-1', 'project-backfilled', 'task-empty', '2026-01-01T00:00:00.000Z');
-            INSERT INTO project_tasks (id, project_id, task_id, created_at)
-              VALUES ('link-2', 'project-ignored', 'task-kept', '2026-01-01T00:00:00.000Z');
-            ",
-        )
-        .unwrap();
-
-        conn.execute_batch(include_str!(
-            "../migrations/0009_remove_duplicate_project_links.sql"
-        ))
-        .unwrap();
-
-        let backfilled: String = conn
-            .query_row(
-                "SELECT project_id FROM tasks WHERE id = 'task-empty'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(backfilled, "project-backfilled");
-
-        let kept: String = conn
-            .query_row(
-                "SELECT project_id FROM tasks WHERE id = 'task-kept'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(kept, "project-existing");
-
-        for table in ["project_tasks", "document_projects", "interaction_projects"] {
-            let count: i64 = conn
-                .query_row(
-                    "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
-                    [table],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert_eq!(count, 0, "{table} should be dropped");
-        }
-    }
-
-    #[test]
     fn migrate_is_idempotent() {
         let mut conn = Connection::open_in_memory().unwrap();
         migrate(&mut conn).unwrap();
@@ -452,63 +374,6 @@ mod tests {
             [],
         )
         .unwrap();
-    }
-
-    #[test]
-    fn migration_0012_demotes_duplicate_current_affiliations() {
-        register_sqlite_vec().unwrap();
-        let mut conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
-        MIGRATIONS.to_version(&mut conn, 11).unwrap();
-
-        conn.execute("INSERT INTO people (id, full_name) VALUES ('p1', 'Ada')", [])
-            .unwrap();
-        conn.execute("INSERT INTO organizations (id, name) VALUES ('o1', 'A')", [])
-            .unwrap();
-        conn.execute("INSERT INTO organizations (id, name) VALUES ('o2', 'B')", [])
-            .unwrap();
-        // Two current affiliations exist at v11 (e.g. written by another path).
-        conn.execute(
-            "INSERT INTO affiliations (id, person_id, organization_id, is_current, updated_at)
-             VALUES ('a1','p1','o1',1,'2026-01-01T00:00:00.000Z')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO affiliations (id, person_id, organization_id, is_current, updated_at)
-             VALUES ('a2','p1','o2',1,'2026-02-01T00:00:00.000Z')",
-            [],
-        )
-        .unwrap();
-
-        MIGRATIONS.to_latest(&mut conn).unwrap();
-
-        let current: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM affiliations WHERE person_id='p1' AND is_current=1",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(current, 1, "duplicates are demoted to a single current");
-        // The most-recently-updated affiliation (a2 -> o2) survives, and the
-        // denormalized column is synced to it.
-        let survivor: String = conn
-            .query_row(
-                "SELECT organization_id FROM affiliations WHERE person_id='p1' AND is_current=1",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(survivor, "o2");
-        let denorm: Option<String> = conn
-            .query_row(
-                "SELECT current_organization_id FROM people WHERE id='p1'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(denorm.as_deref(), Some("o2"));
     }
 
     #[test]
@@ -563,6 +428,11 @@ mod tests {
             "asset_links",
             "asset_texts",
             "asset_search",
+            "record_provenance",
+            "organization_profiles",
+            "interaction_transcripts",
+            "ai_notes",
+            "extracted_facts",
             "chat_conversations",
             "chat_messages",
             "suggestions",
@@ -591,7 +461,10 @@ mod tests {
             "google_calendar",
             "google_meet",
             "zoom",
+            "granola",
             "file",
+            "reflect_notes",
+            "public_web",
             "ai_extraction",
         ] {
             let count: i64 = conn
@@ -676,40 +549,6 @@ mod tests {
             update.is_err(),
             "relationship_strengths must stay select-only"
         );
-    }
-
-    #[test]
-    fn v3_database_migrates_strength_to_select_only_view() {
-        register_sqlite_vec().unwrap();
-        let mut conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
-        MIGRATIONS.to_version(&mut conn, 3).unwrap();
-
-        conn.execute(
-            "INSERT INTO people (id, full_name, relationship_strength) VALUES ('p1', 'Ada Lovelace', 5)",
-            [],
-        )
-        .unwrap();
-
-        MIGRATIONS.to_latest(&mut conn).unwrap();
-
-        let people_column_count: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM pragma_table_info('people') WHERE name = 'relationship_strength'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(people_column_count, 0);
-
-        let strength: Option<i64> = conn
-            .query_row(
-                "SELECT relationship_strength FROM relationship_strengths WHERE person_id = 'p1'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(strength, None);
     }
 
     #[test]
@@ -800,34 +639,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(document, "d1", "document summary is searchable after update");
-    }
-
-    #[test]
-    fn migration_0013_reindexes_existing_summaries() {
-        register_sqlite_vec().unwrap();
-        let mut conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
-        MIGRATIONS.to_version(&mut conn, 12).unwrap();
-        // A row that existed BEFORE 0013, with a distinctive term only in its summary.
-        conn.execute(
-            "INSERT INTO interactions (id, kind, title, body_text, summary)
-             VALUES ('i1', 'meeting', 'Sync', 'filler body', 'Northwind pilot greenlit')",
-            [],
-        )
-        .unwrap();
-
-        MIGRATIONS.to_latest(&mut conn).unwrap();
-
-        // 0013's `rebuild` re-indexes the pre-existing summary, so it is now findable.
-        let id: String = conn
-            .query_row(
-                "SELECT i.id FROM interactions_fts f JOIN interactions i ON i.rowid = f.rowid \
-                 WHERE interactions_fts MATCH 'greenlit'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(id, "i1", "rebuild re-indexes summaries written before 0013");
     }
 
     #[test]

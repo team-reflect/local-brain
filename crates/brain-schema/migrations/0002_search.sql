@@ -1,19 +1,91 @@
--- 0008_asset_search.sql
---
--- First-class search for asset metadata plus optional local/imported asset text.
--- The binary bytes still live under the brain root's assets/ directory; this
--- migration adds only durable searchable text and a rebuildable FTS projection.
+-- Rebuildable search and vector projections.
 
-CREATE TABLE asset_texts (
-  asset_id     TEXT PRIMARY KEY REFERENCES assets (id) ON DELETE CASCADE,
-  text         TEXT NOT NULL,
-  text_source  TEXT NOT NULL DEFAULT 'manual',
-  content_hash TEXT,
-  created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  CHECK (trim(text) != ''),
-  CHECK (text_source IN ('importer', 'local_extraction', 'manual'))
+CREATE VIRTUAL TABLE documents_fts USING fts5 (
+  title,
+  body_text,
+  summary,
+  content = 'documents',
+  content_rowid = 'rowid',
+  tokenize = 'porter unicode61'
 );
+
+CREATE TRIGGER documents_ai AFTER INSERT ON documents BEGIN
+  INSERT INTO documents_fts (rowid, title, body_text, summary)
+  VALUES (new.rowid, new.title, new.body_text, new.summary);
+END;
+
+CREATE TRIGGER documents_ad AFTER DELETE ON documents BEGIN
+  INSERT INTO documents_fts (documents_fts, rowid, title, body_text, summary)
+  VALUES ('delete', old.rowid, old.title, old.body_text, old.summary);
+END;
+
+CREATE TRIGGER documents_au AFTER UPDATE ON documents BEGIN
+  INSERT INTO documents_fts (documents_fts, rowid, title, body_text, summary)
+  VALUES ('delete', old.rowid, old.title, old.body_text, old.summary);
+  INSERT INTO documents_fts (rowid, title, body_text, summary)
+  VALUES (new.rowid, new.title, new.body_text, new.summary);
+END;
+
+CREATE VIRTUAL TABLE interactions_fts USING fts5 (
+  title,
+  body_text,
+  summary,
+  content = 'interactions',
+  content_rowid = 'rowid',
+  tokenize = 'porter unicode61'
+);
+
+CREATE TRIGGER interactions_ai AFTER INSERT ON interactions BEGIN
+  INSERT INTO interactions_fts (rowid, title, body_text, summary)
+  VALUES (new.rowid, new.title, new.body_text, new.summary);
+END;
+
+CREATE TRIGGER interactions_ad AFTER DELETE ON interactions BEGIN
+  INSERT INTO interactions_fts (interactions_fts, rowid, title, body_text, summary)
+  VALUES ('delete', old.rowid, old.title, old.body_text, old.summary);
+END;
+
+CREATE TRIGGER interactions_au AFTER UPDATE ON interactions BEGIN
+  INSERT INTO interactions_fts (interactions_fts, rowid, title, body_text, summary)
+  VALUES ('delete', old.rowid, old.title, old.body_text, old.summary);
+  INSERT INTO interactions_fts (rowid, title, body_text, summary)
+  VALUES (new.rowid, new.title, new.body_text, new.summary);
+END;
+
+CREATE VIRTUAL TABLE content_chunks_fts USING fts5 (
+  text,
+  content = 'content_chunks',
+  content_rowid = 'rowid',
+  tokenize = 'porter unicode61'
+);
+
+CREATE TRIGGER content_chunks_ai AFTER INSERT ON content_chunks BEGIN
+  INSERT INTO content_chunks_fts (rowid, text) VALUES (new.rowid, new.text);
+END;
+
+CREATE TRIGGER content_chunks_ad AFTER DELETE ON content_chunks BEGIN
+  INSERT INTO content_chunks_fts (content_chunks_fts, rowid, text)
+  VALUES ('delete', old.rowid, old.text);
+END;
+
+CREATE TRIGGER content_chunks_au AFTER UPDATE ON content_chunks BEGIN
+  INSERT INTO content_chunks_fts (content_chunks_fts, rowid, text)
+  VALUES ('delete', old.rowid, old.text);
+  INSERT INTO content_chunks_fts (rowid, text) VALUES (new.rowid, new.text);
+END;
+
+CREATE TABLE chunk_embeddings (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  chunk_id     TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  model_id     TEXT NOT NULL,
+  created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  UNIQUE (chunk_id, model_id)
+);
+
+CREATE INDEX chunk_embeddings_chunk ON chunk_embeddings (chunk_id);
+
+CREATE VIRTUAL TABLE chunk_vectors USING vec0(embedding float[384] distance_metric=cosine);
 
 CREATE TABLE asset_search (
   asset_id      TEXT PRIMARY KEY REFERENCES assets (id) ON DELETE CASCADE,
@@ -162,29 +234,6 @@ CREATE TRIGGER asset_links_search_ai AFTER INSERT ON asset_links BEGIN
     updated_at = excluded.updated_at;
 END;
 
-CREATE TRIGGER asset_links_search_au AFTER UPDATE ON asset_links BEGIN
-  INSERT INTO asset_search (asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at)
-  SELECT asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at
-  FROM asset_search_source WHERE asset_id = new.asset_id
-  ON CONFLICT(asset_id) DO UPDATE SET
-    title = excluded.title,
-    subtitle = excluded.subtitle,
-    metadata_text = excluded.metadata_text,
-    link_text = excluded.link_text,
-    body_text = excluded.body_text,
-    updated_at = excluded.updated_at;
-  INSERT INTO asset_search (asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at)
-  SELECT asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at
-  FROM asset_search_source WHERE asset_id = old.asset_id AND old.asset_id <> new.asset_id
-  ON CONFLICT(asset_id) DO UPDATE SET
-    title = excluded.title,
-    subtitle = excluded.subtitle,
-    metadata_text = excluded.metadata_text,
-    link_text = excluded.link_text,
-    body_text = excluded.body_text,
-    updated_at = excluded.updated_at;
-END;
-
 CREATE TRIGGER asset_links_search_ad AFTER DELETE ON asset_links BEGIN
   INSERT INTO asset_search (asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at)
   SELECT asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at
@@ -197,69 +246,3 @@ CREATE TRIGGER asset_links_search_ad AFTER DELETE ON asset_links BEGIN
     body_text = excluded.body_text,
     updated_at = excluded.updated_at;
 END;
-
-CREATE TRIGGER people_asset_search_au AFTER UPDATE OF full_name, archived_at ON people BEGIN
-  UPDATE asset_search SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-  WHERE asset_id IN (SELECT asset_id FROM asset_links WHERE record_type = 'person' AND record_id = new.id);
-  INSERT INTO asset_search (asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at)
-  SELECT asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at
-  FROM asset_search_source
-  WHERE asset_id IN (SELECT asset_id FROM asset_links WHERE record_type = 'person' AND record_id = new.id)
-  ON CONFLICT(asset_id) DO UPDATE SET title = excluded.title, subtitle = excluded.subtitle,
-    metadata_text = excluded.metadata_text, link_text = excluded.link_text,
-    body_text = excluded.body_text, updated_at = excluded.updated_at;
-END;
-
-CREATE TRIGGER organizations_asset_search_au AFTER UPDATE OF name, archived_at ON organizations BEGIN
-  INSERT INTO asset_search (asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at)
-  SELECT asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at
-  FROM asset_search_source
-  WHERE asset_id IN (SELECT asset_id FROM asset_links WHERE record_type = 'organization' AND record_id = new.id)
-  ON CONFLICT(asset_id) DO UPDATE SET title = excluded.title, subtitle = excluded.subtitle,
-    metadata_text = excluded.metadata_text, link_text = excluded.link_text,
-    body_text = excluded.body_text, updated_at = excluded.updated_at;
-END;
-
-CREATE TRIGGER projects_asset_search_au AFTER UPDATE OF name, archived_at ON projects BEGIN
-  INSERT INTO asset_search (asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at)
-  SELECT asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at
-  FROM asset_search_source
-  WHERE asset_id IN (SELECT asset_id FROM asset_links WHERE record_type = 'project' AND record_id = new.id)
-  ON CONFLICT(asset_id) DO UPDATE SET title = excluded.title, subtitle = excluded.subtitle,
-    metadata_text = excluded.metadata_text, link_text = excluded.link_text,
-    body_text = excluded.body_text, updated_at = excluded.updated_at;
-END;
-
-CREATE TRIGGER tasks_asset_search_au AFTER UPDATE OF title, archived_at ON tasks BEGIN
-  INSERT INTO asset_search (asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at)
-  SELECT asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at
-  FROM asset_search_source
-  WHERE asset_id IN (SELECT asset_id FROM asset_links WHERE record_type = 'task' AND record_id = new.id)
-  ON CONFLICT(asset_id) DO UPDATE SET title = excluded.title, subtitle = excluded.subtitle,
-    metadata_text = excluded.metadata_text, link_text = excluded.link_text,
-    body_text = excluded.body_text, updated_at = excluded.updated_at;
-END;
-
-CREATE TRIGGER documents_asset_search_au AFTER UPDATE OF title, archived_at ON documents BEGIN
-  INSERT INTO asset_search (asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at)
-  SELECT asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at
-  FROM asset_search_source
-  WHERE asset_id IN (SELECT asset_id FROM asset_links WHERE record_type = 'document' AND record_id = new.id)
-  ON CONFLICT(asset_id) DO UPDATE SET title = excluded.title, subtitle = excluded.subtitle,
-    metadata_text = excluded.metadata_text, link_text = excluded.link_text,
-    body_text = excluded.body_text, updated_at = excluded.updated_at;
-END;
-
-CREATE TRIGGER interactions_asset_search_au AFTER UPDATE OF title, archived_at ON interactions BEGIN
-  INSERT INTO asset_search (asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at)
-  SELECT asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at
-  FROM asset_search_source
-  WHERE asset_id IN (SELECT asset_id FROM asset_links WHERE record_type = 'interaction' AND record_id = new.id)
-  ON CONFLICT(asset_id) DO UPDATE SET title = excluded.title, subtitle = excluded.subtitle,
-    metadata_text = excluded.metadata_text, link_text = excluded.link_text,
-    body_text = excluded.body_text, updated_at = excluded.updated_at;
-END;
-
-INSERT INTO asset_search (asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at)
-SELECT asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at
-FROM asset_search_source;

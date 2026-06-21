@@ -1,214 +1,203 @@
 # Agent Interface
 
-Local Brain is primarily operated by local agents. The first agent contract is a
-`brain` CLI plus a local Codex skill.
+Local Brain is primarily operated by local agents through the `brain` CLI. The
+desktop UI is for browsing, correction, inspection, Ask, and demonstration; agents
+should not scrape it.
 
-The desktop UI exists, but agents should not scrape it. A Codex daily automation should
-be able to update the brain, generate a report, and produce a todo list through the CLI
-or approved local database access.
+The CLI is provider-neutral. Gmail, Granola, Reflect notes, Calendar, contacts,
+and other upstream systems are fetched by external tools or agent code, then
+translated into generic Local Brain commands.
 
 ## Principles
 
 - Query before writing.
-- Write typed records: people, documents, interactions, assets, tasks, and hidden memories.
-- Use people, organizations, projects, and tasks as the main links.
-- Store readable imported text in SQLite through the CLI.
-- Store binary assets through CLI file import so SQLite can record metadata and typed
-  links while bytes stay in the app-managed `assets/` directory.
-- Store asset-derived plain text in `asset_texts` when an importer already has it.
-  Text-like UTF-8 files can be indexed locally; PDFs/images remain metadata-searchable
-  until a later OCR/local extraction pass.
-- Keep imports provider-neutral: upstream tools translate source records into generic
-  `brain` CLI calls.
-- Preserve provenance directly on documents, interactions, tasks, memories, and
-  evidence references.
-- Treat `brain --json contract` as the discoverable source of truth for command shapes,
-  link syntax, source identity rules, exit codes, and import mappings.
-- In `--json` mode, parse command failures from JSON on stderr:
-  `{ ok: false, error: { kind, message, exitCode } }`.
-- Prefer cited records and evidence over uncited summaries.
-- Never invent context. Add uncertain details as low-confidence memories or skip them.
+- Use typed records: people, organizations, projects, tasks, documents,
+  interactions, transcripts, AI notes, extracted facts, memories, assets, and
+  tags.
+- Preserve source identity with `--source`, `--external-kind`, `--external-id`,
+  and `--original-url` where available.
+- Keep stdout as data and stderr as diagnostics. Use global `--json` for stable
+  machine output and JSON errors.
+- Store raw evidence before summaries. Store AI narratives as `ai_notes`, not as
+  replacements for source text.
+- Treat extracted claims as facts first; promote only durable, useful claims to
+  memories.
+- Cite exact evidence chunks when creating tasks, facts, AI notes, and memories.
+- Link existing projects; suggest new projects instead of auto-creating them.
+- Treat `brain --json contract` as the discoverable source of truth for command
+  shapes, exit codes, source slugs, and link syntax.
 
-## Example Commands
-
-Status and diagnostics:
+## Read Commands
 
 ```bash
 brain --json contract
-brain status
-brain doctor --json
+brain --json doctor
 brain path
-brain source ensure --slug gmail --name "Gmail" --json
+brain --json import-context --limit 200
+brain --json search "revised budget"
+brain --json show person <id>
+brain --json today
+brain --json report daily
+brain --json tasks plan-day --limit 25
+brain --json graph --center self
+brain --json suggest list
+brain --json import audit --limit 100
 ```
 
-Add records:
+Use `brain import-context` at the start of an import. It returns self identity,
+registered sources, existing projects and organizations, open suggestions, import
+watermarks, and counts.
+
+## Write Phases
+
+Source-led imports should move through explicit phases:
 
 ```bash
-brain add person --full-name "Maya Chen" --email maya@example.com
-brain add person-from-email --full-name "Maya Chen" --email maya@example.com --source gmail --external-id msg-123 --json
-brain add document --title "Kitchen remodel notes" --text-file notes.md
-brain add interaction --kind meeting --title "Call with Maya" --text-file transcript.txt
-brain add interaction --kind email --title "Email from Maya" --text-file body.txt --source gmail --external-id msg-123 --participant "from:Maya Chen <maya@example.com>" --json
-brain add interaction --kind email --title "Everlywell Integration" --text-file digest.md --summary "Production credential setup and go-live readiness." --source gmail --external-kind thread --external-id thread-123 --json
-brain add interaction --kind meeting --title "Granola: Northwind kickoff" --text-file transcript.txt --summary "Kickoff decisions and follow-ups." --source granola --external-id meeting-123 --replace-body --json
-brain add interaction --kind event --title "Calendar: Hotel stay" --occurred-at 2026-07-09 --ended-at 2026-07-12 --location "Louma" --source google_calendar --external-id event-123 --self-participant "attendee:You <alex@example.com>" --json
-brain add project --name "Kitchen remodel" --summary "Budget, contractor, and cabinet decision context." --json
-brain add asset --file maya.jpg --link person:maya --role avatar
-brain add asset --file invoice.pdf --link interaction:email-id --text-file extracted.txt --text-source importer --json
-brain asset text set asset-id --text-file - --source importer --json
-brain add task --title "Send Maya the revised budget" --link project:<id>
-brain add task --title "Send cardiologist shortlist to Dr. Vargas" --link interaction:<id> --link project:<id> --link person:<id> --evidence interaction:<id>#0 --json
-brain remember --kind decision --claim "Maya approved the revised budget range" --link person:maya --link interaction:<id> --evidence interaction:<id>#0
+brain --json import interaction ...
+brain --json import document ...
+brain --json import transcript --interaction <id> --text-file transcript.txt ...
+brain --json enrich person <id> ...
+brain --json enrich organization <id> ...
+brain --json add ai-note ...
+brain --json add fact ...
+brain --json promote fact <fact-id> --memory-kind <kind>
+brain --json tag ensure --name "Picardo"
+brain --json tag attach --tag picardo --record interaction:<id>
+brain --json import finalize --record interaction:<id>
 ```
 
-Query records:
+The older `brain add document` and `brain add interaction` commands remain valid
+aliases for direct typed writes. Prefer `brain import ...` in import harnesses so
+the staged workflow is obvious in logs.
+
+## Common Examples
+
+Ensure sources:
 
 ```bash
-brain search "revised budget"
-brain today --json
-brain report daily --json
-brain tasks plan-day --json
-brain graph --center self --json
-brain show person maya --json
-brain show asset asset-id --json
-brain show project "Kitchen remodel"
+brain --json source ensure --slug gmail --name Gmail
+brain --json source ensure --slug granola --name Granola
+brain --json source ensure --slug reflect_notes --name "Reflect Notes"
 ```
 
-## Document Versus Interaction
+Set the self person once:
 
-Use a document for user-readable reference material:
+```bash
+brain --json self show
+brain --json self set --full-name "Alex MacCaw" \
+  --email alex@maccaw.org --email alex@picardo.health
+```
 
-- notes
-- PDFs and text files
-- specs and plans
-- webpages
-- receipts
-- long-form reference text
+Import a Gmail thread digest:
 
-Use an asset for binary supporting material:
+```bash
+brain --json import interaction --kind email \
+  --title "Gmail: Everlywell Integration" \
+  --summary "Production credential setup and go-live readiness." \
+  --text-file digest.md \
+  --source gmail --external-kind thread --external-id <thread-id> \
+  --participant "from:Maya Chen <maya@example.com>" \
+  --link project:<id>
+```
 
-- avatars and logos
-- screenshots and images
-- original attachments whose readable text is stored separately
-- source files that should remain inspectable beside the database
+Import a Granola meeting with raw transcript and AI note:
 
-Use an interaction for a human exchange:
+```bash
+brain --json import interaction --kind meeting \
+  --title "Granola: Northwind kickoff" \
+  --summary "Kickoff decisions and follow-ups." \
+  --source granola --external-id <meeting-id> \
+  --participant "attendee:Robin Spencer <robin@example.com>" \
+  --link project:<id>
 
-- meeting transcript
-- call transcript
-- email body or thread
-- message thread
-- chat transcript
-- voice note
-- event notes
+brain --json import transcript --interaction <interaction-id> \
+  --text-file transcript.txt \
+  --source granola --external-kind transcript --external-id <meeting-id>
 
-## Agent Write Rules
+brain --json add ai-note --kind summary \
+  --interaction <interaction-id> \
+  --title "Meeting summary" \
+  --text-file summary.md \
+  --source granola
+```
 
-Before adding a record:
+Add a fact, promote a selected fact, and tag the record:
 
-1. Search for likely duplicates.
-2. Reuse existing people, organizations, projects, and tasks when possible.
-3. Include title, kind, date, and provenance metadata when known. For source-backed
-   imports, use the correct external identity scope, such as Gmail `--external-kind
-   thread` versus `message`.
-4. Link the new record to relevant people, organizations, projects, or tasks. Projects
-   are manually curated user structure: search existing projects and link clear
-   matches, but do not auto-create projects during import or extraction.
-5. When a task or memory is derived from a source record, cite the exact source chunk
-   with `--evidence document:<id>#<chunk>` or `--evidence interaction:<id>#<chunk>`.
-6. Let extraction create hidden memories unless the agent has an explicit atomic claim
-   to store.
+```bash
+brain --json add fact --subject interaction:<id> \
+  --key "decision" \
+  --value-text "The team agreed to ship the credential flow before launch." \
+  --source-record interaction:<id> \
+  --evidence interaction:<id>~"ship the credential flow"
 
-When adding a person:
+brain --json promote fact <fact-id> --memory-kind decision
+brain --json tag ensure --name "Picardo"
+brain --json tag attach --tag picardo --record interaction:<id>
+brain --json import finalize --record interaction:<id>
+```
 
-- Use the generic CLI person command for explicit contact imports, regardless of source
-  (Google Contacts, vCard, CSV, or manual user instruction).
-- Include stable contact fields when known: full name, preferred name, emails, phones,
-  headline, location, summary, and notes.
-- Use `--source`, `--external-id`, and contact handles for idempotent import. The CLI
-  resolves first by external identity, then email handle, then normalized name.
-- Use `brain add person-from-email` for untrusted sender/display-name pairs. It skips
-  machine senders, no-reply addresses, token-looking names, invalid emails, and
-  email-as-name values with structured JSON reason codes.
-- Do not teach the `brain` CLI about any upstream provider. Agents translate source
-  records into Local Brain's typed person fields before writing.
+Enrich a person and organization:
 
-When importing emails or calendar events:
+```bash
+brain --json enrich person <person-id> \
+  --headline "Picardo vendor contact for lab logistics" \
+  --current-title "Operations lead" \
+  --role-family operations --seniority lead
 
-- Store readable body text as an interaction.
-- Prefer thread-level digests for long Gmail conversations; store raw message-level
-  bodies only when the message is standalone and safe.
-- Use `--summary` for a compact redacted import summary, while still passing
-  `--text-file` or `--text` for searchable body/digest text.
-- Pass provider identity through generic `--source` and `--external-id`.
-- For calendar events, map structured fields onto the interaction before notes:
-  `--occurred-at` for start, `--ended-at` for end, `--location` for venue or
-  address, and `--original-url` for the provider event URL.
-- Use `--kind meeting` for people-centered calendar items and `--kind event` for
-  travel, lodging, reservations, reminders, and all-day schedule blocks, even when
-  they have attendees.
-- Link known people with `--link person:<id>` when the importer has already resolved
-  them. Raw participant email handles that match existing people are also resolved by
-  the CLI.
-- Preserve raw unresolved participants with repeatable `--participant` values such as
-  `from:Robin Spencer <robin@example.com>`; do not create people for every handle.
-- Use `--self-participant` for attendee rows the upstream provider marks as the user.
-- Keep notes for source-specific details that do not have typed Local Brain fields,
-  not as the primary storage for start/end/location/attendee data.
-- Calendar items with a title and structured fields may omit `--text` / `--text-file`.
-- Store binary attachments through `brain add asset --link interaction:<id>`.
+brain --json enrich organization <org-id> \
+  --headline "Clinical lab partner" \
+  --website "https://example.com" \
+  --industry healthcare \
+  --one-line-description "Clinical testing provider for launch workflows." \
+  --why-it-matters "Relevant to credentialing and ordering paths." \
+  --source-urls-json '["https://example.com"]' \
+  --model "agent-research" --prompt-fingerprint "org-profile-v1"
+```
 
-When importing Granola meetings:
+Create a task with evidence:
 
-- Always fetch and store the raw transcript as `interactions.body_text` through
-  `--text-file`; it is the durable evidence the brain should cite.
-- Store Granola's AI note or agent-written digest in `--summary`, not in place of the
-  transcript.
-- Re-import an existing meeting with the same `--source granola --external-id` and
-  `--replace-body` when the transcript becomes available or changes, so search chunks
-  are regenerated from the raw transcript.
-- Treat `postAnalysisRequired: true` in `brain add interaction --json` output as a
-  hard follow-up, not a suggestion.
-- Before the import is considered complete, run post-analysis: link participants and
-  high-signal mentioned people, link or create the project context, write explicit
-  follow-up tasks linked back to `interaction:<id>` with chunk evidence, and store
-  only transcript-backed memories with chunk evidence.
+```bash
+brain --json add task --title "Send Maya the revised budget" \
+  --link project:<id> --link person:<id> --link interaction:<id> \
+  --assignee <person-id> \
+  --evidence interaction:<id>#0
+```
 
-When adding an asset:
+## Completion Rule
 
-- Import from a local file path; do not inline base64 in document text.
-- Link it to a typed record with a role such as avatar, logo, attachment, inline_image,
-  screenshot, or source_file.
-- Preserve original filename, original path, URL, MIME type, size, and content hash when
-  available.
-- Pass importer-provided plain text with `--text` or `--text-file` and
-  `--text-source importer` when available. Use `brain asset text set` to add text after
-  the asset already exists.
-- Do not pretend PDF/image bytes are searchable by content unless an importer or later
-  local extractor has populated asset text. Metadata, link captions, and linked record
-  titles are searchable immediately.
+A meeting, email, or document import is incomplete until it has:
 
-When adding a memory:
+- source identity;
+- participants or entities where applicable;
+- raw text or transcript when available;
+- an AI note;
+- extracted facts;
+- links to existing projects or tasks when relevant;
+- evidence-backed tasks or promoted memories when actions/claims were derived;
+- tags;
+- retrieval chunks.
 
-- Keep it atomic.
-- Use one of: fact, preference, decision, commitment, instruction, risk, idea.
-- Link it to visible records.
-- Add chunk evidence when the claim came from a document or interaction.
+Run:
 
-## Skill Contract
+```bash
+brain --json import finalize --record interaction:<id>
+brain --json import audit --limit 100
+```
 
-The local skill should teach agents:
+`finalize` returns `complete:false` with a `missing` array until the staged
+requirements are satisfied.
 
-- the product nouns,
-- when to create documents versus interactions,
-- how to query before writing,
-- how to add tasks and memories,
-- how to add and link binary assets,
-- how to run provider-neutral email/contact imports,
-- how to run daily update/report/todo workflows,
-- how to query the user-centered graph,
-- how to request JSON output,
-- how to cite evidence,
-- how to avoid duplicate records.
+## Guardrails
 
-Agents should treat the CLI as the main supported operating path for launch.
+Person-from-email and organization-from-email paths are cautious. Use
+`brain add person-from-email` for untrusted display names; it returns structured
+skip reasons for machine senders, no-reply addresses, invalid emails, token-like
+names, and email-as-name values.
+
+Do not infer new projects or high-impact organizations from a single weak clue.
+Use `brain suggest project` or `brain suggest organization` with evidence and let
+the user accept or dismiss.
+
+Do not store provider-specific logic in the CLI. Agents own upstream pagination,
+filtering, credential handling, transcript retrieval, attachment extraction, and
+translation into generic `brain` calls.

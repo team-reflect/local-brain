@@ -1,6 +1,5 @@
 import { sql } from 'kysely'
 import { db } from '../db/client'
-import type { RecordKind } from '../domains/relations/types'
 import { embedStatus, embedTexts } from '../embeddings/commands'
 import { isEmbedReady } from '../embeddings/model'
 import { fuseRanked, semanticHits } from '../embeddings/semantic'
@@ -25,7 +24,19 @@ import { combineScore, lexicalScore, recencyScore } from './ranking'
  */
 export type RetrievalMode = 'lexical' | 'semantic' | 'hybrid'
 
-export type SourceRecordType = 'document' | 'interaction'
+export type SourceRecordType =
+  | 'person'
+  | 'organization'
+  | 'organization_profile'
+  | 'project'
+  | 'task'
+  | 'document'
+  | 'interaction'
+  | 'interaction_transcript'
+  | 'ai_note'
+  | 'extracted_fact'
+  | 'memory'
+  | 'asset'
 
 export interface RetrievedChunk {
   chunkId: string
@@ -59,7 +70,7 @@ export interface RetrieveOptions {
   /** Restrict to one source type. */
   recordType?: SourceRecordType
   /**
-   * Owning document/interaction ids considered "in context" (e.g. the records
+   * Owning source record ids considered "in context" (e.g. the records
    * linked to the project the user is viewing). Chunks from these records get a
    * relevance boost. Callers resolve context; retrieval stays a pure read.
    */
@@ -118,16 +129,73 @@ async function lexicalHits(
       cc.record_type  AS "recordType",
       cc.record_id    AS "recordId",
       cc.chunk_index  AS "chunkIndex",
-      COALESCE(d.title, i.title)            AS "recordTitle",
-      COALESCE(i.occurred_at, d.updated_at) AS "recordDate",
+      COALESCE(
+        p.full_name,
+        o.name,
+        op.one_line_description,
+        pr.name,
+        t.title,
+        d.title,
+        i.title,
+        transcript_interaction.title,
+        an.title,
+        ef.key,
+        m.claim,
+        a.original_filename,
+        a.storage_path
+      ) AS "recordTitle",
+      COALESCE(
+        i.occurred_at,
+        transcript_interaction.occurred_at,
+        d.occurred_at,
+        d.authored_at,
+        t.due_at,
+        an.generated_at,
+        ef.observed_at,
+        m.valid_from,
+        p.last_interaction_at,
+        d.updated_at,
+        i.updated_at,
+        p.updated_at,
+        o.updated_at,
+        pr.updated_at,
+        t.updated_at,
+        an.updated_at,
+        ef.updated_at,
+        m.updated_at,
+        a.updated_at
+      ) AS "recordDate",
       bm25(content_chunks_fts)              AS "bm25"
     FROM content_chunks_fts
     JOIN content_chunks cc ON cc.rowid = content_chunks_fts.rowid
-    LEFT JOIN documents d    ON d.id = cc.record_id AND cc.record_type = 'document'
+    LEFT JOIN people p ON p.id = cc.record_id AND cc.record_type = 'person'
+    LEFT JOIN organizations o ON o.id = cc.record_id AND cc.record_type = 'organization'
+    LEFT JOIN organization_profiles op ON op.id = cc.record_id AND cc.record_type = 'organization_profile'
+    LEFT JOIN projects pr ON pr.id = cc.record_id AND cc.record_type = 'project'
+    LEFT JOIN tasks t ON t.id = cc.record_id AND cc.record_type = 'task'
+    LEFT JOIN documents d ON d.id = cc.record_id AND cc.record_type = 'document'
     LEFT JOIN interactions i ON i.id = cc.record_id AND cc.record_type = 'interaction'
+    LEFT JOIN interaction_transcripts tr ON tr.id = cc.record_id AND cc.record_type = 'interaction_transcript'
+    LEFT JOIN interactions transcript_interaction ON transcript_interaction.id = tr.interaction_id
+    LEFT JOIN ai_notes an ON an.id = cc.record_id AND cc.record_type = 'ai_note'
+    LEFT JOIN extracted_facts ef ON ef.id = cc.record_id AND cc.record_type = 'extracted_fact'
+    LEFT JOIN memories m ON m.id = cc.record_id AND cc.record_type = 'memory'
+    LEFT JOIN assets a ON a.id = cc.record_id AND cc.record_type = 'asset'
     WHERE content_chunks_fts MATCH ${match}
-      AND (d.archived_at IS NULL)
-      AND (i.archived_at IS NULL)
+      AND (
+        (cc.record_type = 'person' AND p.archived_at IS NULL)
+        OR (cc.record_type = 'organization' AND o.archived_at IS NULL)
+        OR (cc.record_type = 'organization_profile' AND op.id IS NOT NULL)
+        OR (cc.record_type = 'project' AND pr.archived_at IS NULL)
+        OR (cc.record_type = 'task' AND t.archived_at IS NULL)
+        OR (cc.record_type = 'document' AND d.archived_at IS NULL)
+        OR (cc.record_type = 'interaction' AND i.archived_at IS NULL)
+        OR (cc.record_type = 'interaction_transcript' AND tr.id IS NOT NULL AND transcript_interaction.archived_at IS NULL)
+        OR (cc.record_type = 'ai_note' AND an.id IS NOT NULL)
+        OR (cc.record_type = 'extracted_fact' AND ef.archived_at IS NULL)
+        OR (cc.record_type = 'memory' AND m.archived_at IS NULL)
+        OR (cc.record_type = 'asset' AND a.archived_at IS NULL)
+      )
       ${recordTypeFilter}
     ORDER BY bm25(content_chunks_fts)
     LIMIT ${options.limit}
@@ -237,5 +305,18 @@ export async function retrieve(query: string, options: RetrieveOptions = {}): Pr
   return { query, mode, semanticAvailable: false, chunks }
 }
 
-/** The kinds {@link retrieve} can ground answers in (source records only). */
-export const RETRIEVABLE_SOURCE_KINDS: readonly RecordKind[] = ['document', 'interaction']
+/** The source kinds {@link retrieve} can ground answers in. */
+export const RETRIEVABLE_SOURCE_KINDS: readonly SourceRecordType[] = [
+  'person',
+  'organization',
+  'organization_profile',
+  'project',
+  'task',
+  'document',
+  'interaction',
+  'interaction_transcript',
+  'ai_note',
+  'extracted_fact',
+  'memory',
+  'asset',
+]

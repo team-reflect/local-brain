@@ -25,11 +25,35 @@ export interface Affiliations {
   personId: string
   organizationId: string
   title: string | null
+  department: string | null
   role: string | null
+  roleFamily: string | null
+  seniority: string | null
   startedOn: string | null
   endedOn: string | null
   isCurrent: Generated<number>
+  isPrimary: Generated<number>
+  evidenceRefId: string | null
   notes: string | null
+  createdAt: Generated<string>
+  updatedAt: Generated<string>
+}
+
+export interface AiNotes {
+  id: string
+  kind: Generated<string>
+  interactionId: string | null
+  documentId: string | null
+  subjectType: string | null
+  subjectId: string | null
+  title: string | null
+  content: string
+  contentFormat: Generated<string>
+  model: string | null
+  promptFingerprint: string | null
+  sourceId: string | null
+  metadataJson: string | null
+  generatedAt: string | null
   createdAt: Generated<string>
   updatedAt: Generated<string>
 }
@@ -123,10 +147,13 @@ export interface ContentChunks {
   id: string
   recordType: string
   recordId: string
+  sourceRecordType: string | null
+  sourceRecordId: string | null
   chunkIndex: number
   text: string
   tokenCount: number | null
   contentHash: string | null
+  citationLabel: string | null
   createdAt: Generated<string>
 }
 
@@ -165,6 +192,7 @@ export interface Documents {
   originalUrl: string | null
   contentHash: string | null
   authoredAt: string | null
+  occurredAt: string | null
   createdAt: Generated<string>
   updatedAt: Generated<string>
   archivedAt: string | null
@@ -194,6 +222,26 @@ export interface ExternalIdentities {
   updatedAt: Generated<string>
 }
 
+export interface ExtractedFacts {
+  id: string
+  subjectType: string
+  subjectId: string
+  key: string
+  valueText: string | null
+  valueJson: string | null
+  confidence: number | null
+  sourceRecordType: string | null
+  sourceRecordId: string | null
+  sourceExcerpt: string | null
+  observedAt: string | null
+  model: string | null
+  promptFingerprint: string | null
+  metadataJson: string | null
+  createdAt: Generated<string>
+  updatedAt: Generated<string>
+  archivedAt: string | null
+}
+
 export interface InteractionOrganizations {
   id: string
   interactionId: string
@@ -214,6 +262,25 @@ export interface InteractionParticipants {
   createdAt: Generated<string>
 }
 
+export interface InteractionTranscripts {
+  id: string
+  interactionId: string
+  rawText: string
+  format: Generated<string>
+  language: string | null
+  segmentsJson: string | null
+  recordingUrl: string | null
+  storagePath: string | null
+  sourceId: string | null
+  sourceExternalId: string | null
+  transcribedBy: string | null
+  transcribedAt: string | null
+  contentHash: string | null
+  metadataJson: string | null
+  createdAt: Generated<string>
+  updatedAt: Generated<string>
+}
+
 export interface Interactions {
   id: string
   kind: Generated<string>
@@ -222,11 +289,13 @@ export interface Interactions {
   summary: string | null
   occurredAt: string | null
   endedAt: string | null
+  durationSeconds: number | null
   location: string | null
   externalId: string | null
   originalPath: string | null
   originalUrl: string | null
   contentHash: string | null
+  metadataJson: string | null
   createdAt: Generated<string>
   updatedAt: Generated<string>
   archivedAt: string | null
@@ -239,6 +308,7 @@ export interface Memories {
   confidence: number | null
   validFrom: string | null
   validTo: string | null
+  promotedFromFactId: string | null
   createdAt: Generated<string>
   updatedAt: Generated<string>
   archivedAt: string | null
@@ -253,13 +323,40 @@ export interface MemoryLinks {
   createdAt: Generated<string>
 }
 
+export interface OrganizationProfiles {
+  id: string
+  organizationId: string
+  model: string | null
+  promptFingerprint: string | null
+  canonicalName: string | null
+  website: string | null
+  oneLineDescription: string | null
+  category: string | null
+  whyItMatters: string | null
+  offeringsJson: string | null
+  notablePeopleJson: string | null
+  suggestedTagsJson: string | null
+  reviewFlagsJson: string | null
+  sourceUrlsJson: string | null
+  rawEnrichmentJson: string | null
+  researchedAt: string | null
+  createdAt: Generated<string>
+  updatedAt: Generated<string>
+}
+
 export interface Organizations {
   id: string
   name: string
   kind: string | null
   domain: string | null
-  location: string | null
+  headline: string | null
   summary: string | null
+  website: string | null
+  industry: string | null
+  location: string | null
+  hqCity: string | null
+  hqRegion: string | null
+  hqCountry: string | null
   notes: string | null
   createdAt: Generated<string>
   updatedAt: Generated<string>
@@ -271,15 +368,25 @@ export interface People {
   fullName: string
   preferredName: string | null
   headline: string | null
+  summary: string | null
   primaryEmail: string | null
   primaryPhone: string | null
   location: string | null
-  isSelf: Generated<number>
-  lastInteractionAt: string | null
+  city: string | null
+  region: string | null
+  country: string | null
+  timezone: string | null
+  linkedinUrl: string | null
+  website: string | null
   importantDatesJson: string | null
-  summary: string | null
   notes: string | null
+  isSelf: Generated<number>
+  currentTitle: string | null
+  currentDepartment: string | null
   currentOrganizationId: string | null
+  roleFamily: string | null
+  seniority: string | null
+  lastInteractionAt: string | null
   createdAt: Generated<string>
   updatedAt: Generated<string>
   archivedAt: string | null
@@ -356,6 +463,22 @@ export interface Projects {
   archivedAt: string | null
 }
 
+export interface RecordProvenance {
+  id: string
+  recordType: string
+  recordId: string
+  provenanceKind: Generated<string>
+  sourceId: string | null
+  externalIdentityId: string | null
+  originalPath: string | null
+  originalUrl: string | null
+  importedAt: string | null
+  model: string | null
+  promptFingerprint: string | null
+  metadataJson: string | null
+  createdAt: Generated<string>
+}
+
 export interface RelationshipStrengths {
   personId: SelectOnly<string | null>
   lastInteractionAt: SelectOnly<string | null>
@@ -368,6 +491,7 @@ export interface RelationshipStrengths {
 export interface SchemaMeta {
   key: string
   value: string
+  updatedAt: Generated<string>
 }
 
 export interface Settings {
@@ -412,13 +536,16 @@ export interface Taggings {
   tagId: string
   recordType: string
   recordId: string
+  sourceId: string | null
   createdAt: Generated<string>
 }
 
 export interface Tags {
   id: string
   name: string
+  slug: string | null
   color: string | null
+  description: string | null
   createdAt: Generated<string>
   updatedAt: Generated<string>
 }
@@ -467,6 +594,8 @@ export interface Tasks {
   completedAt: string | null
   originDocumentId: string | null
   originInteractionId: string | null
+  sourceRecordType: string | null
+  sourceRecordId: string | null
   createdAt: Generated<string>
   updatedAt: Generated<string>
   archivedAt: string | null
@@ -474,6 +603,7 @@ export interface Tasks {
 
 export interface Database {
   affiliations: Affiliations
+  aiNotes: AiNotes
   assetLinks: AssetLinks
   assetSearch: AssetSearch
   assetSearchSource: AssetSearchSource
@@ -489,11 +619,14 @@ export interface Database {
   documents: Documents
   evidenceRefs: EvidenceRefs
   externalIdentities: ExternalIdentities
+  extractedFacts: ExtractedFacts
   interactionOrganizations: InteractionOrganizations
   interactionParticipants: InteractionParticipants
+  interactionTranscripts: InteractionTranscripts
   interactions: Interactions
   memories: Memories
   memoryLinks: MemoryLinks
+  organizationProfiles: OrganizationProfiles
   organizations: Organizations
   people: People
   personEmails: PersonEmails
@@ -503,6 +636,7 @@ export interface Database {
   projectOrganizations: ProjectOrganizations
   projectPeople: ProjectPeople
   projects: Projects
+  recordProvenance: RecordProvenance
   relationshipStrengths: RelationshipStrengths
   schemaMeta: SchemaMeta
   settings: Settings

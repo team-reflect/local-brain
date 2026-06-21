@@ -15,8 +15,12 @@ pub struct AffiliateArgs<'a> {
     pub person_id: &'a str,
     pub organization_id: &'a str,
     pub title: Option<&'a str>,
+    pub department: Option<&'a str>,
     pub role: Option<&'a str>,
+    pub role_family: Option<&'a str>,
+    pub seniority: Option<&'a str>,
     pub is_current: bool,
+    pub is_primary: bool,
 }
 
 /// Upsert one person<->org affiliation. Deduped by (person, org): an existing row
@@ -29,8 +33,12 @@ pub(super) fn upsert_affiliation(
     person_id: &str,
     organization_id: &str,
     title: Option<&str>,
+    department: Option<&str>,
     role: Option<&str>,
+    role_family: Option<&str>,
+    seniority: Option<&str>,
     is_current: bool,
+    is_primary: bool,
 ) -> Result<(), CliError> {
     // Demote every current affiliation for the person FIRST, before inserting or
     // promoting the target, so the single-current unique index
@@ -41,6 +49,14 @@ pub(super) fn upsert_affiliation(
             "UPDATE affiliations
              SET is_current = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
              WHERE person_id = ?1 AND is_current = 1",
+            params![person_id],
+        )?;
+    }
+    if is_primary {
+        conn.execute(
+            "UPDATE affiliations
+             SET is_primary = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             WHERE person_id = ?1 AND is_primary = 1",
             params![person_id],
         )?;
     }
@@ -59,16 +75,27 @@ pub(super) fn upsert_affiliation(
                 "UPDATE affiliations
                  SET title = CASE
                        WHEN (title IS NULL OR trim(title) = '') AND ?2 IS NOT NULL THEN ?2 ELSE title END,
+                     department = CASE
+                       WHEN (department IS NULL OR trim(department) = '') AND ?3 IS NOT NULL THEN ?3 ELSE department END,
                      role = CASE
-                       WHEN (role IS NULL OR trim(role) = '') AND ?3 IS NOT NULL THEN ?3 ELSE role END,
-                     is_current = CASE WHEN ?4 = 1 THEN 1 ELSE is_current END,
+                       WHEN (role IS NULL OR trim(role) = '') AND ?4 IS NOT NULL THEN ?4 ELSE role END,
+                     role_family = CASE
+                       WHEN (role_family IS NULL OR trim(role_family) = '') AND ?5 IS NOT NULL THEN ?5 ELSE role_family END,
+                     seniority = CASE
+                       WHEN (seniority IS NULL OR trim(seniority) = '') AND ?6 IS NOT NULL THEN ?6 ELSE seniority END,
+                     is_current = CASE WHEN ?7 = 1 THEN 1 ELSE is_current END,
+                     is_primary = CASE WHEN ?8 = 1 THEN 1 ELSE is_primary END,
                      updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
                  WHERE id = ?1",
                 params![
                     id,
                     normalize_optional(title),
+                    normalize_optional(department),
                     normalize_optional(role),
+                    normalize_optional(role_family),
+                    normalize_optional(seniority),
                     i64::from(is_current),
+                    i64::from(is_primary),
                 ],
             )?;
             id
@@ -77,15 +104,20 @@ pub(super) fn upsert_affiliation(
             let id = new_id();
             conn.execute(
                 "INSERT INTO affiliations
-                   (id, person_id, organization_id, title, role, is_current)
-                 VALUES (?1,?2,?3,?4,?5,?6)",
+                   (id, person_id, organization_id, title, department, role,
+                    role_family, seniority, is_current, is_primary)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
                 params![
                     id,
                     person_id,
                     organization_id,
                     normalize_optional(title),
+                    normalize_optional(department),
                     normalize_optional(role),
+                    normalize_optional(role_family),
+                    normalize_optional(seniority),
                     i64::from(is_current),
+                    i64::from(is_primary),
                 ],
             )?;
             id
@@ -97,9 +129,20 @@ pub(super) fn upsert_affiliation(
         conn.execute(
             "UPDATE people
              SET current_organization_id = ?1,
+                 current_title = COALESCE(?3, current_title),
+                 current_department = COALESCE(?4, current_department),
+                 role_family = COALESCE(?5, role_family),
+                 seniority = COALESCE(?6, seniority),
                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
              WHERE id = ?2",
-            params![organization_id, person_id],
+            params![
+                organization_id,
+                person_id,
+                normalize_optional(title),
+                normalize_optional(department),
+                normalize_optional(role_family),
+                normalize_optional(seniority),
+            ],
         )?;
     }
     Ok(())
@@ -134,8 +177,12 @@ pub fn affiliate(conn: &mut Connection, json: bool, args: AffiliateArgs) -> Resu
         args.person_id,
         args.organization_id,
         args.title,
+        args.department,
         args.role,
+        args.role_family,
+        args.seniority,
         args.is_current,
+        args.is_primary,
     )?;
     tx.commit()?;
     if json {
@@ -144,6 +191,7 @@ pub fn affiliate(conn: &mut Connection, json: bool, args: AffiliateArgs) -> Resu
             "personId": args.person_id,
             "organizationId": args.organization_id,
             "isCurrent": args.is_current,
+            "isPrimary": args.is_primary,
         }))
     } else {
         println!(
@@ -179,9 +227,9 @@ mod tests {
     fn upsert_affiliation_dedupes_and_sets_single_current() {
         let conn = brain_schema::open_in_memory().unwrap();
         let (person, org) = seed_person_and_org(&conn);
-        upsert_affiliation(&conn, &person, &org, Some("Lead Designer"), None, true).unwrap();
+        upsert_affiliation(&conn, &person, &org, Some("Lead Designer"), None, None, None, None, true, true).unwrap();
         // Re-run: must not fork a second affiliation row.
-        upsert_affiliation(&conn, &person, &org, None, None, false).unwrap();
+        upsert_affiliation(&conn, &person, &org, None, None, None, None, None, false, false).unwrap();
         let count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM affiliations WHERE person_id = ?1",
@@ -210,8 +258,8 @@ mod tests {
             params![org_b],
         )
         .unwrap();
-        upsert_affiliation(&conn, &person, &org_a, None, None, true).unwrap();
-        upsert_affiliation(&conn, &person, &org_b, None, None, true).unwrap();
+        upsert_affiliation(&conn, &person, &org_a, None, None, None, None, None, true, true).unwrap();
+        upsert_affiliation(&conn, &person, &org_b, None, None, None, None, None, true, true).unwrap();
         let current_count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM affiliations WHERE person_id = ?1 AND is_current = 1",
@@ -242,8 +290,12 @@ mod tests {
                 person_id: &missing,
                 organization_id: &org,
                 title: None,
+                department: None,
                 role: None,
+                role_family: None,
+                seniority: None,
                 is_current: false,
+                is_primary: false,
             },
         );
         assert!(
@@ -264,8 +316,12 @@ mod tests {
                 person_id: &person,
                 organization_id: &missing,
                 title: None,
+                department: None,
                 role: None,
+                role_family: None,
+                seniority: None,
                 is_current: false,
+                is_primary: false,
             },
         );
         assert!(
