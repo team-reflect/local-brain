@@ -15,6 +15,7 @@ import {
   getPersonLinks,
   getProject,
   getProjectLinks,
+  getRecordInspection,
   getSelf,
   getTask,
   getTaskLinks,
@@ -28,6 +29,7 @@ import {
   updateTask,
   type ListTasksOptions,
   type NewProject,
+  type RecordInspectionKind,
   type TaskPatch,
 } from '@local-brain/core'
 
@@ -128,6 +130,13 @@ export function useAssetDetail(id: string) {
   return useQuery({
     queryKey: ['asset', id],
     queryFn: () => getAssetDetail(id).then((asset) => asset ?? null),
+  })
+}
+
+export function useRecordInspection(recordType: RecordInspectionKind, id: string) {
+  return useQuery({
+    queryKey: ['record-inspection', recordType, id],
+    queryFn: () => getRecordInspection(recordType, id),
   })
 }
 

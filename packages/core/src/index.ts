@@ -211,6 +211,11 @@ export {
   type InteractionLinks,
 } from './domains/relations/getters'
 export { unlinkRecords, type LinkRef, type LinkableKind } from './domains/relations/setters'
+export {
+  getRecordInspection,
+  type RecordInspection,
+  type RecordInspectionKind,
+} from './domains/records/inspection'
 
 // Citations / evidence
 export {

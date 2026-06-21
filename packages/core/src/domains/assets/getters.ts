@@ -9,7 +9,7 @@ export type AssetText = Selectable<AssetTexts>
 
 export interface AssetDetail {
   asset: Asset
-  text: Pick<AssetText, 'textSource' | 'contentHash' | 'createdAt' | 'updatedAt'> & {
+  text: Pick<AssetText, 'text' | 'textSource' | 'contentHash' | 'createdAt' | 'updatedAt'> & {
     textLength: number
   } | null
   linkedRecords: LinkedRecord[]
@@ -37,6 +37,7 @@ export async function getAssetDetail(id: string): Promise<AssetDetail | undefine
     db
       .selectFrom('assetTexts')
       .select(({ fn }) => [
+        'text',
         'textSource',
         'contentHash',
         'createdAt',

@@ -2,12 +2,16 @@ import type { ReactNode } from 'react'
 import { DetailFields } from '../../components/detail-fields'
 import { DetailPage } from '../../components/detail-page'
 import { LinkedRecords } from '../../components/linked-records'
+import { MemoryList } from '../../components/memory-list'
 import { PageHead } from '../../components/page-head'
+import { RecordInspectionPanel } from '../../components/record-inspection'
 import { Section } from '../../components/section'
 import {
   useInteraction,
   useInteractionLinks,
   useInteractionParticipants,
+  useMemoriesForRecord,
+  useRecordInspection,
   useUnlinkFrom,
 } from '../../lib/queries'
 import { useRouter } from '../../routing/router'
@@ -17,6 +21,8 @@ export function InteractionDetail({ id }: { id: string }): ReactNode {
   const interaction = useInteraction(id)
   const participants = useInteractionParticipants(id)
   const links = useInteractionLinks(id)
+  const memories = useMemoriesForRecord('interaction', id)
+  const inspection = useRecordInspection('interaction', id)
   const onUnlink = useUnlinkFrom({ kind: 'interaction', id })
 
   return (
@@ -27,9 +33,19 @@ export function InteractionDetail({ id }: { id: string }): ReactNode {
           <DetailFields
             fields={[
               { label: 'Occurred', value: i.occurredAt?.slice(0, 16).replace('T', ' ') ?? '—' },
+              { label: 'Ended', value: i.endedAt?.slice(0, 16).replace('T', ' ') ?? '—' },
+              { label: 'Duration', value: i.durationSeconds ?? '—' },
               { label: 'Location', value: i.location ?? '—' },
+              { label: 'External id', value: i.externalId ?? '—' },
+              { label: 'Source', value: i.originalUrl ?? i.originalPath ?? '—' },
+              { label: 'Content hash', value: i.contentHash ?? '—' },
+              { label: 'Metadata', value: i.metadataJson ?? '—' },
+              { label: 'Created', value: i.createdAt.slice(0, 10) },
+              { label: 'Updated', value: i.updatedAt.slice(0, 10) },
+              { label: 'Archived', value: i.archivedAt?.slice(0, 10) ?? '—' },
             ]}
           />
+          {i.summary ? <p className="text-sm text-foreground">{i.summary}</p> : null}
           <Section title="Participants">
             {participants.data && participants.data.length > 0 ? (
               <ul className="flex flex-col gap-1">
@@ -72,6 +88,10 @@ export function InteractionDetail({ id }: { id: string }): ReactNode {
               <LinkedRecords title="Assets" records={links.data.assets} onUnlink={onUnlink} />
             </>
           ) : null}
+          {memories.data ? (
+            <MemoryList records={memories.data} recordType="interaction" recordId={id} />
+          ) : null}
+          <RecordInspectionPanel inspection={inspection.data} />
         </>
       )}
     </DetailPage>

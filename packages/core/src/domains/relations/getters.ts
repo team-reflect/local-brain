@@ -52,10 +52,11 @@ export interface PersonLinks {
   tasks: LinkedRecord[]
   interactions: LinkedRecord[]
   documents: LinkedRecord[]
+  assets: LinkedRecord[]
 }
 
 export async function getPersonLinks(personId: string): Promise<PersonLinks> {
-  const [organizations, projects, tasks, interactions, documents] = await Promise.all([
+  const [organizations, projects, tasks, interactions, documents, assets] = await Promise.all([
     db
       .selectFrom('organizations')
       .innerJoin('affiliations', 'affiliations.organizationId', 'organizations.id')
@@ -96,6 +97,7 @@ export async function getPersonLinks(personId: string): Promise<PersonLinks> {
       .orderBy('documents.title', 'asc')
       .select(['documents.id as id', 'documents.title as title', 'documents.kind as subtitle'])
       .execute(),
+    getAssetLinks('person', personId),
   ])
   return {
     organizations: asLinks('organization', organizations),
@@ -103,6 +105,7 @@ export async function getPersonLinks(personId: string): Promise<PersonLinks> {
     tasks: asLinks('task', tasks),
     interactions: asLinks('interaction', interactions),
     documents: asLinks('document', documents),
+    assets,
   }
 }
 
@@ -112,10 +115,11 @@ export interface OrganizationLinks {
   documents: LinkedRecord[]
   interactions: LinkedRecord[]
   tasks: LinkedRecord[]
+  assets: LinkedRecord[]
 }
 
 export async function getOrganizationLinks(organizationId: string): Promise<OrganizationLinks> {
-  const [people, projects, documents, interactions, tasks] = await Promise.all([
+  const [people, projects, documents, interactions, tasks, assets] = await Promise.all([
     db
       .selectFrom('people')
       .innerJoin('affiliations', 'affiliations.personId', 'people.id')
@@ -156,6 +160,7 @@ export async function getOrganizationLinks(organizationId: string): Promise<Orga
       .orderBy('tasks.title', 'asc')
       .select(['tasks.id as id', 'tasks.title as title', 'tasks.status as subtitle'])
       .execute(),
+    getAssetLinks('organization', organizationId),
   ])
   return {
     people: asLinks('person', people),
@@ -163,6 +168,7 @@ export async function getOrganizationLinks(organizationId: string): Promise<Orga
     documents: asLinks('document', documents),
     interactions: asLinks('interaction', interactions),
     tasks: asLinks('task', tasks),
+    assets,
   }
 }
 
@@ -172,10 +178,11 @@ export interface ProjectLinks {
   documents: LinkedRecord[]
   interactions: LinkedRecord[]
   organizations: LinkedRecord[]
+  assets: LinkedRecord[]
 }
 
 export async function getProjectLinks(projectId: string): Promise<ProjectLinks> {
-  const [people, tasks, documents, interactions, organizations] = await Promise.all([
+  const [people, tasks, documents, interactions, organizations, assets] = await Promise.all([
     db
       .selectFrom('people')
       .innerJoin('projectPeople', 'projectPeople.personId', 'people.id')
@@ -215,6 +222,7 @@ export async function getProjectLinks(projectId: string): Promise<ProjectLinks> 
       .orderBy('organizations.name', 'asc')
       .select(['organizations.id as id', 'organizations.name as title', 'organizations.kind as subtitle'])
       .execute(),
+    getAssetLinks('project', projectId),
   ])
   return {
     people: asLinks('person', people),
@@ -222,6 +230,7 @@ export async function getProjectLinks(projectId: string): Promise<ProjectLinks> 
     documents: asLinks('document', documents),
     interactions: asLinks('interaction', interactions),
     organizations: asLinks('organization', organizations),
+    assets,
   }
 }
 
@@ -233,10 +242,12 @@ export interface TaskLinks {
   assignees: LinkedRecord[]
   documents: LinkedRecord[]
   interactions: LinkedRecord[]
+  organizations: LinkedRecord[]
+  assets: LinkedRecord[]
 }
 
 export async function getTaskLinks(taskId: string): Promise<TaskLinks> {
-  const [projects, people, assignees, documents, interactions] = await Promise.all([
+  const [projects, people, assignees, documents, interactions, organizations, assets] = await Promise.all([
     db
       .selectFrom('projects')
       .innerJoin('tasks', 'tasks.projectId', 'projects.id')
@@ -278,6 +289,15 @@ export async function getTaskLinks(taskId: string): Promise<TaskLinks> {
       .orderBy('interactions.occurredAt', 'desc')
       .select(['interactions.id as id', 'interactions.title as title', 'interactions.occurredAt as subtitle'])
       .execute(),
+    db
+      .selectFrom('organizations')
+      .innerJoin('taskOrganizations', 'taskOrganizations.organizationId', 'organizations.id')
+      .where('taskOrganizations.taskId', '=', taskId)
+      .where('organizations.archivedAt', 'is', null)
+      .orderBy('organizations.name', 'asc')
+      .select(['organizations.id as id', 'organizations.name as title', 'taskOrganizations.role as subtitle'])
+      .execute(),
+    getAssetLinks('task', taskId),
   ])
   return {
     projects: asLinks('project', projects),
@@ -285,11 +305,14 @@ export async function getTaskLinks(taskId: string): Promise<TaskLinks> {
     assignees: asLinks('person', assignees),
     documents: asLinks('document', documents),
     interactions: asLinks('interaction', interactions),
+    organizations: asLinks('organization', organizations),
+    assets,
   }
 }
 
 export interface DocumentLinks {
   people: LinkedRecord[]
+  organizations: LinkedRecord[]
   projects: LinkedRecord[]
   interactions: LinkedRecord[]
   tasks: LinkedRecord[]
@@ -297,7 +320,7 @@ export interface DocumentLinks {
 }
 
 export async function getDocumentLinks(documentId: string): Promise<DocumentLinks> {
-  const [people, projects, interactions, tasks, assets] = await Promise.all([
+  const [people, organizations, projects, interactions, tasks, assets] = await Promise.all([
     db
       .selectFrom('people')
       .innerJoin('documentPeople', 'documentPeople.personId', 'people.id')
@@ -305,6 +328,14 @@ export async function getDocumentLinks(documentId: string): Promise<DocumentLink
       .where('people.archivedAt', 'is', null)
       .orderBy('people.fullName', 'asc')
       .select(['people.id as id', 'people.fullName as title', 'documentPeople.role as subtitle'])
+      .execute(),
+    db
+      .selectFrom('organizations')
+      .innerJoin('documentOrganizations', 'documentOrganizations.organizationId', 'organizations.id')
+      .where('documentOrganizations.documentId', '=', documentId)
+      .where('organizations.archivedAt', 'is', null)
+      .orderBy('organizations.name', 'asc')
+      .select(['organizations.id as id', 'organizations.name as title', 'documentOrganizations.role as subtitle'])
       .execute(),
     db
       .selectFrom('projects')
@@ -334,6 +365,7 @@ export async function getDocumentLinks(documentId: string): Promise<DocumentLink
   ])
   return {
     people: asLinks('person', people),
+    organizations: asLinks('organization', organizations),
     projects: asLinks('project', projects),
     interactions: asLinks('interaction', interactions),
     tasks: asLinks('task', tasks),

@@ -4,14 +4,24 @@ import { StatusBadge } from '../../components/badge'
 import { DetailFields } from '../../components/detail-fields'
 import { DetailPage } from '../../components/detail-page'
 import { LinkedRecords } from '../../components/linked-records'
+import { MemoryList } from '../../components/memory-list'
 import { PageHead } from '../../components/page-head'
+import { RecordInspectionPanel } from '../../components/record-inspection'
 import { Drawer, DrawerContent, DrawerTitle } from '../../components/ui/drawer'
-import { useProject, useProjectLinks, useUnlinkFrom } from '../../lib/queries'
+import {
+  useMemoriesForRecord,
+  useProject,
+  useProjectLinks,
+  useRecordInspection,
+  useUnlinkFrom,
+} from '../../lib/queries'
 import { TaskDetail } from './task'
 
 export function ProjectDetail({ id }: { id: string }): ReactNode {
   const project = useProject(id)
   const links = useProjectLinks(id)
+  const memories = useMemoriesForRecord('project', id)
+  const inspection = useRecordInspection('project', id)
   const onUnlink = useUnlinkFrom({ kind: 'project', id })
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
 
@@ -32,9 +42,13 @@ export function ProjectDetail({ id }: { id: string }): ReactNode {
                 { label: 'Started', value: p.startedOn ?? '—' },
                 { label: 'Target', value: p.targetDate ?? '—' },
                 { label: 'Completed', value: p.completedOn ?? '—' },
+                { label: 'Created', value: p.createdAt.slice(0, 10) },
+                { label: 'Updated', value: p.updatedAt.slice(0, 10) },
+                { label: 'Archived', value: p.archivedAt?.slice(0, 10) ?? '—' },
               ]}
             />
             {p.summary ? <p className="text-sm text-foreground">{p.summary}</p> : null}
+            {p.notes ? <p className="whitespace-pre-wrap text-sm text-foreground">{p.notes}</p> : null}
             {links.data ? (
               <>
                 <LinkedRecords
@@ -47,8 +61,13 @@ export function ProjectDetail({ id }: { id: string }): ReactNode {
                 <LinkedRecords title="Organizations" records={links.data.organizations} onUnlink={onUnlink} />
                 <LinkedRecords title="Documents" records={links.data.documents} onUnlink={onUnlink} />
                 <LinkedRecords title="Interactions" records={links.data.interactions} onUnlink={onUnlink} />
+                <LinkedRecords title="Assets" records={links.data.assets} onUnlink={onUnlink} />
               </>
             ) : null}
+            {memories.data ? (
+              <MemoryList records={memories.data} recordType="project" recordId={id} />
+            ) : null}
+            <RecordInspectionPanel inspection={inspection.data} />
           </>
         )}
       </DetailPage>

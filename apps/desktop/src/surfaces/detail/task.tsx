@@ -7,8 +7,19 @@ import { InlineEditableInput } from '../../components/inline-edit-input'
 import { InlineEditableSelect } from '../../components/inline-edit-select'
 import { InlineEditableTextarea } from '../../components/inline-edit-textarea'
 import { LinkedRecords } from '../../components/linked-records'
+import { MemoryList } from '../../components/memory-list'
 import { PageHead } from '../../components/page-head'
-import { useProjects, useTask, useTaskLinks, useUnlinkFrom, useUpdateTask } from '../../lib/queries'
+import { RecordInspectionPanel } from '../../components/record-inspection'
+import {
+  useMemoriesForRecord,
+  useProjects,
+  useRecordInspection,
+  useTask,
+  useTaskLinks,
+  useUnlinkFrom,
+  useUpdateTask,
+} from '../../lib/queries'
+import { TaskMetadataFields } from './task-metadata-fields'
 
 const TASK_STATUSES = ['open', 'waiting', 'scheduled', 'done', 'canceled'] as const
 const PRIORITY_OPTIONS = [
@@ -35,6 +46,8 @@ type SaveState = 'idle' | 'saving' | 'error'
 export function TaskDetail({ id }: { id: string }): ReactNode {
   const task = useTask(id)
   const links = useTaskLinks(id)
+  const memories = useMemoriesForRecord('task', id)
+  const inspection = useRecordInspection('task', id)
   const onUnlink = useUnlinkFrom({ kind: 'task', id })
 
   return (
@@ -42,6 +55,7 @@ export function TaskDetail({ id }: { id: string }): ReactNode {
       {(t) => (
         <>
           <TaskInlineEditor key={t.id} task={t} />
+          <TaskMetadataFields task={t} />
           {links.data ? (
             <>
               <LinkedRecords title="Project" records={links.data.projects} onUnlink={onUnlink} />
@@ -53,10 +67,16 @@ export function TaskDetail({ id }: { id: string }): ReactNode {
                 records={links.data.people.filter((p) => p.subtitle !== 'assignee')}
                 onUnlink={onUnlink}
               />
+              <LinkedRecords title="Organizations" records={links.data.organizations} onUnlink={onUnlink} />
               <LinkedRecords title="Documents" records={links.data.documents} onUnlink={onUnlink} />
               <LinkedRecords title="Interactions" records={links.data.interactions} onUnlink={onUnlink} />
+              <LinkedRecords title="Assets" records={links.data.assets} onUnlink={onUnlink} />
             </>
           ) : null}
+          {memories.data ? (
+            <MemoryList records={memories.data} recordType="task" recordId={id} />
+          ) : null}
+          <RecordInspectionPanel inspection={inspection.data} />
         </>
       )}
     </DetailPage>
