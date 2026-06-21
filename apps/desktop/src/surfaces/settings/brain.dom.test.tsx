@@ -16,7 +16,7 @@ const ACTIVE = {
   schemaVersion: 2,
 }
 describe('Settings → Brain', () => {
-  it('renders the active brain identity, color popover, folder, and forget action', async () => {
+  it('renders the active brain identity, color popover, folder, and bottom destructive action', async () => {
     installFakeBridge({
       respond: (command) => {
         switch (command) {
@@ -52,7 +52,11 @@ describe('Settings → Brain', () => {
     expect(brain.queryByText('Last opened')).toBeNull()
     expect(brain.queryByText('All brains')).toBeNull()
     expect(brain.queryByRole('button', { name: 'Switch' })).toBeNull()
-    expect(brain.getByRole('button', { name: 'Forget brain' })).toBeDefined()
+    expect(brain.queryByRole('button', { name: 'Forget brain' })).toBeNull()
+
+    const destructive = screen.getByRole('region', { name: 'Destructive settings' })
+    expect(within(destructive).getByRole('heading', { name: 'Destructive' })).toBeDefined()
+    expect(within(destructive).getByRole('button', { name: 'Forget brain' })).toBeDefined()
 
     expect(screen.queryByRole('button', { name: 'Teal' })).toBeNull()
     fireEvent.click(brain.getByRole('button', { name: 'Brain color' }))

@@ -5,6 +5,7 @@ import { useRouter } from '../../routing/router'
 import { AboutSettings } from './about'
 import { BrainSettings } from './brain'
 import { CliAgentsSettings } from './cli-agents'
+import { DestructiveSettings } from './destructive-settings'
 import { SemanticSearchSettings } from './semantic-search'
 
 interface SettingsSection {
@@ -76,6 +77,7 @@ export function SettingsSurface({ section }: { section: string | undefined }): R
             <SectionBody section={s.key} />
           </div>
         ))}
+        <DestructiveSettings />
       </div>
     </div>
   )
