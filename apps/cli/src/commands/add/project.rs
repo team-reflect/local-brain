@@ -9,7 +9,7 @@ use super::identity::{
     external_kind, find_external_identity, insert_external_identity, source_id,
     ExternalIdentityWrite,
 };
-use super::text::{normalize_optional, normalize_title, squish};
+use super::text::{normalize_name, normalize_optional, normalize_title};
 use crate::commands::{LinkKind, LinkRef};
 use crate::error::CliError;
 use crate::id::new_id;
@@ -31,10 +31,11 @@ pub struct AddProjectArgs<'a> {
 }
 
 fn find_duplicate_project(conn: &Connection, name: &str) -> Result<Option<String>, CliError> {
-    // Projects dedupe on the squished (case-preserved) name, matching
-    // `normalize_title`; `squish` is its normalizer without the empty→None step,
-    // which `find_by_normalized_name` handles itself.
-    super::find_by_normalized_name(conn, "projects", "name", name, squish)
+    // Dedupe on the case-/punctuation-folded name (`normalize_name`), matching
+    // people and organizations — and the suggestion dedupe key — so accepting a
+    // "west elizabeth" proposal reuses an existing "West Elizabeth" project instead
+    // of forking a case-variant duplicate. The display name keeps its original case.
+    super::find_by_normalized_name(conn, "projects", "name", name, normalize_name)
 }
 
 fn enrich_duplicate_project(

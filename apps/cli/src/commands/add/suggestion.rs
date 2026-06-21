@@ -617,6 +617,51 @@ mod tests {
     }
 
     #[test]
+    fn accept_reuses_a_case_variant_existing_project() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        // An existing project under a specific casing.
+        conn.execute(
+            "INSERT INTO projects (id, name, status) VALUES ('proj-existing', 'West Elizabeth', 'active')",
+            [],
+        )
+        .unwrap();
+        // A proposal for the same name in different casing/spacing.
+        suggest(
+            &mut conn,
+            true,
+            project_suggestion("west   elizabeth", vec![]),
+        )
+        .unwrap();
+        let sid: String = conn
+            .query_row("SELECT id FROM suggestions", [], |row| row.get(0))
+            .unwrap();
+        accept_suggestion(&mut conn, true, &sid).unwrap();
+
+        let active_projects: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM projects WHERE archived_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            active_projects, 1,
+            "accept must reuse the case-variant project, not fork a duplicate"
+        );
+        let resolved: String = conn
+            .query_row(
+                "SELECT resolved_record_id FROM suggestions WHERE id = ?1",
+                params![sid],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            resolved, "proj-existing",
+            "resolved to the existing project"
+        );
+    }
+
+    #[test]
     fn resolve_is_guarded_so_a_lost_race_leaves_no_partial_write() {
         // A suggestion that another process already accepted (resolved).
         let mut conn = brain_schema::open_in_memory().unwrap();
