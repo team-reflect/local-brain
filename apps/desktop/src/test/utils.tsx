@@ -83,29 +83,68 @@ export function installFakeBridge(options: FakeBridgeOptions = {}): void {
         case 'skill_status':
           return Promise.resolve({
             supported: true,
-            installTargetPath: '/Users/alex/.agents/skills/brain/SKILL.md',
-            installTargetDir: '/Users/alex/.agents/skills/brain',
-            bundledHash: 'abc123abc123abc123',
-            installedHash: null,
+            installTargetDir: '/Users/alex/.agents/skills',
             installState: 'missing',
+            skills: [
+              {
+                id: 'brain',
+                installTargetDir: '/Users/alex/.agents/skills/brain',
+                bundledHash: 'abc123abc123abc123',
+                installedHash: null,
+                installState: 'missing',
+              },
+              {
+                id: 'brain-backfill',
+                installTargetDir: '/Users/alex/.agents/skills/brain-backfill',
+                bundledHash: 'def456def456def456',
+                installedHash: null,
+                installState: 'missing',
+              },
+            ],
           })
         case 'skill_install':
           return Promise.resolve({
             supported: true,
-            installTargetPath: '/Users/alex/.agents/skills/brain/SKILL.md',
-            installTargetDir: '/Users/alex/.agents/skills/brain',
-            bundledHash: 'abc123abc123abc123',
-            installedHash: 'abc123abc123abc123',
+            installTargetDir: '/Users/alex/.agents/skills',
             installState: 'current',
+            skills: [
+              {
+                id: 'brain',
+                installTargetDir: '/Users/alex/.agents/skills/brain',
+                bundledHash: 'abc123abc123abc123',
+                installedHash: 'abc123abc123abc123',
+                installState: 'current',
+              },
+              {
+                id: 'brain-backfill',
+                installTargetDir: '/Users/alex/.agents/skills/brain-backfill',
+                bundledHash: 'def456def456def456',
+                installedHash: 'def456def456def456',
+                installState: 'current',
+              },
+            ],
           })
         case 'skill_uninstall':
           return Promise.resolve({
             supported: true,
-            installTargetPath: '/Users/alex/.agents/skills/brain/SKILL.md',
-            installTargetDir: '/Users/alex/.agents/skills/brain',
-            bundledHash: 'abc123abc123abc123',
-            installedHash: null,
+            installTargetDir: '/Users/alex/.agents/skills',
             installState: 'missing',
+            skills: [
+              {
+                id: 'brain',
+                installTargetDir: '/Users/alex/.agents/skills/brain',
+                bundledHash: 'abc123abc123abc123',
+                installedHash: null,
+                installState: 'missing',
+              },
+              {
+                id: 'brain-backfill',
+                installTargetDir: '/Users/alex/.agents/skills/brain-backfill',
+                bundledHash: 'def456def456def456',
+                installedHash: null,
+                installState: 'missing',
+              },
+            ],
           })
         default:
           return Promise.resolve(null)

@@ -8,17 +8,34 @@ describe('skillStatus', () => {
     setBridge(
       bridgeReturning({
         supported: true,
-        installTargetPath: '/Users/alex/.agents/skills/brain/SKILL.md',
-        installTargetDir: '/Users/alex/.agents/skills/brain',
-        bundledHash: 'abc123abc123',
-        installedHash: null,
+        installTargetDir: '/Users/alex/.agents/skills',
         installState: 'missing',
+        skills: [
+          {
+            id: 'brain',
+            installTargetDir: '/Users/alex/.agents/skills/brain',
+            bundledHash: 'abc123abc123',
+            installedHash: null,
+            installState: 'missing',
+          },
+          {
+            id: 'brain-backfill',
+            installTargetDir: '/Users/alex/.agents/skills/brain-backfill',
+            bundledHash: 'def456def456',
+            installedHash: null,
+            installState: 'missing',
+          },
+        ],
       }),
     )
 
     await expect(skillStatus()).resolves.toMatchObject({
-      installTargetPath: '/Users/alex/.agents/skills/brain/SKILL.md',
+      installTargetDir: '/Users/alex/.agents/skills',
       installState: 'missing',
+      skills: [
+        { id: 'brain', installTargetDir: '/Users/alex/.agents/skills/brain' },
+        { id: 'brain-backfill', installTargetDir: '/Users/alex/.agents/skills/brain-backfill' },
+      ],
     })
   })
 
@@ -26,11 +43,9 @@ describe('skillStatus', () => {
     setBridge(
       bridgeReturning({
         supported: true,
-        installTargetPath: '/Users/alex/.agents/skills/brain/SKILL.md',
-        installTargetDir: '/Users/alex/.agents/skills/brain',
-        bundledHash: 'abc123abc123',
-        installedHash: null,
+        installTargetDir: '/Users/alex/.agents/skills',
         installState: 'weird',
+        skills: [],
       }),
     )
 

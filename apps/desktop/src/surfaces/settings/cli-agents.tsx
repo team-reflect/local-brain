@@ -156,6 +156,9 @@ function SkillInstallCard({
 }): ReactNode {
   const data = status.data
   const busy = install.isPending || uninstall.isPending
+  const canRemove =
+    data?.supported &&
+    data.skills.some((skill) => skill.installState === 'current' || skill.installState === 'stale')
 
   return (
     <div className="rounded-lg border border-border bg-card p-4">
@@ -168,20 +171,26 @@ function SkillInstallCard({
           </div>
 
           <dl className="grid grid-cols-[8rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
-            <dt className="text-muted-foreground">Agent skill</dt>
+            <dt className="text-muted-foreground">Agent skills</dt>
             <dd className="min-w-0 font-mono text-foreground">
-              <span className="block truncate">{data.installTargetPath}</span>
-              <span className="text-muted-foreground">
-                bundled {data.bundledHash.slice(0, 12)}
-                {data.installedHash ? ` · installed ${data.installedHash.slice(0, 12)}` : ''}
-              </span>
+              <ul className="flex min-w-0 flex-col gap-1">
+                {data.skills.map((skill) => (
+                  <li key={skill.id} className="min-w-0">
+                    <span className="block truncate">{skill.installTargetDir}</span>
+                    <span className="text-muted-foreground">
+                      bundled {skill.bundledHash.slice(0, 12)}
+                      {skill.installedHash ? ` · installed ${skill.installedHash.slice(0, 12)}` : ''}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </dd>
           </dl>
 
           {data.installState === 'conflict' ? (
             <ConflictBox>
-              Another skill already exists at this path. Move it before installing the Local Brain
-              agent skill.
+              Another skill already exists at one of these paths. Move it before installing the
+              Local Brain agent skills.
             </ConflictBox>
           ) : null}
 
@@ -192,11 +201,7 @@ function SkillInstallCard({
           ) : null}
 
           <div className="flex items-center gap-2">
-            {data.installState === 'current' ? (
-              <Button variant="outline" disabled={busy} onClick={() => uninstall.mutate()}>
-                {uninstall.isPending ? 'Removing...' : 'Remove skill'}
-              </Button>
-            ) : (
+            {data.installState !== 'current' ? (
               <Button
                 variant="primary"
                 disabled={!data.supported || data.installState === 'conflict' || busy}
@@ -205,10 +210,15 @@ function SkillInstallCard({
                 {install.isPending
                   ? 'Installing...'
                   : data.installState === 'stale'
-                    ? 'Repair skill'
-                    : 'Install skill'}
+                    ? 'Repair skills'
+                    : 'Install skills'}
               </Button>
-            )}
+            ) : null}
+            {canRemove ? (
+              <Button variant="outline" disabled={busy} onClick={() => uninstall.mutate()}>
+                {uninstall.isPending ? 'Removing...' : 'Remove skills'}
+              </Button>
+            ) : null}
           </div>
         </div>
       ) : (
@@ -272,15 +282,15 @@ function cliStatusTitle(state: string): string {
 function skillStatusTitle(state: string): string {
   switch (state) {
     case 'current':
-      return 'Agent skill is installed'
+      return 'Agent skills are installed'
     case 'stale':
-      return 'Agent skill needs repair'
+      return 'Agent skills need repair'
     case 'conflict':
-      return 'Agent skill has a conflict'
+      return 'Agent skills have a conflict'
     case 'unsupported':
       return 'Agent skill install is unavailable'
     case 'missing':
     default:
-      return 'Agent skill is not installed'
+      return 'Agent skills are not installed'
   }
 }

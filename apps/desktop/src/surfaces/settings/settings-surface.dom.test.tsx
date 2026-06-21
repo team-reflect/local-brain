@@ -192,11 +192,13 @@ describe('SettingsSurface (Plan 08)', () => {
 
     renderWithProviders(<SettingsSurface section="cli-agents" />)
 
-    expect(await screen.findByText('Agent skill is not installed')).toBeDefined()
+    expect(await screen.findByText('Agent skills are not installed')).toBeDefined()
+    expect(screen.getByText('/Users/alex/.agents/skills/brain')).toBeDefined()
+    expect(screen.getByText('/Users/alex/.agents/skills/brain-backfill')).toBeDefined()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Install skill' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Install skills' }))
 
-    await waitFor(() => expect(screen.getByText('Agent skill is installed')).toBeDefined())
+    await waitFor(() => expect(screen.getByText('Agent skills are installed')).toBeDefined())
     expect(commands).toContain('skill_install')
   })
 
@@ -206,11 +208,24 @@ describe('SettingsSurface (Plan 08)', () => {
         if (command === 'skill_status') {
           return {
             supported: true,
-            installTargetPath: '/Users/alex/.agents/skills/brain/SKILL.md',
-            installTargetDir: '/Users/alex/.agents/skills/brain',
-            bundledHash: 'abc123abc123abc123',
-            installedHash: 'old123old123',
+            installTargetDir: '/Users/alex/.agents/skills',
             installState: 'stale',
+            skills: [
+              {
+                id: 'brain',
+                installTargetDir: '/Users/alex/.agents/skills/brain',
+                bundledHash: 'abc123abc123abc123',
+                installedHash: 'old123old123',
+                installState: 'stale',
+              },
+              {
+                id: 'brain-backfill',
+                installTargetDir: '/Users/alex/.agents/skills/brain-backfill',
+                bundledHash: 'def456def456def456',
+                installedHash: 'def456def456def456',
+                installState: 'current',
+              },
+            ],
           }
         }
         return undefined
@@ -219,8 +234,45 @@ describe('SettingsSurface (Plan 08)', () => {
 
     renderWithProviders(<SettingsSurface section="cli-agents" />)
 
-    expect(await screen.findByText('Agent skill needs repair')).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Repair skill' })).toBeDefined()
+    expect(await screen.findByText('Agent skills need repair')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Repair skills' })).toBeDefined()
+  })
+
+  it('offers install and remove actions for a partial managed skill install', async () => {
+    installFakeBridge({
+      respond: (command) => {
+        if (command === 'skill_status') {
+          return {
+            supported: true,
+            installTargetDir: '/Users/alex/.agents/skills',
+            installState: 'missing',
+            skills: [
+              {
+                id: 'brain',
+                installTargetDir: '/Users/alex/.agents/skills/brain',
+                bundledHash: 'abc123abc123abc123',
+                installedHash: 'abc123abc123abc123',
+                installState: 'current',
+              },
+              {
+                id: 'brain-backfill',
+                installTargetDir: '/Users/alex/.agents/skills/brain-backfill',
+                bundledHash: 'def456def456def456',
+                installedHash: null,
+                installState: 'missing',
+              },
+            ],
+          }
+        }
+        return undefined
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="cli-agents" />)
+
+    expect(await screen.findByText('Agent skills are not installed')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Install skills' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Remove skills' })).toBeDefined()
   })
 
   it('shows agent skill conflicts without offering destructive install', async () => {
@@ -229,11 +281,24 @@ describe('SettingsSurface (Plan 08)', () => {
         if (command === 'skill_status') {
           return {
             supported: true,
-            installTargetPath: '/Users/alex/.agents/skills/brain/SKILL.md',
-            installTargetDir: '/Users/alex/.agents/skills/brain',
-            bundledHash: 'abc123abc123abc123',
-            installedHash: null,
+            installTargetDir: '/Users/alex/.agents/skills',
             installState: 'conflict',
+            skills: [
+              {
+                id: 'brain',
+                installTargetDir: '/Users/alex/.agents/skills/brain',
+                bundledHash: 'abc123abc123abc123',
+                installedHash: null,
+                installState: 'conflict',
+              },
+              {
+                id: 'brain-backfill',
+                installTargetDir: '/Users/alex/.agents/skills/brain-backfill',
+                bundledHash: 'def456def456def456',
+                installedHash: null,
+                installState: 'missing',
+              },
+            ],
           }
         }
         return undefined
@@ -242,11 +307,50 @@ describe('SettingsSurface (Plan 08)', () => {
 
     renderWithProviders(<SettingsSurface section="cli-agents" />)
 
-    expect(await screen.findByText('Agent skill has a conflict')).toBeDefined()
+    expect(await screen.findByText('Agent skills have a conflict')).toBeDefined()
     expect(screen.getByText(/Another skill already exists/)).toBeDefined()
-    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Install skill' }).disabled).toBe(
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Install skills' }).disabled).toBe(
       true,
     )
+  })
+
+  it('offers removal when a managed skill exists beside a conflicting sibling', async () => {
+    installFakeBridge({
+      respond: (command) => {
+        if (command === 'skill_status') {
+          return {
+            supported: true,
+            installTargetDir: '/Users/alex/.agents/skills',
+            installState: 'conflict',
+            skills: [
+              {
+                id: 'brain',
+                installTargetDir: '/Users/alex/.agents/skills/brain',
+                bundledHash: 'abc123abc123abc123',
+                installedHash: 'abc123abc123abc123',
+                installState: 'current',
+              },
+              {
+                id: 'brain-backfill',
+                installTargetDir: '/Users/alex/.agents/skills/brain-backfill',
+                bundledHash: 'def456def456def456',
+                installedHash: null,
+                installState: 'conflict',
+              },
+            ],
+          }
+        }
+        return undefined
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="cli-agents" />)
+
+    expect(await screen.findByText('Agent skills have a conflict')).toBeDefined()
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Install skills' }).disabled).toBe(
+      true,
+    )
+    expect(screen.getByRole('button', { name: 'Remove skills' })).toBeDefined()
   })
 
   it('removes a current managed agent skill', async () => {
@@ -257,11 +361,24 @@ describe('SettingsSurface (Plan 08)', () => {
         if (command === 'skill_status') {
           return {
             supported: true,
-            installTargetPath: '/Users/alex/.agents/skills/brain/SKILL.md',
-            installTargetDir: '/Users/alex/.agents/skills/brain',
-            bundledHash: 'abc123abc123abc123',
-            installedHash: 'abc123abc123abc123',
+            installTargetDir: '/Users/alex/.agents/skills',
             installState: 'current',
+            skills: [
+              {
+                id: 'brain',
+                installTargetDir: '/Users/alex/.agents/skills/brain',
+                bundledHash: 'abc123abc123abc123',
+                installedHash: 'abc123abc123abc123',
+                installState: 'current',
+              },
+              {
+                id: 'brain-backfill',
+                installTargetDir: '/Users/alex/.agents/skills/brain-backfill',
+                bundledHash: 'def456def456def456',
+                installedHash: 'def456def456def456',
+                installState: 'current',
+              },
+            ],
           }
         }
         return undefined
@@ -270,11 +387,11 @@ describe('SettingsSurface (Plan 08)', () => {
 
     renderWithProviders(<SettingsSurface section="cli-agents" />)
 
-    expect(await screen.findByText('Agent skill is installed')).toBeDefined()
+    expect(await screen.findByText('Agent skills are installed')).toBeDefined()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Remove skill' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove skills' }))
 
-    await waitFor(() => expect(screen.getByText('Agent skill is not installed')).toBeDefined())
+    await waitFor(() => expect(screen.getByText('Agent skills are not installed')).toBeDefined())
     expect(commands).toContain('skill_uninstall')
   })
 
