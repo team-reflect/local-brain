@@ -14,8 +14,9 @@ translate upstream records into generic typed writes through the CLI.
 - Preserve raw readable evidence in SQLite where available.
 - Keep binary bytes in the managed assets directory; SQLite owns manifests,
   search text, links, and provenance.
-- Keep projects user-curated. Importers may link existing projects and propose
-  new ones through suggestions, but must not auto-create topic buckets.
+- Keep projects user-agreed. Importers may create projects after explicit user
+  sign-off, link existing projects, and propose unapproved candidates through
+  suggestions, but must not auto-create topic buckets.
 - Store narrative AI output separately from raw evidence.
 - Treat extracted claims as append-only facts; promote only selected claims into
   curated hidden memories.
@@ -137,9 +138,10 @@ global search and quick UI lookup.
 
 ## Suggestions
 
-`suggestions` is a user-facing curation queue, not an automation log. It is only
-for structure an importer must not auto-create, such as a new project, a
-high-impact organization, an affiliation, or a merge proposal.
+`suggestions` is a user-facing curation queue, not an automation log. It is for
+inferred or not-yet-approved structure an importer must not auto-create, such as
+a possible project boundary, a high-impact organization, an affiliation, or a
+merge proposal.
 
 Every suggestion must be actionable and cite evidence. Accepting a suggestion
 performs the typed write and relinks cited records. Dismissals are durable so a

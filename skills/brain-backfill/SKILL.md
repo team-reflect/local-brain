@@ -95,8 +95,10 @@ Merge ledger shards at the end and run one global audit.
 ### Projects And Boundaries
 
 Start from accepted projects in `import-context`. Group each company/product as
-one project unless the user explicitly asks for subprojects. Do not auto-create
-projects during import; use `brain suggest project` with evidence.
+one project unless the user explicitly asks for subprojects. If the user has
+already agreed to a project boundary, create it with `brain add project` and
+link later imports to it. Otherwise do not auto-create projects during import;
+use `brain suggest project` with evidence.
 
 ### Granola
 

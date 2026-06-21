@@ -25,8 +25,10 @@ search chunks in SQLite. Use the `brain` CLI; do not write SQLite directly.
    notes, facts, tasks, tags, and memories complete the import.
 7. **Cite, do not invent.** Use chunk evidence for derived tasks, facts, AI notes,
    and memories.
-8. **Suggest uncertain structure.** Link existing projects/orgs; use suggestions
-   for new projects or high-impact inferred organizations.
+8. **Create agreed projects, suggest uncertain structure.** Add a project only
+   after the user has signed off on that project boundary. Link existing
+   projects/orgs; use suggestions for unapproved project candidates or
+   high-impact inferred organizations.
 
 ## Nouns
 
@@ -34,8 +36,9 @@ search chunks in SQLite. Use the `brain` CLI; do not write SQLite directly.
   person-from-email`, or `brain enrich person`.
 - **organization** - company, team, vendor, school, club, or institution. It has
   a `headline`; use `brain add organization` or `brain enrich organization`.
-- **project** - user-approved workstream or life area. Imports may link existing
-  projects; propose new ones with `brain suggest project`.
+- **project** - user-agreed workstream or life area. Use `brain add project`
+  only after explicit user sign-off; otherwise link existing projects or
+  propose candidates with `brain suggest project`.
 - **task** - commitment, waiting item, reminder, or follow-up. Cite source chunks
   when derived from an import.
 - **interaction** - meeting, call, email, message, event, or note that happened
@@ -138,6 +141,19 @@ Use `brain suggest organization` when an org is weakly inferred from one email
 signature or ambiguous domain. Use `brain affiliate --person <id> --org <id>
 --title <title> --department <dept> --role-family <family> --seniority <level>
 --current --primary` for existing records.
+
+## Projects
+
+Create projects only when the user has agreed to the project boundary:
+
+```bash
+brain --json add project --name "House" \
+  --summary "Renovation and property work for 701 W Elizabeth St and 700 Jewell St" \
+  --link person:<id> --link interaction:<id>
+```
+
+When a source strongly hints at a project but the user has not signed off, do
+not create the project. Use `brain suggest project` with evidence instead.
 
 ## Email, Calendar, And Meetings
 

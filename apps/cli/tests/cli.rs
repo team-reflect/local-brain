@@ -204,6 +204,18 @@ fn contract_reports_agent_cli_contract() {
         .as_str()
         .unwrap()
         .contains("[--text <text>|--text-file <path|->]"));
+    assert!(contract["commands"]["addProject"]["usage"]
+        .as_str()
+        .unwrap()
+        .contains("brain --json add project"));
+    assert!(contract["commands"]["addProject"]["purpose"]
+        .as_str()
+        .unwrap()
+        .contains("user sign-off"));
+    assert!(contract["commands"]["suggest"]["purpose"]
+        .as_str()
+        .unwrap()
+        .contains("not-yet-approved"));
     assert!(contract["writeRules"]
         .as_array()
         .unwrap()
@@ -212,6 +224,14 @@ fn contract_reports_agent_cli_contract() {
             .as_str()
             .unwrap()
             .contains("typed fields over burying structure")));
+    assert!(contract["writeRules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|rule| rule
+            .as_str()
+            .unwrap()
+            .contains("explicit user sign-off")));
 }
 
 #[test]
