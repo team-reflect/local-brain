@@ -301,15 +301,25 @@ pub fn accept_suggestion(conn: &mut Connection, json: bool, id: &str) -> Result<
             )));
         }
     };
-    tx.execute(
+    // Atomically claim the suggestion: the `status = 'open'` guard makes the
+    // transition the point of serialization, so a concurrent accept/dismiss that
+    // already resolved it leaves 0 rows changed. We then return without committing,
+    // so the project/org creation and relinks above roll back — the loser of the
+    // race performs no partial write.
+    let claimed = tx.execute(
         "UPDATE suggestions
          SET status = 'accepted',
              resolved_record_type = ?2,
              resolved_record_id = ?3,
              resolved_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-         WHERE id = ?1",
+         WHERE id = ?1 AND status = 'open'",
         params![id, record_type, record_id],
     )?;
+    if claimed == 0 {
+        return Err(CliError::Runtime(format!(
+            "suggestion {id} was already resolved concurrently"
+        )));
+    }
     tx.commit()?;
     if json {
         print_json(&json!({
@@ -333,13 +343,20 @@ pub fn dismiss_suggestion(conn: &mut Connection, json: bool, id: &str) -> Result
             suggestion.status
         )));
     }
-    conn.execute(
+    // Atomically claim the suggestion (see accept_suggestion): the `status = 'open'`
+    // guard makes a single concurrent resolver win.
+    let claimed = conn.execute(
         "UPDATE suggestions
          SET status = 'dismissed',
              resolved_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-         WHERE id = ?1",
+         WHERE id = ?1 AND status = 'open'",
         params![id],
     )?;
+    if claimed == 0 {
+        return Err(CliError::Runtime(format!(
+            "suggestion {id} was already resolved concurrently"
+        )));
+    }
     if json {
         print_json(&json!({ "kind": "suggestion", "id": id, "status": "dismissed" }))
     } else {
@@ -597,6 +614,55 @@ mod tests {
             )
             .unwrap();
         assert_eq!(links, 2, "new evidence merged into the open proposal");
+    }
+
+    #[test]
+    fn resolve_is_guarded_so_a_lost_race_leaves_no_partial_write() {
+        // A suggestion that another process already accepted (resolved).
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        let interaction = interaction_id(&conn);
+        suggest(
+            &mut conn,
+            true,
+            project_suggestion(
+                "West Elizabeth",
+                vec![LinkRef {
+                    kind: LinkKind::Interaction,
+                    id: interaction,
+                }],
+            ),
+        )
+        .unwrap();
+        let sid: String = conn
+            .query_row("SELECT id FROM suggestions", [], |row| row.get(0))
+            .unwrap();
+        // Simulate a concurrent resolver winning first.
+        conn.execute(
+            "UPDATE suggestions SET status = 'accepted' WHERE id = ?1",
+            params![sid],
+        )
+        .unwrap();
+
+        // The status='open' guard makes the resolving UPDATE a no-op on an already
+        // resolved row, so a second resolver changes nothing.
+        let claimed = conn
+            .execute(
+                "UPDATE suggestions SET status = 'dismissed' WHERE id = ?1 AND status = 'open'",
+                params![sid],
+            )
+            .unwrap();
+        assert_eq!(
+            claimed, 0,
+            "the guard refuses to clobber a resolved suggestion"
+        );
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM suggestions WHERE id = ?1",
+                params![sid],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "accepted", "the prior resolution stands");
     }
 
     #[test]
