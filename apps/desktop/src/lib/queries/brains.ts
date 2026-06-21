@@ -143,7 +143,16 @@ export function useForgetBrain() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (rootPath: string) => forgetBrain(rootPath),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: BRAINS_KEY }),
+    onSuccess: (list) => {
+      queryClient.setQueryData(BRAINS_KEY, list)
+      const active = list.find((brain) => brain.isActive) ?? null
+      queryClient.setQueryData(ACTIVE_BRAIN_KEY, active)
+      if (!active) {
+        queryClient.removeQueries({ predicate: (query) => !isBrainPickerQuery(query.queryKey) })
+      }
+      void queryClient.invalidateQueries({ queryKey: BRAINS_KEY })
+      void queryClient.invalidateQueries({ queryKey: ACTIVE_BRAIN_KEY })
+    },
   })
 }
 
