@@ -332,6 +332,7 @@ export function GraphSurface({
         <EmptyState
           title="Nothing to graph yet"
           hint="People, projects, and the records that connect them will appear here."
+          variant="plain"
         />
       ) : (
         <div className="relative min-h-0 flex-1 overflow-hidden">

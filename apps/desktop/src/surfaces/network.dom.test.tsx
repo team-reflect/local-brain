@@ -97,6 +97,18 @@ describe('NetworkSurface', () => {
     expect(layout?.className).toContain('min-h-0')
   })
 
+  it('renders the graph empty state without a panel background or border', async () => {
+    installFakeBridge({ queryRows: [] })
+
+    renderWithProviders(<NetworkSurface tab="graph" />)
+
+    const emptyTitle = await screen.findByText('Nothing to graph yet')
+    const emptyState = emptyTitle.parentElement
+    expect(emptyState).not.toBeNull()
+    expect(emptyState?.className).not.toContain('border')
+    expect(emptyState?.className).not.toContain('bg-secondary')
+  })
+
   it('overlays the graph tabs at the list-tab position to avoid a jump on switch', async () => {
     installFakeBridge({ queryRows: [] })
 
