@@ -156,6 +156,10 @@ function SkillInstallCard({
 }): ReactNode {
   const data = status.data
   const busy = install.isPending || uninstall.isPending
+  const canRemove =
+    data?.supported &&
+    data.installState !== 'conflict' &&
+    data.skills.some((skill) => skill.installState === 'current' || skill.installState === 'stale')
 
   return (
     <div className="rounded-lg border border-border bg-card p-4">
@@ -198,11 +202,7 @@ function SkillInstallCard({
           ) : null}
 
           <div className="flex items-center gap-2">
-            {data.installState === 'current' ? (
-              <Button variant="outline" disabled={busy} onClick={() => uninstall.mutate()}>
-                {uninstall.isPending ? 'Removing...' : 'Remove skills'}
-              </Button>
-            ) : (
+            {data.installState !== 'current' ? (
               <Button
                 variant="primary"
                 disabled={!data.supported || data.installState === 'conflict' || busy}
@@ -214,7 +214,12 @@ function SkillInstallCard({
                     ? 'Repair skills'
                     : 'Install skills'}
               </Button>
-            )}
+            ) : null}
+            {canRemove ? (
+              <Button variant="outline" disabled={busy} onClick={() => uninstall.mutate()}>
+                {uninstall.isPending ? 'Removing...' : 'Remove skills'}
+              </Button>
+            ) : null}
           </div>
         </div>
       ) : (

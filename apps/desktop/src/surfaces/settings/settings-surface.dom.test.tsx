@@ -238,6 +238,43 @@ describe('SettingsSurface (Plan 08)', () => {
     expect(screen.getByRole('button', { name: 'Repair skills' })).toBeDefined()
   })
 
+  it('offers install and remove actions for a partial managed skill install', async () => {
+    installFakeBridge({
+      respond: (command) => {
+        if (command === 'skill_status') {
+          return {
+            supported: true,
+            installTargetDir: '/Users/alex/.agents/skills',
+            installState: 'missing',
+            skills: [
+              {
+                id: 'brain',
+                installTargetDir: '/Users/alex/.agents/skills/brain',
+                bundledHash: 'abc123abc123abc123',
+                installedHash: 'abc123abc123abc123',
+                installState: 'current',
+              },
+              {
+                id: 'brain-backfill',
+                installTargetDir: '/Users/alex/.agents/skills/brain-backfill',
+                bundledHash: 'def456def456def456',
+                installedHash: null,
+                installState: 'missing',
+              },
+            ],
+          }
+        }
+        return undefined
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="cli-agents" />)
+
+    expect(await screen.findByText('Agent skills are not installed')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Install skills' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Remove skills' })).toBeDefined()
+  })
+
   it('shows agent skill conflicts without offering destructive install', async () => {
     installFakeBridge({
       respond: (command) => {

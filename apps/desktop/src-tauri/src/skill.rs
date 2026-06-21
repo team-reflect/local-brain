@@ -78,9 +78,14 @@ pub fn skill_install(
     brains: State<'_, BrainState>,
 ) -> AppResult<SkillStatus> {
     let paths = runtime_paths();
+    let snapshot = snapshot_install_files(&paths)?;
     install_for(&paths)?;
     if let Err(err) = sync_brain_manifest(&db, &brains) {
-        let _ = uninstall_for(&paths);
+        if let Err(rollback_err) = restore_file_snapshot(&snapshot) {
+            return Err(AppError::io(format!(
+                "{err}; also failed to roll back agent skill install: {rollback_err}"
+            )));
+        }
         return Err(err);
     }
     status_for(&paths)
@@ -223,24 +228,94 @@ fn uninstall_for(paths: &SkillPaths) -> AppResult<SkillStatus> {
         )));
     }
 
-    match status.install_state {
-        SkillInstallState::Current | SkillInstallState::Stale => {
-            remove_brain_manifest(paths)?;
-            for skill_status in &status.skills {
-                if matches!(
-                    skill_status.install_state,
-                    SkillInstallState::Current | SkillInstallState::Stale
-                ) {
-                    let skill = managed_skill_by_id(&skill_status.id)?;
-                    fs::remove_file(install_target(paths, skill))?;
-                }
+    let removable = status.skills.iter().any(|skill| {
+        matches!(
+            skill.install_state,
+            SkillInstallState::Current | SkillInstallState::Stale
+        )
+    });
+
+    if removable {
+        remove_brain_manifest(paths)?;
+        for skill_status in &status.skills {
+            if matches!(
+                skill_status.install_state,
+                SkillInstallState::Current | SkillInstallState::Stale
+            ) {
+                let skill = managed_skill_by_id(&skill_status.id)?;
+                fs::remove_file(install_target(paths, skill))?;
             }
         }
-        SkillInstallState::Conflict => unreachable!("conflict returned before uninstall"),
-        SkillInstallState::Missing | SkillInstallState::Unsupported => {}
     }
 
     status_for(paths)
+}
+
+#[derive(Debug, Clone)]
+struct FileSnapshot {
+    path: PathBuf,
+    content: Option<String>,
+}
+
+fn snapshot_install_files(paths: &SkillPaths) -> AppResult<Vec<FileSnapshot>> {
+    if !paths.supported {
+        return Ok(Vec::new());
+    }
+
+    let mut snapshots = Vec::with_capacity(MANAGED_SKILLS.len() + 1);
+    for skill in MANAGED_SKILLS {
+        let path = install_target(paths, skill);
+        snapshots.push(FileSnapshot {
+            content: read_optional_file(&path, "installed skill")?,
+            path,
+        });
+    }
+    if let Some(skill) = MANAGED_SKILLS
+        .iter()
+        .find(|skill| skill.sync_brain_manifest)
+    {
+        let path = brain_manifest_target(paths, skill);
+        snapshots.push(FileSnapshot {
+            content: read_optional_file(&path, "brain manifest")?,
+            path,
+        });
+    }
+    Ok(snapshots)
+}
+
+fn read_optional_file(path: &Path, label: &str) -> AppResult<Option<String>> {
+    match fs::read_to_string(path) {
+        Ok(content) => Ok(Some(content)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(AppError::io(format!(
+            "Could not read {label} at {}: {err}",
+            path.display()
+        ))),
+    }
+}
+
+fn restore_file_snapshot(snapshot: &[FileSnapshot]) -> AppResult<()> {
+    for file in snapshot {
+        match &file.content {
+            Some(content) => {
+                if let Some(parent) = file.path.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::write(&file.path, content)?;
+            }
+            None => match fs::remove_file(&file.path) {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => {
+                    return Err(AppError::io(format!(
+                        "Could not remove restored-missing file at {}: {err}",
+                        file.path.display()
+                    )));
+                }
+            },
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Serialize)]
@@ -680,6 +755,37 @@ mod tests {
     }
 
     #[test]
+    fn rollback_restores_partial_install_snapshot() {
+        let temp = TempDir::new().unwrap();
+        let paths = paths_for(temp.path());
+        let manifest = "{\"version\":1}\n";
+        fs::create_dir_all(install_dir(&paths, brain_skill())).unwrap();
+        fs::write(
+            install_target(&paths, brain_skill()),
+            managed_skill_content(brain_skill()),
+        )
+        .unwrap();
+        fs::write(brain_manifest_target(&paths, brain_skill()), manifest).unwrap();
+
+        let snapshot = snapshot_install_files(&paths).unwrap();
+        install_for(&paths).unwrap();
+
+        assert!(install_target(&paths, backfill_skill()).exists());
+
+        restore_file_snapshot(&snapshot).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(install_target(&paths, brain_skill())).unwrap(),
+            managed_skill_content(brain_skill())
+        );
+        assert!(!install_target(&paths, backfill_skill()).exists());
+        assert_eq!(
+            fs::read_to_string(brain_manifest_target(&paths, brain_skill())).unwrap(),
+            manifest
+        );
+    }
+
+    #[test]
     fn uninstalls_current_managed_skill() {
         let temp = TempDir::new().unwrap();
         let paths = paths_for(temp.path());
@@ -688,6 +794,31 @@ mod tests {
             fs::write(install_target(&paths, skill), managed_skill_content(skill)).unwrap();
         }
         fs::write(brain_manifest_target(&paths, brain_skill()), "{}").unwrap();
+
+        let status = uninstall_for(&paths).unwrap();
+
+        assert_eq!(status.install_state, SkillInstallState::Missing);
+        assert!(!install_target(&paths, brain_skill()).exists());
+        assert!(!install_target(&paths, backfill_skill()).exists());
+        assert!(!brain_manifest_target(&paths, brain_skill()).exists());
+    }
+
+    #[test]
+    fn uninstalls_partial_managed_skill() {
+        let temp = TempDir::new().unwrap();
+        let paths = paths_for(temp.path());
+        fs::create_dir_all(install_dir(&paths, brain_skill())).unwrap();
+        fs::write(
+            install_target(&paths, brain_skill()),
+            managed_skill_content(brain_skill()),
+        )
+        .unwrap();
+        fs::write(brain_manifest_target(&paths, brain_skill()), "{}").unwrap();
+
+        assert_eq!(
+            status_for(&paths).unwrap().install_state,
+            SkillInstallState::Missing
+        );
 
         let status = uninstall_for(&paths).unwrap();
 
