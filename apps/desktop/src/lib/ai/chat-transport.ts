@@ -56,6 +56,11 @@ function assistantMessage(messageId: string, text: string): UIMessage {
   }
 }
 
+function responseMessageIdForTurn(messages: readonly UIMessage[]): string {
+  const latest = messages[messages.length - 1]
+  return latest?.role === 'assistant' ? latest.id : createChatId()
+}
+
 function staticAssistantStream(message: UIMessage, finishReason: 'error' | 'stop'): ReadableStream<UIMessageChunk> {
   const text = uiMessageText(message)
   const textId = `${message.id}-text`
@@ -146,7 +151,7 @@ export function createChatTransport(): ChatTransport<UIMessage> {
           temperature: 0,
           ...(abortSignal ? { abortSignal } : {}),
         })
-        const responseId = createChatId()
+        const responseId = responseMessageIdForTurn(messages)
         return result.toUIMessageStream<UIMessage>({
           originalMessages: messages,
           generateMessageId: () => responseId,

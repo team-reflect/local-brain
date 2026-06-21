@@ -109,14 +109,16 @@ describe('createChatTransport', () => {
     aiMocks.convertToModelMessages.mockResolvedValue([{ role: 'user', content: 'What did Maya promise?' }])
     aiMocks.streamText.mockReturnValue({
       toUIMessageStream: (options: {
+        generateMessageId?: () => string
         onFinish?: (event: {
           responseMessage: UIMessage
           finishReason?: 'stop'
         }) => void | PromiseLike<void>
       }) => {
+        const responseId = options.generateMessageId?.() ?? 'assistant-1'
         void options.onFinish?.({
           responseMessage: {
-            id: 'assistant-1',
+            id: responseId,
             role: 'assistant',
             parts: [{ type: 'text', text: 'Maya promised the revised budget.', state: 'done' }],
           },
@@ -213,6 +215,7 @@ describe('createChatTransport', () => {
     expect(aiMocks.convertToModelMessages).toHaveBeenCalledWith([userMessage, approvalResponseMessage])
     expect(coreMocks.appendChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
+        id: 'assistant-approval',
         conversationId: 'chat-1',
         role: 'assistant',
         contentText: 'Maya promised the revised budget.',
