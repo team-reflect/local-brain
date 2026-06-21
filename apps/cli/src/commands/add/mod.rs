@@ -6,7 +6,9 @@
 //! Module layout:
 //! - [`text`] — pure string normalization shared across writers.
 //! - [`identity`] — sources, content-hash dedupe, and `external_identities`.
+//! - [`record_ref`] — provider-neutral `kind:id` validation for typed records.
 //! - [`links`] — chunk + typed-link writers for documents/interactions.
+//! - [`import_completion`] — audit/finalize checks for staged imports.
 //! - [`person`] / [`person_import`] — person writes and untrusted-name guardrails.
 //! - [`asset`], [`document`], [`interaction`], [`project`], [`task`],
 //!   [`memory`] — one entity per module, each with its own tests.
@@ -15,6 +17,8 @@ mod affiliation;
 mod asset;
 mod document;
 mod identity;
+mod import_completion;
+mod intelligence;
 mod interaction;
 mod links;
 mod memory;
@@ -22,6 +26,7 @@ mod organization;
 mod person;
 mod person_import;
 mod project;
+mod record_ref;
 mod suggestion;
 mod task;
 mod text;
@@ -88,6 +93,14 @@ pub(super) fn fill_blanks(
 pub use affiliation::{affiliate, AffiliateArgs};
 pub use asset::{add_asset, set_asset_text, AddAssetArgs};
 pub use document::{add_document, AddDocumentArgs};
+pub use import_completion::{
+    import_audit, import_finalize, ImportAuditArgs, ImportFinalizeArgs,
+};
+pub use intelligence::{
+    add_ai_note, add_fact, add_transcript, attach_tag, enrich_organization, enrich_person,
+    ensure_tag, promote_fact, AddAiNoteArgs, AddFactArgs, AddTranscriptArgs,
+    EnrichOrganizationArgs, EnrichPersonArgs, PromoteFactArgs, TagAttachArgs, TagEnsureArgs,
+};
 pub use interaction::{add_interaction, AddInteractionArgs};
 pub use memory::{remember, RememberArgs};
 pub use organization::{add_organization, AddOrganizationArgs};

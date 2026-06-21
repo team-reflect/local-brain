@@ -8,8 +8,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::json;
 
 use super::identity::{
-    external_kind, find_duplicate, find_external_identity, insert_external_identity, source_id,
-    ExternalIdentityWrite,
+    external_kind, find_duplicate, find_external_identity, insert_external_identity,
+    insert_record_provenance, source_id, ExternalIdentityWrite, RecordProvenanceWrite,
 };
 use super::links::{insert_chunks, insert_links, replace_chunks};
 use super::text::{normalize_optional, normalize_title};
@@ -181,6 +181,20 @@ fn enrich_existing_interaction(
             external_id: args.external_id,
             url: args.original_url,
             force_duplicate: false,
+        },
+    )?;
+    insert_record_provenance(
+        tx,
+        RecordProvenanceWrite {
+            record_type: "interaction",
+            record_id: existing,
+            provenance_kind: "imported",
+            source_id,
+            original_path: None,
+            original_url: args.original_url,
+            model: None,
+            prompt_fingerprint: None,
+            metadata_json: None,
         },
     )?;
     Ok(chunk_count)
@@ -640,6 +654,20 @@ pub fn add_interaction(
             external_id: args.external_id,
             url: args.original_url,
             force_duplicate,
+        },
+    )?;
+    insert_record_provenance(
+        &tx,
+        RecordProvenanceWrite {
+            record_type: "interaction",
+            record_id: &id,
+            provenance_kind: "imported",
+            source_id: source_id.as_deref(),
+            original_path: None,
+            original_url: args.original_url,
+            model: None,
+            prompt_fingerprint: None,
+            metadata_json: None,
         },
     )?;
     tx.commit()?;

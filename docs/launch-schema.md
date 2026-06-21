@@ -1,613 +1,168 @@
 # Launch Schema
 
-SQLite is the durable source of truth for Local Brain. The launch schema is a personal
-CRM with first-class people, organizations, projects, tasks, interactions, documents,
-asset metadata, hidden atomic memories, tags, and settings.
-
-The schema should make everyday questions easy:
-
-- Who did I talk to, and what did we decide?
-- What am I waiting on?
-- What projects are active?
-- What documents and conversations explain this?
-- What does my AI know, and what evidence supports it?
-
-## Schema Principles
-
-- Use typed tables for product nouns instead of a generic graph-node layer.
-- Store imported readable text directly in SQLite.
-- Store binary asset bytes as app-managed files under the chosen brain root; SQLite owns
-  the asset manifest, typed links, provenance, and deletion state.
-- Store optional asset-derived text in SQLite so imported attachments can be searched
-  without making binary bytes the database payload.
-- Preserve provenance on the record that owns the text.
-- Derive chunks for search and embeddings from documents and interactions.
-- Keep memories hidden by default and link them to visible records.
-- Cite answers through evidence references to document or interaction chunks.
-- Keep launch privacy simple: no row-level sensitivity labels.
-
-## Core Tables
-
-### `people`
-
-People the user knows or needs to remember.
-
-Key columns:
-
-- `id`
-- `full_name`
-- `preferred_name`
-- `headline`
-- `primary_email`
-- `primary_phone`
-- `location`
-- `is_self`
-- `last_interaction_at`
-- `important_dates_json`
-- `summary`
-- `notes`
-- `avatar_asset_id`
-- `current_organization_id`
-- `created_at`
-- `updated_at`
-- `archived_at`
-
-`primary_email` and `primary_phone` remain fast display fields. Durable imports store
-multiple handles in `person_emails` and `person_phones`.
-
-### `person_emails` and `person_phones`
-
-Multiple contact handles for a person. Importers use normalized values for dedupe while
-preserving the original display value.
-
-Shared key columns:
-
-- `id`
-- `person_id`
-- display value (`email` or `phone`)
-- normalized value (`normalized_email` or `normalized_phone`)
-- `label`
-- `is_primary`
-- `source_id`
-- `created_at`
-- `updated_at`
-
-### `organizations`
-
-Companies, teams, schools, clubs, vendors, government bodies, and other groups.
-
-Key columns:
-
-- `id`
-- `name`
-- `kind`
-- `domain`
-- `location`
-- `summary`
-- `notes`
-- `logo_asset_id`
-- `created_at`
-- `updated_at`
-- `archived_at`
-
-### `affiliations`
-
-Time-bound links between people and organizations.
-
-Key columns:
-
-- `id`
-- `person_id`
-- `organization_id`
-- `title`
-- `role`
-- `started_on`
-- `ended_on`
-- `is_current`
-- `notes`
-- `created_at`
-- `updated_at`
-
-### `projects`
-
-Personal or professional work areas that the user deliberately creates or approves. A
-project is not a task tag or agent-inferred topic bucket: it is the durable record for
-an ongoing life/work thread that can collect people, organizations, documents,
-interactions, tasks, decisions, and memories.
-
-Key columns:
-
-- `id`
-- `name`
-- `status`
-- `kind`
-- `summary`
-- `notes`
-- `started_on`
-- `target_date`
-- `completed_on`
-- `archived_at`
-- `created_at`
-- `updated_at`
-
-Suggested `status` values: `active`, `waiting`, `paused`, `done`, `archived`.
-
-Launch projects stay flat. Do not add visible subtasks or parent/child project
-hierarchy before release. Project rows are manually created user structure. Imports
-and extraction may link existing projects when there is a clear match, but should
-surface possible new projects as suggestions rather than creating them. Store import
-provenance through `sources`/`external_identities`, using `kind` values such as
-`thread` or `meeting` when the upstream identifier is not a single record id.
-
-### `tasks`
-
-Commitments, follow-ups, reminders, and waiting items.
-
-Key columns:
-
-- `id`
-- `title`
-- `description`
-- `status`
-- `priority`
-- `project_id`
-- `due_at`
-- `scheduled_for`
-- `completed_at`
-- `origin_document_id`
-- `origin_interaction_id`
-- `created_at`
-- `updated_at`
-- `archived_at`
-
-Suggested `status` values: `open`, `waiting`, `scheduled`, `done`, `canceled`,
-`archived`.
-
-`project_id` is the canonical project association for launch. A task belongs to at
-most one project.
-
-### `interactions`
-
-Human exchanges: meetings, calls, emails, messages, chats, voice notes, notes, and
-events. Email bodies and meeting transcripts live here.
-
-Granola imports should store the raw transcript in `body_text` whenever available.
-AI notes, redacted digests, and agent-written summaries belong in `summary`, not as a
-replacement for the transcript.
-
-Key columns:
-
-- `id`
-- `kind`
-- `title`
-- `body_text`
-- `summary`
-- `occurred_at`
-- `ended_at`
-- `location`
-- `external_id`
-- `original_path`
-- `original_url`
-- `content_hash`
-- `created_at`
-- `updated_at`
-- `archived_at`
-
-Suggested `kind` values: `meeting`, `call`, `email`, `message`, `chat`, `voice_note`,
-`note`, `event`, `other`.
-
-### `documents`
-
-User-readable artifacts and reference material. Imported text is stored directly in
-SQLite, with optional metadata for the original file or URL.
-
-Key columns:
-
-- `id`
-- `kind`
-- `title`
-- `body_text`
-- `summary`
-- `mime_type`
-- `original_path`
-- `original_url`
-- `content_hash`
-- `authored_at`
-- `created_at`
-- `updated_at`
-- `archived_at`
-
-Suggested `kind` values: `note`, `file`, `pdf`, `webpage`, `plan`, `receipt`, `text`,
-`other`.
-
-### `chat_conversations` and `chat_messages`
-
-Durable Ask history. Conversations group turns; messages store both queryable
-projection fields and the verbatim Vercel AI SDK `UIMessage` JSON used by the desktop.
-Retrieved Ask sources are request-local and are not stored as `evidence_refs`.
-
-`chat_conversations` key columns:
-
-- `id`
-- `title`
-- `created_at`
-- `updated_at`
-- `archived_at`
-
-`chat_messages` key columns:
-
-- `id`
-- `conversation_id`
-- `role`
-- `content_text`
-- `ui_message_json`
-- `model`
-- `status`
-- `error`
-- `created_at`
-
-### `assets`
-
-App-managed binary files such as avatars, organization logos, screenshots, inline
-images, and original attachments. The bytes live under the chosen brain root's
-`assets/` directory, following Reflect Open's ordinary-file attachment model. SQLite
-stores the durable manifest and links.
-
-Key columns:
-
-- `id`
-- `kind`
-- `mime_type`
-- `byte_size`
-- `content_hash`
-- `storage_path`
-- `original_filename`
-- `original_path`
-- `original_url`
-- `width`
-- `height`
-- `created_at`
-- `updated_at`
-- `archived_at`
-
-Suggested `kind` values: `avatar`, `logo`, `image`, `screenshot`, `attachment`,
-`source_file`, `thumbnail`, `other`.
-
-`storage_path` is app-relative, for example `assets/pasted-20260618-ab12cd34.png` or
-`assets/objects/ab/abcdef...jpg`. Absolute paths stay in provenance fields only.
-
-### `asset_texts`
-
-Optional durable text extracted from, or supplied with, an asset. This is the local
-path for importer-provided email attachment text and safe UTF-8 text-like files. PDFs,
-images, and other binary files remain searchable by metadata until a later local
-extractor or OCR pass populates this table.
-
-Key columns:
-
-- `asset_id`
-- `text`
-- `text_source`
-- `content_hash`
-- `created_at`
-- `updated_at`
-
-Allowed `text_source` values: `importer`, `local_extraction`, `manual`.
-
-### `sources` and `external_identities`
-
-Provider-neutral import identity. `sources` names stable upstream systems such as
-`manual`, `agent`, `gmail`, `google_people`, `google_calendar`, `google_meet`, `zoom`,
-`file`, and `ai_extraction`. `external_identities` maps a source/kind/external id to a
-typed Local Brain record for idempotent sync.
-
-`sources` key columns:
-
-- `id`
-- `slug`
-- `name`
-- `description`
-- `created_at`
-- `updated_at`
-
-`external_identities` key columns:
-
-- `id`
-- `entity_type`
-- `entity_id`
-- `source_id`
-- `kind`
-- `external_id`
-- `url`
-- `metadata_json`
-- `created_at`
-- `updated_at`
-
-### `asset_links`
-
-Typed links from assets to visible records.
-
-Key columns:
-
-- `id`
-- `asset_id`
-- `record_type`
-- `record_id`
-- `role`
-- `caption`
-- `sort_order`
-- `created_at`
-
-Allowed `record_type` values: `person`, `organization`, `project`, `task`, `document`,
-`interaction`. Suggested `role` values: `avatar`, `logo`, `attachment`, `inline_image`,
-`screenshot`, `source_file`.
-
-### `content_chunks`
-
-Derived chunks for lexical search, embeddings, and citations.
-
-Key columns:
-
-- `id`
-- `record_type`
-- `record_id`
-- `chunk_index`
-- `text`
-- `token_count`
-- `content_hash`
-- `created_at`
-
-Allowed `record_type` values for launch: `document`, `interaction`.
-
-### `memories`
-
-Hidden atomic claims extracted from documents, interactions, and tasks.
-
-Key columns:
-
-- `id`
-- `kind`
-- `claim`
-- `confidence`
-- `valid_from`
-- `valid_to`
-- `created_at`
-- `updated_at`
-- `archived_at`
-
-Suggested `kind` values: `fact`, `preference`, `decision`, `commitment`,
-`instruction`, `risk`, `idea`.
-
-### `memory_links`
-
-Generic links from hidden memories to visible records.
-
-Key columns:
-
-- `id`
-- `memory_id`
-- `record_type`
-- `record_id`
-- `role`
-- `created_at`
-
-Allowed `record_type` values: `person`, `organization`, `project`, `task`,
-`document`, `interaction`.
-
-### `evidence_refs`
-
-Citation links from memories and tasks to exact document or interaction chunks.
-
-Key columns:
-
-- `id`
-- `subject_type`
-- `subject_id`
-- `chunk_id`
-- `quote_start`
-- `quote_end`
-- `note`
-- `created_at`
-
-Allowed `subject_type` values: `memory`, `task`.
-
-### `tags` and `taggings`
-
-Lightweight user-defined grouping.
-
-Tags are descriptors and filters, not pseudo-projects. Use a project when the context
-has lifecycle, linked people/orgs, decisions, tasks, or a useful status brief. Use tags
-for cross-cutting labels such as `tax`, `receipt`, `gift`, or `medical`.
-
-`tags` key columns:
-
-- `id`
-- `name`
-- `color`
-- `created_at`
-- `updated_at`
-
-`taggings` key columns:
-
-- `id`
-- `tag_id`
-- `record_type`
-- `record_id`
-- `created_at`
-
-Allowed `record_type` values: `person`, `organization`, `project`, `task`,
-`document`, `interaction`, `memory`.
-
-### `settings`
-
-Local configuration.
-
-Key columns:
-
-- `key`
-- `value_json`
-- `updated_at`
-
-Settings owns about, brain identity, AI providers, and semantic search flags.
-
-### `suggestions` and `suggestion_links`
-
-A user-facing curation queue for structure the importer must not auto-create — a
-new project or organization. This is deliberately NOT an automation log (see the
-`AGENTS.md` guardrail): every suggestion is actionable and cites evidence.
-
-`suggestions` key columns:
-
-- `id`
-- `kind` (`create_project`, `create_organization`)
-- `title` (the proposed entity name)
-- `payload_json` (proposed fields: name, summary, domain, kind)
-- `rationale`
-- `status` (`open`, `accepted`, `dismissed`)
-- `resolved_record_type`, `resolved_record_id` (the record created on accept)
-- `created_at`, `resolved_at`
-
-`suggestion_links` cites the visible records that prompted a suggestion (the
-interactions/people behind it); on accept these are relinked to the created
-project/organization. Key columns: `id`, `suggestion_id`, `record_type`,
-`record_id`, `role`, `created_at`.
-
-Proposals dedupe by (`kind`, normalized `title`) across every status, so a
-dismissed proposal is durable and never re-raised. Accepting a `create_project`
-suggestion creates the project and relinks its cited interactions/tasks; accepting
-a `create_organization` suggestion creates the org and affiliates cited people.
-
-## Join Tables
-
-Use explicit typed join tables where they make the UI faster and clearer:
-
-- `interaction_participants`: people in an interaction plus unresolved raw handles from
-  imports (`person_id` can be null when `handle` or `display_name` is preserved).
-- `interaction_organizations`: organizations involved in an interaction.
-- `project_people`: people linked to a project.
-- `project_organizations`: organizations linked to a project.
-- `project_documents`: documents linked to a project.
-- `project_interactions`: interactions linked to a project.
-- `document_people`: people mentioned by or related to a document.
-- `document_organizations`: organizations mentioned by or related to a document.
-- `document_interactions`: interactions that explain, produced, or reference a
-  document.
-- `task_people`: people linked to a task.
-- `task_organizations`: organizations linked to a task.
-- `task_documents`: documents that explain a task.
-- `task_interactions`: interactions that created or changed a task.
-- `asset_links`: assets attached to typed records, with role and ordering.
-
-Each join table should include:
-
-- `id`
-- the two foreign keys
-- `role`
-- `created_at`
-
-## Schema Diagram
+SQLite is the durable source of truth for Local Brain. The launch schema is a
+typed personal intelligence database: durable people, organizations, projects,
+tasks, documents, interactions, assets, raw evidence, AI artifacts, extracted
+facts, curated memories, citations, tags, and universal retrieval chunks.
+
+Markdown is not storage. Provider APIs are not part of the schema. Import agents
+translate upstream records into generic typed writes through the CLI.
+
+## Principles
+
+- Model product nouns with typed tables, not a generic graph-node table.
+- Preserve raw readable evidence in SQLite where available.
+- Keep binary bytes in the managed assets directory; SQLite owns manifests,
+  search text, links, and provenance.
+- Keep projects user-curated. Importers may link existing projects and propose
+  new ones through suggestions, but must not auto-create topic buckets.
+- Store narrative AI output separately from raw evidence.
+- Treat extracted claims as append-only facts; promote only selected claims into
+  curated hidden memories.
+- Cite structure and claims through `evidence_refs` to exact `content_chunks`.
+- Derive search and retrieval from universal chunks over every text-bearing
+  record, not just documents and interactions.
+
+## Baseline Migrations
+
+The clean launch baseline is:
+
+- `0001_core.sql` - typed records, provenance, relationships, facts, memories,
+  tags, assets, and chat history.
+- `0002_search.sql` - FTS5 projections, universal chunk FTS, sqlite-vec chunk
+  vectors, and asset search projections.
+- `0003_suggestions.sql` - user-facing curation queue for proposed structure.
+- `0004_seed.sql` - built-in source rows.
+
+Backwards compatibility with old `brain.sqlite` files is not required before
+launch. Reimport from source instead of carrying old incremental migrations.
+
+## Identity And Provenance
+
+`sources` registers provider-neutral upstream systems such as `manual`, `agent`,
+`gmail`, `granola`, `reflect_notes`, and `google_calendar`.
+
+`external_identities` stores source-scoped identities for durable records:
+`person`, `organization`, `organization_profile`, `project`, `task`, `document`,
+`interaction`, `interaction_transcript`, `ai_note`, `extracted_fact`, `memory`,
+and `asset`.
+
+`record_provenance` stores import/enrichment metadata such as source, external
+URL/path, imported time, model, prompt fingerprint, and opaque metadata JSON.
+
+## People And Organizations
+
+`people` stores rich profile fields: name, preferred name, headline, summary,
+email/phone display caches, structured location, timezone, profile URLs,
+important dates JSON, self flag, notes, relationship recency, and current
+title/organization/department/role family/seniority caches.
+
+`person_emails` and `person_phones` store normalized handles for dedupe and
+multiple contact methods.
+
+`organizations` stores name, kind, domain, headline, summary, website, industry,
+location/HQ fields, notes, and archive state. Organizations do have a
+`headline`: use it for a compact one-line description, while `summary` holds the
+longer profile.
+
+`affiliations` stores person-organization history with title, department, role,
+role family, seniority, started/ended dates, current/primary flags, notes, and
+optional evidence pointer. Current/primary affiliations synchronize the person
+cache.
+
+`organization_profiles` stores AI/research enrichment rows: canonical name,
+website, one-line description, category, why it matters, offerings JSON, notable
+people JSON, suggested tags JSON, review flags JSON, source URLs JSON, raw
+enrichment JSON, model, prompt fingerprint, and researched time.
+
+## Work And Relationships
+
+`projects` are generic workstreams or life areas. They collect people,
+organizations, documents, interactions, tasks, assets, facts, and memories through
+typed links. Do not add company-specific partnership tables.
+
+`tasks` are commitments, waiting items, reminders, and follow-ups. They may link
+to one project, people, organizations, documents, interactions, and exact
+evidence chunks.
+
+Typed join tables link people, organizations, projects, tasks, documents,
+interactions, assets, memories, tags, and source records. The graph surface is
+derived from these typed records and links, centered on the user's self person.
+
+## Evidence And Intelligence
+
+`interactions` stores meetings, calls, emails, messages, events, and notes with a
+readable title, summary, structured timing/location, metadata, and optional body
+text.
+
+`interaction_transcripts` stores full raw transcript text, speaker segments JSON,
+language, transcript source, recording/storage metadata, content hash, and source
+identity. A meeting/email import can have both an interaction summary and a raw
+transcript.
+
+`documents` stores durable reference artifacts: notes, files, memos, plans,
+receipts, webpages, and imported readable text.
+
+`ai_notes` stores narrative AI artifacts: summaries, action items, decisions,
+risks, highlights, coaching, and other generated notes. Each note anchors to
+exactly one interaction, document, or typed subject.
+
+`extracted_facts` stores append-only structured claims with subject, key,
+text/JSON value, confidence, observed time, source record, source excerpt, model,
+prompt fingerprint, and metadata.
+
+`memories` stores curated hidden claims, either written directly or promoted from
+facts. Memories are not a dump of all extracted claims.
+
+`evidence_refs` cites exact chunks/spans from tasks, memories, facts, AI notes,
+profile fields, and other typed subjects.
+
+## Search And Retrieval
+
+`content_chunks` is the universal retrieval surface. It chunks text-bearing
+records of type:
 
 ```text
-                         +----------------+
-                         |    settings    |
-                         +----------------+
-
-+--------+       +---------------+       +---------------+
-| people |<----->| affiliations  |<----->| organizations |
-+--------+       +---------------+       +---------------+
-   ^  ^                    ^                    ^   ^
-   |  |                    |                    |   |
-   |  +---------+----------+----------+---------+   |
-   |            |                     |             |
-   |       +----------+          +----------+        |
-   |       | projects |<-------->|  tasks   |        |
-   |       +----------+          +----------+        |
-   |        ^   ^   ^              ^   ^            |
-   |        |   |   |              |   |            |
-   |        |   |   +--------------+   |            |
-   |        |   |                      |            |
-   |        |   +----------+-----------+            |
-   |        |              |                        |
-   v        v              v                        v
-+----------------+     +----------------+     +----------+
-| interactions   |<--->|   documents    |<--->|   tags   |
-+----------------+     +----------------+     +----------+
-        ^                     ^                    ^
-        |                     |                    |
-        +----------+----------+--------------------+
-                   |
-          +----------------+
-          | content_chunks |
-          +----------------+
-                   ^
-                   |
-         +----------------+       +-------------+       +------------+
-         | evidence_refs  |       | asset_links |------>|   assets   |
-         +----------------+       +-------------+       +------------+
-                                                       ^
-                                                       |
-                                                 +-------------+
-                                                 | asset_texts |
-                                                 +-------------+
-           ^      ^
-           |      |
-      +---------+ |
-      | memories| |
-      +---------+ |
-           ^      |
-           |      |
-      +--------------+
-      | memory_links |
-      +--------------+
+person, organization, organization_profile, project, task,
+document, interaction, interaction_transcript, ai_note,
+extracted_fact, memory, asset
 ```
 
-## Derived Indexes
+`content_chunks_fts` provides lexical search over chunks. `chunk_embeddings` and
+`chunk_vectors` provide sqlite-vec semantic retrieval. Retrieval returns the chunk
+plus its owning typed record, source record, snippet, score, and citation handle.
 
-- FTS5 tables over document title/body/summary, interaction title/body/summary,
-  `content_chunks.text`, and a derived asset projection (`assets_fts`) covering
-  filename/title, kind, MIME type, storage path, original URL, link captions, linked
-  record titles, and `asset_texts.text`. Indexing `summary` lets a transcript or email
-  digest be found by its recap even when those words aren't in the raw body.
-- People, organizations, projects, and tasks currently use deterministic name/title
-  matching for global search; they do not have dedicated FTS tables yet. Extraction
-  uses project name matching only to link existing, manually created projects.
-- Vector index over `content_chunks` (`chunk_embeddings` + the `chunk_vectors` vec0
-  virtual table; sqlite-vec, 384-dim cosine). Derived and rebuildable; vectors are
-  generated on demand by the desktop `fastembed` runtime. See `docs/reflect-embeddings/`.
-- Optional denormalized search view that unions visible records for global search.
-- Derived graph view centered on the `people.is_self` row, with nodes for typed records
-  and edges from affiliations, join tables, task origins, memory links, evidence refs,
-  asset links, and tags.
+Documents, interactions, and assets also keep navigational FTS projections for
+global search and quick UI lookup.
 
-Derived indexes can be rebuilt from durable tables.
+## Suggestions
 
-## Launch Omissions
+`suggestions` is a user-facing curation queue, not an automation log. It is only
+for structure an importer must not auto-create, such as a new project, a
+high-impact organization, an affiliation, or a merge proposal.
 
-The launch schema intentionally omits:
+Every suggestion must be actionable and cite evidence. Accepting a suggestion
+performs the typed write and relinks cited records. Dismissals are durable so a
+proposal is not re-raised.
 
-- A top-level ingestion bucket for raw material.
-- A generic graph-node table as the primary model.
-- A generic edge table as the primary link model.
-- A top-level automation log table or surface. (The `suggestions` curation queue
-  is a deliberate, narrowly-scoped exception — proposed structure awaiting the
-  user's ratification, not a log of agent activity.)
-- Row-level sensitivity labels.
-- Hosted sync tables.
-- Browser/email/calendar OAuth integration tables.
-- User-facing subtasks or project hierarchy.
+## CLI Completion Rule
 
-## Relationship Intelligence
+An imported meeting, email, or document is incomplete until it has:
 
-Relationship intelligence is derived from typed records, especially people,
-interactions, tasks, affiliations, projects, and memories.
+- source identity;
+- participants or entities where applicable;
+- raw text where available;
+- at least one AI note;
+- extracted facts;
+- links to existing projects or tasks when relevant;
+- evidence-backed tasks or memories when claims/actions were derived;
+- tags;
+- retrieval chunks;
+- a passing `brain --json import finalize --record kind:id` result.
 
-Launch should support:
-
-- recency through `people.last_interaction_at`
-- strength through the SELECT-only `relationship_strengths` view
-- important dates through `people.important_dates_json`
-- prompts for Today: upcoming important dates and relationship-linked waiting items
-
-These hints feed agents and UI. Network strength must be calculated deterministically
-from durable interactions and tasks at read time, not set as third-party writable
-SQLite state.
+`brain import audit --json` reports records that still miss these staged import
+requirements. `brain import finalize` supports narrow explicit waivers for
+source limitations (`--raw-text-unavailable`, `--no-entities`,
+`--no-project-or-task-link`, `--no-derived-actions`, and
+`--no-extracted-facts`) and writes durable `finalized` provenance when a record
+passes.

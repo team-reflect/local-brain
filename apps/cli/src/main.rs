@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 //! The `brain` CLI — the supported agent interface to a Local Brain database.
 //!
 //! It opens the SQLite file directly via the shared `brain-schema` crate (no
@@ -67,8 +69,28 @@ enum Command {
         #[command(subcommand)]
         what: Box<AddCommand>,
     },
+    /// Source-led import phases and completeness checks.
+    Import {
+        #[command(subcommand)]
+        what: Box<ImportCommand>,
+    },
+    /// Enrich an existing person or organization profile.
+    Enrich {
+        #[command(subcommand)]
+        what: Box<EnrichCommand>,
+    },
     /// Add a hidden memory (atomic claim) with provenance links.
     Remember(RememberArgs),
+    /// Promote an extracted fact into a curated hidden memory.
+    Promote {
+        #[command(subcommand)]
+        what: PromoteCommand,
+    },
+    /// Ensure or attach tags to typed records.
+    Tag {
+        #[command(subcommand)]
+        what: TagCommand,
+    },
     /// Show or set the user's own (self) person and known handles.
     #[command(name = "self")]
     SelfPerson {
@@ -138,6 +160,47 @@ enum AddCommand {
     Project(AddProjectArgs),
     /// Add a task.
     Task(AddTaskArgs),
+    /// Add a narrative AI artifact tied to one record.
+    #[command(name = "ai-note")]
+    AiNote(AddAiNoteArgs),
+    /// Add an append-only extracted fact.
+    Fact(AddFactArgs),
+}
+
+#[derive(Subcommand)]
+enum ImportCommand {
+    /// Import a provider-neutral interaction.
+    Interaction(AddInteractionArgs),
+    /// Import a provider-neutral document.
+    Document(AddDocumentArgs),
+    /// Import or replace a raw transcript for an interaction.
+    Transcript(AddTranscriptArgs),
+    /// Report incomplete document/interaction imports.
+    Audit(ImportAuditArgs),
+    /// Check whether one imported record has met the completion rule.
+    Finalize(ImportFinalizeArgs),
+}
+
+#[derive(Subcommand)]
+enum EnrichCommand {
+    /// Enrich a person profile.
+    Person(EnrichPersonArgs),
+    /// Enrich an organization and optionally write an organization profile.
+    Organization(EnrichOrganizationArgs),
+}
+
+#[derive(Subcommand)]
+enum PromoteCommand {
+    /// Promote an extracted fact into a memory.
+    Fact(PromoteFactArgs),
+}
+
+#[derive(Subcommand)]
+enum TagCommand {
+    /// Ensure a tag exists.
+    Ensure(TagEnsureArgs),
+    /// Attach an existing tag to a record.
+    Attach(TagAttachArgs),
 }
 
 #[derive(Parser)]
@@ -224,9 +287,21 @@ struct AddOrganizationArgs {
     #[arg(long)]
     domain: Option<String>,
     #[arg(long)]
+    headline: Option<String>,
+    #[arg(long)]
     location: Option<String>,
     #[arg(long)]
     summary: Option<String>,
+    #[arg(long)]
+    website: Option<String>,
+    #[arg(long)]
+    industry: Option<String>,
+    #[arg(long)]
+    hq_city: Option<String>,
+    #[arg(long)]
+    hq_region: Option<String>,
+    #[arg(long)]
+    hq_country: Option<String>,
     #[arg(long)]
     notes: Option<String>,
     #[arg(long)]
@@ -250,9 +325,17 @@ struct AffiliateArgs {
     #[arg(long)]
     title: Option<String>,
     #[arg(long)]
+    department: Option<String>,
+    #[arg(long)]
     role: Option<String>,
     #[arg(long)]
+    role_family: Option<String>,
+    #[arg(long)]
+    seniority: Option<String>,
+    #[arg(long)]
     current: bool,
+    #[arg(long)]
+    primary: bool,
 }
 
 #[derive(Parser)]
@@ -289,6 +372,16 @@ struct AddDocumentArgs {
     title: Option<String>,
     #[arg(long)]
     kind: Option<String>,
+    #[arg(long)]
+    source: Option<String>,
+    #[arg(long, default_value = "record")]
+    external_kind: String,
+    #[arg(long)]
+    external_id: Option<String>,
+    #[arg(long)]
+    original_path: Option<String>,
+    #[arg(long)]
+    original_url: Option<String>,
     #[arg(long)]
     text: Option<String>,
     #[arg(long, value_name = "PATH")]
@@ -400,14 +493,247 @@ struct AddTaskArgs {
     links: Vec<String>,
     /// Source chunk evidence by index `interaction:01ABC#0` or by quote
     /// `interaction:01ABC~"a phrase from the chunk"`.
-    #[arg(
-        long = "evidence",
-        value_name = "DOC_OR_INTERACTION:ID#CHUNK_OR_~QUOTE"
-    )]
+    #[arg(long = "evidence", value_name = "RECORD_TYPE:ID#CHUNK_OR_~QUOTE")]
     evidence: Vec<String>,
     /// Person ID to assign this task to (repeatable; creates task_people row with role='assignee').
     #[arg(long, value_name = "PERSON_ID")]
     assignee: Vec<String>,
+}
+
+#[derive(Parser)]
+struct AddTranscriptArgs {
+    #[arg(long)]
+    interaction: String,
+    #[arg(long)]
+    text: Option<String>,
+    #[arg(long, value_name = "PATH")]
+    text_file: Option<PathBuf>,
+    #[arg(long, default_value = "plain_text")]
+    format: String,
+    #[arg(long)]
+    language: Option<String>,
+    #[arg(long)]
+    segments_json: Option<String>,
+    #[arg(long)]
+    recording_url: Option<String>,
+    #[arg(long)]
+    storage_path: Option<String>,
+    #[arg(long)]
+    source: Option<String>,
+    #[arg(long, default_value = "transcript")]
+    external_kind: String,
+    #[arg(long)]
+    external_id: Option<String>,
+    #[arg(long)]
+    transcribed_by: Option<String>,
+    #[arg(long)]
+    transcribed_at: Option<String>,
+    #[arg(long)]
+    metadata_json: Option<String>,
+}
+
+#[derive(Parser)]
+struct AddAiNoteArgs {
+    #[arg(long, default_value = "summary")]
+    kind: String,
+    #[arg(long)]
+    interaction: Option<String>,
+    #[arg(long)]
+    document: Option<String>,
+    #[arg(long, value_name = "KIND:ID")]
+    subject: Option<String>,
+    #[arg(long)]
+    title: Option<String>,
+    #[arg(long)]
+    text: Option<String>,
+    #[arg(long, value_name = "PATH")]
+    text_file: Option<PathBuf>,
+    #[arg(long, default_value = "markdown")]
+    content_format: String,
+    #[arg(long)]
+    model: Option<String>,
+    #[arg(long)]
+    prompt_fingerprint: Option<String>,
+    #[arg(long)]
+    source: Option<String>,
+    #[arg(long)]
+    metadata_json: Option<String>,
+    #[arg(long = "evidence", value_name = "RECORD_TYPE:ID#CHUNK_OR_~QUOTE")]
+    evidence: Vec<String>,
+}
+
+#[derive(Parser)]
+struct AddFactArgs {
+    #[arg(long, value_name = "KIND:ID")]
+    subject: String,
+    #[arg(long)]
+    key: String,
+    #[arg(long)]
+    value_text: Option<String>,
+    #[arg(long)]
+    value_json: Option<String>,
+    #[arg(long)]
+    confidence: Option<f64>,
+    #[arg(long, value_name = "KIND:ID")]
+    source_record: Option<String>,
+    #[arg(long)]
+    source_excerpt: Option<String>,
+    #[arg(long)]
+    observed_at: Option<String>,
+    #[arg(long)]
+    model: Option<String>,
+    #[arg(long)]
+    prompt_fingerprint: Option<String>,
+    #[arg(long)]
+    metadata_json: Option<String>,
+    #[arg(long = "evidence", value_name = "RECORD_TYPE:ID#CHUNK_OR_~QUOTE")]
+    evidence: Vec<String>,
+}
+
+#[derive(Parser)]
+struct EnrichPersonArgs {
+    id: String,
+    #[arg(long)]
+    preferred_name: Option<String>,
+    #[arg(long)]
+    headline: Option<String>,
+    #[arg(long)]
+    summary: Option<String>,
+    #[arg(long)]
+    location: Option<String>,
+    #[arg(long)]
+    city: Option<String>,
+    #[arg(long)]
+    region: Option<String>,
+    #[arg(long)]
+    country: Option<String>,
+    #[arg(long)]
+    timezone: Option<String>,
+    #[arg(long)]
+    linkedin_url: Option<String>,
+    #[arg(long)]
+    website: Option<String>,
+    #[arg(long)]
+    important_dates_json: Option<String>,
+    #[arg(long)]
+    current_title: Option<String>,
+    #[arg(long)]
+    current_department: Option<String>,
+    #[arg(long)]
+    role_family: Option<String>,
+    #[arg(long)]
+    seniority: Option<String>,
+    #[arg(long)]
+    notes: Option<String>,
+}
+
+#[derive(Parser)]
+struct EnrichOrganizationArgs {
+    id: String,
+    #[arg(long)]
+    kind: Option<String>,
+    #[arg(long)]
+    domain: Option<String>,
+    #[arg(long)]
+    headline: Option<String>,
+    #[arg(long)]
+    summary: Option<String>,
+    #[arg(long)]
+    website: Option<String>,
+    #[arg(long)]
+    industry: Option<String>,
+    #[arg(long)]
+    location: Option<String>,
+    #[arg(long)]
+    hq_city: Option<String>,
+    #[arg(long)]
+    hq_region: Option<String>,
+    #[arg(long)]
+    hq_country: Option<String>,
+    #[arg(long)]
+    notes: Option<String>,
+    #[arg(long)]
+    model: Option<String>,
+    #[arg(long)]
+    prompt_fingerprint: Option<String>,
+    #[arg(long)]
+    canonical_name: Option<String>,
+    #[arg(long)]
+    one_line_description: Option<String>,
+    #[arg(long)]
+    category: Option<String>,
+    #[arg(long)]
+    why_it_matters: Option<String>,
+    #[arg(long)]
+    offerings_json: Option<String>,
+    #[arg(long)]
+    notable_people_json: Option<String>,
+    #[arg(long)]
+    suggested_tags_json: Option<String>,
+    #[arg(long)]
+    review_flags_json: Option<String>,
+    #[arg(long)]
+    source_urls_json: Option<String>,
+    #[arg(long)]
+    raw_enrichment_json: Option<String>,
+    #[arg(long)]
+    source: Option<String>,
+}
+
+#[derive(Parser)]
+struct PromoteFactArgs {
+    id: String,
+    #[arg(long, default_value = "fact")]
+    memory_kind: String,
+}
+
+#[derive(Parser)]
+struct TagEnsureArgs {
+    #[arg(long)]
+    name: String,
+    #[arg(long)]
+    slug: Option<String>,
+    #[arg(long)]
+    color: Option<String>,
+    #[arg(long)]
+    description: Option<String>,
+}
+
+#[derive(Parser)]
+struct TagAttachArgs {
+    #[arg(long)]
+    tag: String,
+    #[arg(long, value_name = "KIND:ID")]
+    record: String,
+    #[arg(long)]
+    source: Option<String>,
+}
+
+#[derive(Parser)]
+struct ImportAuditArgs {
+    #[arg(long, default_value_t = 100)]
+    limit: usize,
+}
+
+#[derive(Parser)]
+struct ImportFinalizeArgs {
+    #[arg(long, value_name = "KIND:ID")]
+    record: String,
+    /// Mark raw source text unavailable after a good-faith fetch attempt.
+    #[arg(long)]
+    raw_text_unavailable: bool,
+    /// Mark the record as having no useful participants/entities to link.
+    #[arg(long)]
+    no_entities: bool,
+    /// Mark the record as not belonging to a current project or task.
+    #[arg(long)]
+    no_project_or_task_link: bool,
+    /// Mark the record as having no actionable tasks or durable memories.
+    #[arg(long)]
+    no_derived_actions: bool,
+    /// Mark the record as having no structured facts worth extracting.
+    #[arg(long)]
+    no_extracted_facts: bool,
 }
 
 #[derive(Parser)]
@@ -418,12 +744,9 @@ struct RememberArgs {
     claim: String,
     #[arg(long = "link", value_name = "KIND:ID")]
     links: Vec<String>,
-    /// Source chunk evidence by index `interaction:01ABC#0` or by quote
-    /// `interaction:01ABC~"a phrase from the chunk"`.
-    #[arg(
-        long = "evidence",
-        value_name = "DOC_OR_INTERACTION:ID#CHUNK_OR_~QUOTE"
-    )]
+    /// Source chunk evidence by index `record_type:01ABC#0` or by quote
+    /// `record_type:01ABC~"a phrase from the chunk"`.
+    #[arg(long = "evidence", value_name = "RECORD_TYPE:ID#CHUNK_OR_~QUOTE")]
     evidence: Vec<String>,
 }
 
@@ -661,6 +984,11 @@ impl AddDocumentArgs {
             title: self.title.as_deref(),
             kind: self.kind.as_deref(),
             body: resolve_text(self.text.as_deref(), self.text_file.as_deref())?,
+            source_slug: self.source.as_deref(),
+            external_kind: &self.external_kind,
+            external_id: self.external_id.as_deref(),
+            original_path: self.original_path.as_deref(),
+            original_url: self.original_url.as_deref(),
             links: parse_links(&self.links)?,
             allow_duplicate: self.allow_duplicate,
         })
@@ -697,8 +1025,14 @@ impl AddOrganizationArgs {
             name: &self.name,
             kind: self.kind.as_deref(),
             domain: self.domain.as_deref(),
+            headline: self.headline.as_deref(),
             location: self.location.as_deref(),
             summary: self.summary.as_deref(),
+            website: self.website.as_deref(),
+            industry: self.industry.as_deref(),
+            hq_city: self.hq_city.as_deref(),
+            hq_region: self.hq_region.as_deref(),
+            hq_country: self.hq_country.as_deref(),
             notes: self.notes.as_deref(),
             source_slug: self.source.as_deref(),
             external_kind: &self.external_kind,
@@ -743,6 +1077,169 @@ impl AddTaskArgs {
     }
 }
 
+impl AddTranscriptArgs {
+    fn to_command(&self) -> Result<add::AddTranscriptArgs<'_>, CliError> {
+        Ok(add::AddTranscriptArgs {
+            interaction_id: &self.interaction,
+            body: resolve_text(self.text.as_deref(), self.text_file.as_deref())?,
+            format: &self.format,
+            language: self.language.as_deref(),
+            segments_json: self.segments_json.as_deref(),
+            recording_url: self.recording_url.as_deref(),
+            storage_path: self.storage_path.as_deref(),
+            source_slug: self.source.as_deref(),
+            external_kind: &self.external_kind,
+            external_id: self.external_id.as_deref(),
+            transcribed_by: self.transcribed_by.as_deref(),
+            transcribed_at: self.transcribed_at.as_deref(),
+            metadata_json: self.metadata_json.as_deref(),
+        })
+    }
+}
+
+impl AddAiNoteArgs {
+    fn to_command(&self) -> Result<add::AddAiNoteArgs<'_>, CliError> {
+        Ok(add::AddAiNoteArgs {
+            kind: &self.kind,
+            interaction_id: self.interaction.as_deref(),
+            document_id: self.document.as_deref(),
+            subject: self.subject.as_deref(),
+            title: self.title.as_deref(),
+            content: resolve_text(self.text.as_deref(), self.text_file.as_deref())?,
+            content_format: &self.content_format,
+            model: self.model.as_deref(),
+            prompt_fingerprint: self.prompt_fingerprint.as_deref(),
+            source_slug: self.source.as_deref(),
+            metadata_json: self.metadata_json.as_deref(),
+            evidence: parse_evidence_refs(&self.evidence)?,
+        })
+    }
+}
+
+impl AddFactArgs {
+    fn to_command(&self) -> Result<add::AddFactArgs<'_>, CliError> {
+        Ok(add::AddFactArgs {
+            subject: &self.subject,
+            key: &self.key,
+            value_text: self.value_text.as_deref(),
+            value_json: self.value_json.as_deref(),
+            confidence: self.confidence,
+            source_record: self.source_record.as_deref(),
+            source_excerpt: self.source_excerpt.as_deref(),
+            observed_at: self.observed_at.as_deref(),
+            model: self.model.as_deref(),
+            prompt_fingerprint: self.prompt_fingerprint.as_deref(),
+            metadata_json: self.metadata_json.as_deref(),
+            evidence: parse_evidence_refs(&self.evidence)?,
+        })
+    }
+}
+
+impl EnrichPersonArgs {
+    fn to_command(&self) -> add::EnrichPersonArgs<'_> {
+        add::EnrichPersonArgs {
+            id: &self.id,
+            preferred_name: self.preferred_name.as_deref(),
+            headline: self.headline.as_deref(),
+            summary: self.summary.as_deref(),
+            location: self.location.as_deref(),
+            city: self.city.as_deref(),
+            region: self.region.as_deref(),
+            country: self.country.as_deref(),
+            timezone: self.timezone.as_deref(),
+            linkedin_url: self.linkedin_url.as_deref(),
+            website: self.website.as_deref(),
+            important_dates_json: self.important_dates_json.as_deref(),
+            current_title: self.current_title.as_deref(),
+            current_department: self.current_department.as_deref(),
+            role_family: self.role_family.as_deref(),
+            seniority: self.seniority.as_deref(),
+            notes: self.notes.as_deref(),
+        }
+    }
+}
+
+impl EnrichOrganizationArgs {
+    fn to_command(&self) -> add::EnrichOrganizationArgs<'_> {
+        add::EnrichOrganizationArgs {
+            id: &self.id,
+            kind: self.kind.as_deref(),
+            domain: self.domain.as_deref(),
+            headline: self.headline.as_deref(),
+            summary: self.summary.as_deref(),
+            website: self.website.as_deref(),
+            industry: self.industry.as_deref(),
+            location: self.location.as_deref(),
+            hq_city: self.hq_city.as_deref(),
+            hq_region: self.hq_region.as_deref(),
+            hq_country: self.hq_country.as_deref(),
+            notes: self.notes.as_deref(),
+            model: self.model.as_deref(),
+            prompt_fingerprint: self.prompt_fingerprint.as_deref(),
+            canonical_name: self.canonical_name.as_deref(),
+            one_line_description: self.one_line_description.as_deref(),
+            category: self.category.as_deref(),
+            why_it_matters: self.why_it_matters.as_deref(),
+            offerings_json: self.offerings_json.as_deref(),
+            notable_people_json: self.notable_people_json.as_deref(),
+            suggested_tags_json: self.suggested_tags_json.as_deref(),
+            review_flags_json: self.review_flags_json.as_deref(),
+            source_urls_json: self.source_urls_json.as_deref(),
+            raw_enrichment_json: self.raw_enrichment_json.as_deref(),
+            source_slug: self.source.as_deref(),
+        }
+    }
+}
+
+impl PromoteFactArgs {
+    fn to_command(&self) -> add::PromoteFactArgs<'_> {
+        add::PromoteFactArgs {
+            fact_id: &self.id,
+            memory_kind: &self.memory_kind,
+        }
+    }
+}
+
+impl TagEnsureArgs {
+    fn to_command(&self) -> add::TagEnsureArgs<'_> {
+        add::TagEnsureArgs {
+            name: &self.name,
+            slug: self.slug.as_deref(),
+            color: self.color.as_deref(),
+            description: self.description.as_deref(),
+        }
+    }
+}
+
+impl TagAttachArgs {
+    fn to_command(&self) -> add::TagAttachArgs<'_> {
+        add::TagAttachArgs {
+            tag: &self.tag,
+            record: &self.record,
+            source_slug: self.source.as_deref(),
+        }
+    }
+}
+
+impl ImportAuditArgs {
+    fn to_command(&self) -> add::ImportAuditArgs {
+        add::ImportAuditArgs { limit: self.limit }
+    }
+}
+
+impl ImportFinalizeArgs {
+    fn to_command(&self) -> add::ImportFinalizeArgs<'_> {
+        add::ImportFinalizeArgs {
+            record: &self.record,
+            raw_text_unavailable: self.raw_text_unavailable,
+            no_entities: self.no_entities,
+            no_project_or_task_link: self.no_project_or_task_link,
+            no_derived_actions: self.no_derived_actions,
+            no_extracted_facts: self.no_extracted_facts,
+        }
+    }
+}
+
 impl RememberArgs {
     fn to_command(&self) -> Result<add::RememberArgs<'_>, CliError> {
         Ok(add::RememberArgs {
@@ -760,8 +1257,12 @@ impl AffiliateArgs {
             person_id: &self.person,
             organization_id: &self.org,
             title: self.title.as_deref(),
+            department: self.department.as_deref(),
             role: self.role.as_deref(),
+            role_family: self.role_family.as_deref(),
+            seniority: self.seniority.as_deref(),
             is_current: self.current,
+            is_primary: self.primary,
         }
     }
 }
@@ -905,6 +1406,31 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 }
                 AddCommand::Project(a) => add::add_project(&mut conn, json, a.to_command()?),
                 AddCommand::Task(a) => add::add_task(&mut conn, json, a.to_command()?),
+                AddCommand::AiNote(a) => add::add_ai_note(&mut conn, json, a.to_command()?),
+                AddCommand::Fact(a) => add::add_fact(&mut conn, json, a.to_command()?),
+            }
+        }
+        Command::Import { what } => {
+            let mut conn = db::open(&db_path)?;
+            match *what {
+                ImportCommand::Interaction(a) => {
+                    add::add_interaction(&mut conn, json, a.to_command()?)
+                }
+                ImportCommand::Document(a) => add::add_document(&mut conn, json, a.to_command()?),
+                ImportCommand::Transcript(a) => {
+                    add::add_transcript(&mut conn, json, a.to_command()?)
+                }
+                ImportCommand::Audit(a) => add::import_audit(&conn, json, a.to_command()),
+                ImportCommand::Finalize(a) => add::import_finalize(&conn, json, a.to_command()),
+            }
+        }
+        Command::Enrich { what } => {
+            let mut conn = db::open(&db_path)?;
+            match *what {
+                EnrichCommand::Person(a) => add::enrich_person(&mut conn, json, a.to_command()),
+                EnrichCommand::Organization(a) => {
+                    add::enrich_organization(&mut conn, json, a.to_command())
+                }
             }
         }
         Command::Asset { what } => {
@@ -924,6 +1450,19 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Command::Remember(a) => {
             let mut conn = db::open(&db_path)?;
             add::remember(&mut conn, json, a.to_command()?)
+        }
+        Command::Promote { what } => {
+            let mut conn = db::open(&db_path)?;
+            match what {
+                PromoteCommand::Fact(a) => add::promote_fact(&mut conn, json, a.to_command()),
+            }
+        }
+        Command::Tag { what } => {
+            let mut conn = db::open(&db_path)?;
+            match what {
+                TagCommand::Ensure(a) => add::ensure_tag(&mut conn, json, a.to_command()),
+                TagCommand::Attach(a) => add::attach_tag(&mut conn, json, a.to_command()),
+            }
         }
         Command::SelfPerson { what } => match what {
             SelfCommand::Show => {
@@ -1079,11 +1618,21 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
             "interaction",
             "asset",
             "memory",
+            "interaction_transcript",
+            "ai_note",
+            "extracted_fact",
+            "organization_profile",
         ],
         "linkSyntax": {
             "format": "kind:id",
             "acceptedKinds": ["person", "organization", "org", "project", "task", "document", "doc", "interaction"],
             "examples": ["person:01ABC", "project:01XYZ", "task:01TODO"],
+        },
+        "evidenceSyntax": {
+            "format": "record_type:id#chunk_index or record_type:id~quote",
+            "acceptedRecordTypes": ["person", "organization", "organization_profile", "project", "task", "document", "interaction", "interaction_transcript", "ai_note", "extracted_fact", "memory", "asset"],
+            "aliases": { "doc": "document", "org": "organization" },
+            "examples": ["document:01ABC#0", "interaction_transcript:01XYZ~\"ship the credential flow\""],
         },
         "sources": {
             "builtInSlugs": [
@@ -1095,6 +1644,9 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
                 "google_calendar",
                 "google_meet",
                 "zoom",
+                "granola",
+                "reflect_notes",
+                "public_web",
                 "ai_extraction",
             ],
             "identityRule": "Use --source plus --external-id for idempotent provider imports. External ids are source-scoped.",
@@ -1134,7 +1686,7 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
                 "purpose": "Safely create people from untrusted sender/display-name pairs; machine senders are skipped with reasonCodes.",
             },
             "addDocument": {
-                "usage": "brain --json add document --title <title> (--text <text>|--text-file <path|->) [--link kind:id...]",
+                "usage": "brain --json add document --title <title> (--text <text>|--text-file <path|->) [--source <slug> --external-kind <kind> --external-id <id>] [--original-path <path>] [--original-url <url>] [--link kind:id...]",
                 "useFor": ["reference notes", "PDF text", "webpages", "receipts", "long-form material"],
             },
             "addInteraction": {
@@ -1154,20 +1706,48 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
                     "notes": "Only source-specific leftovers that do not have typed fields.",
                 },
             },
+            "importInteraction": {
+                "usage": "brain --json import interaction <same args as add interaction>",
+                "purpose": "Preferred source-led import alias for interactions.",
+            },
+            "importDocument": {
+                "usage": "brain --json import document <same args as add document>",
+                "purpose": "Preferred source-led import alias for documents.",
+            },
+            "importTranscript": {
+                "usage": "brain --json import transcript --interaction <id> (--text <text>|--text-file <path|->) [--source <slug> --external-kind transcript --external-id <id>] [--language <code>] [--segments-json <json>]",
+                "purpose": "Store full raw transcript text for an interaction and create universal retrieval chunks.",
+            },
+            "importFinalize": {
+                "usage": "brain --json import finalize --record <kind:id> [--raw-text-unavailable] [--no-entities] [--no-project-or-task-link] [--no-derived-actions] [--no-extracted-facts]",
+                "returns": "complete flag plus missing staged-import requirements; complete records get finalized provenance.",
+            },
+            "importAudit": {
+                "usage": "brain --json import audit --limit 100",
+                "returns": "recent incomplete documents/interactions and their missing stages.",
+            },
             "addAsset": {
                 "usage": "brain --json add asset --file <path> --link <kind:id> [--role attachment|avatar|logo|screenshot|source_file]",
                 "purpose": "Copy bytes into the managed assets directory and link them to a typed record.",
             },
             "addOrganization": {
-                "usage": "brain --json add organization --name <name> [--domain <domain>] [--kind <kind>] [--location <loc>] [--source <slug> --external-id <id>]",
+                "usage": "brain --json add organization --name <name> [--domain <domain>] [--kind <kind>] [--headline <one-line>] [--website <url>] [--industry <industry>] [--location <loc>] [--source <slug> --external-id <id>]",
                 "dedupe": "external identity, then normalized name, then normalized domain (www-stripped)",
+            },
+            "enrichPerson": {
+                "usage": "brain --json enrich person <id> [--headline <headline>] [--summary <summary>] [--city <city>] [--timezone <tz>] [--current-title <title>] [--role-family <family>] [--seniority <level>]",
+                "purpose": "Update rich person profile fields and regenerate person chunks.",
+            },
+            "enrichOrganization": {
+                "usage": "brain --json enrich organization <id> [--headline <headline>] [--summary <summary>] [--website <url>] [--industry <industry>] [--one-line-description <text>] [--why-it-matters <text>] [--source-urls-json <json>]",
+                "purpose": "Update organization profile fields and optionally write an organization_profiles enrichment row.",
             },
             "addPersonAffiliation": {
                 "usage": "brain --json add person --full-name <name> --org <org-name> [--org-domain <domain>] [--title <title>] [--current]",
                 "purpose": "On person create/enrich, find-or-create the employer org and upsert an affiliation. --current marks the single current employer and sets people.current_organization_id. person-from-email accepts the same --org/--org-domain/--title/--current plus --headline/--phone/--location.",
             },
             "affiliate": {
-                "usage": "brain --json affiliate --person <person-id> --org <org-id> [--title <title>] [--role <role>] [--current]",
+                "usage": "brain --json affiliate --person <person-id> --org <org-id> [--title <title>] [--department <dept>] [--role <role>] [--role-family <family>] [--seniority <level>] [--current] [--primary]",
                 "purpose": "Link an existing person to an existing organization; deduped by (person, org).",
             },
             "suggest": {
@@ -1176,13 +1756,29 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
                 "kinds": ["create_project", "create_organization"],
             },
             "addTask": {
-                "usage": "brain --json add task --title <title> [--due-at <iso>] [--link kind:id...] [--assignee <person-id>...]",
+                "usage": "brain --json add task --title <title> [--due-at <iso>] [--link kind:id...] [--evidence record_type:id#0] [--assignee <person-id>...]",
                 "assigneeFlag": "Use --assignee <person-id> (repeatable) to mark someone as responsible for the task. Creates a task_people row with role='assignee'. Distinct from generic --link person:<id> which creates a generic person link.",
             },
+            "addAiNote": {
+                "usage": "brain --json add ai-note --kind <summary|action_items|decisions|risks|highlights|coaching|other> (--interaction <id>|--document <id>|--subject <kind:id>) (--text <text>|--text-file <path|->) [--evidence record_type:id#0]",
+                "purpose": "Store narrative AI artifacts separately from raw evidence.",
+            },
+            "addFact": {
+                "usage": "brain --json add fact --subject <kind:id> --key <key> (--value-text <text>|--value-json <json>) [--source-record <kind:id>] [--confidence <0..1>] [--evidence record_type:id~\"quote\"]",
+                "purpose": "Append a structured claim without automatically promoting it to memory.",
+            },
+            "promoteFact": {
+                "usage": "brain --json promote fact <fact-id> --memory-kind <kind>",
+                "purpose": "Promote a selected extracted fact into a curated hidden memory.",
+            },
+            "tag": {
+                "usage": "brain --json tag ensure --name <name> [--slug <slug>] | brain --json tag attach --tag <id|slug|name> --record <kind:id>",
+                "purpose": "Ensure tags and attach them to typed records.",
+            },
             "remember": {
-                "usage": "brain --json remember --kind <fact|preference|decision|commitment|instruction|risk|idea> --claim <atomic claim> --link kind:id... [--evidence interaction:<id>#<chunk>|interaction:<id>~\"quote\"]",
+                "usage": "brain --json remember --kind <fact|preference|decision|commitment|instruction|risk|idea> --claim <atomic claim> --link kind:id... [--evidence record_type:<id>#<chunk>|record_type:<id>~\"quote\"]",
                 "rule": "Memories should be atomic and linked to visible evidence records.",
-                "evidence": "Cite a chunk by index (#0) or by a quote substring (~\"a phrase\") resolved against the record's chunks at write time, so you need not know chunk boundaries. Works for `remember` and `add task`.",
+                "evidence": "Cite a universal content chunk by index (#0) or by a quote substring (~\"a phrase\") resolved against the record's chunks at write time, so you need not know chunk boundaries. Works for `remember`, `add task`, `add ai-note`, and `add fact`.",
             },
             "self": {
                 "usage": "brain --json self show | brain --json self set --full-name <name> [--email <email>...] [--phone <phone>...]",

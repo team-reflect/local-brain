@@ -54,7 +54,9 @@ fn apply_affiliation(
         return Ok(());
     };
     let org_id = super::organization::find_or_create_organization(tx, org, org_domain, None)?;
-    super::affiliation::upsert_affiliation(tx, person_id, &org_id, title, role, current)?;
+    super::affiliation::upsert_affiliation(
+        tx, person_id, &org_id, title, None, role, None, None, current, current,
+    )?;
     Ok(())
 }
 

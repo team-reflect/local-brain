@@ -74,10 +74,11 @@ pub enum EvidenceLocator {
     Quote(String),
 }
 
-/// A parsed evidence pointer, e.g. `interaction:01ABC#0` or `interaction:01ABC~quote`.
+/// A parsed evidence pointer, e.g. `interaction:01ABC#0` or
+/// `interaction_transcript:01ABC~quote`.
 #[derive(Debug, Clone)]
 pub struct EvidenceRef {
-    pub kind: LinkKind,
+    pub record_type: String,
     pub id: String,
     pub locator: EvidenceLocator,
 }
@@ -111,14 +112,28 @@ pub fn parse_links(raw: &[String]) -> Result<Vec<LinkRef>, CliError> {
     raw.iter().map(|r| parse_link(r)).collect()
 }
 
-/// Parse an evidence pointer. Two locator forms are accepted after the
-/// `document:`/`interaction:` link: `#<chunk_index>` for an exact chunk, or
-/// `~<quote>` to resolve the chunk that contains the quote substring at write
-/// time (so an agent need not predict chunk boundaries). The `~` form is tried
+const EVIDENCE_RECORD_TYPES: &[&str] = &[
+    "person",
+    "organization",
+    "organization_profile",
+    "project",
+    "task",
+    "document",
+    "interaction",
+    "interaction_transcript",
+    "ai_note",
+    "extracted_fact",
+    "memory",
+    "asset",
+];
+
+/// Parse an evidence pointer. Two locator forms are accepted after the source
+/// chunk owner: `#<chunk_index>` for an exact chunk, or `~<quote>` to resolve the
+/// chunk that contains the quote substring at write time. The `~` form is tried
 /// first because a quote may itself contain a `#`.
 pub fn parse_evidence_ref(raw: &str) -> Result<EvidenceRef, CliError> {
-    if let Some((link, quote)) = raw.split_once('~') {
-        let link = parse_evidence_link(link, raw)?;
+    if let Some((record, quote)) = raw.split_once('~') {
+        let (record_type, id) = parse_evidence_record(record, raw)?;
         let quote = quote.trim().trim_matches('"').trim();
         if quote.is_empty() {
             return Err(CliError::Runtime(format!(
@@ -126,17 +141,17 @@ pub fn parse_evidence_ref(raw: &str) -> Result<EvidenceRef, CliError> {
             )));
         }
         return Ok(EvidenceRef {
-            kind: link.kind,
-            id: link.id,
+            record_type,
+            id,
             locator: EvidenceLocator::Quote(quote.to_string()),
         });
     }
-    let (link, chunk) = raw.split_once('#').ok_or_else(|| {
+    let (record, chunk) = raw.split_once('#').ok_or_else(|| {
         CliError::Runtime(format!(
-            "invalid --evidence '{raw}' (expected document:id#chunk, interaction:id#chunk, or :id~quote)"
+            "invalid --evidence '{raw}' (expected record_type:id#chunk or record_type:id~quote)"
         ))
     })?;
-    let link = parse_evidence_link(link, raw)?;
+    let (record_type, id) = parse_evidence_record(record, raw)?;
     let chunk_index = chunk.parse::<i64>().map_err(|_| {
         CliError::Runtime(format!(
             "invalid --evidence '{raw}' (chunk index must be an integer)"
@@ -148,21 +163,36 @@ pub fn parse_evidence_ref(raw: &str) -> Result<EvidenceRef, CliError> {
         )));
     }
     Ok(EvidenceRef {
-        kind: link.kind,
-        id: link.id,
+        record_type,
+        id,
         locator: EvidenceLocator::Chunk(chunk_index),
     })
 }
 
-/// Parse and validate the `document:`/`interaction:` link half of an evidence ref.
-fn parse_evidence_link(link: &str, raw: &str) -> Result<LinkRef, CliError> {
-    let link = parse_link(link)?;
-    if !matches!(link.kind, LinkKind::Document | LinkKind::Interaction) {
+fn parse_evidence_record(record: &str, raw: &str) -> Result<(String, String), CliError> {
+    let (kind, id) = record.split_once(':').ok_or_else(|| {
+        CliError::Runtime(format!(
+            "invalid --evidence '{raw}' (expected record_type:id)"
+        ))
+    })?;
+    let kind = kind.trim();
+    let id = id.trim();
+    let record_type = match kind {
+        "org" => "organization",
+        "doc" => "document",
+        other => other,
+    };
+    if !EVIDENCE_RECORD_TYPES.contains(&record_type) {
         return Err(CliError::Runtime(format!(
-            "invalid --evidence '{raw}' (evidence must cite a document or interaction chunk)"
+            "invalid --evidence '{raw}' (unknown evidence record type '{kind}')"
         )));
     }
-    Ok(link)
+    if id.is_empty() {
+        return Err(CliError::Runtime(format!(
+            "invalid --evidence '{raw}' (empty id)"
+        )));
+    }
+    Ok((record_type.to_string(), id.to_string()))
 }
 
 pub fn parse_evidence_refs(raw: &[String]) -> Result<Vec<EvidenceRef>, CliError> {

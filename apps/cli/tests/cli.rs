@@ -269,6 +269,7 @@ fn add_dedupes_identical_content() {
     );
     assert_eq!(second["isDuplicate"], true);
     assert_eq!(second["id"], first["id"]); // points back at the original
+    assert_eq!(second["chunkCount"], 1);
 }
 
 #[test]
@@ -2390,11 +2391,38 @@ fn search_finds_added_records_by_full_text() {
             "We discussed the Northwind partnership proposal.",
         ],
     );
+    let org = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "organization",
+            "--name",
+            "Northwind Partnership",
+        ],
+    );
+    let org_id = org["id"].as_str().unwrap();
+    run_json(
+        &db,
+        &[
+            "--json",
+            "enrich",
+            "organization",
+            org_id,
+            "--summary",
+            "Northwind Partnership is a distribution relationship.",
+        ],
+    );
     let results = run_json(&db, &["--json", "search", "partnership"]);
     let hits = results["results"].as_array().unwrap();
     assert!(hits
         .iter()
         .any(|h| h["kind"] == "interaction" && h["title"] == "Kickoff"));
+    let org_hits = hits
+        .iter()
+        .filter(|h| h["kind"] == "organization" && h["id"] == org_id)
+        .count();
+    assert_eq!(org_hits, 1);
 }
 
 #[test]
@@ -3396,4 +3424,825 @@ fn import_context_bundles_everything_an_import_needs() {
     assert_eq!(gmail["latestAt"], "2026-06-19T10:00:00Z");
     assert_eq!(gmail["count"], 1);
     assert_eq!(ctx["counts"]["interactions"], 1);
+}
+
+#[test]
+fn import_document_records_identity_provenance_and_finalizes() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let person = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Maya Chen",
+            "--email",
+            "maya@example.com",
+        ],
+    );
+    let project = run_json(
+        &db,
+        &["--json", "add", "project", "--name", "Project Alpha"],
+    );
+    let person_link = format!("person:{}", person["id"].as_str().unwrap());
+    let project_link = format!("project:{}", project["id"].as_str().unwrap());
+
+    let document = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "document",
+            "--title",
+            "Reflect note: Project Alpha",
+            "--text",
+            "Maya Chen confirmed Project Alpha should launch with the new credential flow.",
+            "--source",
+            "reflect_notes",
+            "--external-kind",
+            "note",
+            "--external-id",
+            "reflect-note-1",
+            "--original-path",
+            "/Users/alex/Documents/reflect-maccman2/project-alpha.md",
+            "--original-url",
+            "reflect://note/reflect-note-1",
+            "--link",
+            &person_link,
+            "--link",
+            &project_link,
+        ],
+    );
+    let document_id = document["id"].as_str().unwrap();
+    let document_ref = format!("document:{document_id}");
+    let document_alias_ref = format!("doc:{document_id}");
+    let evidence = format!("{document_ref}~credential flow");
+
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "ai-note",
+            "--kind",
+            "summary",
+            "--subject",
+            &document_alias_ref,
+            "--text",
+            "Project Alpha should launch with the credential flow.",
+            "--evidence",
+            &evidence,
+        ],
+    );
+    let fact = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "fact",
+            "--subject",
+            &document_ref,
+            "--key",
+            "decision",
+            "--value-text",
+            "Project Alpha should launch with the credential flow.",
+            "--source-record",
+            &document_ref,
+            "--confidence",
+            "0.9",
+            "--evidence",
+            &evidence,
+        ],
+    );
+    let memory = run_json(
+        &db,
+        &[
+            "--json",
+            "promote",
+            "fact",
+            fact["id"].as_str().unwrap(),
+            "--memory-kind",
+            "decision",
+        ],
+    );
+    assert_eq!(memory["isDuplicate"], false);
+    assert_eq!(memory["chunkCount"], 1);
+    let duplicate_memory = run_json(
+        &db,
+        &[
+            "--json",
+            "promote",
+            "fact",
+            fact["id"].as_str().unwrap(),
+            "--memory-kind",
+            "decision",
+        ],
+    );
+    assert_eq!(duplicate_memory["id"], memory["id"]);
+    assert_eq!(duplicate_memory["isDuplicate"], true);
+    run_json(
+        &db,
+        &[
+            "--json",
+            "tag",
+            "ensure",
+            "--name",
+            "Project Alpha",
+            "--slug",
+            "project-alpha",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "tag",
+            "attach",
+            "--tag",
+            "project-alpha",
+            "--record",
+            &document_ref,
+        ],
+    );
+
+    let finalized = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "finalize",
+            "--record",
+            &document_alias_ref,
+        ],
+    );
+    assert_eq!(finalized["complete"], true);
+    assert!(finalized["missing"].as_array().unwrap().is_empty());
+    let finalized_again = run_json(
+        &db,
+        &["--json", "import", "finalize", "--record", &document_ref],
+    );
+    assert_eq!(finalized_again["complete"], true);
+
+    let conn = Connection::open(&db).unwrap();
+    let identity_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM external_identities
+             WHERE entity_type = 'document'
+               AND entity_id = ?1
+               AND kind = 'note'
+               AND external_id = 'reflect-note-1'",
+            [document_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(identity_count, 1);
+    let (provenance_count, finalized_count, memory_count, memory_chunks): (i64, i64, i64, i64) =
+        conn.query_row(
+            "SELECT COUNT(*),
+                    SUM(CASE WHEN provenance_kind = 'finalized' THEN 1 ELSE 0 END),
+                    (SELECT COUNT(*) FROM memories WHERE promoted_from_fact_id = ?2),
+                    (SELECT COUNT(*) FROM content_chunks
+                     WHERE record_type = 'memory' AND record_id = ?3)
+             FROM record_provenance
+             WHERE record_type = 'document'
+               AND record_id = ?1
+               AND provenance_kind IN ('imported', 'finalized')",
+            (
+                document_id,
+                fact["id"].as_str().unwrap(),
+                memory["id"].as_str().unwrap(),
+            ),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(provenance_count, 2);
+    assert_eq!(finalized_count, 1);
+    assert_eq!(memory_count, 1);
+    assert_eq!(memory_chunks, 1);
+}
+
+#[test]
+fn import_document_reimport_by_source_identity_refreshes_body_and_chunks() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "document",
+            "--title",
+            "Reflect note",
+            "--text",
+            "Old searchable marker.",
+            "--source",
+            "reflect_notes",
+            "--external-kind",
+            "note",
+            "--external-id",
+            "reflect-note-refresh",
+        ],
+    );
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "document",
+            "--title",
+            "Reflect note",
+            "--text",
+            "New searchable marker.",
+            "--source",
+            "reflect_notes",
+            "--external-kind",
+            "note",
+            "--external-id",
+            "reflect-note-refresh",
+        ],
+    );
+    assert_eq!(second["isDuplicate"], true);
+    assert_eq!(second["id"], first["id"]);
+    assert_eq!(second["chunkCount"], 1);
+
+    let conn = Connection::open(&db).unwrap();
+    let body: String = conn
+        .query_row(
+            "SELECT body_text FROM documents WHERE id = ?1",
+            [first["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(body, "New searchable marker.");
+    let stale_chunks: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM content_chunks
+             WHERE record_type = 'document'
+               AND record_id = ?1
+               AND text LIKE '%Old searchable marker%'",
+            [first["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stale_chunks, 0);
+    let fresh_chunks: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM content_chunks
+             WHERE record_type = 'document'
+               AND record_id = ?1
+               AND text LIKE '%New searchable marker%'",
+            [first["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(fresh_chunks, 1);
+}
+
+#[test]
+fn evidence_refs_accept_transcript_chunks() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let interaction = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Granola sync",
+            "--text",
+            "Meeting shell imported from Granola.",
+            "--source",
+            "granola",
+            "--external-id",
+            "granola-meeting-1",
+            "--participant",
+            "speaker:Alex MacCaw <alex@example.com>",
+        ],
+    );
+    let interaction_id = interaction["id"].as_str().unwrap();
+    let transcript = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "transcript",
+            "--interaction",
+            interaction_id,
+            "--text",
+            "Alex: The credential flow needs to be ready before Friday.",
+            "--source",
+            "granola",
+            "--external-kind",
+            "transcript",
+            "--external-id",
+            "granola-transcript-1",
+            "--transcribed-by",
+            "granola",
+        ],
+    );
+    let transcript_id = transcript["id"].as_str().unwrap();
+    let interaction_ref = format!("interaction:{interaction_id}");
+    let transcript_ref = format!("interaction_transcript:{transcript_id}");
+    let evidence = format!("{transcript_ref}~credential flow");
+
+    let fact = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "fact",
+            "--subject",
+            &interaction_ref,
+            "--key",
+            "follow_up",
+            "--value-text",
+            "Credential flow needs to be ready before Friday.",
+            "--source-record",
+            &transcript_ref,
+            "--evidence",
+            &evidence,
+        ],
+    );
+
+    let conn = Connection::open(&db).unwrap();
+    let transcript_evidence: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM evidence_refs er
+             JOIN content_chunks cc ON cc.id = er.chunk_id
+             WHERE er.subject_type = 'extracted_fact'
+               AND er.subject_id = ?1
+               AND cc.record_type = 'interaction_transcript'
+               AND cc.record_id = ?2",
+            (fact["id"].as_str().unwrap(), transcript_id),
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(transcript_evidence, 1);
+    let transcript_provenance: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM record_provenance
+             WHERE record_type = 'interaction_transcript'
+               AND record_id = ?1
+               AND provenance_kind = 'imported'",
+            [transcript_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(transcript_provenance, 1);
+}
+
+#[test]
+fn import_finalize_accepts_transcript_chunks_for_interaction() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let person = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Alex MacCaw",
+            "--email",
+            "alex@example.com",
+        ],
+    );
+    let project = run_json(
+        &db,
+        &["--json", "add", "project", "--name", "Credential Flow"],
+    );
+    let participant = "speaker:Alex MacCaw <alex@example.com>";
+    let interaction = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Granola sync",
+            "--source",
+            "granola",
+            "--external-id",
+            "granola-meeting-transcript-only",
+            "--participant",
+            participant,
+        ],
+    );
+    let interaction_id = interaction["id"].as_str().unwrap();
+    let transcript = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "transcript",
+            "--interaction",
+            interaction_id,
+            "--text",
+            "Alex: The credential flow needs to be ready before Friday.",
+            "--source",
+            "granola",
+            "--external-kind",
+            "transcript",
+            "--external-id",
+            "granola-transcript-finalize",
+            "--transcribed-by",
+            "granola",
+        ],
+    );
+    let transcript_id = transcript["id"].as_str().unwrap();
+    let interaction_ref = format!("interaction:{interaction_id}");
+    let transcript_ref = format!("interaction_transcript:{transcript_id}");
+    let project_ref = format!("project:{}", project["id"].as_str().unwrap());
+    let person_ref = format!("person:{}", person["id"].as_str().unwrap());
+    let evidence = format!("{transcript_ref}~credential flow");
+
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "ai-note",
+            "--kind",
+            "summary",
+            "--interaction",
+            interaction_id,
+            "--text",
+            "The credential flow needs to be ready before Friday.",
+            "--evidence",
+            &evidence,
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "fact",
+            "--subject",
+            &interaction_ref,
+            "--key",
+            "deadline",
+            "--value-text",
+            "The credential flow needs to be ready before Friday.",
+            "--source-record",
+            &transcript_ref,
+            "--evidence",
+            &evidence,
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "task",
+            "--title",
+            "Ready the credential flow",
+            "--link",
+            &interaction_ref,
+            "--link",
+            &project_ref,
+            "--link",
+            &person_ref,
+            "--evidence",
+            &evidence,
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "tag",
+            "ensure",
+            "--name",
+            "Credential Flow",
+            "--slug",
+            "credential-flow",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "tag",
+            "attach",
+            "--tag",
+            "credential-flow",
+            "--record",
+            &interaction_ref,
+        ],
+    );
+
+    let finalized = run_json(
+        &db,
+        &["--json", "import", "finalize", "--record", &interaction_ref],
+    );
+    assert_eq!(finalized["complete"], true);
+    assert!(finalized["missing"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn import_transcript_rejects_external_identity_for_another_interaction() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "First meeting",
+            "--text",
+            "First shell.",
+            "--source",
+            "granola",
+            "--external-id",
+            "meeting-one",
+        ],
+    );
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Second meeting",
+            "--text",
+            "Second shell.",
+            "--source",
+            "granola",
+            "--external-id",
+            "meeting-two",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "transcript",
+            "--interaction",
+            first["id"].as_str().unwrap(),
+            "--text",
+            "First transcript text.",
+            "--source",
+            "granola",
+            "--external-kind",
+            "transcript",
+            "--external-id",
+            "shared-transcript",
+        ],
+    );
+
+    let out = run(
+        &db,
+        &[
+            "--json",
+            "import",
+            "transcript",
+            "--interaction",
+            second["id"].as_str().unwrap(),
+            "--text",
+            "Second transcript text should not overwrite first.",
+            "--source",
+            "granola",
+            "--external-kind",
+            "transcript",
+            "--external-id",
+            "shared-transcript",
+        ],
+    );
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("belongs to interaction"));
+
+    let conn = Connection::open(&db).unwrap();
+    let first_text: String = conn
+        .query_row(
+            "SELECT raw_text FROM interaction_transcripts WHERE interaction_id = ?1",
+            [first["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(first_text, "First transcript text.");
+    let second_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM interaction_transcripts WHERE interaction_id = ?1",
+            [second["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(second_count, 0);
+}
+
+#[test]
+fn enrich_organization_reuses_profile_for_same_prompt_fingerprint() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let org = run_json(
+        &db,
+        &["--json", "add", "organization", "--name", "Example Labs"],
+    );
+    let org_id = org["id"].as_str().unwrap();
+
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "enrich",
+            "organization",
+            org_id,
+            "--one-line-description",
+            "Original profile text.",
+            "--why-it-matters",
+            "Original reason.",
+            "--model",
+            "agent-research",
+            "--prompt-fingerprint",
+            "org-profile-v1",
+        ],
+    );
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "enrich",
+            "organization",
+            org_id,
+            "--one-line-description",
+            "Updated profile text.",
+            "--why-it-matters",
+            "Updated reason.",
+            "--model",
+            "agent-research",
+            "--prompt-fingerprint",
+            "org-profile-v1",
+        ],
+    );
+    assert_eq!(second["profileId"], first["profileId"]);
+
+    let conn = Connection::open(&db).unwrap();
+    let (profile_count, description, why): (i64, String, String) = conn
+        .query_row(
+            "SELECT COUNT(*), one_line_description, why_it_matters
+             FROM organization_profiles
+             WHERE organization_id = ?1",
+            [org_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(profile_count, 1);
+    assert_eq!(description, "Updated profile text.");
+    assert_eq!(why, "Updated reason.");
+}
+
+#[test]
+fn enrich_organization_reuses_profile_without_prompt_fingerprint() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let org = run_json(
+        &db,
+        &["--json", "add", "organization", "--name", "Example Labs"],
+    );
+    let org_id = org["id"].as_str().unwrap();
+
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "enrich",
+            "organization",
+            org_id,
+            "--one-line-description",
+            "Original profile text.",
+        ],
+    );
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "enrich",
+            "organization",
+            org_id,
+            "--one-line-description",
+            "Updated profile text.",
+        ],
+    );
+    assert_eq!(second["profileId"], first["profileId"]);
+
+    let conn = Connection::open(&db).unwrap();
+    let (profile_count, description): (i64, String) = conn
+        .query_row(
+            "SELECT COUNT(*), one_line_description
+             FROM organization_profiles
+             WHERE organization_id = ?1",
+            [org_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(profile_count, 1);
+    assert_eq!(description, "Updated profile text.");
+}
+
+#[test]
+fn import_finalize_supports_explicit_waivers_for_structured_events() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let event = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "interaction",
+            "--kind",
+            "event",
+            "--title",
+            "Calendar: flight to SFO",
+            "--occurred-at",
+            "2026-07-09T09:00:00Z",
+            "--source",
+            "google_calendar",
+            "--external-kind",
+            "event",
+            "--external-id",
+            "calendar-event-waived-1",
+        ],
+    );
+    assert_eq!(event["chunkCount"], 0);
+    let event_id = event["id"].as_str().unwrap();
+    let event_ref = format!("interaction:{event_id}");
+
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "ai-note",
+            "--kind",
+            "summary",
+            "--interaction",
+            event_id,
+            "--text",
+            "Structured calendar travel block.",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json", "tag", "ensure", "--name", "Travel", "--slug", "travel",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json", "tag", "attach", "--tag", "travel", "--record", &event_ref,
+        ],
+    );
+
+    let before = run_json(
+        &db,
+        &["--json", "import", "finalize", "--record", &event_ref],
+    );
+    assert_eq!(before["complete"], false);
+    assert!(before["missing"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|missing| missing == "participantsOrEntities"));
+
+    let finalized = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "finalize",
+            "--record",
+            &event_ref,
+            "--no-entities",
+            "--no-project-or-task-link",
+            "--no-derived-actions",
+            "--no-extracted-facts",
+        ],
+    );
+    assert_eq!(finalized["complete"], true);
+    assert_eq!(finalized["waivers"]["noEntities"], true);
+    assert_eq!(finalized["waivers"]["noExtractedFacts"], true);
+
+    let audit = run_json(&db, &["--json", "import", "audit", "--limit", "10"]);
+    assert_eq!(audit["incompleteCount"], 0);
 }

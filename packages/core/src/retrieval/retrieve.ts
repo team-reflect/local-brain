@@ -1,10 +1,10 @@
 import { sql } from 'kysely'
 import { db } from '../db/client'
-import type { RecordKind } from '../domains/relations/types'
 import { embedStatus, embedTexts } from '../embeddings/commands'
 import { isEmbedReady } from '../embeddings/model'
 import { fuseRanked, semanticHits } from '../embeddings/semantic'
 import { isEmbeddingsEnabled } from '../embeddings/status'
+import { chunkRecordJoins, chunkRecordTitle, chunkVisibilityFilter } from './chunk-sources'
 import { toMatchQuery } from './match-query'
 import { combineScore, lexicalScore, recencyScore } from './ranking'
 
@@ -25,7 +25,19 @@ import { combineScore, lexicalScore, recencyScore } from './ranking'
  */
 export type RetrievalMode = 'lexical' | 'semantic' | 'hybrid'
 
-export type SourceRecordType = 'document' | 'interaction'
+export type SourceRecordType =
+  | 'person'
+  | 'organization'
+  | 'organization_profile'
+  | 'project'
+  | 'task'
+  | 'document'
+  | 'interaction'
+  | 'interaction_transcript'
+  | 'ai_note'
+  | 'extracted_fact'
+  | 'memory'
+  | 'asset'
 
 export interface RetrievedChunk {
   chunkId: string
@@ -59,7 +71,7 @@ export interface RetrieveOptions {
   /** Restrict to one source type. */
   recordType?: SourceRecordType
   /**
-   * Owning document/interaction ids considered "in context" (e.g. the records
+   * Owning source record ids considered "in context" (e.g. the records
    * linked to the project the user is viewing). Chunks from these records get a
    * relevance boost. Callers resolve context; retrieval stays a pure read.
    */
@@ -118,16 +130,34 @@ async function lexicalHits(
       cc.record_type  AS "recordType",
       cc.record_id    AS "recordId",
       cc.chunk_index  AS "chunkIndex",
-      COALESCE(d.title, i.title)            AS "recordTitle",
-      COALESCE(i.occurred_at, d.updated_at) AS "recordDate",
+      ${chunkRecordTitle} AS "recordTitle",
+      COALESCE(
+        i.occurred_at,
+        transcript_interaction.occurred_at,
+        d.occurred_at,
+        d.authored_at,
+        t.due_at,
+        an.generated_at,
+        ef.observed_at,
+        m.valid_from,
+        p.last_interaction_at,
+        d.updated_at,
+        i.updated_at,
+        p.updated_at,
+        o.updated_at,
+        pr.updated_at,
+        t.updated_at,
+        an.updated_at,
+        ef.updated_at,
+        m.updated_at,
+        a.updated_at
+      ) AS "recordDate",
       bm25(content_chunks_fts)              AS "bm25"
     FROM content_chunks_fts
     JOIN content_chunks cc ON cc.rowid = content_chunks_fts.rowid
-    LEFT JOIN documents d    ON d.id = cc.record_id AND cc.record_type = 'document'
-    LEFT JOIN interactions i ON i.id = cc.record_id AND cc.record_type = 'interaction'
+    ${chunkRecordJoins}
     WHERE content_chunks_fts MATCH ${match}
-      AND (d.archived_at IS NULL)
-      AND (i.archived_at IS NULL)
+      AND ${chunkVisibilityFilter}
       ${recordTypeFilter}
     ORDER BY bm25(content_chunks_fts)
     LIMIT ${options.limit}
@@ -237,5 +267,18 @@ export async function retrieve(query: string, options: RetrieveOptions = {}): Pr
   return { query, mode, semanticAvailable: false, chunks }
 }
 
-/** The kinds {@link retrieve} can ground answers in (source records only). */
-export const RETRIEVABLE_SOURCE_KINDS: readonly RecordKind[] = ['document', 'interaction']
+/** The source kinds {@link retrieve} can ground answers in. */
+export const RETRIEVABLE_SOURCE_KINDS: readonly SourceRecordType[] = [
+  'person',
+  'organization',
+  'organization_profile',
+  'project',
+  'task',
+  'document',
+  'interaction',
+  'interaction_transcript',
+  'ai_note',
+  'extracted_fact',
+  'memory',
+  'asset',
+]
