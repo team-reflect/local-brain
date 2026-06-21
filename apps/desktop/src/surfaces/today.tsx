@@ -176,11 +176,34 @@ function DailyBriefPanel({
 }): ReactNode {
   const hasBrief = note !== null
   const disabled = loading || generating || settingsLoading
-  const action = providersReady ? (
-    <Button size="sm" variant={hasBrief ? 'ghost' : 'primary'} disabled={disabled} onClick={onGenerate}>
+  const headerAction = hasBrief ? (
+    providersReady ? (
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={disabled}
+        onClick={onGenerate}
+        className="h-auto px-0 underline-offset-4 hover:bg-transparent hover:underline"
+      >
+        {generating ? <LoaderCircle aria-hidden className="size-3.5 animate-spin" /> : null}
+        {!generating ? <RefreshCw aria-hidden className="size-3" /> : null}
+        {generating ? 'Generating' : 'Regenerate'}
+      </Button>
+    ) : (
+      <Button size="sm" variant="primary" disabled={settingsLoading} onClick={onConfigure}>
+        Add provider
+      </Button>
+    )
+  ) : null
+  const emptyAction = providersReady ? (
+    <Button
+      size="sm"
+      variant="primary"
+      disabled={disabled}
+      onClick={onGenerate}
+    >
       {generating ? <LoaderCircle aria-hidden className="size-3.5 animate-spin" /> : null}
-      {!generating && hasBrief ? <RefreshCw aria-hidden className="size-3.5" /> : null}
-      {generating ? 'Generating' : hasBrief ? 'Regenerate' : 'Generate'}
+      {generating ? 'Generating' : 'Generate'}
     </Button>
   ) : (
     <Button size="sm" variant="primary" disabled={settingsLoading} onClick={onConfigure}>
@@ -194,10 +217,15 @@ function DailyBriefPanel({
         <div>
           <h2 className={sectionLabel}>Daily brief</h2>
         </div>
-        {action}
+        {headerAction}
       </div>
 
-      <div className="rounded-lg border border-border bg-card px-4 py-3.5">
+      <div
+        className={cn(
+          'rounded-lg border border-border bg-card px-4 py-3.5',
+          !hasBrief && 'flex min-h-36 flex-col items-center justify-center gap-3 text-center',
+        )}
+      >
         {error ? (
           <Alert variant="error">
             {error.message}
@@ -218,15 +246,18 @@ function DailyBriefPanel({
         ) : hasBrief ? (
           <ChatMarkdown text={note.content} />
         ) : (
-          <p className="text-sm leading-6 text-muted-foreground">
-            Generate a grounded brief from today&apos;s tasks, active projects, and recent
-            interactions.
-          </p>
+          <>
+            <p className="max-w-md text-sm leading-6 text-muted-foreground">
+              Generate a grounded brief from today&apos;s tasks, active projects, and recent
+              interactions.
+            </p>
+            {emptyAction}
+          </>
         )}
       </div>
 
       {note?.generatedAt ? (
-        <p className={cn(metaText, '-mt-0.5 text-right')}>Generated {formatGeneratedAt(note.generatedAt)}</p>
+        <p className={cn(metaText, '-mt-0.5 text-right text-[10px]')}>Generated {formatGeneratedAt(note.generatedAt)}</p>
       ) : null}
     </section>
   )
