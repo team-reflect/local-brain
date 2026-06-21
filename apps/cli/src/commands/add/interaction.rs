@@ -120,46 +120,19 @@ fn enrich_duplicate_interaction(
     id: &str,
     args: &AddInteractionArgs,
 ) -> Result<(), CliError> {
-    conn.execute(
-        "UPDATE interactions
-         SET external_id = CASE
-               WHEN (external_id IS NULL OR trim(external_id) = '') AND ?1 IS NOT NULL
-               THEN ?1 ELSE external_id END,
-             original_url = CASE
-               WHEN (original_url IS NULL OR trim(original_url) = '') AND ?2 IS NOT NULL
-               THEN ?2 ELSE original_url END,
-             summary = CASE
-               WHEN (summary IS NULL OR trim(summary) = '') AND ?3 IS NOT NULL
-               THEN ?3 ELSE summary END,
-             occurred_at = CASE
-               WHEN (occurred_at IS NULL OR trim(occurred_at) = '') AND ?4 IS NOT NULL
-               THEN ?4 ELSE occurred_at END,
-             ended_at = CASE
-               WHEN (ended_at IS NULL OR trim(ended_at) = '') AND ?5 IS NOT NULL
-               THEN ?5 ELSE ended_at END,
-             location = CASE
-               WHEN (location IS NULL OR trim(location) = '') AND ?6 IS NOT NULL
-               THEN ?6 ELSE location END,
-             updated_at = CASE
-               WHEN ((external_id IS NULL OR trim(external_id) = '') AND ?1 IS NOT NULL)
-                 OR ((original_url IS NULL OR trim(original_url) = '') AND ?2 IS NOT NULL)
-                 OR ((summary IS NULL OR trim(summary) = '') AND ?3 IS NOT NULL)
-                 OR ((occurred_at IS NULL OR trim(occurred_at) = '') AND ?4 IS NOT NULL)
-                 OR ((ended_at IS NULL OR trim(ended_at) = '') AND ?5 IS NOT NULL)
-                 OR ((location IS NULL OR trim(location) = '') AND ?6 IS NOT NULL)
-               THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE updated_at END
-         WHERE id = ?7",
-        params![
-            normalize_optional(args.external_id),
-            normalize_optional(args.original_url),
-            normalize_optional(args.summary),
-            normalize_optional(args.occurred_at),
-            normalize_optional(args.ended_at),
-            normalize_optional(args.location),
-            id,
+    super::fill_blanks(
+        conn,
+        "interactions",
+        id,
+        &[
+            ("external_id", normalize_optional(args.external_id)),
+            ("original_url", normalize_optional(args.original_url)),
+            ("summary", normalize_optional(args.summary)),
+            ("occurred_at", normalize_optional(args.occurred_at)),
+            ("ended_at", normalize_optional(args.ended_at)),
+            ("location", normalize_optional(args.location)),
         ],
-    )?;
-    Ok(())
+    )
 }
 
 /// Apply a duplicate import onto an existing interaction: fill blank fields, add

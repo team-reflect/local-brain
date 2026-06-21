@@ -41,6 +41,22 @@ impl LinkKind {
             LinkKind::Interaction => "interaction",
         }
     }
+
+    /// Parse the canonical `record_type` string back into a `LinkKind` (the
+    /// inverse of [`as_str`](Self::as_str)). Accepts only the canonical labels
+    /// stored in join/provenance tables — not the CLI input aliases (`org`,
+    /// `doc`) which [`parse_link`] handles.
+    pub fn from_record_type(value: &str) -> Option<Self> {
+        match value {
+            "person" => Some(LinkKind::Person),
+            "organization" => Some(LinkKind::Organization),
+            "project" => Some(LinkKind::Project),
+            "task" => Some(LinkKind::Task),
+            "document" => Some(LinkKind::Document),
+            "interaction" => Some(LinkKind::Interaction),
+            _ => None,
+        }
+    }
 }
 
 /// A parsed `--link kind:id` reference.
@@ -239,16 +255,10 @@ pub fn to_match_query(raw: &str, or: bool) -> Option<String> {
     Some(terms.join(if or { " OR " } else { " " }))
 }
 
-/// Build a `%term%` `LIKE` pattern from arbitrary text — the Rust twin of core's
-/// `toLikePattern`. Escapes the LIKE wildcards (`\`, `%`, `_`) so they match
-/// literally (paired with an `ESCAPE '\'` clause) instead of deleting them, which
-/// would turn a wildcard-only query into a `%%` that matches every record.
-/// Returns `None` for blank input.
-pub fn to_like_pattern(raw: &str) -> Option<String> {
-    let needle = raw.trim();
-    if needle.is_empty() {
-        return None;
-    }
+/// Wrap `needle` in a `%…%` `LIKE` pattern, escaping the LIKE wildcards (`\`,
+/// `%`, `_`) so they match literally (paired with an `ESCAPE '\'` clause) instead
+/// of acting as wildcards. The shared core of the public pattern builders.
+fn like_escaped(needle: &str) -> String {
     let mut pattern = String::with_capacity(needle.len() + 2);
     pattern.push('%');
     for ch in needle.chars() {
@@ -258,5 +268,26 @@ pub fn to_like_pattern(raw: &str) -> Option<String> {
         pattern.push(ch);
     }
     pattern.push('%');
-    Some(pattern)
+    pattern
+}
+
+/// Build a `%term%` `LIKE` pattern from arbitrary text — the Rust twin of core's
+/// `toLikePattern`. Escapes the LIKE wildcards so a wildcard-only query never
+/// degrades into a `%%` that matches every record. Returns `None` for blank input.
+pub fn to_like_pattern(raw: &str) -> Option<String> {
+    let needle = raw.trim();
+    if needle.is_empty() {
+        return None;
+    }
+    Some(like_escaped(needle))
+}
+
+/// Like [`to_like_pattern`] but lowercased, for case-insensitive matching against
+/// a `lower(column)` comparison. Returns `None` for blank input.
+pub fn to_like_pattern_lower(raw: &str) -> Option<String> {
+    let needle = raw.trim();
+    if needle.is_empty() {
+        return None;
+    }
+    Some(like_escaped(&needle.to_lowercase()))
 }

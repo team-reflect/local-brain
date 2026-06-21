@@ -7,6 +7,7 @@
 //! queue awaiting ratification, not an automation log.
 
 use rusqlite::{params, Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::organization::{find_or_create_organization, insert_organization_links};
@@ -30,6 +31,29 @@ impl SuggestionKind {
             SuggestionKind::Organization => "create_organization",
         }
     }
+
+    /// Parse the stored `suggestions.kind` string back into the enum (the inverse
+    /// of [`as_str`](Self::as_str)), so the accept path matches on a typed variant
+    /// rather than re-spelling the literals.
+    fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "create_project" => Some(SuggestionKind::Project),
+            "create_organization" => Some(SuggestionKind::Organization),
+            _ => None,
+        }
+    }
+}
+
+/// The typed payload persisted in `suggestions.payload_json`. A superset across
+/// suggestion kinds: a project proposal carries `name`/`summary`; an organization
+/// proposal carries `name`/`domain`/`kind`. Unset fields serialize as `null`, so
+/// the stored shape (and the `suggest list` JSON) stays stable across kinds.
+#[derive(Default, Serialize, Deserialize)]
+struct SuggestionPayload {
+    name: Option<String>,
+    summary: Option<String>,
+    domain: Option<String>,
+    kind: Option<String>,
 }
 
 pub struct SuggestArgs<'a> {
@@ -42,22 +66,6 @@ pub struct SuggestArgs<'a> {
     pub links: Vec<LinkRef>,
 }
 
-fn link_kind_str(kind: LinkKind) -> &'static str {
-    kind.as_str()
-}
-
-fn link_kind_from_str(value: &str) -> Option<LinkKind> {
-    match value {
-        "person" => Some(LinkKind::Person),
-        "organization" => Some(LinkKind::Organization),
-        "project" => Some(LinkKind::Project),
-        "task" => Some(LinkKind::Task),
-        "document" => Some(LinkKind::Document),
-        "interaction" => Some(LinkKind::Interaction),
-        _ => None,
-    }
-}
-
 /// Insert the evidence links for a suggestion (deduped by the table's UNIQUE).
 fn insert_suggestion_links(
     conn: &Connection,
@@ -68,7 +76,7 @@ fn insert_suggestion_links(
         conn.execute(
             "INSERT OR IGNORE INTO suggestion_links (id, suggestion_id, record_type, record_id)
              VALUES (?1,?2,?3,?4)",
-            params![new_id(), suggestion_id, link_kind_str(link.kind), link.id],
+            params![new_id(), suggestion_id, link.kind.as_str(), link.id],
         )?;
     }
     Ok(())
@@ -86,7 +94,7 @@ fn suggestion_links(conn: &Connection, suggestion_id: &str) -> Result<Vec<LinkRe
     let mut links = Vec::new();
     for row in rows {
         let (record_type, id) = row?;
-        if let Some(kind) = link_kind_from_str(&record_type) {
+        if let Some(kind) = LinkKind::from_record_type(&record_type) {
             links.push(LinkRef { kind, id });
         }
     }
@@ -130,12 +138,13 @@ pub fn suggest(conn: &mut Connection, json: bool, args: SuggestArgs) -> Result<(
         return report_suggestion(json, &id, kind, &status, true);
     }
 
-    let payload = json!({
-        "name": title,
-        "summary": normalize_optional(args.summary),
-        "domain": normalize_optional(args.domain),
-        "kind": normalize_optional(args.org_kind),
-    });
+    let payload = SuggestionPayload {
+        name: Some(title.clone()),
+        summary: normalize_optional(args.summary),
+        domain: normalize_optional(args.domain),
+        kind: normalize_optional(args.org_kind),
+    };
+    let payload_json = serde_json::to_string(&payload)?;
     let id = new_id();
     let tx = conn.transaction()?;
     tx.execute(
@@ -145,7 +154,7 @@ pub fn suggest(conn: &mut Connection, json: bool, args: SuggestArgs) -> Result<(
             id,
             kind,
             title,
-            payload.to_string(),
+            payload_json,
             normalize_optional(args.rationale),
         ],
     )?;
@@ -189,7 +198,7 @@ pub fn list_suggestions(conn: &Connection, json: bool, status: &str) -> Result<(
             "status": status,
             "payload": payload,
             "links": links.iter().map(|link| json!({
-                "recordType": link_kind_str(link.kind),
+                "recordType": link.kind.as_str(),
                 "recordId": link.id,
             })).collect::<Vec<_>>(),
             "createdAt": created_at,
@@ -217,7 +226,7 @@ pub fn list_suggestions(conn: &Connection, json: bool, status: &str) -> Result<(
 struct SuggestionRow {
     kind: String,
     title: String,
-    payload: Value,
+    payload: SuggestionPayload,
     status: String,
 }
 
@@ -238,10 +247,10 @@ fn load_suggestion(conn: &Connection, id: &str) -> Result<SuggestionRow, CliErro
         .optional()?
         .ok_or_else(|| CliError::NotFound(format!("no suggestion {id}")))?;
     let (kind, title, payload_json, status) = row;
-    let payload: Value = payload_json
+    let payload: SuggestionPayload = payload_json
         .as_deref()
         .and_then(|raw| serde_json::from_str(raw).ok())
-        .unwrap_or(Value::Null);
+        .unwrap_or_default();
     Ok(SuggestionRow {
         kind,
         title,
@@ -258,40 +267,37 @@ pub fn accept_suggestion(conn: &mut Connection, json: bool, id: &str) -> Result<
             suggestion.status
         )));
     }
-    let payload_str = |key: &str| -> Option<String> {
-        suggestion
-            .payload
-            .get(key)
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned)
-    };
+    let payload = &suggestion.payload;
+    let name = payload
+        .name
+        .clone()
+        .unwrap_or_else(|| suggestion.title.clone());
     let links = suggestion_links(conn, id)?;
     let tx = conn.transaction()?;
-    let (record_type, record_id) = match suggestion.kind.as_str() {
-        "create_project" => {
-            let name = payload_str("name").unwrap_or_else(|| suggestion.title.clone());
-            let project_id = find_or_create_project(&tx, &name, payload_str("summary").as_deref())?;
+    let (record_type, record_id) = match SuggestionKind::from_str(&suggestion.kind) {
+        Some(SuggestionKind::Project) => {
+            let project_id = find_or_create_project(&tx, &name, payload.summary.as_deref())?;
             insert_project_links(&tx, &project_id, &links)?;
             ("project", project_id)
         }
-        "create_organization" => {
+        Some(SuggestionKind::Organization) => {
             // Relink cited interactions/documents/projects to the org as
             // provenance. Cited *people* are evidence, NOT asserted employees —
             // auto-affiliating them would manufacture relationships the user never
             // confirmed; use `brain affiliate` / `add person --org` for employment.
-            let name = payload_str("name").unwrap_or_else(|| suggestion.title.clone());
             let org_id = find_or_create_organization(
                 &tx,
                 &name,
-                payload_str("domain").as_deref(),
-                payload_str("kind").as_deref(),
+                payload.domain.as_deref(),
+                payload.kind.as_deref(),
             )?;
             insert_organization_links(&tx, &org_id, &links)?;
             ("organization", org_id)
         }
-        other => {
+        None => {
             return Err(CliError::Runtime(format!(
-                "cannot accept suggestion of unknown kind '{other}'"
+                "cannot accept suggestion of unknown kind '{}'",
+                suggestion.kind
             )));
         }
     };

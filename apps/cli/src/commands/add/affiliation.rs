@@ -229,4 +229,48 @@ mod tests {
             .unwrap();
         assert_eq!(current_org.as_deref(), Some(org_b.as_str()));
     }
+
+    #[test]
+    fn affiliate_errors_when_person_missing() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        let (_, org) = seed_person_and_org(&conn);
+        let missing = gen_id();
+        let result = affiliate(
+            &mut conn,
+            true,
+            AffiliateArgs {
+                person_id: &missing,
+                organization_id: &org,
+                title: None,
+                role: None,
+                is_current: false,
+            },
+        );
+        assert!(
+            matches!(result, Err(CliError::NotFound(_))),
+            "affiliating an unknown person must error, not silently insert"
+        );
+    }
+
+    #[test]
+    fn affiliate_errors_when_organization_missing() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        let (person, _) = seed_person_and_org(&conn);
+        let missing = gen_id();
+        let result = affiliate(
+            &mut conn,
+            true,
+            AffiliateArgs {
+                person_id: &person,
+                organization_id: &missing,
+                title: None,
+                role: None,
+                is_current: false,
+            },
+        );
+        assert!(
+            matches!(result, Err(CliError::NotFound(_))),
+            "affiliating with an unknown organization must error"
+        );
+    }
 }

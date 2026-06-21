@@ -4,7 +4,6 @@
 //! domain, and enriches blank fields rather than forking a second row.
 
 use rusqlite::{params, Connection, OptionalExtension};
-use serde_json::json;
 
 use super::identity::{
     external_kind, find_external_identity, insert_external_identity, source_id,
@@ -14,7 +13,6 @@ use super::text::{normalize_domain, normalize_name, normalize_optional, normaliz
 use crate::commands::{LinkKind, LinkRef};
 use crate::error::CliError;
 use crate::id::new_id;
-use crate::output::print_json;
 
 /// Relink a suggestion's cited records to an organization on accept. Interactions,
 /// documents, and projects link via their typed join tables (provenance for why
@@ -33,11 +31,15 @@ pub(super) fn insert_organization_links(
             LinkKind::Project => ("project_organizations", "project_id"),
             LinkKind::Person | LinkKind::Organization | LinkKind::Task => continue,
         };
-        let sql = format!(
-            "INSERT OR IGNORE INTO {table} (id, organization_id, {other_col}) VALUES (?1,?2,?3)"
-        );
-        conn.execute(&sql, params![new_id(), organization_id, link.id])
-            .map_err(|e| CliError::Runtime(format!("could not link organization evidence: {e}")))?;
+        super::links::insert_join_row(
+            conn,
+            table,
+            "organization_id",
+            organization_id,
+            other_col,
+            &link.id,
+            "organization evidence",
+        )?;
     }
     Ok(())
 }
@@ -64,22 +66,10 @@ fn find_duplicate_organization(
     name: &str,
     domain: Option<&str>,
 ) -> Result<Option<String>, CliError> {
-    let target = normalize_name(name);
-    if !target.is_empty() {
-        let mut stmt = conn.prepare(
-            "SELECT id, name FROM organizations
-             WHERE archived_at IS NULL
-             ORDER BY created_at ASC, id ASC",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        for row in rows {
-            let (id, candidate) = row?;
-            if normalize_name(&candidate) == target {
-                return Ok(Some(id));
-            }
-        }
+    if let Some(id) =
+        super::find_by_normalized_name(conn, "organizations", "name", name, normalize_name)?
+    {
+        return Ok(Some(id));
     }
     if let Some(domain) = normalize_domain(domain) {
         let id = conn
@@ -106,36 +96,18 @@ fn enrich_duplicate_organization(
     id: &str,
     args: &AddOrganizationArgs,
 ) -> Result<(), CliError> {
-    conn.execute(
-        "UPDATE organizations
-         SET kind = CASE
-               WHEN (kind IS NULL OR trim(kind) = '') AND ?1 IS NOT NULL THEN ?1 ELSE kind END,
-             domain = CASE
-               WHEN (domain IS NULL OR trim(domain) = '') AND ?2 IS NOT NULL THEN ?2 ELSE domain END,
-             location = CASE
-               WHEN (location IS NULL OR trim(location) = '') AND ?3 IS NOT NULL THEN ?3 ELSE location END,
-             summary = CASE
-               WHEN (summary IS NULL OR trim(summary) = '') AND ?4 IS NOT NULL THEN ?4 ELSE summary END,
-             notes = CASE
-               WHEN (notes IS NULL OR trim(notes) = '') AND ?5 IS NOT NULL THEN ?5 ELSE notes END,
-             updated_at = CASE
-               WHEN ((kind IS NULL OR trim(kind) = '') AND ?1 IS NOT NULL)
-                 OR ((domain IS NULL OR trim(domain) = '') AND ?2 IS NOT NULL)
-                 OR ((location IS NULL OR trim(location) = '') AND ?3 IS NOT NULL)
-                 OR ((summary IS NULL OR trim(summary) = '') AND ?4 IS NOT NULL)
-                 OR ((notes IS NULL OR trim(notes) = '') AND ?5 IS NOT NULL)
-               THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE updated_at END
-         WHERE id = ?6",
-        params![
-            normalize_optional(args.kind),
-            normalize_domain(args.domain),
-            normalize_optional(args.location),
-            normalize_optional(args.summary),
-            normalize_optional(args.notes),
-            id,
+    super::fill_blanks(
+        conn,
+        "organizations",
+        id,
+        &[
+            ("kind", normalize_optional(args.kind)),
+            ("domain", normalize_domain(args.domain)),
+            ("location", normalize_optional(args.location)),
+            ("summary", normalize_optional(args.summary)),
+            ("notes", normalize_optional(args.notes)),
         ],
-    )?;
-    Ok(())
+    )
 }
 
 /// Find-or-create an organization by name (then domain), filling a blank domain
@@ -151,18 +123,14 @@ pub(super) fn find_or_create_organization(
     let name = normalize_title(Some(name))
         .ok_or_else(|| CliError::Runtime("an organization needs a name".into()))?;
     if let Some(existing) = find_duplicate_organization(conn, &name, domain)? {
-        conn.execute(
-            "UPDATE organizations
-             SET domain = CASE
-                   WHEN (domain IS NULL OR trim(domain) = '') AND ?1 IS NOT NULL THEN ?1 ELSE domain END,
-                 kind = CASE
-                   WHEN (kind IS NULL OR trim(kind) = '') AND ?2 IS NOT NULL THEN ?2 ELSE kind END,
-                 updated_at = CASE
-                   WHEN ((domain IS NULL OR trim(domain) = '') AND ?1 IS NOT NULL)
-                     OR ((kind IS NULL OR trim(kind) = '') AND ?2 IS NOT NULL)
-                   THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE updated_at END
-             WHERE id = ?3",
-            params![normalize_domain(domain), normalize_optional(kind), existing],
+        super::fill_blanks(
+            conn,
+            "organizations",
+            &existing,
+            &[
+                ("domain", normalize_domain(domain)),
+                ("kind", normalize_optional(kind)),
+            ],
         )?;
         return Ok(existing);
     }
@@ -250,20 +218,7 @@ pub fn add_organization(
 }
 
 fn report_organization(json: bool, id: &str, duplicate: bool) -> Result<(), CliError> {
-    if json {
-        print_json(&json!({
-            "kind": "organization",
-            "id": id,
-            "isDuplicate": duplicate,
-        }))
-    } else {
-        if duplicate {
-            println!("organization {id} (duplicate, enriched)");
-        } else {
-            println!("organization {id}");
-        }
-        Ok(())
-    }
+    super::report_entity(json, "organization", id, duplicate, "duplicate, enriched")
 }
 
 #[cfg(test)]

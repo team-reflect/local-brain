@@ -4,7 +4,7 @@
 
 use rusqlite::{params, Connection};
 
-use crate::commands::{EvidenceLocator, EvidenceRef, LinkKind, LinkRef};
+use crate::commands::{to_like_pattern_lower, EvidenceLocator, EvidenceRef, LinkKind, LinkRef};
 use crate::error::CliError;
 use crate::id::new_id;
 use crate::text::chunk_text;
@@ -67,21 +67,6 @@ pub(super) fn replace_chunks(
     Ok(chunks.len())
 }
 
-/// Build a lowercased `%escaped%` LIKE pattern (used with `ESCAPE '\'`) so a quote
-/// matches literally and case-insensitively, never as a wildcard.
-fn like_contains(quote: &str) -> String {
-    let mut pattern = String::with_capacity(quote.len() + 2);
-    pattern.push('%');
-    for ch in quote.to_lowercase().chars() {
-        if matches!(ch, '\\' | '%' | '_') {
-            pattern.push('\\');
-        }
-        pattern.push(ch);
-    }
-    pattern.push('%');
-    pattern
-}
-
 /// Attach exact chunk evidence to a memory or task.
 pub(super) fn insert_evidence_refs(
     conn: &Connection,
@@ -117,17 +102,21 @@ pub(super) fn insert_evidence_refs(
                 // Resolve the lowest-index chunk whose text contains the quote
                 // (case-insensitive), so an agent can cite by phrase without
                 // knowing chunk boundaries. LIKE wildcards in the quote are escaped.
-                let pattern = like_contains(quote);
-                conn.query_row(
-                    "SELECT id FROM content_chunks
-                     WHERE record_type = ?1 AND record_id = ?2
-                       AND lower(text) LIKE ?3 ESCAPE '\\'
-                     ORDER BY chunk_index ASC
-                     LIMIT 1",
-                    params![record_type, reference.id, pattern],
-                    |row| row.get::<_, String>(0),
-                )
-                .map_err(|_| {
+                // A blank pattern or no matching chunk both collapse to the same
+                // "not found" error rather than silently matching everything.
+                let chunk = to_like_pattern_lower(quote).and_then(|pattern| {
+                    conn.query_row(
+                        "SELECT id FROM content_chunks
+                         WHERE record_type = ?1 AND record_id = ?2
+                           AND lower(text) LIKE ?3 ESCAPE '\\'
+                         ORDER BY chunk_index ASC
+                         LIMIT 1",
+                        params![record_type, reference.id, pattern],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .ok()
+                });
+                chunk.ok_or_else(|| {
                     CliError::Runtime(format!(
                         "could not find a {record_type}:{} chunk containing quote {quote:?}",
                         reference.id
@@ -144,6 +133,28 @@ pub(super) fn insert_evidence_refs(
     Ok(())
 }
 
+/// Insert one `INSERT OR IGNORE` row into a two-id join table, mapping any SQL
+/// error to a readable "could not link {label}" message. `owner_col`/`other_col`
+/// are the table's two id columns. Every typed-link writer (documents,
+/// interactions, projects, organizations) funnels through here so the
+/// INSERT-OR-IGNORE boilerplate lives in one place; each writer keeps its own
+/// kind→table policy match because those policies genuinely differ.
+pub(super) fn insert_join_row(
+    conn: &Connection,
+    table: &str,
+    owner_col: &str,
+    owner_id: &str,
+    other_col: &str,
+    other_id: &str,
+    label: &str,
+) -> Result<(), CliError> {
+    let sql =
+        format!("INSERT OR IGNORE INTO {table} (id, {owner_col}, {other_col}) VALUES (?1,?2,?3)");
+    conn.execute(&sql, params![new_id(), owner_id, other_id])
+        .map_err(|e| CliError::Runtime(format!("could not link {label}: {e}")))?;
+    Ok(())
+}
+
 /// Insert the typed link rows for a document/interaction.
 pub(super) fn insert_links(
     conn: &Connection,
@@ -153,11 +164,7 @@ pub(super) fn insert_links(
 ) -> Result<(), CliError> {
     for link in links {
         let (table, owner_col, other_col, other) = link_table(owner, link)?;
-        let sql = format!(
-            "INSERT OR IGNORE INTO {table} (id, {owner_col}, {other_col}) VALUES (?1,?2,?3)"
-        );
-        conn.execute(&sql, params![new_id(), owner_id, link.id])
-            .map_err(|e| CliError::Runtime(format!("could not link {other}: {e}")))?;
+        insert_join_row(conn, table, owner_col, owner_id, other_col, &link.id, other)?;
     }
     Ok(())
 }

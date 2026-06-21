@@ -588,6 +588,235 @@ struct EnsureSourceArgs {
     description: Option<String>,
 }
 
+/// Borrow each clap arg struct into its `commands`-layer twin. The clap structs
+/// own `String`/`Vec<String>`; the command functions take borrowed `&str`/`&[T]`,
+/// so every `run` arm would otherwise repeat a field-by-field copy. Keeping the
+/// mapping here next to the struct definitions makes `run` read as a dispatch
+/// table. Methods that parse `--link`/`--evidence` or resolve `--text(-file)` are
+/// fallible and return `Result`.
+impl AddPersonArgs {
+    fn to_command(&self) -> add::AddPersonArgs<'_> {
+        add::AddPersonArgs {
+            full_name: &self.full_name,
+            preferred_name: self.preferred_name.as_deref(),
+            emails: self.email.iter().map(String::as_str).collect(),
+            phones: self.phone.iter().map(String::as_str).collect(),
+            headline: self.headline.as_deref(),
+            location: self.location.as_deref(),
+            summary: self.summary.as_deref(),
+            notes: self.notes.as_deref(),
+            source_slug: self.source.as_deref(),
+            external_kind: &self.external_kind,
+            external_id: self.external_id.as_deref(),
+            original_url: self.original_url.as_deref(),
+            allow_duplicate: self.allow_duplicate,
+            org: self.org.as_deref(),
+            org_domain: self.org_domain.as_deref(),
+            title: self.title.as_deref(),
+            role: self.role.as_deref(),
+            current: self.current,
+        }
+    }
+}
+
+impl AddPersonFromEmailArgs {
+    fn to_command(&self) -> add::AddPersonFromEmailArgs<'_> {
+        add::AddPersonFromEmailArgs {
+            full_name: &self.full_name,
+            email: &self.email,
+            source_slug: self.source.as_deref(),
+            external_id: self.external_id.as_deref(),
+            headline: self.headline.as_deref(),
+            phone: self.phone.as_deref(),
+            location: self.location.as_deref(),
+            org: self.org.as_deref(),
+            org_domain: self.org_domain.as_deref(),
+            title: self.title.as_deref(),
+            current: self.current,
+        }
+    }
+}
+
+impl AddAssetArgs {
+    fn to_command(&self) -> Result<add::AddAssetArgs<'_>, CliError> {
+        Ok(add::AddAssetArgs {
+            file: &self.file,
+            kind: &self.kind,
+            mime_type: self.mime_type.as_deref(),
+            original_filename: self.original_filename.as_deref(),
+            original_url: self.original_url.as_deref(),
+            text: resolve_optional_text(self.text.as_deref(), self.text_file.as_deref())?,
+            text_source: &self.text_source,
+            role: &self.role,
+            caption: self.caption.as_deref(),
+            links: parse_links(&self.links)?,
+            allow_duplicate: self.allow_duplicate,
+        })
+    }
+}
+
+impl AddDocumentArgs {
+    fn to_command(&self) -> Result<add::AddDocumentArgs<'_>, CliError> {
+        Ok(add::AddDocumentArgs {
+            title: self.title.as_deref(),
+            kind: self.kind.as_deref(),
+            body: resolve_text(self.text.as_deref(), self.text_file.as_deref())?,
+            links: parse_links(&self.links)?,
+            allow_duplicate: self.allow_duplicate,
+        })
+    }
+}
+
+impl AddInteractionArgs {
+    fn to_command(&self) -> Result<add::AddInteractionArgs<'_>, CliError> {
+        Ok(add::AddInteractionArgs {
+            title: self.title.as_deref(),
+            kind: &self.kind,
+            occurred_at: self.occurred_at.as_deref(),
+            ended_at: self.ended_at.as_deref(),
+            location: self.location.as_deref(),
+            source_slug: self.source.as_deref(),
+            external_kind: &self.external_kind,
+            external_id: self.external_id.as_deref(),
+            original_url: self.original_url.as_deref(),
+            summary: self.summary.as_deref(),
+            body: resolve_optional_text(self.text.as_deref(), self.text_file.as_deref())?,
+            links: parse_links(&self.links)?,
+            raw_participants: self.participants.iter().map(String::as_str).collect(),
+            self_participants: self.self_participants.iter().map(String::as_str).collect(),
+            allow_duplicate: self.allow_duplicate,
+            replace_body: self.replace_body,
+            refresh: self.refresh,
+        })
+    }
+}
+
+impl AddOrganizationArgs {
+    fn to_command(&self) -> add::AddOrganizationArgs<'_> {
+        add::AddOrganizationArgs {
+            name: &self.name,
+            kind: self.kind.as_deref(),
+            domain: self.domain.as_deref(),
+            location: self.location.as_deref(),
+            summary: self.summary.as_deref(),
+            notes: self.notes.as_deref(),
+            source_slug: self.source.as_deref(),
+            external_kind: &self.external_kind,
+            external_id: self.external_id.as_deref(),
+            original_url: self.original_url.as_deref(),
+            allow_duplicate: self.allow_duplicate,
+        }
+    }
+}
+
+impl AddProjectArgs {
+    fn to_command(&self) -> Result<add::AddProjectArgs<'_>, CliError> {
+        Ok(add::AddProjectArgs {
+            name: &self.name,
+            status: &self.status,
+            kind: self.kind.as_deref(),
+            summary: self.summary.as_deref(),
+            notes: self.notes.as_deref(),
+            started_on: self.started_on.as_deref(),
+            target_date: self.target_date.as_deref(),
+            source_slug: self.source.as_deref(),
+            external_kind: &self.external_kind,
+            external_id: self.external_id.as_deref(),
+            original_url: self.original_url.as_deref(),
+            links: parse_links(&self.links)?,
+            allow_duplicate: self.allow_duplicate,
+        })
+    }
+}
+
+impl AddTaskArgs {
+    fn to_command(&self) -> Result<add::AddTaskArgs<'_>, CliError> {
+        Ok(add::AddTaskArgs {
+            title: &self.title,
+            status: &self.status,
+            due_at: self.due_at.as_deref(),
+            project_id: None,
+            links: parse_links(&self.links)?,
+            evidence: parse_evidence_refs(&self.evidence)?,
+            assignee_ids: self.assignee.clone(),
+        })
+    }
+}
+
+impl RememberArgs {
+    fn to_command(&self) -> Result<add::RememberArgs<'_>, CliError> {
+        Ok(add::RememberArgs {
+            kind: &self.kind,
+            claim: &self.claim,
+            links: parse_links(&self.links)?,
+            evidence: parse_evidence_refs(&self.evidence)?,
+        })
+    }
+}
+
+impl AffiliateArgs {
+    fn to_command(&self) -> add::AffiliateArgs<'_> {
+        add::AffiliateArgs {
+            person_id: &self.person,
+            organization_id: &self.org,
+            title: self.title.as_deref(),
+            role: self.role.as_deref(),
+            is_current: self.current,
+        }
+    }
+}
+
+impl SelfSetArgs {
+    fn to_command(&self) -> add::SetSelfArgs<'_> {
+        add::SetSelfArgs {
+            full_name: self.full_name.as_deref(),
+            preferred_name: self.preferred_name.as_deref(),
+            emails: self.email.iter().map(String::as_str).collect(),
+            phones: self.phone.iter().map(String::as_str).collect(),
+            headline: self.headline.as_deref(),
+            location: self.location.as_deref(),
+        }
+    }
+}
+
+impl SuggestProjectArgs {
+    fn to_command(&self) -> Result<add::SuggestArgs<'_>, CliError> {
+        Ok(add::SuggestArgs {
+            kind: add::SuggestionKind::Project,
+            title: &self.title,
+            summary: self.summary.as_deref(),
+            domain: None,
+            org_kind: None,
+            rationale: self.rationale.as_deref(),
+            links: parse_links(&self.links)?,
+        })
+    }
+}
+
+impl SuggestOrgArgs {
+    fn to_command(&self) -> Result<add::SuggestArgs<'_>, CliError> {
+        Ok(add::SuggestArgs {
+            kind: add::SuggestionKind::Organization,
+            title: &self.title,
+            summary: None,
+            domain: self.domain.as_deref(),
+            org_kind: self.kind.as_deref(),
+            rationale: self.rationale.as_deref(),
+            links: parse_links(&self.links)?,
+        })
+    }
+}
+
+impl EnsureSourceArgs {
+    fn to_command(&self) -> source::EnsureSourceArgs<'_> {
+        source::EnsureSourceArgs {
+            slug: &self.slug,
+            name: &self.name,
+            description: self.description.as_deref(),
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let json = cli.json;
@@ -657,148 +886,25 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Command::Add { what } => {
             let mut conn = db::open(&db_path)?;
             match *what {
-                AddCommand::Person(a) => add::add_person(
-                    &mut conn,
-                    json,
-                    add::AddPersonArgs {
-                        full_name: &a.full_name,
-                        preferred_name: a.preferred_name.as_deref(),
-                        emails: a.email.iter().map(String::as_str).collect(),
-                        phones: a.phone.iter().map(String::as_str).collect(),
-                        headline: a.headline.as_deref(),
-                        location: a.location.as_deref(),
-                        summary: a.summary.as_deref(),
-                        notes: a.notes.as_deref(),
-                        source_slug: a.source.as_deref(),
-                        external_kind: &a.external_kind,
-                        external_id: a.external_id.as_deref(),
-                        original_url: a.original_url.as_deref(),
-                        allow_duplicate: a.allow_duplicate,
-                        org: a.org.as_deref(),
-                        org_domain: a.org_domain.as_deref(),
-                        title: a.title.as_deref(),
-                        role: a.role.as_deref(),
-                        current: a.current,
-                    },
-                ),
-                AddCommand::PersonFromEmail(a) => add::add_person_from_email(
-                    &mut conn,
-                    json,
-                    add::AddPersonFromEmailArgs {
-                        full_name: &a.full_name,
-                        email: &a.email,
-                        source_slug: a.source.as_deref(),
-                        external_id: a.external_id.as_deref(),
-                        headline: a.headline.as_deref(),
-                        phone: a.phone.as_deref(),
-                        location: a.location.as_deref(),
-                        org: a.org.as_deref(),
-                        org_domain: a.org_domain.as_deref(),
-                        title: a.title.as_deref(),
-                        current: a.current,
-                    },
-                ),
+                AddCommand::Person(a) => add::add_person(&mut conn, json, a.to_command()),
+                AddCommand::PersonFromEmail(a) => {
+                    add::add_person_from_email(&mut conn, json, a.to_command())
+                }
                 AddCommand::Asset(a) => add::add_asset(
                     &mut conn,
                     storage.assets_path.as_deref(),
                     json,
-                    add::AddAssetArgs {
-                        file: &a.file,
-                        kind: &a.kind,
-                        mime_type: a.mime_type.as_deref(),
-                        original_filename: a.original_filename.as_deref(),
-                        original_url: a.original_url.as_deref(),
-                        text: resolve_optional_text(a.text.as_deref(), a.text_file.as_deref())?,
-                        text_source: &a.text_source,
-                        role: &a.role,
-                        caption: a.caption.as_deref(),
-                        links: parse_links(&a.links)?,
-                        allow_duplicate: a.allow_duplicate,
-                    },
+                    a.to_command()?,
                 ),
-                AddCommand::Document(a) => add::add_document(
-                    &mut conn,
-                    json,
-                    add::AddDocumentArgs {
-                        title: a.title.as_deref(),
-                        kind: a.kind.as_deref(),
-                        body: resolve_text(a.text.as_deref(), a.text_file.as_deref())?,
-                        links: parse_links(&a.links)?,
-                        allow_duplicate: a.allow_duplicate,
-                    },
-                ),
-                AddCommand::Interaction(a) => add::add_interaction(
-                    &mut conn,
-                    json,
-                    add::AddInteractionArgs {
-                        title: a.title.as_deref(),
-                        kind: &a.kind,
-                        occurred_at: a.occurred_at.as_deref(),
-                        ended_at: a.ended_at.as_deref(),
-                        location: a.location.as_deref(),
-                        source_slug: a.source.as_deref(),
-                        external_kind: &a.external_kind,
-                        external_id: a.external_id.as_deref(),
-                        original_url: a.original_url.as_deref(),
-                        summary: a.summary.as_deref(),
-                        body: resolve_optional_text(a.text.as_deref(), a.text_file.as_deref())?,
-                        links: parse_links(&a.links)?,
-                        raw_participants: a.participants.iter().map(String::as_str).collect(),
-                        self_participants: a.self_participants.iter().map(String::as_str).collect(),
-                        allow_duplicate: a.allow_duplicate,
-                        replace_body: a.replace_body,
-                        refresh: a.refresh,
-                    },
-                ),
-                AddCommand::Organization(a) => add::add_organization(
-                    &mut conn,
-                    json,
-                    add::AddOrganizationArgs {
-                        name: &a.name,
-                        kind: a.kind.as_deref(),
-                        domain: a.domain.as_deref(),
-                        location: a.location.as_deref(),
-                        summary: a.summary.as_deref(),
-                        notes: a.notes.as_deref(),
-                        source_slug: a.source.as_deref(),
-                        external_kind: &a.external_kind,
-                        external_id: a.external_id.as_deref(),
-                        original_url: a.original_url.as_deref(),
-                        allow_duplicate: a.allow_duplicate,
-                    },
-                ),
-                AddCommand::Project(a) => add::add_project(
-                    &mut conn,
-                    json,
-                    add::AddProjectArgs {
-                        name: &a.name,
-                        status: &a.status,
-                        kind: a.kind.as_deref(),
-                        summary: a.summary.as_deref(),
-                        notes: a.notes.as_deref(),
-                        started_on: a.started_on.as_deref(),
-                        target_date: a.target_date.as_deref(),
-                        source_slug: a.source.as_deref(),
-                        external_kind: &a.external_kind,
-                        external_id: a.external_id.as_deref(),
-                        original_url: a.original_url.as_deref(),
-                        links: parse_links(&a.links)?,
-                        allow_duplicate: a.allow_duplicate,
-                    },
-                ),
-                AddCommand::Task(a) => add::add_task(
-                    &mut conn,
-                    json,
-                    add::AddTaskArgs {
-                        title: &a.title,
-                        status: &a.status,
-                        due_at: a.due_at.as_deref(),
-                        project_id: None,
-                        links: parse_links(&a.links)?,
-                        evidence: parse_evidence_refs(&a.evidence)?,
-                        assignee_ids: a.assignee.clone(),
-                    },
-                ),
+                AddCommand::Document(a) => add::add_document(&mut conn, json, a.to_command()?),
+                AddCommand::Interaction(a) => {
+                    add::add_interaction(&mut conn, json, a.to_command()?)
+                }
+                AddCommand::Organization(a) => {
+                    add::add_organization(&mut conn, json, a.to_command())
+                }
+                AddCommand::Project(a) => add::add_project(&mut conn, json, a.to_command()?),
+                AddCommand::Task(a) => add::add_task(&mut conn, json, a.to_command()?),
             }
         }
         Command::Asset { what } => {
@@ -817,16 +923,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
         }
         Command::Remember(a) => {
             let mut conn = db::open(&db_path)?;
-            add::remember(
-                &mut conn,
-                json,
-                add::RememberArgs {
-                    kind: &a.kind,
-                    claim: &a.claim,
-                    links: parse_links(&a.links)?,
-                    evidence: parse_evidence_refs(&a.evidence)?,
-                },
-            )
+            add::remember(&mut conn, json, a.to_command()?)
         }
         Command::SelfPerson { what } => match what {
             SelfCommand::Show => {
@@ -835,66 +932,21 @@ fn run(cli: Cli) -> Result<(), CliError> {
             }
             SelfCommand::Set(a) => {
                 let mut conn = db::open(&db_path)?;
-                add::set_self(
-                    &mut conn,
-                    json,
-                    add::SetSelfArgs {
-                        full_name: a.full_name.as_deref(),
-                        preferred_name: a.preferred_name.as_deref(),
-                        emails: a.email.iter().map(String::as_str).collect(),
-                        phones: a.phone.iter().map(String::as_str).collect(),
-                        headline: a.headline.as_deref(),
-                        location: a.location.as_deref(),
-                    },
-                )
+                add::set_self(&mut conn, json, a.to_command())
             }
         },
         Command::Affiliate(a) => {
             let mut conn = db::open(&db_path)?;
-            add::affiliate(
-                &mut conn,
-                json,
-                add::AffiliateArgs {
-                    person_id: &a.person,
-                    organization_id: &a.org,
-                    title: a.title.as_deref(),
-                    role: a.role.as_deref(),
-                    is_current: a.current,
-                },
-            )
+            add::affiliate(&mut conn, json, a.to_command())
         }
         Command::Suggest { what } => match what {
             SuggestCommand::Project(a) => {
                 let mut conn = db::open(&db_path)?;
-                add::suggest(
-                    &mut conn,
-                    json,
-                    add::SuggestArgs {
-                        kind: add::SuggestionKind::Project,
-                        title: &a.title,
-                        summary: a.summary.as_deref(),
-                        domain: None,
-                        org_kind: None,
-                        rationale: a.rationale.as_deref(),
-                        links: parse_links(&a.links)?,
-                    },
-                )
+                add::suggest(&mut conn, json, a.to_command()?)
             }
             SuggestCommand::Organization(a) => {
                 let mut conn = db::open(&db_path)?;
-                add::suggest(
-                    &mut conn,
-                    json,
-                    add::SuggestArgs {
-                        kind: add::SuggestionKind::Organization,
-                        title: &a.title,
-                        summary: None,
-                        domain: a.domain.as_deref(),
-                        org_kind: a.kind.as_deref(),
-                        rationale: a.rationale.as_deref(),
-                        links: parse_links(&a.links)?,
-                    },
-                )
+                add::suggest(&mut conn, json, a.to_command()?)
             }
             SuggestCommand::List(a) => {
                 let conn = db::open_existing(&db_path)?;
@@ -912,15 +964,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Command::Source { what } => {
             let mut conn = db::open(&db_path)?;
             match what {
-                SourceCommand::Ensure(a) => source::ensure(
-                    &mut conn,
-                    json,
-                    source::EnsureSourceArgs {
-                        slug: &a.slug,
-                        name: &a.name,
-                        description: a.description.as_deref(),
-                    },
-                ),
+                SourceCommand::Ensure(a) => source::ensure(&mut conn, json, a.to_command()),
             }
         }
 

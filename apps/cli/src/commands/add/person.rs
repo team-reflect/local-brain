@@ -167,14 +167,6 @@ fn find_duplicate_person(
     Ok(None)
 }
 
-fn has_text(value: &Option<String>) -> bool {
-    value.as_deref().is_some_and(|text| !text.trim().is_empty())
-}
-
-fn is_blank(value: &Option<String>) -> bool {
-    !has_text(value)
-}
-
 /// Collapse a blank-or-missing string column to `None` so callers can treat an
 /// empty denormalized value the same as an absent one.
 fn blank_to_none(value: Option<String>) -> Option<String> {
@@ -209,125 +201,35 @@ fn enrich_duplicate_person(
     args: &AddPersonArgs,
     emails: &[EmailHandle],
     phones: &[String],
-) -> Result<bool, CliError> {
-    let preferred_name = normalize_optional(args.preferred_name);
-    // Never promote an address another active person already owns into the blank
-    // denormalized people.primary_email: insert_person_handles already skips such
-    // emails for person_emails, so without this the external-id dedupe path could
-    // leave the normalized table clean while stamping someone else's address onto
-    // this person's primary_email. See email_owned_by_other.
-    let primary_email = match emails.first() {
-        Some(email) if !email_owned_by_other(conn, id, &email.normalized)? => {
-            Some(email.email.clone())
-        }
-        _ => None,
-    };
-    let primary_phone = phones.first().cloned();
-    let headline = normalize_optional(args.headline);
-    let location = normalize_optional(args.location);
-    let summary = normalize_optional(args.summary);
-    let notes = normalize_optional(args.notes);
-
-    let current = conn.query_row(
-        "SELECT preferred_name, primary_email, primary_phone, headline, location,
-                summary, notes
-         FROM people
-         WHERE id = ?1",
-        params![id],
-        |row| {
-            Ok((
-                row.get::<_, Option<String>>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                row.get::<_, Option<String>>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, Option<String>>(5)?,
-                row.get::<_, Option<String>>(6)?,
-            ))
-        },
-    )?;
-
-    let changed = (has_text(&preferred_name) && is_blank(&current.0))
-        || (has_text(&primary_email) && is_blank(&current.1))
-        || (has_text(&primary_phone) && is_blank(&current.2))
-        || (has_text(&headline) && is_blank(&current.3))
-        || (has_text(&location) && is_blank(&current.4))
-        || (has_text(&summary) && is_blank(&current.5))
-        || (has_text(&notes) && is_blank(&current.6));
-
-    if !changed {
-        return Ok(false);
-    }
-
-    conn.execute(
-        "UPDATE people
-         SET preferred_name = CASE
-               WHEN (preferred_name IS NULL OR trim(preferred_name) = '') AND ?1 IS NOT NULL
-               THEN ?1 ELSE preferred_name END,
-             primary_email = CASE
-               WHEN (primary_email IS NULL OR trim(primary_email) = '') AND ?2 IS NOT NULL
-               THEN ?2 ELSE primary_email END,
-             primary_phone = CASE
-               WHEN (primary_phone IS NULL OR trim(primary_phone) = '') AND ?3 IS NOT NULL
-               THEN ?3 ELSE primary_phone END,
-             headline = CASE
-               WHEN (headline IS NULL OR trim(headline) = '') AND ?4 IS NOT NULL
-               THEN ?4 ELSE headline END,
-             location = CASE
-               WHEN (location IS NULL OR trim(location) = '') AND ?5 IS NOT NULL
-               THEN ?5 ELSE location END,
-             summary = CASE
-               WHEN (summary IS NULL OR trim(summary) = '') AND ?6 IS NOT NULL
-               THEN ?6 ELSE summary END,
-             notes = CASE
-               WHEN (notes IS NULL OR trim(notes) = '') AND ?7 IS NOT NULL
-               THEN ?7 ELSE notes END,
-             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-         WHERE id = ?8",
-        params![
-            preferred_name,
-            primary_email,
-            primary_phone,
-            headline,
-            location,
-            summary,
-            notes,
-            id,
+) -> Result<(), CliError> {
+    super::fill_blanks(
+        conn,
+        "people",
+        id,
+        &[
+            ("preferred_name", normalize_optional(args.preferred_name)),
+            // Never promote an address another active person already owns into the
+            // blank primary_email — the external-id dedupe path skips email-based
+            // dedupe, so the guard must live here too. See primary_email_for.
+            ("primary_email", primary_email_for(conn, id, emails)?),
+            ("primary_phone", phones.first().cloned()),
+            ("headline", normalize_optional(args.headline)),
+            ("location", normalize_optional(args.location)),
+            ("summary", normalize_optional(args.summary)),
+            ("notes", normalize_optional(args.notes)),
         ],
-    )?;
-    Ok(true)
+    )
 }
 
-fn enrich_duplicate_person_email(
-    conn: &Connection,
-    id: &str,
-    email: &str,
-) -> Result<bool, CliError> {
-    let normalized_email = normalize_email(Some(email));
-    let display_email = normalize_optional(Some(email));
-    let current = conn.query_row(
-        "SELECT primary_email FROM people WHERE id = ?1",
-        params![id],
-        |row| row.get::<_, Option<String>>(0),
-    )?;
-    if !has_text(&normalized_email) || !is_blank(&current) {
-        return Ok(false);
-    }
-    // Mirror enrich_duplicate_person / insert_person_handles: never stamp an
-    // address another active person already owns onto this blank primary_email.
-    if let Some(addr) = normalized_email.as_deref() {
-        if email_owned_by_other(conn, id, addr)? {
-            return Ok(false);
-        }
-    }
-    conn.execute(
-        "UPDATE people
-         SET primary_email = ?1,
-             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-         WHERE id = ?2",
-        params![display_email, id],
-    )?;
-    Ok(true)
+fn enrich_duplicate_person_email(conn: &Connection, id: &str, email: &str) -> Result<(), CliError> {
+    // Don't claim an address another active person already owns; otherwise offer
+    // the display form to fill a blank primary_email. fill_blanks applies the
+    // "only when currently blank" rule. See email_owned_by_other.
+    let value = match normalize_email(Some(email)) {
+        Some(addr) if !email_owned_by_other(conn, id, &addr)? => normalize_optional(Some(email)),
+        _ => None,
+    };
+    super::fill_blanks(conn, "people", id, &[("primary_email", value)])
 }
 
 fn insert_person_handles(
@@ -574,28 +476,16 @@ fn fill_blank_contact_fields(
     location: Option<&str>,
     phone: Option<&str>,
 ) -> Result<(), CliError> {
-    conn.execute(
-        "UPDATE people
-         SET headline = CASE
-               WHEN (headline IS NULL OR trim(headline) = '') AND ?2 IS NOT NULL THEN ?2 ELSE headline END,
-             location = CASE
-               WHEN (location IS NULL OR trim(location) = '') AND ?3 IS NOT NULL THEN ?3 ELSE location END,
-             primary_phone = CASE
-               WHEN (primary_phone IS NULL OR trim(primary_phone) = '') AND ?4 IS NOT NULL THEN ?4 ELSE primary_phone END,
-             updated_at = CASE
-               WHEN ((headline IS NULL OR trim(headline) = '') AND ?2 IS NOT NULL)
-                 OR ((location IS NULL OR trim(location) = '') AND ?3 IS NOT NULL)
-                 OR ((primary_phone IS NULL OR trim(primary_phone) = '') AND ?4 IS NOT NULL)
-               THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE updated_at END
-         WHERE id = ?1",
-        params![
-            id,
-            normalize_optional(headline),
-            normalize_optional(location),
-            normalize_optional(phone),
+    super::fill_blanks(
+        conn,
+        "people",
+        id,
+        &[
+            ("headline", normalize_optional(headline)),
+            ("location", normalize_optional(location)),
+            ("primary_phone", normalize_optional(phone)),
         ],
-    )?;
-    Ok(())
+    )
 }
 
 pub fn add_person_from_email(
@@ -609,7 +499,7 @@ pub fn add_person_from_email(
     }
     let source_id = source_id(conn, args.source_slug)?;
     let emails = normalize_email_handles([args.email]);
-    let phones = normalize_values(args.phone.into_iter(), normalize_optional);
+    let phones = normalize_values(args.phone, normalize_optional);
     let existing_by_external = find_external_identity(
         conn,
         "person",
@@ -731,12 +621,13 @@ fn find_self_person_id(conn: &Connection) -> Result<Option<String>, CliError> {
         .optional()?)
 }
 
-/// The display email to use as the self person's denormalized `primary_email`:
-/// the first provided address, unless another active person already owns it.
-/// Mirrors `insert_person_handles`/`add_person` (which skip an owned address for
-/// `person_emails`), keeping the denormalized column consistent with the handle
-/// table so the self row never shows an address it doesn't own.
-fn self_primary_email(
+/// The display email to use as a person's denormalized `primary_email`: the first
+/// provided address, unless another active person already owns it. Mirrors
+/// `insert_person_handles` (which skips an owned address for `person_emails`),
+/// keeping the denormalized column consistent with the handle table so a row never
+/// shows an address it doesn't own. Shared by the new-person, duplicate-enrich,
+/// and self-management paths. See [`email_owned_by_other`].
+fn primary_email_for(
     conn: &Connection,
     id: &str,
     emails: &[EmailHandle],
@@ -762,7 +653,7 @@ pub fn set_self(conn: &mut Connection, json: bool, args: SetSelfArgs) -> Result<
     let created = existing.is_none();
     let id = match existing {
         Some(id) => {
-            let primary_email = self_primary_email(&tx, &id, &emails)?;
+            let primary_email = primary_email_for(&tx, &id, &emails)?;
             tx.execute(
                 "UPDATE people
                  SET full_name      = COALESCE(?2, full_name),
@@ -795,7 +686,7 @@ pub fn set_self(conn: &mut Connection, json: bool, args: SetSelfArgs) -> Result<
                     CliError::Runtime("--full-name is required to create the self person".into())
                 })?;
             let id = new_id();
-            let primary_email = self_primary_email(&tx, &id, &emails)?;
+            let primary_email = primary_email_for(&tx, &id, &emails)?;
             tx.execute(
                 "INSERT INTO people
                    (id, full_name, preferred_name, primary_email, primary_phone,
@@ -873,20 +764,7 @@ fn report_self(conn: &Connection, json: bool, id: &str, created: bool) -> Result
 }
 
 fn report_person(json: bool, id: &str, duplicate: bool) -> Result<(), CliError> {
-    if json {
-        print_json(&json!({
-            "kind": "person",
-            "id": id,
-            "isDuplicate": duplicate,
-        }))
-    } else {
-        if duplicate {
-            println!("person {id} (duplicate, skipped)");
-        } else {
-            println!("person {id}");
-        }
-        Ok(())
-    }
+    super::report_entity(json, "person", id, duplicate, "duplicate, skipped")
 }
 
 fn report_person_assessment(
