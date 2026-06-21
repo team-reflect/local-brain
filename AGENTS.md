@@ -1,23 +1,49 @@
 # Agent Notes
 
-Local Brain is currently a docs-only planning repo for a consumer personal CRM and
-local memory app. The implementation will use Reflect Open's desktop technology base,
-but SQLite is the durable source of truth.
+## Dev lifecycle
 
-Before starting work, read `docs/README.md` and reference
-`/Users/alex/repos/reflect-open`. Reflect Open has the closest app structure, style,
-tooling, and implementation patterns; reuse its choices unless Local Brain has a
-product-specific reason to diverge. In particular, check
-`/Users/alex/repos/reflect-open/docs/plans/libraries.md` before choosing libraries or
-tooling, and inspect the relevant Reflect Open app files before implementing similar
-desktop, CLI, database, search, AI, or UI behavior.
+1. Before starting work, read `docs/README.md`. For comparable desktop, CLI, database,
+   search, AI, or UI behavior, inspect `/Users/alex/repos/reflect-open` — especially
+   `docs/plans/libraries.md` and the relevant app files — and reuse its patterns unless
+   Local Brain has a product-specific reason to diverge.
+2. Create a plan first, then get signoff before proceeding.
+3. Make your changes. Keep product docs, schema docs, and numbered plans aligned when
+   you touch durable product or schema behavior.
+4. Run focused checks for what you changed:
+   - TypeScript: `pnpm typecheck`, `pnpm lint` (or `pnpm lint:fix`)
+   - Vitest: `pnpm test --run path/to/test`
+   - Rust: `cargo test -p brain-cli`, `cargo test -p brain-schema`, or other relevant
+     crate targets — do not run the full workspace test suite by default
+5. Before declaring work done, run `pnpm check` (typecheck + lint + test). For native,
+   CLI, migration, or database changes, also run the relevant `cargo fmt`, `cargo
+   clippy`, and `cargo test` targets.
+6. Before any `cargo` build/check/test that compiles the desktop crate, stage the CLI
+   sidecar once per checkout:
 
-Keep product docs, schema docs, and numbered plans aligned with each other.
+   ```bash
+   pnpm --filter @local-brain/desktop sidecar
+   ```
+
+   `pnpm tauri dev` and `pnpm tauri build` stage it automatically.
+
+Common commands (repo root):
+
+```bash
+pnpm dev              # turbo dev across packages
+pnpm tauri dev        # full desktop app with hot reload
+pnpm check            # typecheck + lint + test
+pnpm --filter @local-brain/desktop sidecar
+```
+
+Local Brain is an agent-operated local-first personal CRM and memory app. The repo is
+a Tauri monorepo on Reflect Open's desktop technology base: a `brain` CLI and skills
+for agent writes/reads, a desktop UI for browsing and correction, and SQLite as the
+durable source of truth.
 
 Current product shape:
 
 - Agent-operated local brain with a private desktop UI for browsing and correction.
-- SQLite owns durable data. Markdown is not the storage format.
+- SQLite owns durable data. 
 - Most writes should come from AI agents through the CLI/skill contract, for example a
   Codex daily automation that ingests context, updates tasks, and records memories.
 - Most reads should also be agent-driven, for example daily reports, todo lists, and
@@ -31,26 +57,8 @@ Current product shape:
 - Relationship intelligence is part of the product model: recency, relationship
   strength, important dates, and task-linked context should feed Today and daily
   reports.
-- Memories are hidden atomic claims linked to visible records and cited through
-  evidence references.
 - Provenance lives directly on documents, interactions, memories, tasks, and evidence
   links.
-
-Schema guardrails:
-
-- Do not reintroduce a user-facing ingestion bucket or table for raw material.
-- Do not use a generic graph node table as the primary model. Prefer typed people,
-  organizations, projects, tasks, documents, and interactions. The Graph surface should
-  be derived from typed records and links, centered on the user's own person row.
-- Do not add a separate automation log surface. The `suggestions` table is the
-  permitted exception and is explicitly NOT an automation log: it is a user-facing
-  curation queue of proposed structure the importer must not auto-create (a new
-  project or organization). Every suggestion must be actionable (accepting it
-  performs the typed write and relinks the cited records) and must cite evidence;
-  dismissals are durable so a proposal is never re-raised. Do not widen it into a
-  log of agent activity.
-- Do not add row-level sensitivity labels for launch. Settings can own model keys,
-  export, backup, diagnostics, and future privacy-adjacent configuration.
 
 Documentation style:
 
@@ -85,15 +93,11 @@ Implementation conventions:
   kebab-case for files and directories, and keep shared public APIs clear.
 - Use Zod at external and JSON boundaries. Normalize database/native snake_case to
   frontend camelCase once in a bridge layer.
-- For UI work, follow the Local Brain design docs and Reflect Open's component
-  patterns. Check existing shadcn/ui primitives before building custom interactive
+- For UI work, follow [`docs/design-system.md`](docs/design-system.md) and Reflect
+  Open's component patterns. Check existing shadcn/ui primitives before building custom interactive
   controls, overlays, dialogs, menus, popovers, or tooltips. If shadcn/ui already
   covers the needed primitive, install or generate it into the app's `components/ui`
   directory and use it instead of hand-rolling the control. Use Lucide icons where
   appropriate.
 - For React, use named exports, one component per file by default, providers plus
   small hooks for shared state, and never call hooks conditionally.
-- Before declaring implementation work done, run the focused checks that match the
-  change: TypeScript typecheck/lint for frontend logic, targeted Vitest tests for
-  TypeScript behavior, and targeted Rust tests for native, CLI, migration, or database
-  behavior.
