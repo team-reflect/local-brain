@@ -99,7 +99,13 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
   }, [conversationId, hydratedConversationId, initialMessages, setMessages, status, storedMessages.data])
 
   const providerClosed = modelStatus.data && !modelStatus.data.canRun ? modelStatus.data.reason : null
-  const needsProvider = modelSettings.isSuccess && modelSettings.data.providers.length === 0
+  const providerSetupState = modelSettings.isPending
+    ? 'loading'
+    : modelSettings.isError
+      ? 'error'
+      : modelSettings.data.providers.length === 0
+        ? 'missing'
+        : 'ready'
   const pending = status === 'submitted' || status === 'streaming'
   const conversationHydrated = !conversationId || hydratedConversationId === conversationId
   const historyUnavailable = Boolean(conversationId && storedMessages.isError)
@@ -153,32 +159,47 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
 
   const displayedMessages = conversationHydrated ? messages : []
   const showInitialLoading = waitingForHydration
-  const askContent = needsProvider ? (
-    <ConfigureProviderPrompt onConfigure={() => navigate({ kind: 'settings', section: 'ai-providers' })} />
-  ) : (
-    <>
-      {providerClosed ? <Alert className="mb-3">{providerClosed}</Alert> : null}
-      {historyUnavailable ? (
-        <Alert variant="error" className="mb-3">
-          Could not load this chat history.
-        </Alert>
-      ) : null}
-      {showInitialLoading ? (
-        <div className="flex min-h-0 flex-1 items-center justify-center">
-          <Loading />
-        </div>
-      ) : (
-        <MessageList
-          key={chatId}
-          messages={displayedMessages}
-          streamingMessageId={streamingMessageId}
-          showThinking={showThinking}
-        />
-      )}
-      {error ? <Alert variant="error" className="mx-auto mb-3 w-full max-w-2xl">{error.message}</Alert> : null}
-      <Composer draft={draft} setDraft={setDraft} pending={composerPending} onSubmit={onSubmit} />
-    </>
-  )
+  let askContent: ReactNode
+  if (providerSetupState === 'loading') {
+    askContent = (
+      <div className="flex min-h-0 flex-1 items-center justify-center">
+        <Loading />
+      </div>
+    )
+  } else if (providerSetupState === 'error') {
+    askContent = (
+      <ProviderSettingsError onConfigure={() => navigate({ kind: 'settings', section: 'ai-providers' })} />
+    )
+  } else if (providerSetupState === 'missing') {
+    askContent = (
+      <ConfigureProviderPrompt onConfigure={() => navigate({ kind: 'settings', section: 'ai-providers' })} />
+    )
+  } else {
+    askContent = (
+      <>
+        {providerClosed ? <Alert className="mb-3">{providerClosed}</Alert> : null}
+        {historyUnavailable ? (
+          <Alert variant="error" className="mb-3">
+            Could not load this chat history.
+          </Alert>
+        ) : null}
+        {showInitialLoading ? (
+          <div className="flex min-h-0 flex-1 items-center justify-center">
+            <Loading />
+          </div>
+        ) : (
+          <MessageList
+            key={chatId}
+            messages={displayedMessages}
+            streamingMessageId={streamingMessageId}
+            showThinking={showThinking}
+          />
+        )}
+        {error ? <Alert variant="error" className="mx-auto mb-3 w-full max-w-2xl">{error.message}</Alert> : null}
+        <Composer draft={draft} setDraft={setDraft} pending={composerPending} onSubmit={onSubmit} />
+      </>
+    )
+  }
 
   return (
     <div className="flex h-full min-h-0">
@@ -190,6 +211,19 @@ export function AskSurface({ conversationId }: { conversationId: string | undefi
       />
       <div className="flex min-w-0 flex-1 flex-col">
         {askContent}
+      </div>
+    </div>
+  )
+}
+
+function ProviderSettingsError({ onConfigure }: { onConfigure: () => void }): ReactNode {
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center px-6">
+      <div className="flex max-w-sm flex-col items-center text-center">
+        <Alert variant="error">Could not load AI provider settings.</Alert>
+        <Button className="mt-5" variant="outline" onClick={onConfigure}>
+          Open AI providers
+        </Button>
       </div>
     </div>
   )

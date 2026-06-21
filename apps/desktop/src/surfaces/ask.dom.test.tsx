@@ -64,6 +64,11 @@ function installAskBridgeWithProvider(): void {
   })
 }
 
+async function renderReadyAsk(): Promise<void> {
+  renderWithProviders(<AskSurface conversationId={undefined} />)
+  await screen.findByLabelText('Ask message')
+}
+
 describe('AskSurface', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -78,6 +83,7 @@ describe('AskSurface', () => {
     installFakeBridge({ queryRows: [] })
     renderWithProviders(<AskSurface conversationId={undefined} />)
 
+    expect(screen.queryByLabelText('Ask message')).toBeNull()
     expect(await screen.findByText(/Add an AI provider to start chatting/)).not.toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'Add an AI provider' }))
@@ -86,7 +92,7 @@ describe('AskSurface', () => {
   })
 
   it('sends a new UI message instead of replacing a missing message id', async () => {
-    renderWithProviders(<AskSurface conversationId={undefined} />)
+    await renderReadyAsk()
 
     fireEvent.change(screen.getByLabelText('Ask message'), {
       target: { value: 'What changed this week?' },
@@ -103,11 +109,11 @@ describe('AskSurface', () => {
     expect(message).not.toHaveProperty('messageId')
   })
 
-  it('renders settled assistant text as markdown (bold and list)', () => {
+  it('renders settled assistant text as markdown (bold and list)', async () => {
     chatMocks.messages = [
       assistantMessage('a1', '**Bold** answer.\n\n- item one\n- item two'),
     ]
-    renderWithProviders(<AskSurface conversationId={undefined} />)
+    await renderReadyAsk()
 
     // react-markdown should turn **Bold** into a <strong> element
     expect(screen.getByText('Bold')).not.toBeNull()
@@ -116,12 +122,12 @@ describe('AskSurface', () => {
     expect(screen.getByText('item two')).not.toBeNull()
   })
 
-  it('renders streaming assistant text as plain text, not markdown', () => {
+  it('renders streaming assistant text as plain text, not markdown', async () => {
     chatMocks.status = 'streaming'
     chatMocks.messages = [
       assistantMessage('a1', '**Bold** text still streaming', 'streaming'),
     ]
-    renderWithProviders(<AskSurface conversationId={undefined} />)
+    await renderReadyAsk()
 
     // Should be in a plain pre-wrap div, not converted to <strong>
     const boldEl = screen.queryByText('Bold')
@@ -129,17 +135,17 @@ describe('AskSurface', () => {
     expect(screen.getByText('**Bold** text still streaming')).not.toBeNull()
   })
 
-  it('hides the Thinking indicator once streaming content is visible', () => {
+  it('hides the Thinking indicator once streaming content is visible', async () => {
     chatMocks.status = 'streaming'
     chatMocks.messages = [
       assistantMessage('a1', 'Here is what I found…', 'streaming'),
     ]
-    renderWithProviders(<AskSurface conversationId={undefined} />)
+    await renderReadyAsk()
 
     expect(screen.queryByLabelText('Thinking')).toBeNull()
   })
 
-  it('hides the Thinking indicator once streaming reasoning is visible', () => {
+  it('hides the Thinking indicator once streaming reasoning is visible', async () => {
     chatMocks.status = 'streaming'
     chatMocks.messages = [
       {
@@ -148,31 +154,31 @@ describe('AskSurface', () => {
         parts: [{ type: 'reasoning', text: 'Checking local context…' }],
       } as unknown as UIMessage,
     ]
-    renderWithProviders(<AskSurface conversationId={undefined} />)
+    await renderReadyAsk()
 
     expect(screen.getByText('Checking local context…')).not.toBeNull()
     expect(screen.queryByLabelText('Thinking')).toBeNull()
   })
 
-  it('shows Thinking indicator when streaming but no content yet', () => {
+  it('shows Thinking indicator when streaming but no content yet', async () => {
     chatMocks.status = 'streaming'
     chatMocks.messages = [
       { id: 'a1', role: 'assistant', parts: [] } as unknown as UIMessage,
     ]
-    renderWithProviders(<AskSurface conversationId={undefined} />)
+    await renderReadyAsk()
 
     expect(screen.getByLabelText('Thinking')).not.toBeNull()
   })
 
-  it('shows Thinking indicator when submitted (before streaming starts)', () => {
+  it('shows Thinking indicator when submitted (before streaming starts)', async () => {
     chatMocks.status = 'submitted'
     chatMocks.messages = []
-    renderWithProviders(<AskSurface conversationId={undefined} />)
+    await renderReadyAsk()
 
     expect(screen.getByLabelText('Thinking')).not.toBeNull()
   })
 
-  it('renders earlier text parts as plain text when a tool part follows during streaming', () => {
+  it('renders earlier text parts as plain text when a tool part follows during streaming', async () => {
     chatMocks.status = 'streaming'
     chatMocks.messages = [
       {
@@ -189,23 +195,23 @@ describe('AskSurface', () => {
         ],
       } as unknown as UIMessage,
     ]
-    renderWithProviders(<AskSurface conversationId={undefined} />)
+    await renderReadyAsk()
 
     // Earlier text part should still be plain (not parsed as markdown) while streaming
     expect(screen.queryByText('Bold')).toBeNull()
     expect(screen.getByText('**Bold** text before tool')).not.toBeNull()
   })
 
-  it('renders a pending search_records tool chip', () => {
+  it('renders a pending search_records tool chip', async () => {
     chatMocks.messages = [
       toolMessage('a1', 'search_records', 'input-available', { query: 'Maya budget' }),
     ]
-    renderWithProviders(<AskSurface conversationId={undefined} />)
+    await renderReadyAsk()
 
     expect(screen.getByText(/Searched "Maya budget"/)).not.toBeNull()
   })
 
-  it('renders a settled search_records tool chip with count', () => {
+  it('renders a settled search_records tool chip with count', async () => {
     chatMocks.messages = [
       toolMessage(
         'a1',
@@ -215,23 +221,23 @@ describe('AskSurface', () => {
         { hits: [{ recordType: 'interaction', recordId: 'i1', title: 'Call with Maya', snippet: 'budget' }], count: 1 },
       ),
     ]
-    renderWithProviders(<AskSurface conversationId={undefined} />)
+    await renderReadyAsk()
 
     expect(screen.getByText(/Searched "Maya budget"/)).not.toBeNull()
     expect(screen.getByText(/1 result/)).not.toBeNull()
   })
 
-  it('renders a list_projects tool chip', () => {
+  it('renders a list_projects tool chip', async () => {
     chatMocks.messages = [
       toolMessage('a1', 'list_projects', 'output-available', {}, { projects: [], count: 3 }),
     ]
-    renderWithProviders(<AskSurface conversationId={undefined} />)
+    await renderReadyAsk()
 
     expect(screen.getByText(/Listed projects/)).not.toBeNull()
     expect(screen.getByText(/3 projects/)).not.toBeNull()
   })
 
-  it('renders persisted tool chip correctly (reloaded conversation)', () => {
+  it('renders persisted tool chip correctly (reloaded conversation)', async () => {
     // Simulates messages already hydrated (e.g. restored from DB via setMessages).
     // conversationId is undefined here so displayedMessages = messages immediately.
     chatMocks.messages = [
@@ -243,7 +249,7 @@ describe('AskSurface', () => {
         { hits: [], count: 0 },
       ),
     ]
-    renderWithProviders(<AskSurface conversationId={undefined} />)
+    await renderReadyAsk()
 
     expect(screen.getByText(/Searched "Atlas deadline"/)).not.toBeNull()
     expect(screen.getByText(/0 results/)).not.toBeNull()
