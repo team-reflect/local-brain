@@ -15,6 +15,12 @@ use crate::error::CliError;
 use crate::id::new_id;
 use crate::text::{content_hash, normalize_text};
 
+/// Inputs for `brain add document` and its source-led `brain import document`
+/// alias.
+///
+/// Documents can be imported from files, notes, webpages, or extracted text.
+/// Source identity is optional for hand-written records but should be present
+/// for automated backfills so re-imports are idempotent and auditable.
 pub struct AddDocumentArgs<'a> {
     pub title: Option<&'a str>,
     pub kind: Option<&'a str>,

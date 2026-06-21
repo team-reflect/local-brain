@@ -70,6 +70,18 @@ The older `brain add document` and `brain add interaction` commands remain valid
 aliases for direct typed writes. Prefer `brain import ...` in import harnesses so
 the staged workflow is obvious in logs.
 
+## Identity And Provenance
+
+Source-backed imports should pass `--source`, `--external-kind`, and
+`--external-id` whenever the upstream system has a durable identifier. That
+triple is stored in `external_identities` and is the dedupe key for re-imports.
+
+`record_provenance` is a separate trail of how a Local Brain record was created
+or enriched: imported source records, generated AI notes, extracted facts,
+promoted memories, profile enrichment, and successful finalization all write
+provenance events. Do not use provider-specific IDs as Local Brain IDs; keep
+them in source identity/provenance fields and link the typed record normally.
+
 ## Common Examples
 
 Ensure sources:

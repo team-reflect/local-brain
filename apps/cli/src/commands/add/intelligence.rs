@@ -11,6 +11,7 @@ use super::identity::{
     source_id, ExternalIdentityWrite, RecordProvenanceWrite,
 };
 use super::links::{insert_chunks, insert_evidence_refs, replace_chunks};
+use super::record_ref::{parse_record_ref, require_record, RECORD_TYPES};
 use super::text::normalize_optional;
 use crate::commands::{now_iso, EvidenceRef};
 use crate::error::CliError;
@@ -18,21 +19,11 @@ use crate::id::new_id;
 use crate::output::print_json;
 use crate::text::{content_hash, normalize_text};
 
-const RECORD_TYPES: &[&str] = &[
-    "person",
-    "organization",
-    "organization_profile",
-    "project",
-    "task",
-    "document",
-    "interaction",
-    "interaction_transcript",
-    "ai_note",
-    "extracted_fact",
-    "memory",
-    "asset",
-];
-
+/// Inputs for `brain import transcript`.
+///
+/// A transcript is raw evidence attached to an interaction. It is chunked for
+/// retrieval separately from the interaction shell so citations can point at
+/// the exact transcript text rather than a lossy meeting summary.
 pub struct AddTranscriptArgs<'a> {
     pub interaction_id: &'a str,
     pub body: String,
@@ -49,6 +40,11 @@ pub struct AddTranscriptArgs<'a> {
     pub metadata_json: Option<&'a str>,
 }
 
+/// Inputs for `brain add ai-note`.
+///
+/// AI notes are narrative model artifacts such as summaries, decisions, risks,
+/// or coaching notes. They are visible records with citations; they are not
+/// hidden memories.
 pub struct AddAiNoteArgs<'a> {
     pub kind: &'a str,
     pub interaction_id: Option<&'a str>,
@@ -64,6 +60,10 @@ pub struct AddAiNoteArgs<'a> {
     pub evidence: Vec<EvidenceRef>,
 }
 
+/// Inputs for `brain add fact`.
+///
+/// Facts are append-only structured claims. They can cite exact chunks and can
+/// later be promoted into curated memories when the claim is worth preserving.
 pub struct AddFactArgs<'a> {
     pub subject: &'a str,
     pub key: &'a str,
@@ -79,6 +79,10 @@ pub struct AddFactArgs<'a> {
     pub evidence: Vec<EvidenceRef>,
 }
 
+/// Inputs for `brain enrich person`.
+///
+/// Enrichment updates profile/cache fields and regenerates person search chunks
+/// without creating a new person.
 pub struct EnrichPersonArgs<'a> {
     pub id: &'a str,
     pub preferred_name: Option<&'a str>,
@@ -99,6 +103,11 @@ pub struct EnrichPersonArgs<'a> {
     pub notes: Option<&'a str>,
 }
 
+/// Inputs for `brain enrich organization`.
+///
+/// Organization enrichment updates the canonical org row and can also write an
+/// `organization_profiles` research artifact when model/profile fields are
+/// present.
 pub struct EnrichOrganizationArgs<'a> {
     pub id: &'a str,
     pub kind: Option<&'a str>,
@@ -127,11 +136,19 @@ pub struct EnrichOrganizationArgs<'a> {
     pub source_slug: Option<&'a str>,
 }
 
+/// Inputs for `brain promote fact`.
+///
+/// Promotion turns one reviewed extracted fact into a hidden curated memory and
+/// copies the fact's evidence refs onto the memory.
 pub struct PromoteFactArgs<'a> {
     pub fact_id: &'a str,
     pub memory_kind: &'a str,
 }
 
+/// Inputs for `brain tag ensure`.
+///
+/// Tags are reusable user-facing labels that can be attached to any typed
+/// record through `taggings`.
 pub struct TagEnsureArgs<'a> {
     pub name: &'a str,
     pub slug: Option<&'a str>,
@@ -139,67 +156,14 @@ pub struct TagEnsureArgs<'a> {
     pub description: Option<&'a str>,
 }
 
+/// Inputs for `brain tag attach`.
+///
+/// `record` is a provider-neutral typed reference such as `project:<id>` or
+/// `interaction:<id>`.
 pub struct TagAttachArgs<'a> {
     pub tag: &'a str,
     pub record: &'a str,
     pub source_slug: Option<&'a str>,
-}
-
-pub struct ImportAuditArgs {
-    pub limit: usize,
-}
-
-pub struct ImportFinalizeArgs<'a> {
-    pub record: &'a str,
-    pub raw_text_unavailable: bool,
-    pub no_entities: bool,
-    pub no_project_or_task_link: bool,
-    pub no_derived_actions: bool,
-    pub no_extracted_facts: bool,
-}
-
-#[derive(Clone, Copy, Default)]
-struct CompletionPolicy {
-    raw_text_unavailable: bool,
-    no_entities: bool,
-    no_project_or_task_link: bool,
-    no_derived_actions: bool,
-    no_extracted_facts: bool,
-}
-
-impl CompletionPolicy {
-    fn from_finalize(args: &ImportFinalizeArgs<'_>) -> Self {
-        Self {
-            raw_text_unavailable: args.raw_text_unavailable,
-            no_entities: args.no_entities,
-            no_project_or_task_link: args.no_project_or_task_link,
-            no_derived_actions: args.no_derived_actions,
-            no_extracted_facts: args.no_extracted_facts,
-        }
-    }
-
-    fn has_waivers(self) -> bool {
-        self.raw_text_unavailable
-            || self.no_entities
-            || self.no_project_or_task_link
-            || self.no_derived_actions
-            || self.no_extracted_facts
-    }
-
-    fn to_json(self) -> Option<String> {
-        self.has_waivers().then(|| {
-            json!({
-                "waivers": {
-                    "rawTextUnavailable": self.raw_text_unavailable,
-                    "noEntities": self.no_entities,
-                    "noProjectOrTaskLink": self.no_project_or_task_link,
-                    "noDerivedActions": self.no_derived_actions,
-                    "noExtractedFacts": self.no_extracted_facts,
-                }
-            })
-            .to_string()
-        })
-    }
 }
 
 fn normalize_json(raw: Option<&str>, field: &str) -> Result<Option<String>, CliError> {
@@ -209,54 +173,6 @@ fn normalize_json(raw: Option<&str>, field: &str) -> Result<Option<String>, CliE
     serde_json::from_str::<Value>(&value)
         .map_err(|e| CliError::Runtime(format!("{field} must be valid JSON: {e}")))?;
     Ok(Some(value))
-}
-
-fn parse_record_ref(raw: &str, label: &str) -> Result<(String, String), CliError> {
-    let (kind, id) = raw
-        .split_once(':')
-        .ok_or_else(|| CliError::Runtime(format!("invalid {label} '{raw}' (expected kind:id)")))?;
-    if !RECORD_TYPES.contains(&kind) {
-        return Err(CliError::Runtime(format!("unknown {label} kind '{kind}'")));
-    }
-    if id.trim().is_empty() {
-        return Err(CliError::Runtime(format!(
-            "invalid {label} '{raw}' (empty id)"
-        )));
-    }
-    Ok((kind.to_string(), id.to_string()))
-}
-
-fn record_exists(conn: &Connection, kind: &str, id: &str) -> Result<bool, CliError> {
-    let (table, archived) = match kind {
-        "person" => ("people", true),
-        "organization" => ("organizations", true),
-        "organization_profile" => ("organization_profiles", false),
-        "project" => ("projects", true),
-        "task" => ("tasks", true),
-        "document" => ("documents", true),
-        "interaction" => ("interactions", true),
-        "interaction_transcript" => ("interaction_transcripts", false),
-        "ai_note" => ("ai_notes", false),
-        "extracted_fact" => ("extracted_facts", true),
-        "memory" => ("memories", true),
-        "asset" => ("assets", true),
-        _ => return Ok(false),
-    };
-    let archived_filter = if archived {
-        "AND archived_at IS NULL"
-    } else {
-        ""
-    };
-    let sql = format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE id = ?1 {archived_filter})");
-    Ok(conn.query_row(&sql, params![id], |row| row.get::<_, bool>(0))?)
-}
-
-fn require_record(conn: &Connection, kind: &str, id: &str) -> Result<(), CliError> {
-    if record_exists(conn, kind, id)? {
-        Ok(())
-    } else {
-        Err(CliError::NotFound(format!("{kind} {id} not found")))
-    }
 }
 
 fn report_written(
@@ -911,94 +827,6 @@ pub fn attach_tag(
     }
 }
 
-pub fn import_finalize(
-    conn: &Connection,
-    json_output: bool,
-    args: ImportFinalizeArgs,
-) -> Result<(), CliError> {
-    let (kind, id) = parse_record_ref(args.record, "--record")?;
-    require_record(conn, &kind, &id)?;
-    let policy = CompletionPolicy::from_finalize(&args);
-    let missing = completion_missing(conn, &kind, &id, policy)?;
-    if missing.is_empty() {
-        let metadata_json = policy.to_json();
-        insert_record_provenance(
-            conn,
-            RecordProvenanceWrite {
-                record_type: &kind,
-                record_id: &id,
-                provenance_kind: "finalized",
-                source_id: None,
-                original_path: None,
-                original_url: None,
-                model: None,
-                prompt_fingerprint: None,
-                metadata_json: metadata_json.as_deref(),
-            },
-        )?;
-    }
-    emit_finalize(json_output, &kind, &id, missing, policy)
-}
-
-pub fn import_audit(
-    conn: &Connection,
-    json_output: bool,
-    args: ImportAuditArgs,
-) -> Result<(), CliError> {
-    let mut rows: Vec<Value> = Vec::new();
-    for (kind, table, title_col) in [
-        ("interaction", "interactions", "title"),
-        ("document", "documents", "title"),
-    ] {
-        let sql = format!(
-            "SELECT id, COALESCE({title_col}, '(untitled)') FROM {table}
-             WHERE archived_at IS NULL
-             ORDER BY updated_at DESC
-             LIMIT ?1"
-        );
-        let mut stmt = conn.prepare(&sql)?;
-        let candidates = stmt.query_map(params![args.limit as i64], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        for candidate in candidates {
-            let (id, title) = candidate?;
-            if is_finalized(conn, kind, &id)? {
-                continue;
-            }
-            let missing = completion_missing(conn, kind, &id, CompletionPolicy::default())?;
-            if !missing.is_empty() {
-                rows.push(json!({
-                    "kind": kind,
-                    "id": id,
-                    "title": title,
-                    "missing": missing,
-                }));
-            }
-        }
-    }
-    if json_output {
-        print_json(&json!({
-            "checkedPerKind": args.limit,
-            "incomplete": rows,
-            "incompleteCount": rows.len(),
-        }))
-    } else {
-        if rows.is_empty() {
-            println!("all checked imports are complete");
-        } else {
-            for row in &rows {
-                println!(
-                    "{}:{} missing {}",
-                    row["kind"].as_str().unwrap_or("record"),
-                    row["id"].as_str().unwrap_or(""),
-                    row["missing"].as_array().map_or(0, Vec::len)
-                );
-            }
-        }
-        Ok(())
-    }
-}
-
 fn fact_chunk_text(conn: &Connection, id: &str) -> Result<String, CliError> {
     let text = conn.query_row(
         "SELECT subject_type || ':' || subject_id || ' ' || key || ': ' ||
@@ -1198,323 +1026,4 @@ fn resolve_tag_id(conn: &Connection, raw: &str) -> Result<String, CliError> {
     )
     .optional()?
     .ok_or_else(|| CliError::NotFound(format!("tag {tag} not found")))
-}
-
-fn completion_missing(
-    conn: &Connection,
-    kind: &str,
-    id: &str,
-    policy: CompletionPolicy,
-) -> Result<Vec<String>, CliError> {
-    let mut missing = Vec::new();
-    if !has_external_identity(conn, kind, id)? {
-        missing.push("sourceIdentity".to_string());
-    }
-    if !has_raw_text(conn, kind, id, policy)? {
-        missing.push("rawText".to_string());
-    }
-    if !has_entities(conn, kind, id, policy)? {
-        missing.push("participantsOrEntities".to_string());
-    }
-    if !has_ai_note(conn, kind, id)? {
-        missing.push("aiNote".to_string());
-    }
-    if !has_extracted_fact(conn, kind, id, policy)? {
-        missing.push("extractedFacts".to_string());
-    }
-    if !has_project_or_task_link(conn, kind, id, policy)? {
-        missing.push("projectOrTaskLinks".to_string());
-    }
-    if !has_evidence_backed_task_or_memory(conn, kind, id, policy)? {
-        missing.push("evidenceBackedTasksOrMemories".to_string());
-    }
-    if !has_tags(conn, kind, id)? {
-        missing.push("tags".to_string());
-    }
-    if !has_chunks(conn, kind, id, policy)? {
-        missing.push("chunks".to_string());
-    }
-    Ok(missing)
-}
-
-fn exists(conn: &Connection, sql: &str, id: &str) -> Result<bool, CliError> {
-    Ok(conn.query_row(sql, params![id], |row| row.get::<_, bool>(0))?)
-}
-
-fn exists2(conn: &Connection, sql: &str, first: &str, second: &str) -> Result<bool, CliError> {
-    Ok(conn.query_row(sql, params![first, second], |row| row.get::<_, bool>(0))?)
-}
-
-fn has_external_identity(conn: &Connection, kind: &str, id: &str) -> Result<bool, CliError> {
-    Ok(conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM external_identities WHERE entity_type = ?1 AND entity_id = ?2)",
-        params![kind, id],
-        |row| row.get::<_, bool>(0),
-    )?)
-}
-
-fn is_finalized(conn: &Connection, kind: &str, id: &str) -> Result<bool, CliError> {
-    Ok(conn.query_row(
-        "SELECT EXISTS(
-           SELECT 1 FROM record_provenance
-           WHERE record_type = ?1 AND record_id = ?2 AND provenance_kind = 'finalized'
-         )",
-        params![kind, id],
-        |row| row.get::<_, bool>(0),
-    )?)
-}
-
-fn interaction_kind(conn: &Connection, id: &str) -> Result<Option<String>, CliError> {
-    conn.query_row(
-        "SELECT kind FROM interactions WHERE id = ?1",
-        params![id],
-        |row| row.get::<_, String>(0),
-    )
-    .optional()
-    .map_err(CliError::from)
-}
-
-fn interaction_can_lack_raw_text(conn: &Connection, id: &str) -> Result<bool, CliError> {
-    Ok(matches!(
-        interaction_kind(conn, id)?.as_deref(),
-        Some("event")
-    ))
-}
-
-fn has_raw_text(
-    conn: &Connection,
-    kind: &str,
-    id: &str,
-    policy: CompletionPolicy,
-) -> Result<bool, CliError> {
-    if policy.raw_text_unavailable {
-        return Ok(true);
-    }
-    match kind {
-        "interaction" if interaction_can_lack_raw_text(conn, id)? => Ok(true),
-        "interaction" => conn
-            .query_row(
-                "SELECT EXISTS(
-                   SELECT 1 FROM interactions
-                   WHERE id = ?1 AND body_text IS NOT NULL AND trim(body_text) != ''
-                   UNION
-                   SELECT 1 FROM interaction_transcripts
-                   WHERE interaction_id = ?1 AND trim(raw_text) != ''
-                 )",
-                params![id],
-                |row| row.get::<_, bool>(0),
-            )
-            .map_err(CliError::from),
-        "document" => exists(
-            conn,
-            "SELECT EXISTS(SELECT 1 FROM documents WHERE id = ?1 AND body_text IS NOT NULL AND trim(body_text) != '')",
-            id,
-        ),
-        _ => Ok(true),
-    }
-}
-
-fn has_entities(
-    conn: &Connection,
-    kind: &str,
-    id: &str,
-    policy: CompletionPolicy,
-) -> Result<bool, CliError> {
-    if policy.no_entities {
-        return Ok(true);
-    }
-    match kind {
-        "interaction" => conn
-            .query_row(
-                "SELECT EXISTS(
-                   SELECT 1 FROM interaction_participants WHERE interaction_id = ?1
-                   UNION
-                   SELECT 1 FROM interaction_organizations WHERE interaction_id = ?1
-                 )",
-                params![id],
-                |row| row.get::<_, bool>(0),
-            )
-            .map_err(CliError::from),
-        "document" => conn
-            .query_row(
-                "SELECT EXISTS(
-                   SELECT 1 FROM document_people WHERE document_id = ?1
-                   UNION
-                   SELECT 1 FROM document_organizations WHERE document_id = ?1
-                 )",
-                params![id],
-                |row| row.get::<_, bool>(0),
-            )
-            .map_err(CliError::from),
-        _ => Ok(true),
-    }
-}
-
-fn has_ai_note(conn: &Connection, kind: &str, id: &str) -> Result<bool, CliError> {
-    match kind {
-        "interaction" => exists(
-            conn,
-            "SELECT EXISTS(SELECT 1 FROM ai_notes WHERE interaction_id = ?1)",
-            id,
-        ),
-        "document" => exists(
-            conn,
-            "SELECT EXISTS(SELECT 1 FROM ai_notes WHERE document_id = ?1)",
-            id,
-        ),
-        _ => exists2(
-            conn,
-            "SELECT EXISTS(SELECT 1 FROM ai_notes WHERE subject_type = ?1 AND subject_id = ?2)",
-            kind,
-            id,
-        ),
-    }
-}
-
-fn has_extracted_fact(
-    conn: &Connection,
-    kind: &str,
-    id: &str,
-    policy: CompletionPolicy,
-) -> Result<bool, CliError> {
-    if policy.no_extracted_facts {
-        return Ok(true);
-    }
-    Ok(conn.query_row(
-        "SELECT EXISTS(
-           SELECT 1 FROM extracted_facts
-           WHERE archived_at IS NULL
-             AND (
-               (subject_type = ?1 AND subject_id = ?2)
-               OR (source_record_type = ?1 AND source_record_id = ?2)
-             )
-         )",
-        params![kind, id],
-        |row| row.get::<_, bool>(0),
-    )?)
-}
-
-fn has_project_or_task_link(
-    conn: &Connection,
-    kind: &str,
-    id: &str,
-    policy: CompletionPolicy,
-) -> Result<bool, CliError> {
-    if policy.no_project_or_task_link {
-        return Ok(true);
-    }
-    match kind {
-        "interaction" => conn
-            .query_row(
-                "SELECT EXISTS(
-                   SELECT 1 FROM project_interactions WHERE interaction_id = ?1
-                   UNION
-                   SELECT 1 FROM task_interactions WHERE interaction_id = ?1
-                   UNION
-                   SELECT 1 FROM tasks WHERE origin_interaction_id = ?1 AND archived_at IS NULL
-                 )",
-                params![id],
-                |row| row.get::<_, bool>(0),
-            )
-            .map_err(CliError::from),
-        "document" => conn
-            .query_row(
-                "SELECT EXISTS(
-                   SELECT 1 FROM project_documents WHERE document_id = ?1
-                   UNION
-                   SELECT 1 FROM task_documents WHERE document_id = ?1
-                   UNION
-                   SELECT 1 FROM tasks WHERE origin_document_id = ?1 AND archived_at IS NULL
-                 )",
-                params![id],
-                |row| row.get::<_, bool>(0),
-            )
-            .map_err(CliError::from),
-        _ => Ok(true),
-    }
-}
-
-fn has_evidence_backed_task_or_memory(
-    conn: &Connection,
-    kind: &str,
-    id: &str,
-    policy: CompletionPolicy,
-) -> Result<bool, CliError> {
-    if policy.no_derived_actions {
-        return Ok(true);
-    }
-    Ok(conn.query_row(
-        "SELECT EXISTS(
-           SELECT 1
-           FROM evidence_refs er
-           JOIN content_chunks cc ON cc.id = er.chunk_id
-           WHERE cc.record_type = ?1
-             AND cc.record_id = ?2
-             AND er.subject_type IN ('task', 'memory')
-         )",
-        params![kind, id],
-        |row| row.get::<_, bool>(0),
-    )?)
-}
-
-fn has_tags(conn: &Connection, kind: &str, id: &str) -> Result<bool, CliError> {
-    Ok(conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM taggings WHERE record_type = ?1 AND record_id = ?2)",
-        params![kind, id],
-        |row| row.get::<_, bool>(0),
-    )?)
-}
-
-fn has_chunks(
-    conn: &Connection,
-    kind: &str,
-    id: &str,
-    policy: CompletionPolicy,
-) -> Result<bool, CliError> {
-    let present = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM content_chunks WHERE record_type = ?1 AND record_id = ?2)",
-        params![kind, id],
-        |row| row.get::<_, bool>(0),
-    )?;
-    if present {
-        return Ok(true);
-    }
-    if policy.raw_text_unavailable {
-        return Ok(true);
-    }
-    if kind == "interaction" && interaction_can_lack_raw_text(conn, id)? {
-        return Ok(true);
-    }
-    Ok(false)
-}
-
-fn emit_finalize(
-    json_output: bool,
-    kind: &str,
-    id: &str,
-    missing: Vec<String>,
-    policy: CompletionPolicy,
-) -> Result<(), CliError> {
-    let complete = missing.is_empty();
-    if json_output {
-        print_json(&json!({
-            "record": { "kind": kind, "id": id },
-            "complete": complete,
-            "missing": missing,
-            "waivers": {
-                "rawTextUnavailable": policy.raw_text_unavailable,
-                "noEntities": policy.no_entities,
-                "noProjectOrTaskLink": policy.no_project_or_task_link,
-                "noDerivedActions": policy.no_derived_actions,
-                "noExtractedFacts": policy.no_extracted_facts,
-            },
-        }))
-    } else {
-        if complete {
-            println!("{kind}:{id} complete");
-        } else {
-            println!("{kind}:{id} incomplete: {}", missing.join(", "));
-        }
-        Ok(())
-    }
 }

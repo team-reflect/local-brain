@@ -175,6 +175,12 @@ pub(super) struct ExternalIdentityWrite<'a> {
     pub force_duplicate: bool,
 }
 
+/// One durable provenance event for a typed record.
+///
+/// Importers use this for source imports, AI-generated/enriched artifacts, fact
+/// extraction, memory promotion, and finalization. It is intentionally separate
+/// from `external_identities`: an identity says "what upstream row is this?",
+/// while provenance says "how did this Local Brain record get here?".
 pub(super) struct RecordProvenanceWrite<'a> {
     pub record_type: &'a str,
     pub record_id: &'a str,
