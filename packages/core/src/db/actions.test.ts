@@ -85,7 +85,7 @@ describe('domain actions', () => {
   })
 
   it('createMemory returns an active duplicate claim instead of inserting', async () => {
-    calls = captureDbBridge([{ id: 'memory-1', claim: 'Alex prefers async updates.' }])
+    calls = captureDbBridge([{ id: 'memory-1', claim: 'Alex   prefers   async updates.' }])
 
     const result = await createMemory({ claim: ' alex prefers async updates. ' })
 

@@ -43,7 +43,7 @@ function normalizeMemory(input: NewMemory): NewMemory {
 }
 
 function memoryClaimKey(claim: string): string {
-  return claim.trim().toLowerCase()
+  return squish(claim).toLowerCase()
 }
 
 function normalizeMemoryLink(link: MemoryLinkInput): MemoryLinkValues {
