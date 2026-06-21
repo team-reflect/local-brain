@@ -212,6 +212,23 @@ export async function acceptSuggestion(id: string): Promise<AcceptedSuggestion> 
     throw new Error(`Cannot accept a suggestion of kind '${suggestion.kind}'.`)
   }
 
+  // Roll the WHOLE transaction back if the suggestion is no longer open. This
+  // re-inserts the suggestion's own id (a primary-key collision) only when the
+  // status is not 'open', so a concurrent dismiss/accept makes `db_batch` error
+  // and undo the project/org creation and relinks — never a partial write.
+  // When still open, the SELECT yields no row, so it's a no-op.
+  stmts.unshift(
+    db
+      .insertInto('suggestions')
+      .columns(['id', 'kind', 'title', 'status'])
+      .expression(
+        db
+          .selectFrom('suggestions')
+          .select(['id', 'kind', 'title', 'status'])
+          .where('id', '=', id)
+          .where('status', '!=', 'open'),
+      ),
+  )
   stmts.push(
     db
       .updateTable('suggestions')
@@ -225,9 +242,12 @@ export async function acceptSuggestion(id: string): Promise<AcceptedSuggestion> 
       .where('status', '=', 'open'),
   )
 
-  const affected = await batch(stmts)
-  if (affected[affected.length - 1] === 0) {
-    throw new Error('This suggestion was resolved concurrently.')
+  try {
+    await batch(stmts)
+  } catch (cause) {
+    throw new Error('This suggestion could not be accepted — it may have just been resolved.', {
+      cause,
+    })
   }
   return { recordType, recordId }
 }

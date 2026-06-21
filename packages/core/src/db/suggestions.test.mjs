@@ -122,12 +122,35 @@ describe('suggestions curation queue', () => {
     expect(database.prepare('SELECT COUNT(*) AS n FROM affiliations').get().n).toBe(0)
   })
 
-  it('dismiss flips status, and a resolved suggestion cannot be re-accepted', async () => {
-    const id = await seedSuggestion({ title: 'Maybe a project' })
+  it('dismiss flips status, and a resolved suggestion cannot be re-accepted (no partial write)', async () => {
+    const interaction = await ingestInteraction({ kind: 'email', title: 'Thread', bodyText: 'x' })
+    const id = await seedSuggestion({
+      title: 'Maybe a project',
+      links: [{ recordType: 'interaction', recordId: interaction.id }],
+    })
     await dismissSuggestion(id)
     expect(database.prepare('SELECT status FROM suggestions WHERE id = ?').get(id).status).toBe('dismissed')
     await expect(acceptSuggestion(id)).rejects.toThrow(/no longer open/)
     await expect(dismissSuggestion(id)).rejects.toThrow(/no longer open/)
+    // Accepting a resolved suggestion creates nothing — no orphan project or relink.
+    expect(database.prepare('SELECT COUNT(*) AS n FROM projects').get().n).toBe(0)
+    expect(database.prepare('SELECT COUNT(*) AS n FROM project_interactions').get().n).toBe(0)
     expect(await listOpenSuggestions()).toHaveLength(0)
+  })
+
+  it('the batch guard rolls back the whole accept if the row was resolved mid-flight', async () => {
+    // Simulate the lost race directly: the SAME guard statement the accept batch
+    // runs first must error (PK collision) when the suggestion is no longer open,
+    // forcing db_batch to roll back any project/relink writes.
+    const id = await seedSuggestion({ title: 'Race' })
+    database.prepare("UPDATE suggestions SET status = 'dismissed' WHERE id = ?").run(id)
+    const guard = () =>
+      database
+        .prepare(
+          `INSERT INTO suggestions (id, kind, title, status)
+           SELECT id, kind, title, status FROM suggestions WHERE id = ? AND status != 'open'`,
+        )
+        .run(id)
+    expect(guard).toThrow() // PK collision aborts the transaction
   })
 })
