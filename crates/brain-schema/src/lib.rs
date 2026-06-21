@@ -219,20 +219,19 @@ pub fn resolve_brain_root() -> Option<PathBuf> {
     None
 }
 
-/// The durable database path used by diagnostics and the CLI compatibility
-/// override: `$BRAIN_DB`, then `$BRAIN_ROOT/brain.sqlite`, then the old app-data
-/// fallback. Desktop startup does not silently create this fallback; it is kept
-/// for advanced CLI/dev workflows.
+/// The explicit database path used by diagnostics and compatibility overrides:
+/// `$BRAIN_ROOT/brain.sqlite`, then `$BRAIN_DB`. There is deliberately no
+/// app-data fallback: a Local Brain is a folder, not a loose SQLite file.
 pub fn resolve_db_path() -> Option<PathBuf> {
+    if let Some(root) = resolve_brain_root() {
+        return Some(BrainPaths::for_root(root).database_path);
+    }
     if let Some(env) = std::env::var_os("BRAIN_DB") {
         if !env.is_empty() {
             return Some(PathBuf::from(env));
         }
     }
-    if let Some(root) = resolve_brain_root() {
-        return Some(BrainPaths::for_root(root).database_path);
-    }
-    Some(app_data_dir()?.join(BRAIN_DB_FILENAME))
+    None
 }
 
 /// The applied schema version (`PRAGMA user_version`), comparable against
@@ -244,6 +243,20 @@ pub fn schema_version(conn: &Connection) -> rusqlite::Result<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn restore_env(key: &str, value: Option<std::ffi::OsString>) {
+        if let Some(value) = value {
+            std::env::set_var(key, value);
+        } else {
+            std::env::remove_var(key);
+        }
+    }
 
     #[test]
     fn migrations_are_well_formed() {
@@ -399,6 +412,25 @@ mod tests {
 
         let _conn = open_and_migrate(&paths.database_path).unwrap();
         assert!(paths.database_path.is_file());
+    }
+
+    #[test]
+    fn resolve_db_path_prefers_brain_root_over_brain_db() {
+        let _guard = env_lock().lock().unwrap();
+        let old_root = std::env::var_os("BRAIN_ROOT");
+        let old_db = std::env::var_os("BRAIN_DB");
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("Personal Brain");
+        let exact_db = dir.path().join("override.sqlite");
+
+        std::env::set_var("BRAIN_ROOT", &root);
+        std::env::set_var("BRAIN_DB", &exact_db);
+        let resolved = resolve_db_path();
+
+        restore_env("BRAIN_ROOT", old_root);
+        restore_env("BRAIN_DB", old_db);
+
+        assert_eq!(resolved, Some(root.join("brain.sqlite")));
     }
 
     /// Every durable product table named in docs/launch-schema.md exists.

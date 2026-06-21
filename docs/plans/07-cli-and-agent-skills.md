@@ -72,9 +72,8 @@ path resolution, sidecar bundling, installation checks.
 2. Add brain-root resolution:
    - explicit `--brain <directory>`
    - `BRAIN_ROOT` environment variable
-   - newest recent brain root from the OS-config recents store
    - advanced `--db <path>` / `BRAIN_DB` override for tests and diagnostics
-   - clear error if no brain root or database exists
+   - clear error if no brain root or explicit database is provided
 3. Add SQLite open behavior:
    - use `crates/brain-schema`
    - check schema version

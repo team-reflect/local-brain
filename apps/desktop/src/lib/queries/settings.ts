@@ -2,6 +2,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   aiKeySecretName,
   apiKeyHint,
+  cliInstall,
+  cliStatus,
+  cliUninstall,
   databasePath,
   getModelSettings,
   hardDeleteRecord,
@@ -10,6 +13,9 @@ import {
   keychainHas,
   keychainSet,
   rebuildSearchIndexes,
+  skillInstall,
+  skillStatus,
+  skillUninstall,
   updateAiProvidersState,
   withAiProviderAdded,
   withAiProviderRemoved,
@@ -25,6 +31,46 @@ import {
 
 export function useDatabasePath() {
   return useQuery({ queryKey: ['database-path'], queryFn: databasePath })
+}
+
+export function useCliStatus() {
+  return useQuery({ queryKey: ['cli-status'], queryFn: cliStatus })
+}
+
+export function useInstallCli() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: cliInstall,
+    onSuccess: (status) => queryClient.setQueryData(['cli-status'], status),
+  })
+}
+
+export function useUninstallCli() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: cliUninstall,
+    onSuccess: (status) => queryClient.setQueryData(['cli-status'], status),
+  })
+}
+
+export function useSkillStatus() {
+  return useQuery({ queryKey: ['skill-status'], queryFn: skillStatus })
+}
+
+export function useInstallSkill() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: skillInstall,
+    onSuccess: (status) => queryClient.setQueryData(['skill-status'], status),
+  })
+}
+
+export function useUninstallSkill() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: skillUninstall,
+    onSuccess: (status) => queryClient.setQueryData(['skill-status'], status),
+  })
 }
 
 export function useModelSettings() {

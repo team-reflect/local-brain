@@ -34,6 +34,27 @@ compiles the macOS app. The runnable bundle is
 at `Contents/MacOS/brain`. (DMG packaging needs a GUI session; see
 [checklist.md](checklist.md).)
 
+### Installing the `brain` command and Codex skill
+
+From the app, open **Settings → CLI & agents** and install both the command and
+the Codex skill. The app symlinks the bundled sidecar to `~/.local/bin/brain`
+and copies the managed skill to `~/.codex/skills/brain/SKILL.md`; it never needs
+sudo and does not edit shell profile files. If `~/.local/bin` is not already on
+your `PATH`, add this line to your shell profile:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+For source/development checkouts, install directly from Cargo instead:
+
+```bash
+cargo install --path apps/cli --locked
+```
+
+If you need to install the skill manually, copy `skills/brain/SKILL.md` to
+`~/.codex/skills/brain/SKILL.md`.
+
 ## Local storage
 
 Each **brain** is one root folder — your top-level workspace:
@@ -49,13 +70,14 @@ Personal Brain/
 
 The desktop app opens `$BRAIN_ROOT` when set, otherwise the last brain you opened
 from its registry. If neither exists, it shows the folder chooser. The `brain`
-CLI resolves storage as:
+CLI does not guess a default brain root; it resolves storage as:
 
 1. `--db <path>` (advanced exact-file override)
 2. `--brain <dir>`
-3. `$BRAIN_DB` (advanced exact-file override)
-4. `$BRAIN_ROOT`
-5. the legacy platform data path for diagnostics/dev workflows
+3. `$BRAIN_ROOT`
+4. `$BRAIN_DB` (advanced exact-file override)
+
+For automations, prefer setting `BRAIN_ROOT` to the chosen brain folder.
 
 The active brain folder is shown in **Settings → Brain**.
 Migrations run automatically when a brain is opened and the schema is versioned.
@@ -76,10 +98,10 @@ brain add document --title "Pricing model" --text "..." --json
 
 ## Using it with Codex (or another agent)
 
-The agent contract is the `brain` CLI plus the skill at
-[`skills/brain/SKILL.md`](../../skills/brain/SKILL.md). Point your agent at the
-skill; it teaches the nouns, query-before-write, the stdout/stderr contract, and
-daily-automation recipes. Core commands:
+The agent contract is the `brain` CLI plus the Codex skill installed from
+[`skills/brain/SKILL.md`](../../skills/brain/SKILL.md). The skill teaches the
+nouns, query-before-write, the stdout/stderr contract, and daily-automation
+recipes. Core commands:
 
 ```bash
 brain search "northwind" --json
@@ -89,6 +111,8 @@ brain tasks plan-day --json
 brain graph --center self --json
 brain doctor --json     # health: database and schema
 ```
+
+After installing the command, verify the agent path with `brain doctor --json`.
 
 For question answering, the desktop **Ask** surface uses the Vercel AI SDK with the
 configured BYOK provider and persists chat history in SQLite. Agents using the CLI
@@ -111,9 +135,12 @@ extraction is sent through the provider boundary.
 
 ## Troubleshooting
 
-- **"no brain database" (CLI exit 4):** no database at the resolved path. Run an
-  `brain add …` with `--brain <dir>`, open the app and choose a folder, or pass
-  the advanced `--db` override.
+- **"no brain selected" (CLI exit 4):** no brain target was provided. Pass
+  `--brain <dir>`, set `BRAIN_ROOT`, or use the advanced `--db` / `BRAIN_DB`
+  override.
+- **"no brain database" (CLI exit 4):** a target was provided, but no database
+  exists there. Run `brain add …` with `--brain <dir>` or open the app and choose
+  that folder.
 - **Gatekeeper blocks the app:** unsigned alpha build; right-click → Open.
 - **Search finds nothing after a bulk delete:** derived indexes rebuild
   automatically after deletes; if needed, the maintenance rebuild runs on next

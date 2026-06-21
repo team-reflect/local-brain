@@ -247,3 +247,13 @@ brain --json suggest dismiss <id>
 
 Suggestions are user-facing curation, not an automation log. Every suggestion
 must be actionable and evidence-backed.
+
+## Target Brain
+
+The CLI targets a brain folder via `--brain <dir>` or `$BRAIN_ROOT`, and uses
+`<dir>/brain.sqlite` with assets under `<dir>/assets`. It does not guess a default
+brain root. `--db <path>` and `$BRAIN_DB` remain advanced exact-file overrides
+for tests and diagnostics. It opens SQLite directly and works with the desktop
+app closed. Run
+`brain doctor --json` to check database and schema health. Prefer
+`brain --json contract` for the current exit-code and JSON-error contract.

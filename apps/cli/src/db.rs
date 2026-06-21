@@ -18,8 +18,8 @@ pub struct StoragePaths {
 }
 
 /// Resolve storage paths: `--db` wins as an exact-file override, then `--brain`
-/// / `$BRAIN_ROOT` derive the standard folder layout, then the legacy `$BRAIN_DB`
-/// / app-data fallback remains available for dev and diagnostics.
+/// / `$BRAIN_ROOT` derive the standard folder layout, then the advanced
+/// `$BRAIN_DB` exact-file override remains available for dev and diagnostics.
 pub fn resolve_storage(
     brain_flag: Option<&Path>,
     db_flag: Option<&Path>,
@@ -44,8 +44,12 @@ pub fn resolve_storage(
         });
     }
 
-    let database_path = brain_schema::resolve_db_path()
-        .ok_or_else(|| CliError::NoDatabase("could not resolve a data directory".to_string()))?;
+    let database_path = brain_schema::resolve_db_path().ok_or_else(|| {
+        CliError::NoDatabase(
+            "no brain selected; pass --brain <dir>, set BRAIN_ROOT, pass --db <path>, or set BRAIN_DB"
+                .to_string(),
+        )
+    })?;
     Ok(StoragePaths {
         root_path: None,
         database_path,

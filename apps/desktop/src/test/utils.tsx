@@ -44,6 +44,69 @@ export function installFakeBridge(options: FakeBridgeOptions = {}): void {
           return Promise.resolve(((args['statements'] as unknown[]) ?? []).map(() => 1))
         case 'app_version':
           return Promise.resolve({ name: 'Local Brain', version: '0.1.0', platform: 'test' })
+        case 'cli_status':
+          return Promise.resolve({
+            supported: true,
+            bundledPath: '/Applications/Local Brain.app/Contents/MacOS/brain',
+            bundledVersion: 'brain 0.1.0',
+            installTargetPath: '/Users/alex/.local/bin/brain',
+            installTargetDir: '/Users/alex/.local/bin',
+            targetDirOnPath: true,
+            installedPath: null,
+            installedVersion: null,
+            installState: 'missing',
+          })
+        case 'cli_install':
+          return Promise.resolve({
+            supported: true,
+            bundledPath: '/Applications/Local Brain.app/Contents/MacOS/brain',
+            bundledVersion: 'brain 0.1.0',
+            installTargetPath: '/Users/alex/.local/bin/brain',
+            installTargetDir: '/Users/alex/.local/bin',
+            targetDirOnPath: true,
+            installedPath: '/Applications/Local Brain.app/Contents/MacOS/brain',
+            installedVersion: 'brain 0.1.0',
+            installState: 'current',
+          })
+        case 'cli_uninstall':
+          return Promise.resolve({
+            supported: true,
+            bundledPath: '/Applications/Local Brain.app/Contents/MacOS/brain',
+            bundledVersion: 'brain 0.1.0',
+            installTargetPath: '/Users/alex/.local/bin/brain',
+            installTargetDir: '/Users/alex/.local/bin',
+            targetDirOnPath: true,
+            installedPath: null,
+            installedVersion: null,
+            installState: 'missing',
+          })
+        case 'skill_status':
+          return Promise.resolve({
+            supported: true,
+            installTargetPath: '/Users/alex/.codex/skills/brain/SKILL.md',
+            installTargetDir: '/Users/alex/.codex/skills/brain',
+            bundledHash: 'abc123abc123abc123',
+            installedHash: null,
+            installState: 'missing',
+          })
+        case 'skill_install':
+          return Promise.resolve({
+            supported: true,
+            installTargetPath: '/Users/alex/.codex/skills/brain/SKILL.md',
+            installTargetDir: '/Users/alex/.codex/skills/brain',
+            bundledHash: 'abc123abc123abc123',
+            installedHash: 'abc123abc123abc123',
+            installState: 'current',
+          })
+        case 'skill_uninstall':
+          return Promise.resolve({
+            supported: true,
+            installTargetPath: '/Users/alex/.codex/skills/brain/SKILL.md',
+            installTargetDir: '/Users/alex/.codex/skills/brain',
+            bundledHash: 'abc123abc123abc123',
+            installedHash: null,
+            installState: 'missing',
+          })
         default:
           return Promise.resolve(null)
       }
