@@ -70,13 +70,14 @@ Personal Brain/
 
 The desktop app opens `$BRAIN_ROOT` when set, otherwise the last brain you opened
 from its registry. If neither exists, it shows the folder chooser. The `brain`
-CLI resolves storage as:
+CLI does not guess a default brain root; it resolves storage as:
 
 1. `--db <path>` (advanced exact-file override)
 2. `--brain <dir>`
-3. `$BRAIN_DB` (advanced exact-file override)
-4. `$BRAIN_ROOT`
-5. the legacy platform data path for diagnostics/dev workflows
+3. `$BRAIN_ROOT`
+4. `$BRAIN_DB` (advanced exact-file override)
+
+For automations, prefer setting `BRAIN_ROOT` to the chosen brain folder.
 
 The active brain folder is shown in **Settings → Brain**.
 Migrations run automatically when a brain is opened and the schema is versioned.
@@ -134,9 +135,11 @@ extraction is sent through the provider boundary.
 
 ## Troubleshooting
 
-- **"no brain database" (CLI exit 4):** no database at the resolved path. Run an
-  `brain add …` with `--brain <dir>`, open the app and choose a folder, or pass
-  the advanced `--db` override.
+- **"no brain selected" (CLI exit 4):** no brain target was provided. Pass
+  `--brain <dir>`, set `BRAIN_ROOT`, or use the advanced `--db` override.
+- **"no brain database" (CLI exit 4):** a target was provided, but no database
+  exists there. Run `brain add …` with `--brain <dir>` or open the app and choose
+  that folder.
 - **Gatekeeper blocks the app:** unsigned alpha build; right-click → Open.
 - **Search finds nothing after a bulk delete:** derived indexes rebuild
   automatically after deletes; if needed, the maintenance rebuild runs on next

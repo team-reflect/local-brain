@@ -37,7 +37,7 @@ struct Cli {
     #[arg(long, global = true, value_name = "DIR", conflicts_with = "db")]
     brain: Option<PathBuf>,
 
-    /// Path to the brain database (overrides $BRAIN_DB and the default location).
+    /// Path to the brain database (advanced exact-file override; overrides $BRAIN_DB).
     #[arg(long, global = true, value_name = "PATH")]
     db: Option<PathBuf>,
 

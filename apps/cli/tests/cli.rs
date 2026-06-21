@@ -169,6 +169,23 @@ fn brain_root_env_derives_standard_folder_layout() {
 }
 
 #[test]
+fn cli_without_target_fails_instead_of_using_app_data_fallback() {
+    let out = Command::new(BIN)
+        .args(["--json", "path"])
+        .env_remove("BRAIN_DB")
+        .env_remove("BRAIN_ROOT")
+        .output()
+        .expect("failed to run brain");
+    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(4));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("no brain selected"),
+        "stderr should explain the missing target: {stderr}"
+    );
+}
+
+#[test]
 fn contract_reports_agent_cli_contract() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);

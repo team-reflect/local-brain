@@ -41,8 +41,9 @@ OS-config recents store outside any brain root, newest first, deduped by root pa
 safe to forget without touching user data. A corrupt recents store should surface a
 diagnostic and never wipe the existing entries by saving an empty list over it. The
 active root and a monotonic generation live in Rust state so overlapping opens or stale
-writes cannot land in the wrong brain. `$BRAIN_ROOT` pins one brain root for the CLI;
-`$BRAIN_DB` can remain an advanced escape hatch for direct database testing.
+writes cannot land in the wrong brain. `$BRAIN_ROOT` pins one brain root for the CLI
+and automations; `--db` / `$BRAIN_DB` remain advanced escape hatches for direct
+database testing. There is no implicit app-data brain fallback.
 
 Durable tables:
 
