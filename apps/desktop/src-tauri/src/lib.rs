@@ -27,7 +27,10 @@ pub fn run() {
                 let _ = brains.register_active(&paths.root_path, None);
                 db::DbState::new(conn, paths)
             }
-            Err(_) => db::DbState::empty(),
+            Err(err) => db::DbState::empty_with_startup_error(format!(
+                "Could not open the remembered brain at {}: {err}",
+                active_root.display()
+            )),
         }
     } else {
         db::DbState::empty()

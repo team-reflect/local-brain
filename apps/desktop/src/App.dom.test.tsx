@@ -11,7 +11,11 @@ vi.mock('./components/app-shell', () => ({
   AppShell: () => <div data-testid="workspace">workspace</div>,
 }))
 vi.mock('./components/brain-chooser', () => ({
-  BrainChooser: () => <div data-testid="chooser">chooser</div>,
+  BrainChooser: ({ errorMessage }: { errorMessage?: string | null }) => (
+    <div data-testid="chooser">
+      {errorMessage ? <p role="alert">{errorMessage}</p> : 'chooser'}
+    </div>
+  ),
 }))
 vi.mock('./routing/router', () => ({
   RouterProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -75,6 +79,22 @@ describe('App active-brain gate', () => {
     renderApp({ isPending: false, isError: false, data: null })
 
     expect(screen.getByTestId('chooser')).toBeTruthy()
+    expect(screen.queryByTestId('workspace')).toBeNull()
+  })
+
+  it('shows the chooser with the startup database error when the remembered brain fails to open', () => {
+    renderApp({
+      isPending: false,
+      isError: true,
+      data: undefined,
+      error: {
+        kind: 'noDatabase',
+        message: 'Could not open the remembered brain at /Brains/Home: database disk image is malformed',
+      },
+    })
+
+    expect(screen.getByTestId('chooser')).toBeTruthy()
+    expect(screen.getByRole('alert').textContent).toContain('database disk image is malformed')
     expect(screen.queryByTestId('workspace')).toBeNull()
   })
 

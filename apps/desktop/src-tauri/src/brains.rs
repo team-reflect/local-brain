@@ -512,7 +512,12 @@ impl BrainState {
     fn active_info(&self, db: &DbState) -> AppResult<Option<BrainInfo>> {
         let paths = match db.active_paths() {
             Ok(paths) => paths,
-            Err(AppError::NoDatabase { .. }) => return Ok(None),
+            Err(AppError::NoDatabase { .. }) => {
+                if let Some(message) = db.startup_error()? {
+                    return Err(AppError::no_database(message));
+                }
+                return Ok(None);
+            }
             Err(err) => return Err(err),
         };
         let active = paths.root_path.display().to_string();
@@ -1251,6 +1256,22 @@ mod tests {
                 "a stored active file path must not open as a brain root"
             );
         }
+    }
+
+    #[test]
+    fn active_info_surfaces_startup_load_error() {
+        let brains = memory_state();
+        let db = DbState::empty_with_startup_error(
+            "Could not open the remembered brain at /Brains/Home: database disk image is malformed",
+        );
+
+        let result = brains.active_info(&db);
+
+        assert!(matches!(
+            result,
+            Err(AppError::NoDatabase { ref message })
+                if message.contains("database disk image is malformed")
+        ));
     }
 
     #[test]

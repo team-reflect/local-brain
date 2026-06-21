@@ -4,6 +4,7 @@ import { BrainChooser } from './components/brain-chooser'
 import { EmbeddingsSync } from './components/embeddings-sync'
 import { Loading } from './components/loading'
 import { useActiveBrain, useEnsureSeed } from './lib/queries'
+import { errorMessage } from './lib/utils'
 import { RouterProvider } from './routing/router'
 
 /**
@@ -46,7 +47,7 @@ export function App(): ReactNode {
   }
 
   if (!active.data) {
-    return <BrainChooser />
+    return <BrainChooser errorMessage={active.isError ? errorMessage(active.error) : null} />
   }
 
   return <BrainWorkspace key={active.data.rootPath} />
