@@ -24,6 +24,11 @@ pub(super) fn parse_record_ref(raw: &str, label: &str) -> Result<(String, String
     let (kind, id) = raw
         .split_once(':')
         .ok_or_else(|| CliError::Runtime(format!("invalid {label} '{raw}' (expected kind:id)")))?;
+    let kind = match kind {
+        "org" => "organization",
+        "doc" => "document",
+        other => other,
+    };
     if !RECORD_TYPES.contains(&kind) {
         return Err(CliError::Runtime(format!("unknown {label} kind '{kind}'")));
     }

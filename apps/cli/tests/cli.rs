@@ -3477,6 +3477,7 @@ fn import_document_records_identity_provenance_and_finalizes() {
     );
     let document_id = document["id"].as_str().unwrap();
     let document_ref = format!("document:{document_id}");
+    let document_alias_ref = format!("doc:{document_id}");
     let evidence = format!("{document_ref}~credential flow");
 
     run_json(
@@ -3488,7 +3489,7 @@ fn import_document_records_identity_provenance_and_finalizes() {
             "--kind",
             "summary",
             "--subject",
-            &document_ref,
+            &document_alias_ref,
             "--text",
             "Project Alpha should launch with the credential flow.",
             "--evidence",
@@ -3515,7 +3516,7 @@ fn import_document_records_identity_provenance_and_finalizes() {
             &evidence,
         ],
     );
-    run_json(
+    let memory = run_json(
         &db,
         &[
             "--json",
@@ -3526,6 +3527,21 @@ fn import_document_records_identity_provenance_and_finalizes() {
             "decision",
         ],
     );
+    assert_eq!(memory["isDuplicate"], false);
+    assert_eq!(memory["chunkCount"], 1);
+    let duplicate_memory = run_json(
+        &db,
+        &[
+            "--json",
+            "promote",
+            "fact",
+            fact["id"].as_str().unwrap(),
+            "--memory-kind",
+            "decision",
+        ],
+    );
+    assert_eq!(duplicate_memory["id"], memory["id"]);
+    assert_eq!(duplicate_memory["isDuplicate"], true);
     run_json(
         &db,
         &[
@@ -3553,7 +3569,13 @@ fn import_document_records_identity_provenance_and_finalizes() {
 
     let finalized = run_json(
         &db,
-        &["--json", "import", "finalize", "--record", &document_ref],
+        &[
+            "--json",
+            "import",
+            "finalize",
+            "--record",
+            &document_alias_ref,
+        ],
     );
     assert_eq!(finalized["complete"], true);
     assert!(finalized["missing"].as_array().unwrap().is_empty());
@@ -3577,20 +3599,29 @@ fn import_document_records_identity_provenance_and_finalizes() {
         )
         .unwrap();
     assert_eq!(identity_count, 1);
-    let (provenance_count, finalized_count): (i64, i64) = conn
-        .query_row(
+    let (provenance_count, finalized_count, memory_count, memory_chunks): (i64, i64, i64, i64) =
+        conn.query_row(
             "SELECT COUNT(*),
-                    SUM(CASE WHEN provenance_kind = 'finalized' THEN 1 ELSE 0 END)
+                    SUM(CASE WHEN provenance_kind = 'finalized' THEN 1 ELSE 0 END),
+                    (SELECT COUNT(*) FROM memories WHERE promoted_from_fact_id = ?2),
+                    (SELECT COUNT(*) FROM content_chunks
+                     WHERE record_type = 'memory' AND record_id = ?3)
              FROM record_provenance
              WHERE record_type = 'document'
                AND record_id = ?1
                AND provenance_kind IN ('imported', 'finalized')",
-            [document_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            (
+                document_id,
+                fact["id"].as_str().unwrap(),
+                memory["id"].as_str().unwrap(),
+            ),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .unwrap();
     assert_eq!(provenance_count, 2);
     assert_eq!(finalized_count, 1);
+    assert_eq!(memory_count, 1);
+    assert_eq!(memory_chunks, 1);
 }
 
 #[test]

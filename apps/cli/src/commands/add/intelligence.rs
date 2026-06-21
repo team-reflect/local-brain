@@ -511,7 +511,33 @@ pub fn promote_fact(
     let (subject_type, subject_id, key, value_text, value_json, confidence, observed_at) = fact;
     let value = value_text.or(value_json).unwrap_or_default();
     let claim = format!("{subject_type}:{subject_id} {key}: {value}");
+    if let Some(existing_id) = conn
+        .query_row(
+            "SELECT id FROM memories
+             WHERE promoted_from_fact_id = ?1 AND archived_at IS NULL
+             LIMIT 1",
+            params![args.fact_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+    {
+        let tx = conn.transaction()?;
+        let count = replace_chunks(&tx, "memory", &existing_id, &claim)?;
+        tx.commit()?;
+        if json_output {
+            return print_json(&json!({
+                "kind": "memory",
+                "id": existing_id,
+                "promotedFromFactId": args.fact_id,
+                "isDuplicate": true,
+                "chunkCount": count,
+            }));
+        }
+        println!("memory {existing_id}");
+        return Ok(());
+    }
     let id = new_id();
+    let memory_kind = normalize_optional(Some(args.memory_kind)).unwrap_or_else(|| "fact".into());
     let tx = conn.transaction()?;
     tx.execute(
         "INSERT INTO memories
@@ -519,13 +545,14 @@ pub fn promote_fact(
          VALUES (?1,?2,?3,?4,?5,?6)",
         params![
             id,
-            normalize_optional(Some(args.memory_kind)).unwrap_or_else(|| "fact".into()),
-            claim,
+            memory_kind,
+            claim.as_str(),
             confidence,
             observed_at.or(Some(now_iso(&tx)?)),
             args.fact_id,
         ],
     )?;
+    let count = insert_chunks(&tx, "memory", &id, &claim)?;
     if RECORD_TYPES.contains(&subject_type.as_str()) {
         tx.execute(
             "INSERT INTO memory_links (id, memory_id, record_type, record_id)
@@ -576,6 +603,8 @@ pub fn promote_fact(
             "kind": "memory",
             "id": id,
             "promotedFromFactId": args.fact_id,
+            "isDuplicate": false,
+            "chunkCount": count,
         }))
     } else {
         println!("memory {id}");

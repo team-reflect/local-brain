@@ -7,7 +7,37 @@ use rusqlite::{params, Connection};
 use crate::commands::{to_like_pattern_lower, EvidenceLocator, EvidenceRef, LinkKind, LinkRef};
 use crate::error::CliError;
 use crate::id::new_id;
-use crate::text::chunk_text;
+use crate::text::{chunk_text, content_hash};
+
+/// Insert one ordered chunk row, stamping its `content_hash`.
+///
+/// The hash is what the embedding pipeline diffs against (`chunk_embeddings`):
+/// it only re-embeds a chunk when the stored `content_chunks.content_hash` no
+/// longer matches the embedded one, so every writer of chunk text MUST keep the
+/// hash in lockstep with the text. The Rust `content_hash` is the same
+/// normalized-text SHA-256 as the app's `contentHash`, so a CLI-written chunk
+/// and an app-written chunk hash identically.
+fn insert_chunk_row(
+    conn: &Connection,
+    record_type: &str,
+    record_id: &str,
+    chunk_index: i64,
+    text: &str,
+) -> Result<(), CliError> {
+    conn.execute(
+        "INSERT INTO content_chunks (id, record_type, record_id, chunk_index, text, content_hash)
+         VALUES (?1,?2,?3,?4,?5,?6)",
+        params![
+            new_id(),
+            record_type,
+            record_id,
+            chunk_index,
+            text,
+            content_hash(text),
+        ],
+    )?;
+    Ok(())
+}
 
 /// Chunk `body` and insert the ordered `content_chunks` rows for a record,
 /// returning the chunk count. The chunking is the Rust twin of the app's, so the
@@ -20,14 +50,16 @@ pub(super) fn insert_chunks(
 ) -> Result<usize, CliError> {
     let chunks = chunk_text(body);
     for (index, text) in chunks.iter().enumerate() {
-        conn.execute(
-            "INSERT INTO content_chunks (id, record_type, record_id, chunk_index, text) VALUES (?1,?2,?3,?4,?5)",
-            params![new_id(), record_type, record_id, index as i64, text],
-        )?;
+        insert_chunk_row(conn, record_type, record_id, index as i64, text)?;
     }
     Ok(chunks.len())
 }
 
+/// Re-chunk `body` over a record's existing chunks: refresh the text (and hash)
+/// of rows still in range, insert any new tail rows, and drop rows the shorter
+/// body no longer needs. Updating `content_hash` alongside `text` is what makes
+/// a re-import/enrich actually re-embed — without it the embedding pipeline sees
+/// an unchanged hash and serves a stale vector for the old text.
 pub(super) fn replace_chunks(
     conn: &Connection,
     record_type: &str,
@@ -48,15 +80,11 @@ pub(super) fn replace_chunks(
             .ok();
         if let Some(existing_id) = existing_id {
             conn.execute(
-                "UPDATE content_chunks SET text = ?1 WHERE id = ?2",
-                params![text, existing_id],
+                "UPDATE content_chunks SET text = ?1, content_hash = ?2 WHERE id = ?3",
+                params![text, content_hash(text), existing_id],
             )?;
         } else {
-            conn.execute(
-                "INSERT INTO content_chunks (id, record_type, record_id, chunk_index, text)
-                 VALUES (?1,?2,?3,?4,?5)",
-                params![new_id(), record_type, record_id, chunk_index, text],
-            )?;
+            insert_chunk_row(conn, record_type, record_id, chunk_index, text)?;
         }
     }
     conn.execute(
@@ -271,5 +299,51 @@ mod tests {
             result.is_err(),
             "an unmatched quote must error, not silently skip"
         );
+    }
+
+    #[test]
+    fn insert_chunks_stamps_the_content_hash() {
+        let conn = brain_schema::open_in_memory().unwrap();
+        conn.execute("INSERT INTO documents (id, title) VALUES ('d1', 'Doc')", [])
+            .unwrap();
+        insert_chunks(&conn, "document", "d1", "the original body text").unwrap();
+        let hash: Option<String> = conn
+            .query_row(
+                "SELECT content_hash FROM content_chunks WHERE record_type='document' AND record_id='d1' AND chunk_index=0",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(hash.as_deref(), Some(content_hash("the original body text").as_str()));
+    }
+
+    #[test]
+    fn replace_chunks_refreshes_content_hash_when_text_changes() {
+        // Regression: replacing a chunk's text must also refresh its content_hash,
+        // or the embedding pipeline's `cc.content_hash != ce.content_hash` staleness
+        // check never fires and a re-import/enrich serves a stale vector.
+        let conn = brain_schema::open_in_memory().unwrap();
+        conn.execute("INSERT INTO documents (id, title) VALUES ('d1', 'Doc')", [])
+            .unwrap();
+        replace_chunks(&conn, "document", "d1", "first version of the body").unwrap();
+        let first: String = conn
+            .query_row(
+                "SELECT content_hash FROM content_chunks WHERE record_id='d1' AND chunk_index=0",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        replace_chunks(&conn, "document", "d1", "a completely different body").unwrap();
+        let (second_text, second_hash): (String, String) = conn
+            .query_row(
+                "SELECT text, content_hash FROM content_chunks WHERE record_id='d1' AND chunk_index=0",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(second_text, "a completely different body");
+        assert_ne!(first, second_hash, "changed text must change the stored hash");
+        assert_eq!(second_hash, content_hash("a completely different body"));
     }
 }
