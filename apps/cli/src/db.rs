@@ -46,7 +46,7 @@ pub fn resolve_storage(
 
     let database_path = brain_schema::resolve_db_path().ok_or_else(|| {
         CliError::NoDatabase(
-            "no brain selected; pass --brain <dir>, set BRAIN_ROOT, or pass --db <path>"
+            "no brain selected; pass --brain <dir>, set BRAIN_ROOT, pass --db <path>, or set BRAIN_DB"
                 .to_string(),
         )
     })?;

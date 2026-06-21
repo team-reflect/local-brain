@@ -1,4 +1,5 @@
 use std::env;
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -148,7 +149,7 @@ fn status_for(paths: &CliPaths) -> CliStatus {
         bundled_version: version_for(&paths.bundled_path),
         install_target_path: display_path(&paths.install_target),
         install_target_dir: display_path(&paths.install_dir),
-        target_dir_on_path: path_contains_dir(&paths.install_dir),
+        target_dir_on_path: target_dir_on_path(&paths.install_dir),
         installed_version: installed_path
             .as_ref()
             .and_then(|_| version_for(&paths.install_target)),
@@ -245,11 +246,34 @@ fn symlink_target(path: &Path) -> Option<PathBuf> {
     fs::read_link(path).ok()
 }
 
-fn path_contains_dir(dir: &Path) -> bool {
+fn target_dir_on_path(dir: &Path) -> bool {
+    process_path_contains_dir(dir) || shell_path_contains_dir(dir).unwrap_or(false)
+}
+
+fn process_path_contains_dir(dir: &Path) -> bool {
     let Some(path) = env::var_os("PATH") else {
         return false;
     };
     path_list_contains_dir(dir, &path)
+}
+
+fn shell_path_contains_dir(dir: &Path) -> Option<bool> {
+    let path = login_shell_path()?;
+    Some(path_list_contains_dir(dir, &path))
+}
+
+fn login_shell_path() -> Option<OsString> {
+    let shell = env::var_os("SHELL")
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| OsString::from("/bin/zsh"));
+    let output = Command::new(shell)
+        .args(["-lc", "printf %s \"$PATH\""])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(OsString::from(String::from_utf8(output.stdout).ok()?))
 }
 
 fn path_list_contains_dir(dir: &Path, path: &std::ffi::OsStr) -> bool {

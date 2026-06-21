@@ -136,7 +136,8 @@ extraction is sent through the provider boundary.
 ## Troubleshooting
 
 - **"no brain selected" (CLI exit 4):** no brain target was provided. Pass
-  `--brain <dir>`, set `BRAIN_ROOT`, or use the advanced `--db` override.
+  `--brain <dir>`, set `BRAIN_ROOT`, or use the advanced `--db` / `BRAIN_DB`
+  override.
 - **"no brain database" (CLI exit 4):** a target was provided, but no database
   exists there. Run `brain add …` with `--brain <dir>` or open the app and choose
   that folder.
