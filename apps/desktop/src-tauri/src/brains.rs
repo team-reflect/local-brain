@@ -390,10 +390,31 @@ fn infos(
 }
 
 pub(crate) fn list_brain_infos(db: &DbState, brains: &BrainState) -> AppResult<Vec<BrainInfo>> {
-    let live_active = db.active_root_path().ok();
+    let active_paths = db.active_paths().ok();
+    let live_active = active_paths.as_ref().map(|paths| paths.root_path.as_path());
     let schema_version = db.schema_version().ok();
     let conn = brains.lock()?;
-    infos(&conn, live_active.as_deref(), schema_version)
+    let mut list = infos(&conn, live_active, schema_version)?;
+    if let Some(paths) = active_paths {
+        let active = paths.root_path.display().to_string();
+        if !list.iter().any(|brain| brain.root_path == active) {
+            list.insert(
+                0,
+                BrainInfo {
+                    root_path: active.clone(),
+                    database_path: paths.database_path.display().to_string(),
+                    assets_path: paths.assets_path.display().to_string(),
+                    name: derive_name(&paths.root_path),
+                    color: DEFAULT_COLOR.to_string(),
+                    created_ms: 0,
+                    last_opened_ms: 0,
+                    is_active: true,
+                    schema_version,
+                },
+            );
+        }
+    }
+    Ok(list)
 }
 
 fn log_manifest_sync(result: AppResult<bool>) {
@@ -1206,6 +1227,26 @@ mod tests {
         // registry's recorded active_path).
         let none = infos(&conn, None, None).unwrap();
         assert!(none.iter().all(|info| !info.is_active));
+    }
+
+    #[test]
+    fn list_brain_infos_includes_uncatalogued_active_brain() {
+        // The skill manifest is built from `list_brain_infos`; if the live DB is
+        // open on an uncatalogued brain (for example a BRAIN_ROOT pin or a failed
+        // best-effort startup registry write), agents still need that active
+        // root in brains.json.
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("Work");
+        let (db, key) = live_db(&root);
+        let brains = memory_state();
+
+        let list = list_brain_infos(&db, &brains).unwrap();
+
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].root_path, key);
+        assert_eq!(list[0].name, "Work");
+        assert!(list[0].is_active);
+        assert_eq!(list[0].schema_version, Some(4));
     }
 
     #[test]
