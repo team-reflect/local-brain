@@ -68,7 +68,7 @@ export function TodaySurface(): ReactNode {
 
       <DailyBriefPanel
         note={dailyBrief.data ?? null}
-        loading={dailyBrief.isPending}
+        loading={dailyBrief.isPending || (dailyBrief.isFetching && dailyBrief.data == null)}
         generating={generateBrief.isPending}
         error={generateBrief.error}
         providersReady={providersReady}
