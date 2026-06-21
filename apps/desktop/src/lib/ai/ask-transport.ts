@@ -1,31 +1,23 @@
-import { createAnthropic } from '@ai-sdk/anthropic'
-import { createGoogleGenerativeAI } from '@ai-sdk/google'
-import { createOpenAI } from '@ai-sdk/openai'
 import {
   convertToModelMessages,
   createUIMessageStream,
   stepCountIs,
   streamText,
   type ChatTransport,
-  type LanguageModel,
   type UIMessage,
   type UIMessageChunk,
 } from 'ai'
 import {
-  aiKeySecretName,
   appendChatMessage,
   buildChatSystemPrompt,
   buildChatTools,
   createChatId,
   createConversation,
-  defaultAiProvider,
   getConversation,
-  getModelSettings,
-  keychainGet,
   listProjects,
   localDateString,
-  type AiProviderConfig,
 } from '@local-brain/core'
+import { resolveLanguageModel } from './provider'
 
 const TOOL_STEPS = 5
 
@@ -54,39 +46,6 @@ function titleForQuestion(question: string): string {
 async function ensureConversation(chatId: string, title: string): Promise<void> {
   const existing = await getConversation(chatId)
   if (!existing) await createConversation({ id: chatId, title })
-}
-
-function modelFor(config: AiProviderConfig, apiKey: string): LanguageModel {
-  switch (config.provider) {
-    case 'openai':
-      return createOpenAI({ apiKey })(config.model)
-    case 'anthropic':
-      return createAnthropic({
-        apiKey,
-        headers: { 'anthropic-dangerous-direct-browser-access': 'true' },
-      })(config.model)
-    case 'google':
-      return createGoogleGenerativeAI({ apiKey })(config.model)
-  }
-  const unreachable: never = config.provider
-  return unreachable
-}
-
-async function resolveModel(): Promise<{ model: LanguageModel; label: string }> {
-  const settings = await getModelSettings()
-  const config = defaultAiProvider({
-    providers: settings.providers,
-    defaultProviderId: settings.defaultProviderId,
-  })
-  if (!config) throw new Error('No AI provider is configured. Add one in Settings.')
-
-  const apiKey = await keychainGet(aiKeySecretName(config.id))
-  if (!apiKey) throw new Error('The selected AI provider has no usable key. Add one in Settings.')
-
-  return {
-    model: modelFor(config, apiKey),
-    label: `${config.provider}/${config.model}`,
-  }
 }
 
 function assistantMessage(messageId: string, text: string): UIMessage {
@@ -163,7 +122,7 @@ export function createAskTransport(): ChatTransport<UIMessage> {
 
       try {
         const [{ model, label }, { system }] = await Promise.all([
-          resolveModel(),
+          resolveLanguageModel(),
           loadChatContext(),
         ])
         const result = streamText({
