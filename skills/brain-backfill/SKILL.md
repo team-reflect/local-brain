@@ -49,6 +49,14 @@ brain --brain "$BRAIN_ROOT" --json source ensure --slug google_calendar --name "
 brain --brain "$BRAIN_ROOT" --json source ensure --slug google_people --name "Google People"
 ```
 
+Before starting source passes, inspect the returned `projects` and
+`counts.projects`. If no projects exist, do not continue directly into import
+writes. First identify the user's core project boundaries from self context,
+source metadata, and high-signal source records such as emails, calendar events,
+notes, meetings, and contacts. Present a compact candidate project list with the
+evidence that supports each boundary, get explicit user sign-off, then create
+only the approved projects with `brain add project` before proceeding.
+
 If self is missing or has no handles, register known user emails before importing
 email/calendar data:
 
@@ -100,11 +108,25 @@ Merge ledger shards at the end and run one global audit.
 
 ### Projects And Boundaries
 
-Start from accepted projects in `import-context`. Group each company/product as
-one project unless the user explicitly asks for subprojects. If the user has
-already agreed to a project boundary, create it with `brain add project` and
-link later imports to it. Otherwise do not auto-create projects during import;
-use `brain suggest project` with evidence.
+Start from accepted projects in `import-context`. Treat the project inventory as
+a gate, not background context: if `counts.projects` is zero or `projects` is
+empty, pause the backfill and figure out the user's core projects before creating
+durable records.
+
+To identify initial project candidates, inspect enough source context to see the
+real workstreams: correspondent domains, recurring meeting titles, calendar
+clusters, note paths/headings, contact affiliations, and repeated subject stems.
+This discovery may require reading selected high-signal emails, meetings, notes,
+or events, but it is still a discovery pass: ledger what was considered and do
+not import records yet except for necessary source setup/self identity.
+
+Present the user with a compact sign-off list: candidate name, one-sentence
+boundary, supporting evidence, and any obvious non-goals or merge/split choices.
+Group each company/product as one project unless the user explicitly asks for
+subprojects. After the user approves boundaries, create those projects with
+`brain add project` and link later imports to them. For any later source record
+that hints at an unapproved project boundary, do not auto-create it during
+import; use `brain suggest project` with evidence.
 
 ### Granola
 
