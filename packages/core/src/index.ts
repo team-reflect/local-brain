@@ -69,6 +69,14 @@ export {
   type ListProjectsOptions,
 } from './domains/projects/getters'
 export {
+  getProjectIntelligence,
+  type ProjectAiNote,
+  type ProjectExtractedFact,
+  type ProjectIntelligence,
+  type ProjectMemory,
+  type ProjectTag,
+} from './domains/projects/intelligence'
+export {
   createProject,
   updateProject,
   completeProject,
