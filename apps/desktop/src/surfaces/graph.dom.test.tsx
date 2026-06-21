@@ -239,6 +239,17 @@ describe('GraphSurface', () => {
     })
   })
 
+  it('keeps enlarged node hit targets below interaction links', () => {
+    renderWithProviders(<GraphSurface showHeader={false} />)
+
+    const hitLayer = screen.getByTestId('graph-node-hit-layer')
+    const interactionLayer = screen.getByTestId('graph-interaction-edge-layer')
+
+    expect(hitLayer.compareDocumentPosition(interactionLayer) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(
+      0,
+    )
+  })
+
   it('hides interaction links when the Interactions filter is turned off', () => {
     const { container } = renderWithProviders(<GraphSurface showHeader={false} />)
 

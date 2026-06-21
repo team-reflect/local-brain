@@ -93,22 +93,8 @@ function routeForNode(node: PositionedNode): Route | null {
 }
 
 function actionLabelForNode(node: PositionedNode): string {
-  switch (node.kind) {
-    case 'self':
-      return `Open person ${node.label}`
-    case 'person':
-      return `Open person ${node.label}`
-    case 'organization':
-      return `Open organization ${node.label}`
-    case 'project':
-      return `Open project ${node.label}`
-    case 'task':
-      return `Open task ${node.label}`
-    case 'document':
-      return `Open document ${node.label}`
-    case 'memory':
-      return `Memory ${node.label}`
-  }
+  const kind = node.kind === 'self' ? 'person' : node.kind
+  return kind === 'memory' ? `Memory ${node.label}` : `Open ${kind} ${node.label}`
 }
 
 function clip(label: string): string {
@@ -415,40 +401,60 @@ export function GraphSurface({
                       />
                     ))}
                 </g>
-                {layout.edges
-                  .filter((edge) => edge.kind === 'interaction')
-                  .map((edge, index) => {
-                    const route: Route | null = edge.interactionId
-                      ? { kind: 'interaction', id: edge.interactionId }
-                      : null
+                <g data-testid="graph-node-hit-layer">
+                  {layout.nodes.map((node) => {
+                    const route = routeForNode(node)
+                    if (!route) return null
                     return (
-                      <g
-                        key={`interaction-${edge.source.id}-${edge.target.id}-${index}`}
-                        className={route ? 'cursor-pointer' : undefined}
-                        onClick={route ? () => handleNodeClick(route) : undefined}
-                      >
-                        {/* Wide transparent hit area so thin links are easy to click. */}
-                        <line
-                          x1={edge.source.x}
-                          y1={edge.source.y}
-                          x2={edge.target.x}
-                          y2={edge.target.y}
-                          stroke="transparent"
-                          strokeWidth={12}
-                        />
-                        <line
-                          x1={edge.source.x}
-                          y1={edge.source.y}
-                          x2={edge.target.x}
-                          y2={edge.target.y}
-                          stroke={KIND_COLOR.interaction}
-                          strokeWidth={interactionEdgeWidth(edge.weight)}
-                          strokeOpacity={0.55}
-                          strokeLinecap="round"
-                        />
-                      </g>
+                      <circle
+                        key={`hit-${node.id}`}
+                        cx={node.x}
+                        cy={node.y}
+                        r={Math.max(node.radius, MIN_NODE_HIT_RADIUS)}
+                        fill="transparent"
+                        pointerEvents="all"
+                        className="cursor-pointer"
+                        onClick={() => handleNodeClick(route)}
+                      />
                     )
                   })}
+                </g>
+                <g data-testid="graph-interaction-edge-layer">
+                  {layout.edges
+                    .filter((edge) => edge.kind === 'interaction')
+                    .map((edge, index) => {
+                      const route: Route | null = edge.interactionId
+                        ? { kind: 'interaction', id: edge.interactionId }
+                        : null
+                      return (
+                        <g
+                          key={`interaction-${edge.source.id}-${edge.target.id}-${index}`}
+                          className={route ? 'cursor-pointer' : undefined}
+                          onClick={route ? () => handleNodeClick(route) : undefined}
+                        >
+                          {/* Wide transparent hit area so thin links are easy to click. */}
+                          <line
+                            x1={edge.source.x}
+                            y1={edge.source.y}
+                            x2={edge.target.x}
+                            y2={edge.target.y}
+                            stroke="transparent"
+                            strokeWidth={12}
+                          />
+                          <line
+                            x1={edge.source.x}
+                            y1={edge.source.y}
+                            x2={edge.target.x}
+                            y2={edge.target.y}
+                            stroke={KIND_COLOR.interaction}
+                            strokeWidth={interactionEdgeWidth(edge.weight)}
+                            strokeOpacity={0.55}
+                            strokeLinecap="round"
+                          />
+                        </g>
+                      )
+                    })}
+                </g>
                 {layout.nodes.map((node) => {
                   const route = routeForNode(node)
                   return (
@@ -462,13 +468,6 @@ export function GraphSurface({
                       tabIndex={route ? 0 : undefined}
                       aria-label={route ? actionLabelForNode(node) : undefined}
                     >
-                      {route ? (
-                        <circle
-                          r={Math.max(node.radius, MIN_NODE_HIT_RADIUS)}
-                          fill="transparent"
-                          pointerEvents="all"
-                        />
-                      ) : null}
                       <circle r={node.radius} fill={KIND_COLOR[node.kind]} />
                       <text
                         x={0}
