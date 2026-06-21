@@ -926,7 +926,8 @@ fn upsert_organization_profile(
     source_urls_json: Option<String>,
     raw_enrichment_json: Option<String>,
 ) -> Result<String, CliError> {
-    let existing = match normalize_optional(args.prompt_fingerprint) {
+    let normalized_prompt = normalize_optional(args.prompt_fingerprint);
+    let existing = match normalized_prompt.as_deref() {
         Some(ref prompt) => conn
             .query_row(
                 "SELECT id FROM organization_profiles
@@ -936,7 +937,15 @@ fn upsert_organization_profile(
                 |row| row.get::<_, String>(0),
             )
             .optional()?,
-        None => None,
+        None => conn
+            .query_row(
+                "SELECT id FROM organization_profiles
+                 WHERE organization_id = ?1 AND prompt_fingerprint IS NULL
+                 LIMIT 1",
+                params![organization_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?,
     };
     let researched_at = now_iso(conn)?;
     let id = match existing {
@@ -962,7 +971,7 @@ fn upsert_organization_profile(
                 params![
                     id,
                     normalize_optional(args.model),
-                    normalize_optional(args.prompt_fingerprint),
+                    normalized_prompt.as_deref(),
                     normalize_optional(args.canonical_name),
                     normalize_optional(args.website),
                     normalize_optional(args.one_line_description),
@@ -992,7 +1001,7 @@ fn upsert_organization_profile(
                     id,
                     organization_id,
                     normalize_optional(args.model),
-                    normalize_optional(args.prompt_fingerprint),
+                    normalized_prompt.as_deref(),
                     normalize_optional(args.canonical_name),
                     normalize_optional(args.website),
                     normalize_optional(args.one_line_description),

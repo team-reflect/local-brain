@@ -3734,6 +3734,158 @@ fn evidence_refs_accept_transcript_chunks() {
 }
 
 #[test]
+fn import_finalize_accepts_transcript_chunks_for_interaction() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let person = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Alex MacCaw",
+            "--email",
+            "alex@example.com",
+        ],
+    );
+    let project = run_json(
+        &db,
+        &["--json", "add", "project", "--name", "Credential Flow"],
+    );
+    let participant = "speaker:Alex MacCaw <alex@example.com>";
+    let interaction = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Granola sync",
+            "--source",
+            "granola",
+            "--external-id",
+            "granola-meeting-transcript-only",
+            "--participant",
+            participant,
+        ],
+    );
+    let interaction_id = interaction["id"].as_str().unwrap();
+    let transcript = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "transcript",
+            "--interaction",
+            interaction_id,
+            "--text",
+            "Alex: The credential flow needs to be ready before Friday.",
+            "--source",
+            "granola",
+            "--external-kind",
+            "transcript",
+            "--external-id",
+            "granola-transcript-finalize",
+            "--transcribed-by",
+            "granola",
+        ],
+    );
+    let transcript_id = transcript["id"].as_str().unwrap();
+    let interaction_ref = format!("interaction:{interaction_id}");
+    let transcript_ref = format!("interaction_transcript:{transcript_id}");
+    let project_ref = format!("project:{}", project["id"].as_str().unwrap());
+    let person_ref = format!("person:{}", person["id"].as_str().unwrap());
+    let evidence = format!("{transcript_ref}~credential flow");
+
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "ai-note",
+            "--kind",
+            "summary",
+            "--interaction",
+            interaction_id,
+            "--text",
+            "The credential flow needs to be ready before Friday.",
+            "--evidence",
+            &evidence,
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "fact",
+            "--subject",
+            &interaction_ref,
+            "--key",
+            "deadline",
+            "--value-text",
+            "The credential flow needs to be ready before Friday.",
+            "--source-record",
+            &transcript_ref,
+            "--evidence",
+            &evidence,
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "task",
+            "--title",
+            "Ready the credential flow",
+            "--link",
+            &interaction_ref,
+            "--link",
+            &project_ref,
+            "--link",
+            &person_ref,
+            "--evidence",
+            &evidence,
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "tag",
+            "ensure",
+            "--name",
+            "Credential Flow",
+            "--slug",
+            "credential-flow",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "tag",
+            "attach",
+            "--tag",
+            "credential-flow",
+            "--record",
+            &interaction_ref,
+        ],
+    );
+
+    let finalized = run_json(
+        &db,
+        &["--json", "import", "finalize", "--record", &interaction_ref],
+    );
+    assert_eq!(finalized["complete"], true);
+    assert!(finalized["missing"].as_array().unwrap().is_empty());
+}
+
+#[test]
 fn import_transcript_rejects_external_identity_for_another_interaction() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
@@ -3891,6 +4043,54 @@ fn enrich_organization_reuses_profile_for_same_prompt_fingerprint() {
     assert_eq!(profile_count, 1);
     assert_eq!(description, "Updated profile text.");
     assert_eq!(why, "Updated reason.");
+}
+
+#[test]
+fn enrich_organization_reuses_profile_without_prompt_fingerprint() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let org = run_json(
+        &db,
+        &["--json", "add", "organization", "--name", "Example Labs"],
+    );
+    let org_id = org["id"].as_str().unwrap();
+
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "enrich",
+            "organization",
+            org_id,
+            "--one-line-description",
+            "Original profile text.",
+        ],
+    );
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "enrich",
+            "organization",
+            org_id,
+            "--one-line-description",
+            "Updated profile text.",
+        ],
+    );
+    assert_eq!(second["profileId"], first["profileId"]);
+
+    let conn = Connection::open(&db).unwrap();
+    let (profile_count, description): (i64, String) = conn
+        .query_row(
+            "SELECT COUNT(*), one_line_description
+             FROM organization_profiles
+             WHERE organization_id = ?1",
+            [org_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(profile_count, 1);
+    assert_eq!(description, "Updated profile text.");
 }
 
 #[test]

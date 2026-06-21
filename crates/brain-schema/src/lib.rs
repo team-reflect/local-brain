@@ -361,12 +361,21 @@ mod tests {
     #[test]
     fn affiliations_enforce_a_single_current_employer() {
         let conn = open_in_memory().unwrap();
-        conn.execute("INSERT INTO people (id, full_name) VALUES ('p1', 'Ada')", [])
-            .unwrap();
-        conn.execute("INSERT INTO organizations (id, name) VALUES ('o1', 'A')", [])
-            .unwrap();
-        conn.execute("INSERT INTO organizations (id, name) VALUES ('o2', 'B')", [])
-            .unwrap();
+        conn.execute(
+            "INSERT INTO people (id, full_name) VALUES ('p1', 'Ada')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO organizations (id, name) VALUES ('o1', 'A')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO organizations (id, name) VALUES ('o2', 'B')",
+            [],
+        )
+        .unwrap();
         conn.execute(
             "INSERT INTO affiliations (id, person_id, organization_id, is_current) VALUES ('a1','p1','o1',1)",
             [],
@@ -670,7 +679,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(document, "d1", "document summary is searchable after update");
+        assert_eq!(
+            document, "d1",
+            "document summary is searchable after update"
+        );
     }
 
     #[test]
@@ -718,6 +730,23 @@ mod tests {
                 .unwrap();
             assert_eq!(id, "a1", "asset search should find term: {term}");
         }
+
+        conn.execute(
+            "UPDATE asset_links SET caption = 'wire transfer confirmation' WHERE id = 'al1'",
+            [],
+        )
+        .unwrap();
+        let updated_link_id: String = conn
+            .query_row(
+                "SELECT s.asset_id
+                 FROM assets_fts f
+                 JOIN asset_search s ON s.rowid = f.rowid
+                 WHERE assets_fts MATCH 'wire'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(updated_link_id, "a1");
 
         conn.execute("DELETE FROM assets_fts", []).unwrap();
         conn.execute("INSERT INTO assets_fts(assets_fts) VALUES ('rebuild')", [])

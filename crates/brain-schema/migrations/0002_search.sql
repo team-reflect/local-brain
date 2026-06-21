@@ -234,6 +234,31 @@ CREATE TRIGGER asset_links_search_ai AFTER INSERT ON asset_links BEGIN
     updated_at = excluded.updated_at;
 END;
 
+CREATE TRIGGER asset_links_search_au AFTER UPDATE ON asset_links BEGIN
+  INSERT INTO asset_search (asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at)
+  SELECT asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at
+  FROM asset_search_source WHERE asset_id = new.asset_id
+  ON CONFLICT(asset_id) DO UPDATE SET
+    title = excluded.title,
+    subtitle = excluded.subtitle,
+    metadata_text = excluded.metadata_text,
+    link_text = excluded.link_text,
+    body_text = excluded.body_text,
+    updated_at = excluded.updated_at;
+
+  INSERT INTO asset_search (asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at)
+  SELECT asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at
+  FROM asset_search_source
+  WHERE asset_id = old.asset_id AND old.asset_id != new.asset_id
+  ON CONFLICT(asset_id) DO UPDATE SET
+    title = excluded.title,
+    subtitle = excluded.subtitle,
+    metadata_text = excluded.metadata_text,
+    link_text = excluded.link_text,
+    body_text = excluded.body_text,
+    updated_at = excluded.updated_at;
+END;
+
 CREATE TRIGGER asset_links_search_ad AFTER DELETE ON asset_links BEGIN
   INSERT INTO asset_search (asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at)
   SELECT asset_id, title, subtitle, metadata_text, link_text, body_text, updated_at

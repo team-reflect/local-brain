@@ -415,6 +415,27 @@ fn has_evidence_backed_task_or_memory(
     if policy.no_derived_actions {
         return Ok(true);
     }
+    if kind == "interaction" {
+        return Ok(conn.query_row(
+            "SELECT EXISTS(
+               SELECT 1
+               FROM evidence_refs er
+               JOIN content_chunks cc ON cc.id = er.chunk_id
+               WHERE er.subject_type IN ('task', 'memory')
+                 AND (
+                   (cc.record_type = 'interaction' AND cc.record_id = ?1)
+                   OR (
+                     cc.record_type = 'interaction_transcript'
+                     AND cc.record_id IN (
+                       SELECT id FROM interaction_transcripts WHERE interaction_id = ?1
+                     )
+                   )
+                 )
+             )",
+            params![id],
+            |row| row.get::<_, bool>(0),
+        )?);
+    }
     Ok(conn.query_row(
         "SELECT EXISTS(
            SELECT 1
@@ -443,11 +464,29 @@ fn has_chunks(
     id: &str,
     policy: CompletionPolicy,
 ) -> Result<bool, CliError> {
-    let present = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM content_chunks WHERE record_type = ?1 AND record_id = ?2)",
-        params![kind, id],
-        |row| row.get::<_, bool>(0),
-    )?;
+    let present = if kind == "interaction" {
+        conn.query_row(
+            "SELECT EXISTS(
+               SELECT 1 FROM content_chunks
+               WHERE record_type = 'interaction' AND record_id = ?1
+               UNION
+               SELECT 1
+               FROM content_chunks
+               WHERE record_type = 'interaction_transcript'
+                 AND record_id IN (
+                   SELECT id FROM interaction_transcripts WHERE interaction_id = ?1
+                 )
+             )",
+            params![id],
+            |row| row.get::<_, bool>(0),
+        )?
+    } else {
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM content_chunks WHERE record_type = ?1 AND record_id = ?2)",
+            params![kind, id],
+            |row| row.get::<_, bool>(0),
+        )?
+    };
     if present {
         return Ok(true);
     }
