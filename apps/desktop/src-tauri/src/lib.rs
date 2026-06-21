@@ -13,6 +13,7 @@ mod embed;
 mod error;
 mod fs;
 mod keychain;
+mod skill;
 
 pub use error::{AppError, AppResult};
 
@@ -49,6 +50,9 @@ pub fn run() {
             cli::cli_status,
             cli::cli_install,
             cli::cli_uninstall,
+            skill::skill_status,
+            skill::skill_install,
+            skill::skill_uninstall,
             db::db_query,
             db::db_execute,
             db::db_batch,

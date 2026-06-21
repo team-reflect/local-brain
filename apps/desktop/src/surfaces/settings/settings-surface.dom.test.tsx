@@ -181,6 +181,103 @@ describe('SettingsSurface (Plan 08)', () => {
     expect(screen.getByText('export PATH="$HOME/.local/bin:$PATH"')).toBeDefined()
   })
 
+  it('shows Codex skill install status and installs the skill', async () => {
+    const commands: string[] = []
+    installFakeBridge({
+      respond: (command) => {
+        commands.push(command)
+        return undefined
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="cli-agents" />)
+
+    expect(await screen.findByText('Codex skill is not installed')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Install skill' }))
+
+    await waitFor(() => expect(screen.getByText('Codex skill is installed')).toBeDefined())
+    expect(commands).toContain('skill_install')
+  })
+
+  it('shows Codex skill repair for a stale managed install', async () => {
+    installFakeBridge({
+      respond: (command) => {
+        if (command === 'skill_status') {
+          return {
+            supported: true,
+            installTargetPath: '/Users/alex/.codex/skills/brain/SKILL.md',
+            installTargetDir: '/Users/alex/.codex/skills/brain',
+            bundledHash: 'abc123abc123abc123',
+            installedHash: 'old123old123',
+            installState: 'stale',
+          }
+        }
+        return undefined
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="cli-agents" />)
+
+    expect(await screen.findByText('Codex skill needs repair')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Repair skill' })).toBeDefined()
+  })
+
+  it('shows Codex skill conflicts without offering destructive install', async () => {
+    installFakeBridge({
+      respond: (command) => {
+        if (command === 'skill_status') {
+          return {
+            supported: true,
+            installTargetPath: '/Users/alex/.codex/skills/brain/SKILL.md',
+            installTargetDir: '/Users/alex/.codex/skills/brain',
+            bundledHash: 'abc123abc123abc123',
+            installedHash: null,
+            installState: 'conflict',
+          }
+        }
+        return undefined
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="cli-agents" />)
+
+    expect(await screen.findByText('Codex skill has a conflict')).toBeDefined()
+    expect(screen.getByText(/Another skill already exists/)).toBeDefined()
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Install skill' }).disabled).toBe(
+      true,
+    )
+  })
+
+  it('removes a current managed Codex skill', async () => {
+    const commands: string[] = []
+    installFakeBridge({
+      respond: (command) => {
+        commands.push(command)
+        if (command === 'skill_status') {
+          return {
+            supported: true,
+            installTargetPath: '/Users/alex/.codex/skills/brain/SKILL.md',
+            installTargetDir: '/Users/alex/.codex/skills/brain',
+            bundledHash: 'abc123abc123abc123',
+            installedHash: 'abc123abc123abc123',
+            installState: 'current',
+          }
+        }
+        return undefined
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="cli-agents" />)
+
+    expect(await screen.findByText('Codex skill is installed')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove skill' }))
+
+    await waitFor(() => expect(screen.getByText('Codex skill is not installed')).toBeDefined())
+    expect(commands).toContain('skill_uninstall')
+  })
+
   it('shows byte-level semantic model download progress', async () => {
     installFakeBridge({
       respond: (command) => {

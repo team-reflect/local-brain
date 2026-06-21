@@ -21,6 +21,13 @@ export {
   type CliStatus,
 } from './ipc/cli'
 export {
+  skillInstall,
+  skillStatus,
+  skillUninstall,
+  type SkillInstallState,
+  type SkillStatus,
+} from './ipc/skill'
+export {
   readTextFile,
   readTextFolder,
   type FileImport,

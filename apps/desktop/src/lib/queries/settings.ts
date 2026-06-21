@@ -13,6 +13,9 @@ import {
   keychainHas,
   keychainSet,
   rebuildSearchIndexes,
+  skillInstall,
+  skillStatus,
+  skillUninstall,
   updateAiProvidersState,
   withAiProviderAdded,
   withAiProviderRemoved,
@@ -47,6 +50,26 @@ export function useUninstallCli() {
   return useMutation({
     mutationFn: cliUninstall,
     onSuccess: (status) => queryClient.setQueryData(['cli-status'], status),
+  })
+}
+
+export function useSkillStatus() {
+  return useQuery({ queryKey: ['skill-status'], queryFn: skillStatus })
+}
+
+export function useInstallSkill() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: skillInstall,
+    onSuccess: (status) => queryClient.setQueryData(['skill-status'], status),
+  })
+}
+
+export function useUninstallSkill() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: skillUninstall,
+    onSuccess: (status) => queryClient.setQueryData(['skill-status'], status),
   })
 }
 
