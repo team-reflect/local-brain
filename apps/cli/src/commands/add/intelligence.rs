@@ -175,6 +175,13 @@ fn normalize_json(raw: Option<&str>, field: &str) -> Result<Option<String>, CliE
     Ok(Some(value))
 }
 
+fn promoted_memory_claim(value_text: Option<String>, value_json: Option<String>) -> String {
+    value_text
+        .and_then(|value| normalize_optional(Some(&value)))
+        .or_else(|| value_json.and_then(|value| normalize_optional(Some(&value))))
+        .unwrap_or_default()
+}
+
 fn report_written(
     json_output: bool,
     kind: &str,
@@ -490,7 +497,7 @@ pub fn promote_fact(
 ) -> Result<(), CliError> {
     let fact = conn
         .query_row(
-            "SELECT subject_type, subject_id, key, value_text, value_json, confidence, observed_at
+            "SELECT subject_type, subject_id, value_text, value_json, confidence, observed_at
              FROM extracted_facts
              WHERE id = ?1 AND archived_at IS NULL",
             params![args.fact_id],
@@ -498,19 +505,17 @@ pub fn promote_fact(
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(2)?,
                     row.get::<_, Option<String>>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                    row.get::<_, Option<f64>>(5)?,
-                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<f64>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
                 ))
             },
         )
         .optional()?
         .ok_or_else(|| CliError::NotFound(format!("fact {} not found", args.fact_id)))?;
-    let (subject_type, subject_id, key, value_text, value_json, confidence, observed_at) = fact;
-    let value = value_text.or(value_json).unwrap_or_default();
-    let claim = format!("{subject_type}:{subject_id} {key}: {value}");
+    let (subject_type, subject_id, value_text, value_json, confidence, observed_at) = fact;
+    let claim = promoted_memory_claim(value_text, value_json);
     if let Some(existing_id) = conn
         .query_row(
             "SELECT id FROM memories
@@ -522,6 +527,10 @@ pub fn promote_fact(
         .optional()?
     {
         let tx = conn.transaction()?;
+        tx.execute(
+            "UPDATE memories SET claim = ?1, updated_at = ?2 WHERE id = ?3",
+            params![claim.as_str(), now_iso(&tx)?, existing_id],
+        )?;
         let count = replace_chunks(&tx, "memory", &existing_id, &claim)?;
         tx.commit()?;
         if json_output {
