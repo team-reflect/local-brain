@@ -1,5 +1,5 @@
 import type { Selectable } from 'kysely'
-import type { People, PersonEmails, PersonPhones } from '@local-brain/db'
+import type { Affiliations, People, PersonEmails, PersonPhones } from '@local-brain/db'
 import { db } from '../../db/client'
 
 export type Person = Selectable<People> & {
@@ -7,6 +7,9 @@ export type Person = Selectable<People> & {
 }
 export type PersonEmail = Selectable<PersonEmails>
 export type PersonPhone = Selectable<PersonPhones>
+export type PersonAffiliation = Selectable<Affiliations> & {
+  organizationName: string | null
+}
 
 const PERSON_SELECT = [
   'people.id as id',
@@ -96,5 +99,20 @@ export function listPersonPhones(personId: string): Promise<PersonPhone[]> {
     .where('personId', '=', personId)
     .orderBy('isPrimary', 'desc')
     .orderBy('phone', 'asc')
+    .execute()
+}
+
+/** Person-organization history, current/primary roles first. */
+export function listPersonAffiliations(personId: string): Promise<PersonAffiliation[]> {
+  return db
+    .selectFrom('affiliations')
+    .leftJoin('organizations', 'organizations.id', 'affiliations.organizationId')
+    .selectAll('affiliations')
+    .select('organizations.name as organizationName')
+    .where('affiliations.personId', '=', personId)
+    .orderBy('affiliations.isCurrent', 'desc')
+    .orderBy('affiliations.isPrimary', 'desc')
+    .orderBy('affiliations.startedOn', 'desc')
+    .orderBy('organizations.name', 'asc')
     .execute()
 }

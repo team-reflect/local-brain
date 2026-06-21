@@ -118,4 +118,28 @@ describe('NetworkSurface', () => {
     expect(listNav.className).not.toContain('absolute')
     expect(listNav.className).not.toContain('top-9')
   })
+
+  it('sizes person and organization detail sheets for their content density', () => {
+    installFakeBridge({ queryRows: [] })
+
+    const person = renderWithProviders(
+      <NetworkSurface tab="people" detail={{ kind: 'person', id: 'p1' }} />,
+    )
+    const personDrawer = document.querySelector('[data-slot="drawer-content"]')
+
+    expect(personDrawer).not.toBeNull()
+    expect(personDrawer?.className).toContain('min-w-[36rem]')
+    expect(personDrawer?.className).toContain('w-[min(40rem,calc(100vw-4rem))]')
+
+    person.unmount()
+
+    renderWithProviders(
+      <NetworkSurface tab="organizations" detail={{ kind: 'organization', id: 'org1' }} />,
+    )
+    const organizationDrawer = document.querySelector('[data-slot="drawer-content"]')
+
+    expect(organizationDrawer).not.toBeNull()
+    expect(organizationDrawer?.className).toContain('min-w-[44rem]')
+    expect(organizationDrawer?.className).toContain('w-[min(52rem,calc(100vw-4rem))]')
+  })
 })

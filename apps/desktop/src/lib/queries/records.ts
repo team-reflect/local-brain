@@ -19,11 +19,17 @@ import {
   getSelf,
   getTask,
   getTaskLinks,
+  listExternalIdentitySummariesForRecord,
   listAllTaskAssignees,
   listInteractionParticipants,
   listInteractions,
+  listOrganizationProfiles,
   listOrganizations,
   listPeople,
+  listPersonAffiliations,
+  listPersonEmails,
+  listPersonPhones,
+  listRecordProvenanceForRecord,
   listProjects,
   listTasks,
   updateTask,
@@ -48,6 +54,21 @@ export function usePeople() {
 
 export function usePerson(id: string) {
   return useQuery({ queryKey: ['person', id], queryFn: () => getPerson(id).then((p) => p ?? null) })
+}
+
+export function usePersonEmails(id: string) {
+  return useQuery({ queryKey: ['person', id, 'emails'], queryFn: () => listPersonEmails(id) })
+}
+
+export function usePersonPhones(id: string) {
+  return useQuery({ queryKey: ['person', id, 'phones'], queryFn: () => listPersonPhones(id) })
+}
+
+export function usePersonAffiliations(id: string) {
+  return useQuery({
+    queryKey: ['person', id, 'affiliations'],
+    queryFn: () => listPersonAffiliations(id),
+  })
 }
 
 export function useProjects() {
@@ -180,6 +201,27 @@ export function useOrganization(id: string) {
   return useQuery({
     queryKey: ['organization', id],
     queryFn: () => getOrganization(id).then((o) => o ?? null),
+  })
+}
+
+export function useOrganizationProfiles(id: string) {
+  return useQuery({
+    queryKey: ['organization', id, 'profiles'],
+    queryFn: () => listOrganizationProfiles(id),
+  })
+}
+
+export function useExternalIdentities(recordType: string, recordId: string) {
+  return useQuery({
+    queryKey: [recordType, recordId, 'external-identities'],
+    queryFn: () => listExternalIdentitySummariesForRecord(recordType, recordId),
+  })
+}
+
+export function useRecordProvenance(recordType: string, recordId: string) {
+  return useQuery({
+    queryKey: [recordType, recordId, 'provenance'],
+    queryFn: () => listRecordProvenanceForRecord(recordType, recordId),
   })
 }
 

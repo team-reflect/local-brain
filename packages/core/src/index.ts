@@ -46,9 +46,11 @@ export {
   listPeople,
   getPerson,
   getSelf,
+  listPersonAffiliations,
   listPersonEmails,
   listPersonPhones,
   type Person,
+  type PersonAffiliation,
   type PersonEmail,
   type PersonPhone,
   type ListPeopleOptions,
@@ -165,7 +167,9 @@ export {
 export {
   listOrganizations,
   getOrganization,
+  listOrganizationProfiles,
   type Organization,
+  type OrganizationProfile,
   type ListOrganizationsOptions,
 } from './domains/organizations/getters'
 export {
@@ -181,9 +185,13 @@ export {
   listSources,
   getSourceBySlug,
   listExternalIdentitiesForRecord,
+  listExternalIdentitySummariesForRecord,
+  listRecordProvenanceForRecord,
   getExternalIdentity,
   type Source,
   type ExternalIdentity,
+  type ExternalIdentitySummary,
+  type RecordProvenanceSummary,
 } from './domains/sources/getters'
 
 // Memories
