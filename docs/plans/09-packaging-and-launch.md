@@ -21,7 +21,7 @@ update-path decision.
 - The CLI ships as a sidecar or companion binary installed by the desktop app.
 - First audience is agent-native technical users.
 - Launch is acceptable with manual document and interaction import.
-- Launch must prove the Codex automation loop, not just the desktop UI.
+- Launch must prove the local agent automation loop, not just the desktop UI.
 - The app must be honest about local storage and external model boundaries.
 - Performance, accessibility, and packaging checks are release gates, not polish.
 - Native sidecars and dylibs need signing/notarization attention early.
@@ -94,8 +94,8 @@ update-path decision.
 - The user can browse Today, Tasks, Network Graph/People/Organizations, and Projects.
 - The user can search records and inspect citations.
 - The user can use the `brain` CLI from a terminal.
-- The user can install/use the Codex skill.
-- A Codex daily automation can update records and produce a daily report/todo list.
+- The user can install/use the agent skill.
+- A local agent automation can update records and produce a daily report/todo list.
 - Diagnostics report common setup failures clearly.
 - Packaged app includes a runnable `brain` sidecar.
 - Release checklist covers accessibility, performance, model-boundary review, and native

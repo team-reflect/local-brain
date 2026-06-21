@@ -83,8 +83,8 @@ export function installFakeBridge(options: FakeBridgeOptions = {}): void {
         case 'skill_status':
           return Promise.resolve({
             supported: true,
-            installTargetPath: '/Users/alex/.codex/skills/brain/SKILL.md',
-            installTargetDir: '/Users/alex/.codex/skills/brain',
+            installTargetPath: '/Users/alex/.agents/skills/brain/SKILL.md',
+            installTargetDir: '/Users/alex/.agents/skills/brain',
             bundledHash: 'abc123abc123abc123',
             installedHash: null,
             installState: 'missing',
@@ -92,8 +92,8 @@ export function installFakeBridge(options: FakeBridgeOptions = {}): void {
         case 'skill_install':
           return Promise.resolve({
             supported: true,
-            installTargetPath: '/Users/alex/.codex/skills/brain/SKILL.md',
-            installTargetDir: '/Users/alex/.codex/skills/brain',
+            installTargetPath: '/Users/alex/.agents/skills/brain/SKILL.md',
+            installTargetDir: '/Users/alex/.agents/skills/brain',
             bundledHash: 'abc123abc123abc123',
             installedHash: 'abc123abc123abc123',
             installState: 'current',
@@ -101,8 +101,8 @@ export function installFakeBridge(options: FakeBridgeOptions = {}): void {
         case 'skill_uninstall':
           return Promise.resolve({
             supported: true,
-            installTargetPath: '/Users/alex/.codex/skills/brain/SKILL.md',
-            installTargetDir: '/Users/alex/.codex/skills/brain',
+            installTargetPath: '/Users/alex/.agents/skills/brain/SKILL.md',
+            installTargetDir: '/Users/alex/.agents/skills/brain',
             bundledHash: 'abc123abc123abc123',
             installedHash: null,
             installState: 'missing',

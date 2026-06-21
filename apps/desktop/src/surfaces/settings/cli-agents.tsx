@@ -33,7 +33,7 @@ export function CliAgentsSettings(): ReactNode {
     <Section title="CLI & agents">
       <div className="flex flex-col gap-3 text-sm">
         <p className="text-muted-foreground">
-          The bundled brain CLI and Codex skill are the supported local interface for agents and
+          The bundled brain CLI and agent skill are the supported local interface for agents and
           terminal workflows.
         </p>
 
@@ -168,7 +168,7 @@ function SkillInstallCard({
           </div>
 
           <dl className="grid grid-cols-[8rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
-            <dt className="text-muted-foreground">Codex skill</dt>
+            <dt className="text-muted-foreground">Agent skill</dt>
             <dd className="min-w-0 font-mono text-foreground">
               <span className="block truncate">{data.installTargetPath}</span>
               <span className="text-muted-foreground">
@@ -181,13 +181,13 @@ function SkillInstallCard({
           {data.installState === 'conflict' ? (
             <ConflictBox>
               Another skill already exists at this path. Move it before installing the Local Brain
-              skill.
+              agent skill.
             </ConflictBox>
           ) : null}
 
           {!data.supported ? (
             <div className="rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
-              Codex skill installation needs a writable home directory.
+              Agent skill installation needs a writable home directory.
             </div>
           ) : null}
 
@@ -272,15 +272,15 @@ function cliStatusTitle(state: string): string {
 function skillStatusTitle(state: string): string {
   switch (state) {
     case 'current':
-      return 'Codex skill is installed'
+      return 'Agent skill is installed'
     case 'stale':
-      return 'Codex skill needs repair'
+      return 'Agent skill needs repair'
     case 'conflict':
-      return 'Codex skill has a conflict'
+      return 'Agent skill has a conflict'
     case 'unsupported':
-      return 'Codex skill install is unavailable'
+      return 'Agent skill install is unavailable'
     case 'missing':
     default:
-      return 'Codex skill is not installed'
+      return 'Agent skill is not installed'
   }
 }

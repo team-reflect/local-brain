@@ -29,10 +29,11 @@ Run against a clean brain root (e.g. `BRAIN_ROOT=$(mktemp -d)`).
 - [ ] Search (⌘K) finds records by name and full text.
 - [ ] Citations open the exact document/interaction.
 - [ ] Settings → CLI & agents installs `~/.local/bin/brain`, reports PATH
-      status clearly, and installs `~/.codex/skills/brain/SKILL.md`.
+      status clearly, and installs `~/.agents/skills/brain/SKILL.md` plus the
+      adjacent `brains.json` manifest.
 - [ ] `brain` CLI works with the app closed: `add`, `search`, `today`,
       `report daily`, `tasks plan-day`, `graph`, `show`.
-- [ ] A Codex daily automation updates records and produces a report + todo list.
+- [ ] A local agent automation updates records and produces a report + todo list.
 - [ ] `brain doctor --json` reports setup clearly.
 
 ## Accessibility gate

@@ -62,8 +62,8 @@ demonstration.
 - Ship a `brain` CLI for local agents.
 - Support adding documents, interactions, assets, tasks, and memories.
 - Support search, Today, and record lookup commands.
-- Support daily report and todo-list generation for Codex automations.
-- Install a local Codex skill that teaches agents how to use the CLI safely.
+- Support daily report and todo-list generation for local agent automations.
+- Install a local agent skill that teaches agents how to use the CLI safely.
 
 ## Phase 7 - Packaging
 
@@ -81,7 +81,7 @@ demonstration.
 - The user can inspect a graph view centered on themselves.
 - The user can relaunch into the most recent brain folder.
 - A local agent can add and query context through the CLI.
-- A Codex daily automation can update the brain and generate a daily report/todo list.
+- A local agent automation can update the brain and generate a daily report/todo list.
 - The daily report includes tasks, recent interactions, active projects, and cited
   relationship context where relevant.
 - Settings shows about, the active brain identity, AI providers, and semantic search.

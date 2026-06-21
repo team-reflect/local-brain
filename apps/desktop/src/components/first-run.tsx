@@ -89,7 +89,8 @@ export function FirstRun(): ReactNode {
               <span className="font-medium text-foreground">Drive it from your agent</span>
               <span className="mt-0.5 block text-muted-foreground">
                 The bundled <code className="font-mono">brain</code> CLI + the{' '}
-                <code className="font-mono">brain</code> skill let Codex read and write your brain.
+                <code className="font-mono">brain</code> skill let local agents read and write your
+                brain.
               </span>
             </span>
           </li>

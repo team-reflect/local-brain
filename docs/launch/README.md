@@ -3,8 +3,7 @@
 Local Brain is a private, local-first personal CRM and knowledge base. Each brain
 lives in a folder on your machine, with SQLite plus assets stored side by side;
 nothing is uploaded. The desktop app is for browsing and correction; the `brain`
-CLI + agent skill are the primary way agents (e.g. Codex) read and write your
-brain.
+CLI + agent skill are the primary way local agents read and write your brain.
 
 > Audience: agent-native technical users. Launch target: **macOS desktop**.
 
@@ -34,13 +33,14 @@ compiles the macOS app. The runnable bundle is
 at `Contents/MacOS/brain`. (DMG packaging needs a GUI session; see
 [checklist.md](checklist.md).)
 
-### Installing the `brain` command and Codex skill
+### Installing the `brain` command and agent skill
 
 From the app, open **Settings → CLI & agents** and install both the command and
-the Codex skill. The app symlinks the bundled sidecar to `~/.local/bin/brain`
-and copies the managed skill to `~/.codex/skills/brain/SKILL.md`; it never needs
-sudo and does not edit shell profile files. If `~/.local/bin` is not already on
-your `PATH`, add this line to your shell profile:
+the agent skill. The app symlinks the bundled sidecar to `~/.local/bin/brain`,
+copies the managed skill to `~/.agents/skills/brain/SKILL.md`, and writes the
+known brain list to `~/.agents/skills/brain/brains.json`; it never needs sudo and
+does not edit shell profile files. If `~/.local/bin` is not already on your
+`PATH`, add this line to your shell profile:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
@@ -53,7 +53,8 @@ cargo install --path apps/cli --locked
 ```
 
 If you need to install the skill manually, copy `skills/brain/SKILL.md` to
-`~/.codex/skills/brain/SKILL.md`.
+`~/.agents/skills/brain/SKILL.md`. The app-generated `brains.json` is optional
+but lets local agents pick the active brain without asking.
 
 ## Local storage
 
@@ -96,9 +97,9 @@ brain add interaction --kind meeting --title "Kickoff" --text-file ./notes.md --
 brain add document --title "Pricing model" --text "..." --json
 ```
 
-## Using it with Codex (or another agent)
+## Using it with a local agent
 
-The agent contract is the `brain` CLI plus the Codex skill installed from
+The agent contract is the `brain` CLI plus the agent skill installed from
 [`skills/brain/SKILL.md`](../../skills/brain/SKILL.md). The skill teaches the
 nouns, query-before-write, the stdout/stderr contract, and daily-automation
 recipes. Core commands:

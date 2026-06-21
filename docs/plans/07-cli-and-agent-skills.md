@@ -120,7 +120,7 @@ path resolution, sidecar bundling, installation checks.
    - Tauri desktop platform config with `bundle.externalBin`
    - generated binaries ignored by git
    - dev and build commands both stage the sidecar
-9. Add Codex/local-agent skill:
+9. Add local agent skill:
    - when to add a document versus interaction
    - how to cite evidence
    - how to avoid duplicate records

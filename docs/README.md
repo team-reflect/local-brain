@@ -32,6 +32,6 @@ People will soon have multiple local agents operating on their behalf. Those age
 need a shared, trusted, inspectable context layer. Local Brain gives them one without
 requiring a hosted account, cloud database, or proprietary API.
 
-The product should be useful through agents first. A Codex daily automation should be
+The product should be useful through agents first. A local agent automation should be
 able to update the brain, produce a report, and generate a todo list without requiring
 the user to open the UI.

@@ -389,6 +389,52 @@ fn infos(
         .collect())
 }
 
+pub(crate) fn list_brain_infos(db: &DbState, brains: &BrainState) -> AppResult<Vec<BrainInfo>> {
+    let active_paths = db.active_paths().ok();
+    let live_active = active_paths.as_ref().map(|paths| paths.root_path.as_path());
+    let schema_version = db.schema_version().ok();
+    let conn = brains.lock()?;
+    let list = infos(&conn, live_active, schema_version)?;
+    Ok(include_uncatalogued_active(
+        list,
+        active_paths,
+        schema_version,
+    ))
+}
+
+fn include_uncatalogued_active(
+    mut list: Vec<BrainInfo>,
+    active_paths: Option<brain_schema::BrainPaths>,
+    schema_version: Option<i64>,
+) -> Vec<BrainInfo> {
+    if let Some(paths) = active_paths {
+        let active = paths.root_path.display().to_string();
+        if !list.iter().any(|brain| brain.root_path == active) {
+            list.insert(
+                0,
+                BrainInfo {
+                    root_path: active.clone(),
+                    database_path: paths.database_path.display().to_string(),
+                    assets_path: paths.assets_path.display().to_string(),
+                    name: derive_name(&paths.root_path),
+                    color: DEFAULT_COLOR.to_string(),
+                    created_ms: 0,
+                    last_opened_ms: 0,
+                    is_active: true,
+                    schema_version,
+                },
+            );
+        }
+    }
+    list
+}
+
+fn log_manifest_sync(result: AppResult<bool>) {
+    if let Err(err) = result {
+        eprintln!("Could not sync agent skill brain manifest: {err}");
+    }
+}
+
 // ---- State ----------------------------------------------------------------
 
 /// The process-wide brain registry, backed by its own SQLite database.
@@ -587,9 +633,11 @@ fn switch_to(
     let paths = paths.into_active_paths();
     let root = paths.root_path.clone();
     db.swap_after(conn, paths, || brains.register_active(&root, name))?;
-    brains
-        .active_info(db)?
-        .ok_or_else(|| AppError::no_database("the brain switch completed without an active brain"))
+    let info = brains.active_info(db)?.ok_or_else(|| {
+        AppError::no_database("the brain switch completed without an active brain")
+    })?;
+    log_manifest_sync(crate::skill::sync_brain_manifest(db, brains));
+    Ok(info)
 }
 
 // ---- Tauri commands -------------------------------------------------------
@@ -600,12 +648,7 @@ pub fn list_brains(
     db: State<'_, DbState>,
     brains: State<'_, BrainState>,
 ) -> AppResult<Vec<BrainInfo>> {
-    // Derive the active flag from the live connection, not the registry pointer,
-    // so a stale `active_path` can't mark the wrong brain active (see [`infos`]).
-    let live_active = db.active_root_path().ok();
-    let schema_version = db.schema_version().ok();
-    let conn = brains.lock()?;
-    infos(&conn, live_active.as_deref(), schema_version)
+    list_brain_infos(&db, &brains)
 }
 
 /// The currently open brain.
@@ -703,9 +746,11 @@ fn edit_metadata(
             )));
         }
     }
-    brains
+    let info = brains
         .active_info(db)?
-        .ok_or_else(|| AppError::no_database("no active brain"))
+        .ok_or_else(|| AppError::no_database("no active brain"))?;
+    log_manifest_sync(crate::skill::sync_brain_manifest(db, brains));
+    Ok(info)
 }
 
 /// Rename a brain in the catalogue.
@@ -767,8 +812,9 @@ fn forget_brain_impl(
     // Guard against forgetting the *live* active brain (the one reads/writes hit),
     // and derive the returned list's active flag from it too, so a stale registry
     // pointer can neither block a valid forget nor mislabel the survivors.
-    let live_active = db.active_root_path().ok();
-    let live_active_str = live_active.as_ref().map(|path| path.display().to_string());
+    let active_paths = db.active_paths().ok();
+    let live_active = active_paths.as_ref().map(|paths| paths.root_path.as_path());
+    let live_active_str = live_active.map(|path| path.display().to_string());
     if live_active_str.as_deref() == Some(key.as_str()) {
         return Err(AppError::parse(
             "cannot forget the active brain — switch to another brain first",
@@ -808,7 +854,10 @@ fn forget_brain_impl(
         }
     }
     tx.commit()?;
-    infos(&conn, live_active.as_deref(), schema_version)
+    let list = infos(&conn, live_active, schema_version)?;
+    let list = include_uncatalogued_active(list, active_paths, schema_version);
+    log_manifest_sync(crate::skill::sync_brain_manifest_from_infos(&list));
+    Ok(list)
 }
 
 /// Reveal a brain's root folder in the OS file manager (best effort).
@@ -1131,7 +1180,7 @@ mod tests {
         // non-active catalogue row still succeeds and drops it.
         let dir = tempdir().unwrap();
         let active = dir.path().join("active.sqlite");
-        let (db, _) = live_db(&active);
+        let (db, active_key) = live_db(&active);
         let brains = memory_state();
         {
             let conn = brains.lock().unwrap();
@@ -1144,6 +1193,14 @@ mod tests {
                 .iter()
                 .all(|info| info.root_path != "/a/brain.sqlite"),
             "the forgotten brain must not appear in the returned list"
+        );
+        assert_eq!(
+            remaining
+                .iter()
+                .filter(|info| info.root_path == active_key && info.is_active)
+                .count(),
+            1,
+            "the uncatalogued live brain must still appear as active"
         );
         let conn = brains.lock().unwrap();
         assert!(
@@ -1192,6 +1249,26 @@ mod tests {
         // registry's recorded active_path).
         let none = infos(&conn, None, None).unwrap();
         assert!(none.iter().all(|info| !info.is_active));
+    }
+
+    #[test]
+    fn list_brain_infos_includes_uncatalogued_active_brain() {
+        // The skill manifest is built from `list_brain_infos`; if the live DB is
+        // open on an uncatalogued brain (for example a BRAIN_ROOT pin or a failed
+        // best-effort startup registry write), agents still need that active
+        // root in brains.json.
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("Work");
+        let (db, key) = live_db(&root);
+        let brains = memory_state();
+
+        let list = list_brain_infos(&db, &brains).unwrap();
+
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].root_path, key);
+        assert_eq!(list[0].name, "Work");
+        assert!(list[0].is_active);
+        assert_eq!(list[0].schema_version, Some(4));
     }
 
     #[test]

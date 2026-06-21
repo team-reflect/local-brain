@@ -1,8 +1,8 @@
 # Agent Interface
 
-Local Brain is primarily operated by local agents through the `brain` CLI. The
-desktop UI is for browsing, correction, inspection, Ask, and demonstration; agents
-should not scrape it.
+Local Brain is primarily operated by local agents through the `brain` CLI and
+local agent skill. The desktop UI is for browsing, correction, inspection, Ask,
+and demonstration; agents should not scrape it.
 
 The CLI is provider-neutral. Gmail, Granola, Reflect notes, Calendar, contacts,
 and other upstream systems are fetched by external tools or agent code, then
