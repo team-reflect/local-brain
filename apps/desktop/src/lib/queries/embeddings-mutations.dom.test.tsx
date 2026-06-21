@@ -15,10 +15,10 @@ import {
  * Invalidate-on-settle contract (Bugbot pass 7 follow-up, "Failed mutations skip
  * invalidation"): `useRebuildEmbeddings` and `useSetEmbeddingsEnabled` persist
  * durable state (`embed_clear`, `setBackfillError`, `embeddings.enabled`) before
- * a step that can throw. With `refetchOnWindowFocus` disabled, an onSuccess-only
- * refresh would leave the UI showing a full/healthy index after a rebuild wipe
- * that then failed. Both must invalidate the status query on *settle* so a failed
- * run still refreshes the cache.
+ * a step that can throw. An onSuccess-only refresh would leave the UI showing a
+ * full/healthy index after a rebuild wipe that then failed until a later focus
+ * refetch or slow poll. Both must invalidate the status query on *settle* so a
+ * failed run still refreshes the cache immediately.
  */
 
 /** A bridge whose runtime is `ready` with one pending chunk, but `embed_texts` fails. */
