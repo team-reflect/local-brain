@@ -125,6 +125,42 @@ describe('CommandPalette', () => {
     await waitFor(() => expect(screen.getByText('No matches')).toBeDefined())
   })
 
+  it('does not steal a user-selected command when record results arrive', async () => {
+    const ctx = context()
+    let resolveDocuments: (rows: unknown[]) => void = () => {}
+    const documentQuery = new Promise<unknown[]>((resolve) => {
+      resolveDocuments = resolve
+    })
+    installFakeBridge({
+      query: (sql) =>
+        sql.includes('documents_fts')
+          ? documentQuery
+          : [],
+    })
+
+    renderWithProviders(<CommandPalette open onClose={() => {}} context={ctx} />)
+    const input = screen.getByPlaceholderText(/Search records or run a command/)
+    fireEvent.change(input, { target: { value: 'go' } })
+
+    expect(screen.getByText('Go to Today')).toBeDefined()
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+
+    resolveDocuments([
+      {
+        id: 'd1',
+        title: 'Go market notes',
+        subtitle: 'note',
+        snippet: '[Go] market',
+        recordDate: '2026-06-01T00:00:00.000Z',
+        bm25: -8,
+      },
+    ])
+    await waitFor(() => expect(screen.getByText('Go market notes')).toBeDefined())
+
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(ctx.navigate).toHaveBeenCalledWith({ kind: 'tasks' })
+  })
+
   it('keeps > as command-only mode', () => {
     const query = vi.fn(() => [])
     installFakeBridge({ query })

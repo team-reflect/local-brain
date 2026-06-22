@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Search } from 'lucide-react'
 import { VisuallyHidden } from 'radix-ui'
 import { listCommands } from '../lib/commands/registry'
@@ -52,18 +52,21 @@ export function CommandPalette({
 }): ReactNode {
   const [query, setQuery] = useState('')
   const [selectedValue, setSelectedValue] = useState('')
+  const autoSelectedValue = useRef('')
   const trimmed = query.trim()
   const commandsOnly = trimmed.startsWith('>')
   const search = useGlobalSearch(open && !commandsOnly ? query : '')
 
   useEffect(() => {
     if (open) {
+      autoSelectedValue.current = ''
       setQuery('')
       setSelectedValue('')
     }
   }, [open])
 
   useEffect(() => {
+    autoSelectedValue.current = ''
     setSelectedValue('')
   }, [query])
 
@@ -118,15 +121,35 @@ export function CommandPalette({
 
   useEffect(() => {
     setSelectedValue((value) => {
-      if (!open || items.length === 0) return ''
+      if (!open || items.length === 0) {
+        autoSelectedValue.current = ''
+        return ''
+      }
       const hasSelection = items.some((item) => item.key === value)
-      if (!hasSelection) return items[0]!.key
-      if (!commandsOnly && trimmed.length > 0 && recordItems.length > 0 && value.startsWith('command:')) {
-        return recordItems[0]!.key
+      if (!hasSelection) {
+        const next = items[0]!.key
+        autoSelectedValue.current = next
+        return next
+      }
+      if (
+        !commandsOnly &&
+        trimmed.length > 0 &&
+        recordItems.length > 0 &&
+        value.startsWith('command:') &&
+        autoSelectedValue.current === value
+      ) {
+        const next = recordItems[0]!.key
+        autoSelectedValue.current = next
+        return next
       }
       return value
     })
   }, [open, itemKey, commandsOnly, trimmed.length, recordItems, items])
+
+  function handleSelectedValueChange(value: string): void {
+    autoSelectedValue.current = ''
+    setSelectedValue(value)
+  }
 
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? undefined : onClose())}>
@@ -134,7 +157,7 @@ export function CommandPalette({
         <VisuallyHidden.Root>
           <DialogTitle>Command palette</DialogTitle>
         </VisuallyHidden.Root>
-        <Command shouldFilter={false} value={selectedValue} onValueChange={setSelectedValue}>
+        <Command shouldFilter={false} value={selectedValue} onValueChange={handleSelectedValueChange}>
           <div className="flex items-center gap-2.5 border-b border-border px-4">
             <Search className="size-4 shrink-0 text-muted-foreground" />
             <CommandInput
