@@ -28,7 +28,7 @@ export const SKILLS: readonly SkillManifest[] = [
     id: 'brain-backfill',
     name: 'Local Brain Backfill',
     description:
-      'Run source-led first-run or large historical Local Brain imports from Gmail/GWS, Granola, Reflect notes, Calendar, contacts, and other personal data sources.',
+      'Run source-led first-run or large historical Local Brain imports from Gmail/GWS, Granola, WhatsApp, Reflect notes, Calendar, contacts, and other personal data sources.',
     docPath: 'skills/brain-backfill/SKILL.md',
   },
 ]

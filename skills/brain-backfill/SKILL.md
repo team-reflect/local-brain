@@ -1,6 +1,6 @@
 ---
 name: brain-backfill
-description: Source-led first-run or large historical Local Brain import. Use when setting up a new brain from Gmail/GWS, Granola, Reflect notes, Calendar, contacts, or other personal data sources, especially when the user asks for a comprehensive backfill.
+description: Source-led first-run or large historical Local Brain import. Use when setting up a new brain from Gmail/GWS, Granola, WhatsApp, Reflect notes, Calendar, contacts, or other personal data sources, especially when the user asks for a comprehensive backfill.
 ---
 
 # Local Brain Backfill
@@ -42,6 +42,9 @@ personal intelligence database, not a dump of every byte.
    boilerplate, promos, alerts, receipts, and private material usually do not
    belong in the brain. Do not redact imported source bodies; if a source record
    should not be stored locally, skip the whole record and ledger the reason.
+12. User corrections and clarifications are trusted manual evidence. Store them
+    as small manual evidence records, add source-keyed facts, update typed
+    profiles/tags/affiliations through the CLI, and keep import audit clean.
 
 ## Setup
 
@@ -53,6 +56,7 @@ brain --brain "$BRAIN_ROOT" --json source ensure --slug granola --name Granola
 brain --brain "$BRAIN_ROOT" --json source ensure --slug reflect_notes --name "Reflect Notes"
 brain --brain "$BRAIN_ROOT" --json source ensure --slug google_calendar --name "Google Calendar"
 brain --brain "$BRAIN_ROOT" --json source ensure --slug google_people --name "Google People"
+brain --brain "$BRAIN_ROOT" --json source ensure --slug whatsapp --name WhatsApp
 ```
 
 Before starting source passes, inspect the returned `projects` and
@@ -318,6 +322,103 @@ If the calendar body only says "see Gmail for details", fetch and import the
 linked Gmail source or leave the event incomplete with `--raw-text-unavailable`
 and a ledger note.
 
+### iMessage / Apple Messages
+
+For local Apple Messages backfills, treat `~/Library/Messages/chat.db` as the
+source of truth and read it with SQLite in read-only mode. Ensure a dedicated
+source first:
+
+```bash
+brain --brain "$BRAIN_ROOT" --json source ensure \
+  --slug imessage --name iMessage
+```
+
+Import one Brain interaction per Apple `chat`, not one interaction per message.
+Use `--kind message`, `--source imessage`, `--external-kind chat`, and a stable
+`--external-id` such as `chat.guid`. Keep a per-chat ledger and preserve the
+complete recovered transcript in the interaction body.
+
+Apple Messages has two important text paths:
+
+- `message.text` contains only part of the readable history.
+- many text messages only appear in `message.attributedBody`; extract that text
+  before deciding a row is blank.
+
+Convert Apple timestamps as nanoseconds since `2001-01-01T00:00:00Z`. Preserve
+reactions, replies, system rows, and empty/media-only rows as transcript lines
+when they carry context. For attachments, include filenames, MIME types, sizes,
+and local paths in the transcript and metadata. Do not bulk-copy every image,
+video, sticker, or audio file into Brain unless the user explicitly asks for
+binary asset import; message media can be huge and is often not searchable
+without a separate extraction pass.
+
+Use local Contacts/AddressBook data to enrich chat handles into names when the
+match is safe, but keep opaque phone/email handles as unresolved participants
+until the participant audit supports promotion. After import, add an `iMessage`
+tag, a concise archive AI note for each chat, finalize with narrow waivers when
+the pass intentionally skips project/action/fact extraction, then run
+participant audit and `merge person --dry-run` / `merge person` for duplicate
+contact shells.
+
+### WhatsApp
+
+For local WhatsApp backfills, copy the source database and its `-wal` / `-shm`
+companions into the pass directory before reading it. Common macOS sources are
+under `~/Library/Group Containers/group.net.whatsapp.WhatsApp.shared/`, with
+`ChatStorage.sqlite` as the main SQLite database. Treat the copied database as
+read-only source material and write to Brain only through the CLI:
+
+```bash
+brain --brain "$BRAIN_ROOT" --json source ensure \
+  --slug whatsapp --name WhatsApp
+```
+
+Inspect the schema before extraction; WhatsApp Core Data table names vary by
+version. Common useful tables include `ZWAMESSAGE`, `ZWACHATSESSION`,
+`ZWAGROUPMEMBER`, `ZWAMEDIAITEM`, and `ZWAPROFILEPUSHNAME`. Convert WhatsApp
+Core Data timestamps as seconds since `2001-01-01T00:00:00Z` by adding
+`978307200` seconds.
+
+For small or high-signal chats, import one interaction per chat. Use one
+interaction per chat-month when a transcript would exceed roughly 10,000
+messages or 5 MB of Markdown, or when one chat would dominate search chunks and
+summaries:
+
+```bash
+brain --brain "$BRAIN_ROOT" --json import interaction --kind message \
+  --title "WhatsApp: <chat name> (<YYYY-MM>)" \
+  --summary "<concise archive summary>" \
+  --text-file transcript.md \
+  --metadata-json-file metadata.json \
+  --source whatsapp --external-kind chat_month \
+  --external-id "<chat-jid>:<YYYY-MM>" \
+  --participant "sender:<display name or handle>" \
+  --link project:<id>
+```
+
+Preserve the full readable transcript in the body: local timestamp, sender,
+text, deleted/system markers, media captions, media filenames/paths, quoted
+reply context when available, and message ids or stanza ids in metadata. Do not
+bulk-import WhatsApp media binaries by default; record media metadata and local
+paths, then attach selected files only when the user explicitly wants binary
+assets or the file is clearly durable evidence.
+
+Participant handling is the fragile part. For direct chats, prefer phone-backed
+JIDs when present. For group chats, sender identity usually comes from group
+member rows such as `ZMEMBERJID`, not the group chat JID. Preserve source-native
+handles like `<phone>@s.whatsapp.net`, group JIDs, and opaque `@lid` handles as
+participants. Use contacts, push names, repeated context, and phone numbers to
+promote safely; do not create people for every group member. Ledger unresolved
+LID-only handles and recurring group participants for the final participant
+audit.
+
+After import, add a `WhatsApp` tag, source-keyed AI notes, facts/tasks/memories
+only where evidence is durable, and finalize each interaction. For archive-only
+chat-month imports, use narrow waivers such as `--no-derived-actions`,
+`--no-extracted-facts`, or `--no-project-or-task-link` rather than inventing
+intelligence. Run `brain import participants audit --source whatsapp` and
+report unresolved handles, promoted people, relinks, and skipped media.
+
 ### Contacts And People
 
 Import trusted contacts with `brain add person` or cautious senders with
@@ -523,6 +624,29 @@ Run a no-surprise-project audit: compare final projects to the baseline plus
 explicitly user-approved creations. Any unapproved project created during the
 backfill blocks completion; convert it to an evidence-backed suggestion or
 unlink/archive the mistaken records with the cleanup commands above.
+
+## Follow-Up Enrichment Passes
+
+After broad source coverage is in place, run targeted enrichment passes for
+sparse but important people and organizations. Prioritize recurring
+participants, known friends/family/household contacts, accepted-project
+counterparties, and high-signal public people. Use existing brain evidence
+first; use contacts, Gmail, Granola, calendar, or public web only when identity
+is safe.
+
+For each confident enrichment:
+
+- add or refresh a source-keyed fact for the specific claim;
+- update summaries, headlines, relationship facts, contact handles, tags,
+  organization affiliations, and public-profile facts through the CLI;
+- store small public/manual evidence documents when the claim comes from outside
+  already-imported source records;
+- finalize new evidence documents with narrow waivers when they are pure
+  reference/profile evidence and do not imply tasks or projects.
+
+Ledger weak cases rather than inventing structure. Pair labels, ambiguous first
+names, shared mailboxes, opaque chat handles, and public-profile near-matches
+should remain unresolved with reasons until there is safe identity evidence.
 
 ## Completion And Audit
 
