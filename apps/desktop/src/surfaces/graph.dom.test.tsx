@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import type { Graph } from '@local-brain/core'
 import { renderWithProviders } from '../test/utils'
 import { layoutGraph } from './graph-layout'
@@ -228,23 +228,40 @@ describe('GraphSurface', () => {
     expect(root?.className).toContain('min-h-0')
   })
 
-  it('opens a person node on click', async () => {
+  it('selects a person node and opens it from the details panel', async () => {
     window.history.pushState({}, '', '/network?tab=graph')
     renderWithProviders(<GraphSurface showHeader={false} />)
 
-    fireEvent.click(await screen.findByRole('link', { name: 'Open person Ada Lovelace' }))
+    const node = await screen.findByRole('button', { name: 'Select person Ada Lovelace' })
+    expect(node.getAttribute('aria-pressed')).toBe('false')
+
+    fireEvent.click(node)
+
+    expect(node.getAttribute('aria-pressed')).toBe('true')
+    const panel = await screen.findByRole('group', { name: 'Selected node' })
+    expect(within(panel).getByText('Person')).toBeDefined()
+    expect(within(panel).getByText('Ada Lovelace')).toBeDefined()
+    // p1 connects to self and the org; the memory edge is dropped with its node.
+    expect(within(panel).getByText('2 connections')).toBeDefined()
+    // The graph stays put until the panel's open action is used.
+    expect(window.location.pathname).toBe('/network')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open person Ada Lovelace' }))
 
     await waitFor(() => {
       expect(window.location.pathname).toBe('/people/p1')
     })
   })
 
-  it('opens an organization node on click', async () => {
+  it('opens an organization node from the details panel', async () => {
     window.history.pushState({}, '', '/network?tab=graph')
     renderWithProviders(<GraphSurface showHeader={false} />)
 
     fireEvent.click(
-      await screen.findByRole('link', { name: 'Open organization Analytical Engines' }),
+      await screen.findByRole('button', { name: 'Select organization Analytical Engines' }),
+    )
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Open organization Analytical Engines' }),
     )
 
     await waitFor(() => {
@@ -252,16 +269,50 @@ describe('GraphSurface', () => {
     })
   })
 
-  it('opens a node from the keyboard', async () => {
+  it('selects a node from the keyboard', async () => {
     window.history.pushState({}, '', '/network?tab=graph')
     renderWithProviders(<GraphSurface showHeader={false} />)
 
-    fireEvent.keyDown(await screen.findByRole('link', { name: 'Open person Ada Lovelace' }), {
-      key: 'Enter',
+    const node = await screen.findByRole('button', { name: 'Select person Ada Lovelace' })
+    fireEvent.keyDown(node, { key: 'Enter' })
+
+    expect(node.getAttribute('aria-pressed')).toBe('true')
+    expect(await screen.findByRole('group', { name: 'Selected node' })).toBeDefined()
+    // Selecting alone never navigates.
+    expect(window.location.pathname).toBe('/network')
+  })
+
+  it('clears the selection on Escape and on a background click', async () => {
+    renderWithProviders(<GraphSurface showHeader={false} />)
+
+    const svg = await mockGraphBounds()
+    fireEvent.click(await screen.findByRole('button', { name: 'Select person Ada Lovelace' }))
+    expect(await screen.findByRole('group', { name: 'Selected node' })).toBeDefined()
+
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    await waitFor(() => {
+      expect(screen.queryByRole('group', { name: 'Selected node' })).toBeNull()
     })
 
+    fireEvent.click(await screen.findByRole('button', { name: 'Select person Ada Lovelace' }))
+    expect(await screen.findByRole('group', { name: 'Selected node' })).toBeDefined()
+
+    fireEvent.click(svg)
     await waitFor(() => {
-      expect(window.location.pathname).toBe('/people/p1')
+      expect(screen.queryByRole('group', { name: 'Selected node' })).toBeNull()
+    })
+  })
+
+  it('drops the selection when its node is filtered out', async () => {
+    renderWithProviders(<GraphSurface showHeader={false} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Select person Ada Lovelace' }))
+    expect(await screen.findByRole('group', { name: 'Selected node' })).toBeDefined()
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'People' }))
+
+    await waitFor(() => {
+      expect(screen.queryByRole('group', { name: 'Selected node' })).toBeNull()
     })
   })
 
