@@ -16,6 +16,9 @@ translated into generic Local Brain commands.
   tags.
 - Preserve source identity with `--source`, `--external-kind`, `--external-id`,
   and `--original-url` where available.
+- For people and organizations, use `--external-id` only when it identifies the
+  person/org itself. Source record ids such as email threads, messages, meetings,
+  events, and notes belong on documents/interactions, not entities.
 - Keep stdout as data and stderr as diagnostics. Use global `--json` for stable
   machine output and JSON errors.
 - Store complete local readable evidence before summaries. Never redact an
@@ -66,6 +69,7 @@ brain --json add fact ...
 brain --json promote fact <fact-id> --memory-kind <kind>
 brain --json tag ensure --name "Picardo"
 brain --json tag attach --tag picardo --record interaction:<id>
+brain --json import participants audit --min-count 2
 brain --json import finalize --record interaction:<id>
 ```
 
@@ -85,6 +89,15 @@ brain --json add project --name "House" \
 Source-backed imports should pass `--source`, `--external-kind`, and
 `--external-id` whenever the upstream system has a durable identifier. That
 triple is stored in `external_identities` and is the dedupe key for re-imports.
+For person and organization writes, that identifier must be the upstream
+identity of the person/org itself, such as a contact id, normalized domain, or
+stable organization id. Do not reuse the source record id that merely mentioned
+the person/org.
+
+When a person/org external identity matches an active record but the incoming
+email, domain, or normalized name conflicts, the CLI returns JSON error kind
+`external_identity_conflict` with `existingRecordId` and `conflictingFields`.
+Treat that as an import bug or repair task, not as a reason to force enrichment.
 
 `record_provenance` is a separate trail of how a Local Brain record was created
 or enriched: imported source records, generated AI notes, extracted facts,
@@ -191,6 +204,19 @@ brain --json tag attach --tag picardo --record interaction:<id>
 brain --json import finalize --record interaction:<id>
 ```
 
+Audit and normalize participants after source passes:
+
+```bash
+brain --json import participants audit --source gmail --min-count 2 --limit 100
+brain --json import participants promote --handle maya@example.com \
+  --full-name "Maya Chen" --headline "Picardo vendor contact" \
+  --org "Example Labs" --org-domain example.com --title "Operations lead" --current
+brain --json repair participants relink --handle maya@example.com --person <person-id>
+brain --json repair person-email move --email maya@example.com \
+  --from <wrong-person-id> --to <right-person-id> --relink-participants
+brain --json import participants audit --min-count 2 --fail-on-promote-candidates
+```
+
 Promoting a fact stores the fact value as the memory claim. The fact key,
 subject, source record, and evidence remain available through the extracted fact,
 memory links, and citations.
@@ -247,6 +273,7 @@ Run:
 ```bash
 brain --json import finalize --record interaction:<id>
 brain --json import audit --limit 100
+brain --json import participants audit --min-count 2 --fail-on-promote-candidates
 ```
 
 `finalize` returns `complete:false` with a `missing` array until the staged
@@ -255,6 +282,10 @@ use an explicit waiver such as `--raw-text-unavailable`, `--no-entities`,
 `--no-project-or-task-link`, `--no-derived-actions`, or
 `--no-extracted-facts`; a successful finalize writes durable `finalized`
 provenance so audit does not re-raise the record.
+
+`import finalize` is record-level completeness. It does not prove global
+participant normalization is done; run the participant audit fail gate before a
+backfill final report.
 
 Concise summaries are welcome in `summary` or `ai_note` records, but they must
 not replace source body text. Calendar placeholders such as "see Gmail for
@@ -267,6 +298,10 @@ Person-from-email and organization-from-email paths are cautious. Use
 `brain add person-from-email` for untrusted display names; it returns structured
 skip reasons for machine senders, no-reply addresses, invalid emails, token-like
 names, and email-as-name values.
+
+For `person-from-email`, omit `--external-id` unless the id is a stable upstream
+contact/person id. A Gmail message or thread id is the external identity for the
+imported email interaction, not the sender.
 
 Do not create projects that the user has not signed off on, and do not infer
 high-impact organizations from a single weak clue. Use `brain suggest project`

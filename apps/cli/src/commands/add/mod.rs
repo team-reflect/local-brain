@@ -23,6 +23,7 @@ mod interaction;
 mod links;
 mod memory;
 mod organization;
+mod participants;
 mod person;
 mod person_import;
 mod project;
@@ -102,6 +103,10 @@ pub use intelligence::{
 pub use interaction::{add_interaction, AddInteractionArgs};
 pub use memory::{remember, RememberArgs};
 pub use organization::{add_organization, AddOrganizationArgs};
+pub use participants::{
+    audit_participants, promote_participant, repair_participants_relink, repair_person_email_move,
+    ParticipantAuditArgs, ParticipantPromoteArgs, ParticipantRelinkArgs, PersonEmailMoveArgs,
+};
 pub use person::{
     add_person, add_person_from_email, set_self, show_self, AddPersonArgs, AddPersonFromEmailArgs,
     SetSelfArgs,

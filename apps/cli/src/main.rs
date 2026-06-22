@@ -75,6 +75,11 @@ enum Command {
         #[command(subcommand)]
         what: Box<ImportCommand>,
     },
+    /// Repair identity and participant links after an audited import issue.
+    Repair {
+        #[command(subcommand)]
+        what: RepairCommand,
+    },
     /// Enrich an existing person or organization profile.
     Enrich {
         #[command(subcommand)]
@@ -178,8 +183,48 @@ enum ImportCommand {
     Transcript(AddTranscriptArgs),
     /// Report incomplete document/interaction imports.
     Audit(ImportAuditArgs),
+    /// Audit or promote unresolved interaction participants.
+    Participants {
+        #[command(subcommand)]
+        what: ImportParticipantsCommand,
+    },
     /// Check whether one imported record has met the completion rule.
     Finalize(ImportFinalizeArgs),
+}
+
+#[derive(Subcommand)]
+enum ImportParticipantsCommand {
+    /// Group unresolved participant handles and recommend promotion work.
+    Audit(ImportParticipantsAuditArgs),
+    /// Promote one unresolved email handle to a person and relink matching rows.
+    Promote(ImportParticipantsPromoteArgs),
+}
+
+#[derive(Subcommand)]
+enum RepairCommand {
+    /// Move an email handle between people.
+    #[command(name = "person-email")]
+    PersonEmail {
+        #[command(subcommand)]
+        what: RepairPersonEmailCommand,
+    },
+    /// Relink unresolved participant rows.
+    Participants {
+        #[command(subcommand)]
+        what: RepairParticipantsCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum RepairPersonEmailCommand {
+    /// Move one email from one person to another.
+    Move(RepairPersonEmailMoveArgs),
+}
+
+#[derive(Subcommand)]
+enum RepairParticipantsCommand {
+    /// Relink unresolved participants with a handle to a person.
+    Relink(RepairParticipantsRelinkArgs),
 }
 
 #[derive(Subcommand)]
@@ -726,6 +771,56 @@ struct TagAttachArgs {
 struct ImportAuditArgs {
     #[arg(long, default_value_t = 100)]
     limit: usize,
+}
+
+#[derive(Parser)]
+struct ImportParticipantsAuditArgs {
+    #[arg(long)]
+    source: Option<String>,
+    #[arg(long, default_value_t = 2)]
+    min_count: usize,
+    #[arg(long, default_value_t = 50)]
+    limit: usize,
+    #[arg(long)]
+    fail_on_promote_candidates: bool,
+}
+
+#[derive(Parser)]
+struct ImportParticipantsPromoteArgs {
+    #[arg(long)]
+    handle: String,
+    #[arg(long)]
+    full_name: String,
+    #[arg(long)]
+    headline: Option<String>,
+    #[arg(long)]
+    org: Option<String>,
+    #[arg(long)]
+    org_domain: Option<String>,
+    #[arg(long)]
+    title: Option<String>,
+    #[arg(long)]
+    current: bool,
+}
+
+#[derive(Parser)]
+struct RepairPersonEmailMoveArgs {
+    #[arg(long)]
+    email: String,
+    #[arg(long = "from")]
+    from_person: String,
+    #[arg(long = "to")]
+    to_person: String,
+    #[arg(long)]
+    relink_participants: bool,
+}
+
+#[derive(Parser)]
+struct RepairParticipantsRelinkArgs {
+    #[arg(long)]
+    handle: String,
+    #[arg(long)]
+    person: String,
 }
 
 #[derive(Parser)]
@@ -1280,6 +1375,51 @@ impl ImportAuditArgs {
     }
 }
 
+impl ImportParticipantsAuditArgs {
+    fn to_command(&self) -> add::ParticipantAuditArgs<'_> {
+        add::ParticipantAuditArgs {
+            source_slug: self.source.as_deref(),
+            min_count: self.min_count,
+            limit: self.limit,
+            fail_on_promote_candidates: self.fail_on_promote_candidates,
+        }
+    }
+}
+
+impl ImportParticipantsPromoteArgs {
+    fn to_command(&self) -> add::ParticipantPromoteArgs<'_> {
+        add::ParticipantPromoteArgs {
+            handle: &self.handle,
+            full_name: &self.full_name,
+            headline: self.headline.as_deref(),
+            org: self.org.as_deref(),
+            org_domain: self.org_domain.as_deref(),
+            title: self.title.as_deref(),
+            current: self.current,
+        }
+    }
+}
+
+impl RepairPersonEmailMoveArgs {
+    fn to_command(&self) -> add::PersonEmailMoveArgs<'_> {
+        add::PersonEmailMoveArgs {
+            email: &self.email,
+            from_person_id: &self.from_person,
+            to_person_id: &self.to_person,
+            relink_participants: self.relink_participants,
+        }
+    }
+}
+
+impl RepairParticipantsRelinkArgs {
+    fn to_command(&self) -> add::ParticipantRelinkArgs<'_> {
+        add::ParticipantRelinkArgs {
+            handle: &self.handle,
+            person_id: &self.person,
+        }
+    }
+}
+
 impl ImportFinalizeArgs {
     fn to_command(&self) -> add::ImportFinalizeArgs<'_> {
         add::ImportFinalizeArgs {
@@ -1378,15 +1518,22 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             if json {
+                let mut error = json!({
+                    "kind": err.kind(),
+                    "message": err.to_string(),
+                    "exitCode": err.exit_code(),
+                });
+                if let Some(existing_record_id) = err.existing_record_id() {
+                    error["existingRecordId"] = json!(existing_record_id);
+                }
+                if let Some(conflicting_fields) = err.conflicting_fields() {
+                    error["conflictingFields"] = json!(conflicting_fields);
+                }
                 eprintln!(
                     "{}",
                     serde_json::to_string_pretty(&json!({
                         "ok": false,
-                        "error": {
-                            "kind": err.kind(),
-                            "message": err.to_string(),
-                            "exitCode": err.exit_code(),
-                        }
+                        "error": error,
                     }))
                     .unwrap_or_else(|_| err.to_string())
                 );
@@ -1474,7 +1621,30 @@ fn run(cli: Cli) -> Result<(), CliError> {
                     add::add_transcript(&mut conn, json, a.to_command()?)
                 }
                 ImportCommand::Audit(a) => add::import_audit(&conn, json, a.to_command()),
+                ImportCommand::Participants { what } => match what {
+                    ImportParticipantsCommand::Audit(a) => {
+                        add::audit_participants(&conn, json, a.to_command())
+                    }
+                    ImportParticipantsCommand::Promote(a) => {
+                        add::promote_participant(&mut conn, json, a.to_command())
+                    }
+                },
                 ImportCommand::Finalize(a) => add::import_finalize(&conn, json, a.to_command()),
+            }
+        }
+        Command::Repair { what } => {
+            let mut conn = db::open(&db_path)?;
+            match what {
+                RepairCommand::PersonEmail { what } => match what {
+                    RepairPersonEmailCommand::Move(a) => {
+                        add::repair_person_email_move(&mut conn, json, a.to_command())
+                    }
+                },
+                RepairCommand::Participants { what } => match what {
+                    RepairParticipantsCommand::Relink(a) => {
+                        add::repair_participants_relink(&mut conn, json, a.to_command())
+                    }
+                },
             }
         }
         Command::Enrich { what } => {
@@ -1659,6 +1829,7 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
         "exitCodes": [
             { "code": 0, "kind": "ok", "meaning": "success" },
             { "code": 1, "kind": "runtime", "meaning": "validation, SQL, IO, or unsupported operation failure" },
+            { "code": 1, "kind": "external_identity_conflict", "meaning": "a person/org external identity matched an active record but conflicted with incoming email, domain, or normalized name" },
             { "code": 3, "kind": "not_found", "meaning": "requested record was not found" },
             { "code": 4, "kind": "no_database", "meaning": "database is missing or unusable" },
         ],
@@ -1702,7 +1873,7 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
                 "public_web",
                 "ai_extraction",
             ],
-            "identityRule": "Use --source plus --external-id for idempotent provider imports. External ids are source-scoped.",
+            "identityRule": "Use --source plus --external-id for idempotent provider imports. For people and organizations, --external-id must identify that person/org itself (for example contact id or stable org id), not a source email thread, message, meeting, event, or document id.",
         },
         "writeRules": [
             "Search before writing likely duplicates.",
@@ -1710,7 +1881,9 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
             "Reuse and link existing people, organizations, projects, and tasks when possible.",
             "Projects are user-agreed structure: create them only after explicit user sign-off, otherwise link existing projects or suggest inferred candidates.",
             "Preserve provider provenance with --source, --external-id, and --original-url.",
+            "Never reuse a source record id as a person/org --external-id. If no stable participant/org upstream id exists, omit --external-id and rely on email/domain/name dedupe.",
             "Do not create people for every raw sender or attendee; preserve unresolved handles with --participant.",
+            "Before final backfill reporting, run import participants audit, promote recurring real people, and rerun it with --fail-on-promote-candidates.",
             "Use --text-file or --text-file - for large source bodies. Imported source records must store complete local readable evidence; do not redact imported body text.",
             "If a source record is too sensitive or not worth storing, skip the whole record and ledger it instead of importing a partial redaction.",
             "Concise summaries belong in summary or ai-note records, not as replacements for source body text.",
@@ -1789,6 +1962,22 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
             "importAudit": {
                 "usage": "brain --json import audit --limit 100",
                 "returns": "recent incomplete documents/interactions and their missing stages.",
+            },
+            "importParticipantsAudit": {
+                "usage": "brain --json import participants audit [--source <slug>] [--min-count <n>] [--limit <n>] [--fail-on-promote-candidates]",
+                "returns": "unresolved interaction participant groups with counts, sources, first/latest interaction, sample titles, and recommendation promote|skip|review.",
+            },
+            "importParticipantsPromote": {
+                "usage": "brain --json import participants promote --handle <email> --full-name <name> [--headline <text>] [--org <name>] [--org-domain <domain>] [--title <title>] [--current]",
+                "purpose": "Create or reuse a person for a real participant, attach the email if safe, relink matching participant rows, and refresh relationship recency.",
+            },
+            "repairPersonEmailMove": {
+                "usage": "brain --json repair person-email move --email <email> --from <person-id> --to <person-id> [--relink-participants]",
+                "purpose": "Move an email handle between existing people and optionally relink matching participant rows.",
+            },
+            "repairParticipantsRelink": {
+                "usage": "brain --json repair participants relink --handle <email> --person <person-id>",
+                "purpose": "Relink unresolved participant rows for one handle to an existing person.",
             },
             "addAsset": {
                 "usage": "brain --json add asset --file <path> --link <kind:id> [--role attachment|avatar|logo|screenshot|source_file]",
