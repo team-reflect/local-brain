@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import { useChat } from '@ai-sdk/react'
-import { MessageSquare, Plus, Send } from 'lucide-react'
+import { MessageSquare, Send } from 'lucide-react'
 import { z } from 'zod'
 import { createChatId, type ChatMessage } from '@local-brain/core'
 import { lastAssistantMessageIsCompleteWithApprovalResponses, type UIMessage } from 'ai'
@@ -24,9 +24,16 @@ import {
   type ToolApprovalResponse,
   type ToolPart,
 } from '../components/chat/chat-tool-chip'
+import { ConversationRail } from '../components/chat/conversation-rail'
 import { createChatTransport } from '../lib/ai/chat-transport'
-import { invalidateChatTurnQueries, useConversations, useMessages, useModelSettings, useModelStatus } from '../lib/queries'
-import { cn } from '../lib/utils'
+import {
+  invalidateChatTurnQueries,
+  useConversations,
+  useDeleteConversation,
+  useMessages,
+  useModelSettings,
+  useModelStatus,
+} from '../lib/queries'
 import { useRouter } from '../routing/router'
 
 const uiMessageSchema = z
@@ -76,6 +83,7 @@ export function ChatSurface({ conversationId }: { conversationId: string | undef
   const modelSettings = useModelSettings()
   const modelStatus = useModelStatus()
   const queryClient = useQueryClient()
+  const deleteConversation = useDeleteConversation()
   const { navigate } = useRouter()
   const transport = useMemo(() => createChatTransport(), [])
   const initialMessages = useMemo(() => persistedMessages(storedMessages.data), [storedMessages.data])
@@ -162,6 +170,17 @@ export function ChatSurface({ conversationId }: { conversationId: string | undef
     }
   }
 
+  async function confirmDeleteConversation(id: string): Promise<void> {
+    await deleteConversation.mutateAsync(id)
+    if (id === conversationId) {
+      setDraft('')
+      setMessages([])
+      setDraftConversationId(createChatId())
+      setHydratedConversationId(null)
+      navigate({ kind: 'chat' })
+    }
+  }
+
   const displayedMessages = conversationHydrated ? messages : []
   const showInitialLoading = waitingForHydration
   let chatContent: ReactNode
@@ -212,8 +231,10 @@ export function ChatSurface({ conversationId }: { conversationId: string | undef
       <ConversationRail
         activeId={conversationId}
         conversations={conversations.data ?? []}
+        deleting={deleteConversation.isPending}
         onNew={startNewChat}
         onOpen={(id) => navigate({ kind: 'chat', conversationId: id })}
+        onDelete={confirmDeleteConversation}
       />
       <div className="flex min-w-0 flex-1 flex-col">
         {chatContent}
@@ -250,56 +271,6 @@ function ConfigureProviderPrompt({ onConfigure }: { onConfigure: () => void }): 
         </Button>
       </div>
     </div>
-  )
-}
-
-function ConversationRail({
-  activeId,
-  conversations,
-  onNew,
-  onOpen,
-}: {
-  activeId: string | undefined
-  conversations: NonNullable<ReturnType<typeof useConversations>['data']>
-  onNew: () => void
-  onOpen: (id: string) => void
-}): ReactNode {
-  return (
-    <aside className="mr-6 hidden w-56 shrink-0 border-r border-border pr-4 lg:block">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-foreground">Chat</h2>
-        <button
-          type="button"
-          onClick={onNew}
-          aria-label="New chat"
-          title="New chat"
-          className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"
-        >
-          <Plus className="size-4" />
-        </button>
-      </div>
-      <nav className="flex flex-col gap-1">
-        {conversations.length === 0 ? (
-          <p className="-ml-2 -mr-1 px-2 py-2 text-xs text-muted-foreground">No chats yet</p>
-        ) : (
-          conversations.map((conversation) => (
-            <button
-              key={conversation.id}
-              type="button"
-              onClick={() => onOpen(conversation.id)}
-              className={cn(
-                '-ml-2 -mr-1 rounded-md px-2 py-1.5 text-left text-xs transition-colors',
-                conversation.id === activeId
-                  ? 'bg-secondary text-foreground'
-                  : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
-              )}
-            >
-              <span className="block truncate">{conversation.title ?? 'Untitled'}</span>
-            </button>
-          ))
-        )}
-      </nav>
-    </aside>
   )
 }
 
