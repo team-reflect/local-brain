@@ -379,9 +379,10 @@ version. Common useful tables include `ZWAMESSAGE`, `ZWACHATSESSION`,
 Core Data timestamps as seconds since `2001-01-01T00:00:00Z` by adding
 `978307200` seconds.
 
-For small or high-signal chats, import one interaction per chat. For very large
-histories, import one interaction per chat-month so search chunks and summaries
-stay useful:
+For small or high-signal chats, import one interaction per chat. Use one
+interaction per chat-month when a transcript would exceed roughly 10,000
+messages or 5 MB of Markdown, or when one chat would dominate search chunks and
+summaries:
 
 ```bash
 brain --brain "$BRAIN_ROOT" --json import interaction --kind message \
