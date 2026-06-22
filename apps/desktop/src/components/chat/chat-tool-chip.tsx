@@ -287,14 +287,42 @@ function WriteToolChip({
   )
 }
 
+/** Plural, human label for a record-type filter value. Falls back to the raw id. */
+const RECORD_TYPE_LABEL: Record<string, string> = {
+  interaction: 'interactions',
+  interaction_transcript: 'transcripts',
+  document: 'documents',
+  task: 'tasks',
+  person: 'people',
+  organization: 'organizations',
+  memory: 'memories',
+  extracted_fact: 'facts',
+  ai_note: 'notes',
+  asset: 'files',
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
+}
+
+/** A short phrase for a query-less browse, e.g. "recent emails, transcripts". */
+function browseLabel(input: Record<string, unknown> | undefined): string {
+  const kinds = stringArray(input?.['kinds'])
+  const types = stringArray(input?.['recordTypes'])
+  const nouns = kinds.length > 0 ? kinds : types.map((t) => RECORD_TYPE_LABEL[t] ?? t)
+  const noun = nouns.length > 0 ? nouns.join(', ') : 'records'
+  const recent = input?.['sort'] === 'recency' || Boolean(input?.['after'])
+  return `${recent ? 'recent ' : ''}${noun}`
+}
+
 function SearchRecordsChip({ part }: { part: ToolPart }): ReactNode {
   const pending = isToolPartPending(part)
-  const query = String(part.input?.['query'] ?? '')
+  const query = String(part.input?.['query'] ?? '').trim()
   const count = typeof part.output?.['count'] === 'number' ? part.output['count'] : null
 
   return (
     <ChipFrame pending={pending} icon={<Search aria-hidden className="size-3.5" />}>
-      Searched "{query}"
+      {query ? `Searched "${query}"` : `Browsed ${browseLabel(part.input)}`}
       {!pending && count !== null ? countSuffix(count, 'result') : ''}
       {!pending && part.state === 'output-error' ? ` — ${part.errorText ?? 'error'}` : ''}
     </ChipFrame>

@@ -12,6 +12,7 @@ function hit(chunkId: string, overrides: Partial<RetrievedChunk> = {}): Retrieve
     recordType: 'document',
     recordId: `r-${chunkId}`,
     recordTitle: null,
+    recordDate: null,
     chunkIndex: 0,
     score: 0,
     lexicalScore: 0,

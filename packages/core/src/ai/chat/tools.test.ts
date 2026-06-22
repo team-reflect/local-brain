@@ -25,6 +25,20 @@ vi.mock('ai', () => ({
 
 vi.mock('../../retrieval/retrieve', () => ({
   retrieve: coreMocks.retrieve,
+  RETRIEVABLE_SOURCE_KINDS: [
+    'person',
+    'organization',
+    'organization_profile',
+    'project',
+    'task',
+    'document',
+    'interaction',
+    'interaction_transcript',
+    'ai_note',
+    'extracted_fact',
+    'memory',
+    'asset',
+  ],
 }))
 
 vi.mock('../../domains/projects/getters', () => ({
@@ -110,6 +124,55 @@ describe('buildChatTools', () => {
     expect(listProjectsTool.needsApproval).toBeUndefined()
     expect(searchOutput).toMatchObject({ count: 1, semanticAvailable: true })
     expect(projectsOutput).toMatchObject({ count: 1 })
+  })
+
+  it('passes recency/type/date filters through to retrieve and returns record dates', async () => {
+    coreMocks.retrieve.mockResolvedValue({
+      chunks: [
+        {
+          recordType: 'interaction',
+          recordId: 'i1',
+          recordTitle: 'Budget email',
+          recordDate: '2026-06-18T00:00:00.000Z',
+          snippet: 'budget',
+          text: 'send the budget',
+        },
+      ],
+      semanticAvailable: false,
+    })
+    const tools = chatTools()
+    const searchRecords = toolByName(tools, 'search_records')
+
+    const output = await searchRecords.execute(
+      searchRecords.inputSchema.parse({
+        recordTypes: ['interaction'],
+        kinds: ['email'],
+        after: '2026-06-07T00:00:00.000Z',
+        sort: 'recency',
+      }),
+    )
+
+    expect(coreMocks.retrieve).toHaveBeenCalledWith('', {
+      mode: 'hybrid',
+      limit: 8,
+      recordTypes: ['interaction'],
+      kinds: ['email'],
+      after: '2026-06-07T00:00:00.000Z',
+      sort: 'recency',
+    })
+    expect(output).toMatchObject({
+      count: 1,
+      hits: [{ recordType: 'interaction', date: '2026-06-18T00:00:00.000Z' }],
+    })
+  })
+
+  it('rejects a search with neither a query nor a filter', async () => {
+    const tools = chatTools()
+    const searchRecords = toolByName(tools, 'search_records')
+    await expect(searchRecords.execute(searchRecords.inputSchema.parse({}))).rejects.toThrow(
+      /Provide a query or at least one filter/,
+    )
+    expect(coreMocks.retrieve).not.toHaveBeenCalled()
   })
 
   it('requires approval for every write tool', () => {
