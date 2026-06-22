@@ -3463,6 +3463,47 @@ fn today_json_includes_assignees() {
 }
 
 #[test]
+fn today_relationship_context_ignores_cancelled_tasks() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let person = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Casey Drift",
+            "--email",
+            "casey@example.com",
+        ],
+    );
+    let person_id = person["id"].as_str().unwrap();
+
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "task",
+            "--title",
+            "No longer relevant",
+            "--status",
+            "cancelled",
+            "--assignee",
+            person_id,
+        ],
+    );
+
+    let today = run_json(&db, &["--json", "today"]);
+    assert!(!today["relationshipContext"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|context| context["name"] == "Casey Drift"));
+}
+
+#[test]
 fn plan_day_buckets_overdue_first() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
@@ -3638,9 +3679,88 @@ fn remember_can_cite_source_interaction_chunk() {
 fn today_and_changes_emit_valid_json() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
-    run_json(&db, &["--json", "add", "task", "--title", "A task"]);
+    let task = run_json(&db, &["--json", "add", "task", "--title", "A task"]);
+    let task_id = task["id"].as_str().unwrap();
+    Connection::open(&db)
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET updated_at = '2999-01-01T00:00:00.000Z' WHERE id = ?1",
+            [task_id],
+        )
+        .unwrap();
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "task",
+            "--title",
+            "Waiting task",
+            "--status",
+            "waiting",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json", "source", "ensure", "--slug", "gmail", "--name", "Gmail",
+        ],
+    );
+    let email = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Gmail: Partner launch update",
+            "--summary",
+            "Maya sent launch timing and credential readiness updates.",
+            "--text",
+            "Maya says the launch window is Thursday, credentials are ready, and Alex should review the revised onboarding note before the check-in.",
+            "--occurred-at",
+            "2026-06-21T18:00:00Z",
+            "--source",
+            "gmail",
+            "--external-id",
+            "thr-1",
+            "--participant",
+            "from:Maya Chen <maya@example.com>",
+        ],
+    );
+    let email_id = email["id"].as_str().unwrap();
+
     let today = run_json(&db, &["--json", "today"]);
     assert!(today["counts"]["openTasks"].as_i64().unwrap() >= 1);
+    assert_eq!(today["counts"]["waitingItems"].as_i64().unwrap(), 1);
+    assert!(today["waitingItems"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|task| task["title"] == "Waiting task"));
+    assert!(!today["recentChanges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|change| change["id"] == task_id));
+    let email_context = today["recentInteractions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|interaction| interaction["id"] == email_id)
+        .expect("expected imported email in recentInteractions");
+    assert_eq!(email_context["source"]["slug"], "gmail");
+    assert!(email_context["excerpt"]
+        .as_str()
+        .unwrap()
+        .contains("credentials are ready"));
+    assert!(email_context["participants"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|participant| participant["name"] == "Maya Chen"));
     let changes = run_json(
         &db,
         &["--json", "changes", "--since", "2000-01-01T00:00:00Z"],

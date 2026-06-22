@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   createModelExtractor,
   createTask,
+  db,
   getChangesSince,
   getDailyBrief,
   getModelStatus,
@@ -16,6 +17,7 @@ import {
   ingestDocument,
   ingestInteraction,
   listPeople,
+  newId,
   planDay,
   retrieve,
   runExtraction,
@@ -252,9 +254,90 @@ describe('Plan 06 agent report endpoints', () => {
     expect(plan[0].title).toBe('Overdue thing')
   })
 
+  it('includes imported email context beyond the email title', async () => {
+    const existingSource = await db
+      .selectFrom('sources')
+      .select('id')
+      .where('slug', '=', 'gmail')
+      .executeTakeFirst()
+    const sourceId = existingSource?.id ?? newId()
+    if (!existingSource) {
+      await db
+        .insertInto('sources')
+        .values({ id: sourceId, slug: 'gmail', name: 'Gmail' })
+        .execute()
+    }
+    const personId = newId()
+    await db
+      .insertInto('people')
+      .values({ id: personId, fullName: 'Maya Chen', headline: 'Vendor partner' })
+      .execute()
+    const interaction = await ingestInteraction({
+      kind: 'email',
+      title: 'Gmail: Partner launch update',
+      summary: 'Maya sent launch timing and credential readiness updates.',
+      bodyText:
+        'Maya says the launch window is Thursday, credentials are ready, and Alex should review the revised onboarding note before the check-in.',
+      occurredAt: '2026-06-17T16:00:00Z',
+    })
+    await db
+      .updateTable('interactions')
+      .set({ updatedAt: '2026-06-17T17:00:00.000Z' })
+      .where('id', '=', interaction.id)
+      .execute()
+    await db
+      .insertInto('externalIdentities')
+      .values({
+        id: newId(),
+        entityType: 'interaction',
+        entityId: interaction.id,
+        sourceId,
+        kind: 'thread',
+        externalId: 'thr-1',
+      })
+      .execute()
+    await db
+      .insertInto('interactionParticipants')
+      .values({
+        id: newId(),
+        interactionId: interaction.id,
+        personId,
+        role: 'from',
+        handle: 'maya@example.com',
+      })
+      .execute()
+    await createTask({ title: 'Waiting on vendor reply', status: 'waiting' })
+
+    const briefNow = new Date('2026-06-17T18:00:00Z')
+    const brief = await getDailyBrief({ now: briefNow })
+    expect(brief.generatedAt).toBe(briefNow.toISOString())
+    const email = brief.recentInteractions.find((item) => item.id === interaction.id)
+    expect(email?.source?.slug).toBe('gmail')
+    expect(email?.participants.map((participant) => participant.name)).toContain('Maya Chen')
+    expect(email?.summary).toContain('launch timing')
+    expect(email?.excerpt).toContain('credentials are ready')
+    expect(brief.waitingItems.map((task) => task.title)).toContain('Waiting on vendor reply')
+    expect(brief.recentChanges.some((change) => change.kind === 'interaction')).toBe(true)
+    expect(brief.relationshipContext.some((context) => context.name === 'Maya Chen')).toBe(true)
+
+    const futureBrief = await getDailyBrief({ now: new Date('2036-01-01T18:00:00Z') })
+    expect(futureBrief.date).toBe('2036-01-01')
+    expect(futureBrief.recentChanges.some((change) => change.id === interaction.id)).toBe(false)
+  })
+
   it('reports records changed since a timestamp', async () => {
     await createTask({ title: 'Recent', status: 'open' })
+    await db
+      .insertInto('tasks')
+      .values({
+        id: newId(),
+        title: 'Archived recent task',
+        status: 'open',
+        archivedAt: '2026-06-17T12:00:00.000Z',
+      })
+      .execute()
     const changes = await getChangesSince('2000-01-01T00:00:00Z')
     expect(changes.find((c) => c.title === 'Recent')).toBeTruthy()
+    expect(changes.find((c) => c.title === 'Archived recent task')).toBeUndefined()
   })
 })

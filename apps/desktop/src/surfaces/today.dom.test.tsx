@@ -25,7 +25,7 @@ function savedDailyBriefRows(): unknown[] {
       content: '**Focus:** ship the launch checklist.',
       contentFormat: 'markdown',
       model: 'openai/gpt-5.5',
-      promptFingerprint: 'today-daily-brief-v1',
+      promptFingerprint: 'today-daily-brief-v2',
       sourceId: null,
       metadataJson: null,
       generatedAt: '2026-06-21T16:00:00.000Z',

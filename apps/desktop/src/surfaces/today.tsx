@@ -248,8 +248,8 @@ function DailyBriefPanel({
         ) : (
           <>
             <p className="max-w-md text-sm leading-6 text-muted-foreground">
-              Generate a grounded brief from today&apos;s tasks, active projects, and recent
-              interactions.
+              Generate a grounded brief from recent email context, interactions, waiting items,
+              tasks, and active projects.
             </p>
             {emptyAction}
           </>

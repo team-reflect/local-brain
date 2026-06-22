@@ -12,6 +12,9 @@ use super::today;
 use crate::error::CliError;
 use crate::output::print_json;
 
+const INTERACTION_EXCERPT_CHARS: usize = 900;
+const RECENT_CHANGE_DAYS: i64 = 2;
+
 struct TaskRow {
     id: String,
     title: String,
@@ -20,6 +23,15 @@ struct TaskRow {
     scheduled_for: Option<String>,
     priority: Option<i64>,
     project_id: Option<String>,
+}
+
+struct InteractionRow {
+    id: String,
+    title: Option<String>,
+    kind: String,
+    occurred_at: Option<String>,
+    summary: Option<String>,
+    body_preview: Option<String>,
 }
 
 fn fetch_open_tasks(conn: &Connection) -> Result<Vec<TaskRow>, CliError> {
@@ -118,34 +130,327 @@ fn soon_cutoff(conn: &Connection, days: i64) -> Result<String, CliError> {
     )?)
 }
 
+fn compact_text(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn clip_text(value: Option<String>, limit: usize) -> Option<String> {
+    let compact = compact_text(value.as_deref()?);
+    if compact.is_empty() {
+        return None;
+    }
+    if compact.len() <= limit {
+        return Some(compact);
+    }
+    let mut clipped = compact
+        .chars()
+        .take(limit.saturating_sub(1))
+        .collect::<String>();
+    clipped = clipped.trim_end().to_string();
+    clipped.push('…');
+    Some(clipped)
+}
+
+fn interaction_excerpt(
+    conn: &Connection,
+    interaction_id: &str,
+    body_preview: Option<String>,
+) -> Result<Option<String>, CliError> {
+    let mut stmt = conn.prepare(
+        "SELECT text FROM content_chunks
+         WHERE record_type = 'interaction' AND record_id = ?1
+         ORDER BY chunk_index ASC LIMIT 2",
+    )?;
+    let chunks = stmt
+        .query_map(params![interaction_id], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(stmt);
+    let text = if chunks.is_empty() {
+        body_preview
+    } else {
+        Some(chunks.join("\n\n"))
+    };
+    Ok(clip_text(text, INTERACTION_EXCERPT_CHARS))
+}
+
+fn source_value(row: Option<(Option<String>, Option<String>, Option<String>)>) -> Option<Value> {
+    let (name, slug, external_kind) = row?;
+    if name.is_none() && slug.is_none() && external_kind.is_none() {
+        return None;
+    }
+    Some(json!({
+        "name": name,
+        "slug": slug,
+        "externalKind": external_kind,
+    }))
+}
+
+fn interaction_source(conn: &Connection, interaction_id: &str) -> Result<Option<Value>, CliError> {
+    let mut stmt = conn.prepare(
+        "SELECT s.name, s.slug, ei.kind
+         FROM external_identities ei
+         LEFT JOIN sources s ON s.id = ei.source_id
+         WHERE ei.entity_type = 'interaction' AND ei.entity_id = ?1
+         ORDER BY ei.created_at ASC",
+    )?;
+    let identities = stmt.query_map(params![interaction_id], |row| {
+        Ok((
+            row.get::<_, Option<String>>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, Option<String>>(2)?,
+        ))
+    })?;
+    for identity in identities {
+        if let Some(source) = source_value(Some(identity?)) {
+            return Ok(Some(source));
+        }
+    }
+    drop(stmt);
+
+    let provenance = conn
+        .query_row(
+            "SELECT s.name, s.slug, ei.kind
+             FROM record_provenance rp
+             LEFT JOIN sources s ON s.id = rp.source_id
+             LEFT JOIN external_identities ei ON ei.id = rp.external_identity_id
+             WHERE rp.record_type = 'interaction' AND rp.record_id = ?1
+             ORDER BY rp.imported_at DESC, rp.created_at DESC LIMIT 1",
+            params![interaction_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    Ok(source_value(provenance))
+}
+
+fn interaction_participants(
+    conn: &Connection,
+    interaction_id: &str,
+) -> Result<Vec<Value>, CliError> {
+    let mut stmt = conn.prepare(
+        "SELECT ip.person_id,
+                COALESCE(p.full_name, ip.display_name, ip.handle, 'Unknown participant') AS name,
+                ip.role,
+                ip.handle
+         FROM interaction_participants ip
+         LEFT JOIN people p ON p.id = ip.person_id
+         WHERE ip.interaction_id = ?1
+         ORDER BY ip.created_at ASC
+         LIMIT 8",
+    )?;
+    let rows = stmt.query_map(params![interaction_id], |row| {
+        Ok(json!({
+            "id": row.get::<_, Option<String>>(0)?,
+            "name": row.get::<_, String>(1)?,
+            "role": row.get::<_, Option<String>>(2)?,
+            "handle": row.get::<_, Option<String>>(3)?,
+        }))
+    })?;
+    rows.collect::<rusqlite::Result<_>>()
+        .map_err(CliError::from)
+}
+
 fn recent_interactions(conn: &Connection, limit: i64) -> Result<Vec<Value>, CliError> {
     let mut stmt = conn.prepare(
-        "SELECT id, title, kind, occurred_at FROM interactions
-         WHERE archived_at IS NULL ORDER BY occurred_at DESC LIMIT ?1",
+        "SELECT id, title, kind, occurred_at, summary, substr(body_text, 1, 1200)
+         FROM interactions
+         WHERE archived_at IS NULL
+         ORDER BY occurred_at DESC, updated_at DESC
+         LIMIT ?1",
+    )?;
+    let rows = stmt
+        .query_map(params![limit], |row| {
+            Ok(InteractionRow {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                kind: row.get(2)?,
+                occurred_at: row.get(3)?,
+                summary: row.get(4)?,
+                body_preview: row.get(5)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(stmt);
+
+    let mut interactions = Vec::with_capacity(rows.len());
+    for row in rows {
+        let excerpt = interaction_excerpt(conn, &row.id, row.body_preview)?;
+        let source = interaction_source(conn, &row.id)?;
+        let participants = interaction_participants(conn, &row.id)?;
+        interactions.push(json!({
+            "id": row.id,
+            "title": row.title,
+            "kind": row.kind,
+            "occurredAt": row.occurred_at,
+            "summary": clip_text(row.summary, INTERACTION_EXCERPT_CHARS),
+            "excerpt": excerpt,
+            "source": source,
+            "participants": participants,
+        }));
+    }
+    Ok(interactions)
+}
+
+fn relationship_context(conn: &Connection, limit: i64) -> Result<Vec<Value>, CliError> {
+    let mut stmt = conn.prepare(
+        "WITH signals AS (
+           SELECT p.id,
+                  p.full_name,
+                  p.headline,
+                  MAX(CASE
+                    WHEN i.archived_at IS NULL
+                     AND i.occurred_at IS NOT NULL
+                     AND i.occurred_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                    THEN i.occurred_at
+                  END) AS last_interaction_at,
+                  COUNT(DISTINCT CASE
+                    WHEN i.archived_at IS NULL
+                     AND i.occurred_at IS NOT NULL
+                     AND i.occurred_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                     AND i.occurred_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-365 days')
+                    THEN i.id
+                  END) AS recent_interactions,
+                  CAST(julianday('now') - julianday(MAX(CASE
+                    WHEN i.archived_at IS NULL
+                     AND i.occurred_at IS NOT NULL
+                     AND i.occurred_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                    THEN i.occurred_at
+                  END)) AS INTEGER) AS days_since_last,
+                  COUNT(DISTINCT CASE
+                    WHEN t.archived_at IS NULL
+                     AND t.status NOT IN ('done', 'cancelled', 'canceled')
+                    THEN t.id
+                  END) AS open_tasks
+           FROM people p
+           LEFT JOIN interaction_participants ip ON ip.person_id = p.id
+           LEFT JOIN interactions i ON i.id = ip.interaction_id
+           LEFT JOIN task_people tp ON tp.person_id = p.id
+           LEFT JOIN tasks t ON t.id = tp.task_id
+           WHERE p.archived_at IS NULL AND p.is_self = 0
+           GROUP BY p.id
+         ),
+         scores AS (
+           SELECT id,
+                  full_name,
+                  headline,
+                  last_interaction_at,
+                  recent_interactions,
+                  open_tasks,
+                  min(recent_interactions, 5)
+                    + CASE
+                        WHEN days_since_last IS NULL THEN 0
+                        WHEN days_since_last <= 30 THEN 3
+                        WHEN days_since_last <= 90 THEN 2
+                        WHEN days_since_last <= 180 THEN 1
+                        ELSE 0
+                      END
+                    + min(open_tasks, 2) AS score
+           FROM signals
+         )
+         SELECT id,
+                full_name,
+                headline,
+                last_interaction_at,
+                CASE
+                  WHEN score >= 8 THEN 5
+                  WHEN score >= 6 THEN 4
+                  WHEN score >= 4 THEN 3
+                  WHEN score >= 2 THEN 2
+                  ELSE 1
+                END AS relationship_strength,
+                recent_interactions,
+                open_tasks
+         FROM scores
+         WHERE recent_interactions > 0 OR open_tasks > 0
+         ORDER BY relationship_strength DESC, last_interaction_at DESC
+         LIMIT ?1",
     )?;
     let rows = stmt.query_map(params![limit], |row| {
         Ok(json!({
-            "id": row.get::<_, String>(0)?,
-            "title": row.get::<_, Option<String>>(1)?,
-            "kind": row.get::<_, String>(2)?,
-            "occurredAt": row.get::<_, Option<String>>(3)?,
+            "personId": row.get::<_, String>(0)?,
+            "name": row.get::<_, String>(1)?,
+            "headline": row.get::<_, Option<String>>(2)?,
+            "lastInteractionAt": row.get::<_, Option<String>>(3)?,
+            "relationshipStrength": row.get::<_, Option<i64>>(4)?,
+            "recentInteractions": row.get::<_, i64>(5)?,
+            "openTasks": row.get::<_, i64>(6)?,
         }))
     })?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(CliError::from)
+    rows.collect::<rusqlite::Result<_>>()
+        .map_err(CliError::from)
+}
+
+fn recent_changes_since(
+    conn: &Connection,
+    since: &str,
+    until: Option<&str>,
+    limit: usize,
+) -> Result<Vec<Value>, CliError> {
+    let mut out: Vec<Value> = Vec::new();
+    for (table, title_col, kind) in [
+        ("people", "full_name", "person"),
+        ("organizations", "name", "organization"),
+        ("projects", "name", "project"),
+        ("tasks", "title", "task"),
+        ("documents", "title", "document"),
+        ("interactions", "title", "interaction"),
+    ] {
+        let sql = format!(
+            "SELECT id, {title_col}, updated_at FROM {table}
+             WHERE updated_at >= ?1
+               AND (?2 IS NULL OR updated_at <= ?2)
+               AND archived_at IS NULL"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params![since, until], |row| {
+            Ok(json!({
+                "kind": kind,
+                "id": row.get::<_, String>(0)?,
+                "title": row.get::<_, Option<String>>(1)?.unwrap_or_else(|| "(untitled)".into()),
+                "updatedAt": row.get::<_, String>(2)?,
+            }))
+        })?;
+        for row in rows {
+            out.push(row?);
+        }
+    }
+    out.sort_by(|a, b| {
+        b["updatedAt"]
+            .as_str()
+            .unwrap_or("")
+            .cmp(a["updatedAt"].as_str().unwrap_or(""))
+    });
+    out.truncate(limit);
+    Ok(out)
 }
 
 /// Build the daily brief value shared by `brain today` and `brain report daily`.
 fn daily_brief(conn: &Connection) -> Result<Value, CliError> {
     let today = today(conn)?;
     let cutoff = soon_cutoff(conn, 7)?;
+    let (recent_change_since, recent_change_until): (String, String) = conn.query_row(
+        "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?1),
+                strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+        params![format!("-{RECENT_CHANGE_DAYS} days")],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
     let tasks = fetch_open_tasks(conn)?;
     let assignee_map = fetch_task_assignees(conn)?;
     let empty: Vec<Value> = vec![];
-    let (mut overdue, mut due_today, mut soon, mut open) = (vec![], vec![], vec![], vec![]);
+    let (mut overdue, mut due_today, mut soon, mut open, mut waiting_items) =
+        (vec![], vec![], vec![], vec![], vec![]);
     for task in &tasks {
         let bucket = bucket_for(task, &today, &cutoff);
         let assignees = assignee_map.get(&task.id).unwrap_or(&empty);
         let value = task_json(task, bucket, assignees);
+        if task.status == "waiting" || task.status == "blocked" {
+            waiting_items.push(value.clone());
+        }
         match bucket {
             "overdue" => overdue.push(value),
             "today" => due_today.push(value),
@@ -153,14 +458,24 @@ fn daily_brief(conn: &Connection) -> Result<Value, CliError> {
             _ => open.push(value),
         }
     }
+    let interactions = recent_interactions(conn, 5)?;
+    let recent_changes =
+        recent_changes_since(conn, &recent_change_since, Some(&recent_change_until), 12)?;
+    let relationships = relationship_context(conn, 8)?;
     Ok(json!({
         "date": today,
         "tasks": { "overdue": overdue, "today": due_today, "soon": soon, "open": open },
-        "recentInteractions": recent_interactions(conn, 5)?,
+        "waitingItems": waiting_items,
+        "recentInteractions": interactions,
+        "recentChanges": recent_changes,
+        "relationshipContext": relationships,
         "counts": {
             "openTasks": tasks.len(),
             "overdueTasks": overdue.len(),
             "dueToday": due_today.len(),
+            "waitingItems": waiting_items.len(),
+            "recentInteractions": interactions.len(),
+            "recentChanges": recent_changes.len(),
         },
     }))
 }
@@ -212,36 +527,7 @@ pub fn plan_day(conn: &Connection, json: bool, limit: usize) -> Result<(), CliEr
 
 /// `brain changes --since <iso>` — records created/updated at or after a timestamp.
 pub fn changes(conn: &Connection, json: bool, since: &str, limit: usize) -> Result<(), CliError> {
-    let mut out: Vec<Value> = Vec::new();
-    for (table, title_col, kind) in [
-        ("people", "full_name", "person"),
-        ("organizations", "name", "organization"),
-        ("projects", "name", "project"),
-        ("tasks", "title", "task"),
-        ("documents", "title", "document"),
-        ("interactions", "title", "interaction"),
-    ] {
-        let sql = format!("SELECT id, {title_col}, updated_at FROM {table} WHERE updated_at >= ?1");
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params![since], |row| {
-            Ok(json!({
-                "kind": kind,
-                "id": row.get::<_, String>(0)?,
-                "title": row.get::<_, Option<String>>(1)?.unwrap_or_else(|| "(untitled)".into()),
-                "updatedAt": row.get::<_, String>(2)?,
-            }))
-        })?;
-        for row in rows {
-            out.push(row?);
-        }
-    }
-    out.sort_by(|a, b| {
-        b["updatedAt"]
-            .as_str()
-            .unwrap_or("")
-            .cmp(a["updatedAt"].as_str().unwrap_or(""))
-    });
-    out.truncate(limit);
+    let out = recent_changes_since(conn, since, None, limit)?;
     emit(json, &json!({ "since": since, "changes": out }))
 }
 
