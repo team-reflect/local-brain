@@ -1,6 +1,12 @@
 import { db } from '../db/client'
 import { localDateString, nowIso } from '../db/time'
 import type { Task } from '../domains/tasks/getters'
+import {
+  addDays,
+  daysBetween,
+  relationshipStrength,
+  type RelationshipSignals,
+} from '../domains/relationships/strength'
 
 /**
  * Agent-facing retrieval endpoints (Plan 06, step 13). The daily brief, todo
@@ -151,6 +157,60 @@ function toBriefTask(
     bucket,
     assignees,
   }
+}
+
+interface BucketedBriefTasks {
+  sourceTasks: Task[]
+  overdue: BriefTask[]
+  today: BriefTask[]
+  soon: BriefTask[]
+  open: BriefTask[]
+  waitingItems: BriefTask[]
+}
+
+async function bucketedBriefTasks(now: Date, soonDays: number): Promise<BucketedBriefTasks> {
+  const [openTasks, assigneeRows] = await Promise.all([
+    db
+      .selectFrom('tasks')
+      .selectAll()
+      .where('archivedAt', 'is', null)
+      .where('status', 'in', [...OPEN_TASK_STATUSES])
+      .orderBy('dueAt', 'asc')
+      .execute(),
+    db
+      .selectFrom('taskPeople')
+      .innerJoin('people', 'people.id', 'taskPeople.personId')
+      .where('taskPeople.role', '=', 'assignee')
+      .where('people.archivedAt', 'is', null)
+      .select(['taskPeople.taskId', 'taskPeople.personId as id', 'people.fullName as name'])
+      .execute(),
+  ])
+
+  const assigneeMap = new Map<string, { id: string; name: string }[]>()
+  for (const row of assigneeRows) {
+    const list = assigneeMap.get(row.taskId) ?? []
+    list.push({ id: row.id, name: row.name })
+    assigneeMap.set(row.taskId, list)
+  }
+
+  const overdue: BriefTask[] = []
+  const today: BriefTask[] = []
+  const soon: BriefTask[] = []
+  const open: BriefTask[] = []
+  const waitingItems: BriefTask[] = []
+  for (const task of openTasks) {
+    if (TERMINAL.has(task.status)) continue
+    const bucket = bucketFor(task, now, soonDays)
+    const assignees = assigneeMap.get(task.id) ?? []
+    const brief = toBriefTask(task, bucket, assignees)
+    if (task.status === 'waiting' || task.status === 'blocked') waitingItems.push(brief)
+    if (bucket === 'overdue') overdue.push(brief)
+    else if (bucket === 'today') today.push(brief)
+    else if (bucket === 'soon') soon.push(brief)
+    else open.push(brief)
+  }
+
+  return { sourceTasks: openTasks, overdue, today, soon, open, waitingItems }
 }
 
 interface RecentInteractionRow {
@@ -306,36 +366,82 @@ async function recentInteractions(limit: number): Promise<BriefInteraction[]> {
   })
 }
 
-async function relationshipContext(limit: number): Promise<BriefRelationshipContext[]> {
-  const rows = await db
-    .selectFrom('relationshipStrengths')
-    .innerJoin('people', 'people.id', 'relationshipStrengths.personId')
-    .select([
-      'people.id as personId',
-      'people.fullName as name',
-      'people.headline',
-      'relationshipStrengths.lastInteractionAt',
-      'relationshipStrengths.relationshipStrength',
-      'relationshipStrengths.recentInteractions',
-      'relationshipStrengths.openTasks',
-    ])
-    .where('people.archivedAt', 'is', null)
-    .where('people.isSelf', '=', 0)
-    .where('relationshipStrengths.relationshipStrength', 'is not', null)
-    .orderBy('relationshipStrengths.relationshipStrength', 'desc')
-    .orderBy('relationshipStrengths.lastInteractionAt', 'desc')
-    .limit(limit)
-    .execute()
+async function relationshipContext(now: Date, limit: number): Promise<BriefRelationshipContext[]> {
+  const asOfIso = now.toISOString()
+  const windowStartIso = addDays(asOfIso, -365)
+  const [people, interactionRows, taskRows] = await Promise.all([
+    db
+      .selectFrom('people')
+      .select(['id', 'fullName', 'headline'])
+      .where('archivedAt', 'is', null)
+      .where('isSelf', '=', 0)
+      .execute(),
+    db
+      .selectFrom('interactionParticipants')
+      .innerJoin('interactions', 'interactions.id', 'interactionParticipants.interactionId')
+      .select([
+        'interactionParticipants.personId',
+        'interactionParticipants.interactionId',
+        'interactions.occurredAt',
+      ])
+      .where('interactionParticipants.personId', 'is not', null)
+      .where('interactions.archivedAt', 'is', null)
+      .where('interactions.occurredAt', 'is not', null)
+      .where('interactions.occurredAt', '<=', asOfIso)
+      .execute(),
+    db
+      .selectFrom('taskPeople')
+      .innerJoin('tasks', 'tasks.id', 'taskPeople.taskId')
+      .select(['taskPeople.personId', 'taskPeople.taskId', 'tasks.status'])
+      .where('tasks.archivedAt', 'is', null)
+      .execute(),
+  ])
 
-  return rows.map((row) => ({
-    personId: row.personId,
-    name: row.name,
-    headline: row.headline,
-    lastInteractionAt: row.lastInteractionAt,
-    relationshipStrength: row.relationshipStrength,
-    recentInteractions: row.recentInteractions ?? 0,
-    openTasks: row.openTasks ?? 0,
-  }))
+  const interactionsByPerson = new Map<string, { recentIds: Set<string>; lastAt: string | null }>()
+  for (const row of interactionRows) {
+    if (!row.personId || !row.occurredAt) continue
+    const signals = interactionsByPerson.get(row.personId) ?? { recentIds: new Set<string>(), lastAt: null }
+    if (row.occurredAt >= windowStartIso) signals.recentIds.add(row.interactionId)
+    if (signals.lastAt === null || row.occurredAt > signals.lastAt) signals.lastAt = row.occurredAt
+    interactionsByPerson.set(row.personId, signals)
+  }
+
+  const openTaskIdsByPerson = new Map<string, Set<string>>()
+  for (const row of taskRows) {
+    if (TERMINAL.has(row.status)) continue
+    const taskIds = openTaskIdsByPerson.get(row.personId) ?? new Set<string>()
+    taskIds.add(row.taskId)
+    openTaskIdsByPerson.set(row.personId, taskIds)
+  }
+
+  return people
+    .map((person): BriefRelationshipContext | null => {
+      const interactionSignals = interactionsByPerson.get(person.id)
+      const lastInteractionAt = interactionSignals?.lastAt ?? null
+      const signals: RelationshipSignals = {
+        recentInteractions: interactionSignals?.recentIds.size ?? 0,
+        daysSinceLast: lastInteractionAt ? daysBetween(lastInteractionAt, asOfIso) : null,
+        openTasks: openTaskIdsByPerson.get(person.id)?.size ?? 0,
+      }
+      const strength = relationshipStrength(signals)
+      if (strength === null) return null
+      return {
+        personId: person.id,
+        name: person.fullName,
+        headline: person.headline,
+        lastInteractionAt,
+        relationshipStrength: strength,
+        recentInteractions: signals.recentInteractions,
+        openTasks: signals.openTasks,
+      }
+    })
+    .filter((context): context is BriefRelationshipContext => context !== null)
+    .sort((a, b) => {
+      const strength = (b.relationshipStrength ?? 0) - (a.relationshipStrength ?? 0)
+      if (strength !== 0) return strength
+      return (b.lastInteractionAt ?? '').localeCompare(a.lastInteractionAt ?? '')
+    })
+    .slice(0, limit)
 }
 
 /** Assemble the daily brief: bucketed open tasks and recent interactions. */
@@ -347,64 +453,31 @@ export async function getDailyBrief(options: DailyBriefOptions = {}): Promise<Da
   const relationshipLimit = options.relationshipLimit ?? 8
   const recentChangeSince = new Date(now.getTime() - RECENT_CHANGE_DAYS * 86_400_000).toISOString()
 
-  const [openTasks, interactions, recentChanges, relationships, assigneeRows] = await Promise.all([
-    db
-      .selectFrom('tasks')
-      .selectAll()
-      .where('archivedAt', 'is', null)
-      .where('status', 'in', [...OPEN_TASK_STATUSES])
-      .orderBy('dueAt', 'asc')
-      .execute(),
+  const [tasks, interactions, recentChanges, relationships] = await Promise.all([
+    bucketedBriefTasks(now, soonDays),
     recentInteractions(recentLimit),
     getChangesSince(recentChangeSince, changeLimit),
-    relationshipContext(relationshipLimit),
-    db
-      .selectFrom('taskPeople')
-      .innerJoin('people', 'people.id', 'taskPeople.personId')
-      .where('taskPeople.role', '=', 'assignee')
-      .where('people.archivedAt', 'is', null)
-      .select(['taskPeople.taskId', 'taskPeople.personId as id', 'people.fullName as name'])
-      .execute(),
+    relationshipContext(now, relationshipLimit),
   ])
-
-  // Build a map of taskId → [{id, name}] for assignees
-  const assigneeMap = new Map<string, { id: string; name: string }[]>()
-  for (const row of assigneeRows) {
-    const list = assigneeMap.get(row.taskId) ?? []
-    list.push({ id: row.id, name: row.name })
-    assigneeMap.set(row.taskId, list)
-  }
-
-  const overdue: BriefTask[] = []
-  const today: BriefTask[] = []
-  const soon: BriefTask[] = []
-  const open: BriefTask[] = []
-  const waitingItems: BriefTask[] = []
-  for (const task of openTasks) {
-    if (TERMINAL.has(task.status)) continue
-    const bucket = bucketFor(task, now, soonDays)
-    const assignees = assigneeMap.get(task.id) ?? []
-    const brief = toBriefTask(task, bucket, assignees)
-    if (task.status === 'waiting' || task.status === 'blocked') waitingItems.push(brief)
-    if (bucket === 'overdue') overdue.push(brief)
-    else if (bucket === 'today') today.push(brief)
-    else if (bucket === 'soon') soon.push(brief)
-    else open.push(brief)
-  }
 
   return {
     generatedAt: now.toISOString(),
     date: dayKey(now),
-    tasks: { overdue, today, soon, open },
-    waitingItems,
+    tasks: {
+      overdue: tasks.overdue,
+      today: tasks.today,
+      soon: tasks.soon,
+      open: tasks.open,
+    },
+    waitingItems: tasks.waitingItems,
     recentInteractions: interactions,
     recentChanges,
     relationshipContext: relationships,
     counts: {
-      openTasks: openTasks.length,
-      overdueTasks: overdue.length,
-      dueToday: today.length,
-      waitingItems: waitingItems.length,
+      openTasks: tasks.sourceTasks.length,
+      overdueTasks: tasks.overdue.length,
+      dueToday: tasks.today.length,
+      waitingItems: tasks.waitingItems.length,
       recentInteractions: interactions.length,
       recentChanges: recentChanges.length,
     },
@@ -423,8 +496,8 @@ export interface PlanDayOptions {
 export async function planDay(options: PlanDayOptions = {}): Promise<BriefTask[]> {
   const now = options.now ?? new Date()
   const limit = options.limit ?? 25
-  const brief = await getDailyBrief({ now })
-  const ordered = [...brief.tasks.overdue, ...brief.tasks.today, ...brief.tasks.soon, ...brief.tasks.open]
+  const tasks = await bucketedBriefTasks(now, 7)
+  const ordered = [...tasks.overdue, ...tasks.today, ...tasks.soon, ...tasks.open]
   const byPriority = (a: BriefTask, b: BriefTask): number => {
     const pa = a.priority ?? 99
     const pb = b.priority ?? 99
