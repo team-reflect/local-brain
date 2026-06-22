@@ -334,4 +334,67 @@ describe('ChatSurface', () => {
     expect(screen.getByText(/Searched "Atlas deadline"/)).not.toBeNull()
     expect(screen.getByText(/0 results/)).not.toBeNull()
   })
+
+  it('deletes the active conversation from the rail after confirmation', async () => {
+    const calls: Array<{ command: string; args: Record<string, unknown> }> = []
+    installFakeBridge({
+      respond: (command, args) => {
+        calls.push({ command, args })
+        return undefined
+      },
+      query: (sql, params) => {
+        const key = params[0]
+        if (key === 'model.aiProviders') {
+          return [
+            {
+              valueJson: JSON.stringify([
+                { id: 'provider-1', provider: 'openai', model: 'gpt-5.1', keyHint: '12345' },
+              ]),
+            },
+          ]
+        }
+        if (key === 'model.defaultAiProviderId') {
+          return [{ valueJson: JSON.stringify('provider-1') }]
+        }
+        if (sql.includes('from "chat_conversations"')) {
+          return [
+            {
+              id: 'chat-1',
+              title: 'Northwind planning',
+              createdAt: '2026-06-21T00:00:00.000Z',
+              updatedAt: '2026-06-21T00:00:00.000Z',
+              archivedAt: null,
+            },
+          ]
+        }
+        if (sql.includes('from "chat_messages"')) return []
+        return []
+      },
+    })
+    window.history.replaceState({}, '', '/chat?conversation=chat-1')
+
+    renderWithProviders(<ChatSurface conversationId="chat-1" />)
+
+    expect(await screen.findByText('Northwind planning')).not.toBeNull()
+    const actionsButton = screen.getByLabelText('Conversation actions for Northwind planning')
+    actionsButton.focus()
+    fireEvent.keyDown(actionsButton, { key: 'Enter' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Delete conversation/ }))
+    expect(await screen.findByText('Delete conversation?')).not.toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (call) =>
+            call.command === 'db_execute' &&
+            String(call.args['sql']).includes('update "chat_conversations"') &&
+            ((call.args['params'] as unknown[]) ?? []).includes('chat-1'),
+        ),
+      ).toBe(true),
+    )
+    await waitFor(() => expect(window.location.pathname + window.location.search).toBe('/chat'))
+    expect(chatMocks.setMessages).toHaveBeenCalledWith([])
+  })
 })
