@@ -375,6 +375,44 @@ For low-level import facts that should be stable across reruns, include
 returned as a duplicate on rerun; pass `--refresh` only when the importer should
 replace that fact's fields, chunks, and evidence.
 
+## User Corrections
+
+When the user directly corrects or clarifies a person, organization,
+relationship, role, preference, or other durable profile detail, treat the user
+statement as trusted manual evidence. Do not bury the correction only in a
+profile summary.
+
+1. Store a small manual evidence document or interaction note with the user's
+   statement.
+2. Add a source-keyed fact with `--source manual`, a stable `--external-kind`,
+   and a stable `--external-id`; pass `--refresh` on repeated correction imports.
+3. Update the relevant typed profile fields, tags, affiliations, handles, or
+   summaries through the CLI.
+4. If a document/interaction was created, add a short AI note when useful, tag it
+   if applicable, and run `brain --json import finalize` / `brain --json import
+   audit` so staged-import hygiene stays clean.
+
+Example:
+
+```bash
+brain --json import document --title "User relationship note: Charlotte MacCaw" \
+  --text "Alex said Charlotte MacCaw is his mother." \
+  --source manual --external-kind user_note \
+  --external-id "user-correction:charlotte-maccaw-mother"
+
+brain --json add fact --subject person:<charlotte-id> \
+  --key relationship_to_user \
+  --value-text "Charlotte MacCaw is Alex's mother." \
+  --source manual --external-kind user_relationship_fact \
+  --external-id "charlotte-maccaw:mother" --refresh \
+  --source-record document:<note-id> \
+  --evidence document:<note-id>~"Charlotte MacCaw is his mother"
+
+brain --json enrich person <charlotte-id> \
+  --headline "Alex's mother" \
+  --summary "Charlotte MacCaw is Alex's mother, per Alex's direct note."
+```
+
 ## Assets
 
 ```bash

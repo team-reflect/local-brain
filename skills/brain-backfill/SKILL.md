@@ -42,6 +42,9 @@ personal intelligence database, not a dump of every byte.
    boilerplate, promos, alerts, receipts, and private material usually do not
    belong in the brain. Do not redact imported source bodies; if a source record
    should not be stored locally, skip the whole record and ledger the reason.
+12. User corrections and clarifications are trusted manual evidence. Store them
+    as small manual evidence records, add source-keyed facts, update typed
+    profiles/tags/affiliations through the CLI, and keep import audit clean.
 
 ## Setup
 
@@ -523,6 +526,29 @@ Run a no-surprise-project audit: compare final projects to the baseline plus
 explicitly user-approved creations. Any unapproved project created during the
 backfill blocks completion; convert it to an evidence-backed suggestion or
 unlink/archive the mistaken records with the cleanup commands above.
+
+## Follow-Up Enrichment Passes
+
+After broad source coverage is in place, run targeted enrichment passes for
+sparse but important people and organizations. Prioritize recurring
+participants, known friends/family/household contacts, accepted-project
+counterparties, and high-signal public people. Use existing brain evidence
+first; use contacts, Gmail, Granola, calendar, or public web only when identity
+is safe.
+
+For each confident enrichment:
+
+- add or refresh a source-keyed fact for the specific claim;
+- update summaries, headlines, relationship facts, contact handles, tags,
+  organization affiliations, and public-profile facts through the CLI;
+- store small public/manual evidence documents when the claim comes from outside
+  already-imported source records;
+- finalize new evidence documents with narrow waivers when they are pure
+  reference/profile evidence and do not imply tasks or projects.
+
+Ledger weak cases rather than inventing structure. Pair labels, ambiguous first
+names, shared mailboxes, opaque chat handles, and public-profile near-matches
+should remain unresolved with reasons until there is safe identity evidence.
 
 ## Completion And Audit
 
