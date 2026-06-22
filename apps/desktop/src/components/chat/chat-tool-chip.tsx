@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Check, FolderOpen, PencilLine, Search, X } from 'lucide-react'
+import { Check, FolderOpen, PencilLine, Search, TextSearch, X } from 'lucide-react'
 import { Button } from '../button'
 
 /**
@@ -329,6 +329,19 @@ function SearchRecordsChip({ part }: { part: ToolPart }): ReactNode {
   )
 }
 
+function GetRecordsChip({ part }: { part: ToolPart }): ReactNode {
+  const pending = isToolPartPending(part)
+  const count = typeof part.output?.['count'] === 'number' ? part.output['count'] : null
+
+  return (
+    <ChipFrame pending={pending} icon={<TextSearch aria-hidden className="size-3.5" />}>
+      Loaded records
+      {!pending && count !== null ? countSuffix(count, 'record') : ''}
+      {!pending && part.state === 'output-error' ? ` — ${part.errorText ?? 'error'}` : ''}
+    </ChipFrame>
+  )
+}
+
 function ListProjectsChip({ part }: { part: ToolPart }): ReactNode {
   const pending = isToolPartPending(part)
   const statusFilter = part.input?.['status'] ? String(part.input['status']) : null
@@ -359,6 +372,8 @@ export function ChatToolChip({ part, onApprovalResponse }: ChatToolChipProps): R
   switch (toolName) {
     case 'search_records':
       return <SearchRecordsChip part={part} />
+    case 'get_records':
+      return <GetRecordsChip part={part} />
     case 'list_projects':
       return <ListProjectsChip part={part} />
     default:

@@ -3,6 +3,12 @@ import { z } from 'zod'
 import { retrieve, RETRIEVABLE_SOURCE_KINDS, type SourceRecordType } from '../../retrieval/retrieve'
 import { listProjects } from '../../domains/projects/getters'
 import {
+  DEFAULT_RECORD_DETAIL_CHARS,
+  MAX_RECORD_DETAIL_CHARS,
+  getChatRecords,
+  type ChatRecordRequest,
+} from './record-details'
+import {
   completeTaskSchema,
   createOrganizationSchema,
   createPersonSchema,
@@ -34,12 +40,18 @@ export {
  * an explicit Approve response before the execute function mutates SQLite.
  */
 
-const DEFAULT_SEARCH_LIMIT = 8
-const MAX_SEARCH_LIMIT = 20
+const DEFAULT_SEARCH_LIMIT = 20
+const MAX_SEARCH_LIMIT = 50
+const MAX_GET_RECORDS = 10
+const MAX_RECORD_CHUNK_IDS = 5
 const DEFAULT_PROJECTS_LIMIT = 30
-const MAX_CHUNK_CHARS = 1200
 const recordTypeEnum = z.enum([...RETRIEVABLE_SOURCE_KINDS] as [string, ...string[]])
 const optionalString = z.string().optional()
+const recordLookupSchema = z.object({
+  recordType: recordTypeEnum,
+  recordId: z.string().min(1),
+  chunkIds: z.array(z.string().min(1)).max(MAX_RECORD_CHUNK_IDS).optional(),
+})
 
 function optionalNonBlank(value: string | undefined): string | undefined {
   const trimmed = value?.trim()
@@ -115,15 +127,52 @@ export function buildChatTools() {
         })
         return {
           hits: result.chunks.map((chunk) => ({
+            chunkId: chunk.chunkId,
+            chunkIndex: chunk.chunkIndex,
             recordType: chunk.recordType,
             recordId: chunk.recordId,
             title: chunk.recordTitle ?? null,
             date: chunk.recordDate ?? null,
             snippet: chunk.snippet,
-            text: chunk.text.length > MAX_CHUNK_CHARS ? chunk.text.slice(0, MAX_CHUNK_CHARS) : chunk.text,
           })),
           count: result.chunks.length,
           semanticAvailable: result.semanticAvailable,
+        }
+      },
+    }),
+
+    get_records: tool({
+      description:
+        'Load structured details and bounded grounding chunks for specific Local Brain records found by search_records. ' +
+        'Use this after search_records when a question needs details from promising hits. Pass recordType and recordId, ' +
+        'and include chunkIds from search_records to focus the returned context around matched chunks.',
+      inputSchema: z.object({
+        records: z
+          .array(recordLookupSchema)
+          .min(1)
+          .max(MAX_GET_RECORDS)
+          .describe('Records to load, usually chosen from search_records hits.'),
+        maxCharsPerRecord: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_RECORD_DETAIL_CHARS)
+          .optional()
+          .describe(`Max chunk text characters per record (default ${DEFAULT_RECORD_DETAIL_CHARS})`),
+      }),
+      execute: async ({ records, maxCharsPerRecord }) => {
+        const requests: ChatRecordRequest[] = records.map((record) => ({
+          recordType: record.recordType as SourceRecordType,
+          recordId: record.recordId,
+          ...(record.chunkIds !== undefined ? { chunkIds: record.chunkIds } : {}),
+        }))
+        const details = await getChatRecords(
+          requests,
+          maxCharsPerRecord === undefined ? {} : { maxCharsPerRecord },
+        )
+        return {
+          records: details,
+          count: details.length,
         }
       },
     }),
