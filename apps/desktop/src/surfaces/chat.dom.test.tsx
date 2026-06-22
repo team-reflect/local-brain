@@ -90,6 +90,7 @@ describe('ChatSurface', () => {
     chatMocks.messages = []
     chatMocks.status = 'ready'
     chatMocks.useChatConfig = null
+    chatMocks.setMessages.mockImplementation(() => undefined)
     chatMocks.sendMessage.mockResolvedValue(undefined)
     installChatBridgeWithProvider()
   })
@@ -259,7 +260,30 @@ describe('ChatSurface', () => {
     expect(screen.getByText(/3 projects/)).not.toBeNull()
   })
 
-  it('renders approval controls and sends approval responses', async () => {
+  it('executes approved write tools immediately and updates the approval chip', async () => {
+    const calls: Array<{ command: string; args: Record<string, unknown> }> = []
+    installFakeBridge({
+      respond: (command, args) => {
+        calls.push({ command, args })
+        return undefined
+      },
+      query: (_sql, params) => {
+        const key = params[0]
+        if (key === 'model.aiProviders') {
+          return [
+            {
+              valueJson: JSON.stringify([
+                { id: 'provider-1', provider: 'openai', model: 'gpt-5.1', keyHint: '12345' },
+              ]),
+            },
+          ]
+        }
+        if (key === 'model.defaultAiProviderId') {
+          return [{ valueJson: JSON.stringify('provider-1') }]
+        }
+        return []
+      },
+    })
     chatMocks.messages = [
       toolMessage(
         'a1',
@@ -275,8 +299,53 @@ describe('ChatSurface', () => {
     expect(screen.getByText('Create task')).not.toBeNull()
     expect(screen.getByText('Send budget')).not.toBeNull()
     expect(screen.queryByText('Approve')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: /Approve create task/ }))
-    expect(chatMocks.addToolApprovalResponse).toHaveBeenCalledWith({ id: 'approval-1', approved: true })
+    const approveButton = screen.getByRole('button', { name: /Approve create task/ })
+    fireEvent.click(approveButton)
+    fireEvent.click(approveButton)
+
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (call) =>
+            call.command === 'db_execute' &&
+            String(call.args['sql']).includes('insert into "tasks"'),
+        ),
+      ).toBe(true),
+    )
+    expect(
+      calls.filter(
+        (call) =>
+          call.command === 'db_execute' &&
+          String(call.args['sql']).includes('insert into "tasks"'),
+      ),
+    ).toHaveLength(1)
+    await waitFor(() => expect(chatMocks.setMessages).toHaveBeenCalled())
+    const nextMessages = chatMocks.setMessages.mock.calls.at(-1)?.[0] as UIMessage[]
+    const nextPart = nextMessages[0]?.parts[0] as Record<string, unknown> | undefined
+    expect(nextPart).toMatchObject({
+      type: 'tool-create_task',
+      state: 'output-available',
+      approval: { id: 'approval-1', approved: true },
+      output: { kind: 'task', action: 'created' },
+    })
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (call) => {
+            const statements = call.args['statements']
+            return call.command === 'db_batch' &&
+              Array.isArray(statements) &&
+              statements.some(
+                (statement) =>
+                  typeof statement === 'object' &&
+                  statement !== null &&
+                  String((statement as Record<string, unknown>)['sql']).includes('update "chat_messages"'),
+              )
+          },
+        ),
+      ).toBe(true),
+    )
+    expect(chatMocks.addToolApprovalResponse).not.toHaveBeenCalled()
   })
 
   it('keeps the input editable but blocks submit while tool approval is pending', async () => {
@@ -294,12 +363,88 @@ describe('ChatSurface', () => {
 
     const textarea = screen.getByLabelText('Chat message')
     const sendButton = screen.getByRole('button', { name: /Send/ })
+    const config = chatMocks.useChatConfig as {
+      sendAutomaticallyWhen?: (options: { messages: UIMessage[] }) => boolean
+    }
+    expect(config.sendAutomaticallyWhen?.({ messages: chatMocks.messages })).toBe(false)
     expect(textarea).toHaveProperty('disabled', false)
     expect(sendButton).toHaveProperty('disabled', true)
     fireEvent.change(textarea, { target: { value: 'Start a new turn' } })
     expect(textarea).toHaveProperty('value', 'Start a new turn')
     fireEvent.click(sendButton)
     expect(chatMocks.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('keeps the input editable but blocks submit while an approved write tool is executing', async () => {
+    let insertStarted = false
+    let resolveInsert: () => void = () => {
+      throw new Error('Expected task insert to be pending.')
+    }
+    installFakeBridge({
+      respond: (command, args) => {
+        if (command === 'db_execute' && String(args['sql']).includes('insert into "tasks"')) {
+          insertStarted = true
+          return new Promise<number>((resolve) => {
+            resolveInsert = () => resolve(1)
+          })
+        }
+        return undefined
+      },
+      query: (_sql, params) => {
+        const key = params[0]
+        if (key === 'model.aiProviders') {
+          return [
+            {
+              valueJson: JSON.stringify([
+                { id: 'provider-1', provider: 'openai', model: 'gpt-5.1', keyHint: '12345' },
+              ]),
+            },
+          ]
+        }
+        if (key === 'model.defaultAiProviderId') {
+          return [{ valueJson: JSON.stringify('provider-1') }]
+        }
+        return []
+      },
+    })
+    chatMocks.setMessages.mockImplementation((messages: UIMessage[]) => {
+      chatMocks.messages = messages
+    })
+    chatMocks.messages = [
+      toolMessage(
+        'a1',
+        'create_task',
+        'approval-requested',
+        { title: 'Send budget' },
+        undefined,
+        { id: 'approval-1' },
+      ),
+    ]
+    await renderReadyChat()
+
+    fireEvent.click(screen.getByRole('button', { name: /Approve create task/ }))
+    await waitFor(() => expect(insertStarted).toBe(true))
+    await waitFor(() => {
+      const message = chatMocks.messages[0]
+      const part = message?.parts[0] as Record<string, unknown> | undefined
+      expect(part).toMatchObject({ state: 'approval-responded' })
+    })
+
+    const textarea = screen.getByLabelText('Chat message')
+    const sendButton = screen.getByRole('button', { name: /Send/ })
+    expect(textarea).toHaveProperty('disabled', false)
+    expect(sendButton).toHaveProperty('disabled', true)
+    fireEvent.change(textarea, { target: { value: 'Start a new turn' } })
+    expect(textarea).toHaveProperty('value', 'Start a new turn')
+    fireEvent.click(sendButton)
+    expect(chatMocks.sendMessage).not.toHaveBeenCalled()
+
+    resolveInsert()
+    await waitFor(() => {
+      const message = chatMocks.messages[0]
+      const part = message?.parts[0] as Record<string, unknown> | undefined
+      expect(part).toMatchObject({ state: 'output-available' })
+    })
   })
 
   it('keeps the input editable but blocks submit while chat is streaming', async () => {

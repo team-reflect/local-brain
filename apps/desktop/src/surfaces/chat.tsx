@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -25,6 +26,7 @@ import {
   type ToolPart,
 } from '../components/chat/chat-tool-chip'
 import { ConversationRail } from '../components/chat/conversation-rail'
+import { handleChatToolApprovalResponse } from '../lib/ai/chat-approval'
 import { createChatTransport } from '../lib/ai/chat-transport'
 import {
   invalidateChatTurnQueries,
@@ -88,17 +90,62 @@ export function ChatSurface({ conversationId }: { conversationId: string | undef
   const transport = useMemo(() => createChatTransport(), [])
   const initialMessages = useMemo(() => persistedMessages(storedMessages.data), [storedMessages.data])
   const [draft, setDraft] = useState('')
+  const [executingApprovalCount, setExecutingApprovalCount] = useState(0)
+  const executingApprovalCountRef = useRef(0)
+  const sendAutomaticallyWhen = useCallback<typeof lastAssistantMessageIsCompleteWithApprovalResponses>(
+    (options) =>
+      executingApprovalCountRef.current === 0 &&
+      lastAssistantMessageIsCompleteWithApprovalResponses(options),
+    [],
+  )
 
   const chat = useChat({
     id: chatId,
     transport,
     messages: initialMessages,
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
+    sendAutomaticallyWhen,
     onFinish: () => {
       invalidateChatTurnQueries(queryClient, chatId)
     },
   })
   const { addToolApprovalResponse, error, messages, sendMessage, setMessages, status } = chat
+  const messagesRef = useRef<UIMessage[]>(messages)
+
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
+
+  const setChatMessages = useCallback((nextMessages: UIMessage[]) => {
+    messagesRef.current = nextMessages
+    setMessages(nextMessages)
+  }, [setMessages])
+
+  function incrementExecutingApprovalCount(): void {
+    const nextCount = executingApprovalCountRef.current + 1
+    executingApprovalCountRef.current = nextCount
+    setExecutingApprovalCount(nextCount)
+  }
+
+  function decrementExecutingApprovalCount(): void {
+    const nextCount = Math.max(0, executingApprovalCountRef.current - 1)
+    executingApprovalCountRef.current = nextCount
+    setExecutingApprovalCount(nextCount)
+  }
+
+  async function handleToolApprovalResponse(response: ToolApprovalResponse): Promise<void> {
+    if (response.approved) incrementExecutingApprovalCount()
+    try {
+      await handleChatToolApprovalResponse(response, {
+        chatId,
+        getMessages: () => messagesRef.current,
+        queryClient,
+        setMessages: setChatMessages,
+        addToolApprovalResponse,
+      })
+    } finally {
+      if (response.approved) decrementExecutingApprovalCount()
+    }
+  }
 
   useEffect(() => {
     if (!conversationId) setHydratedConversationId(null)
@@ -106,9 +153,9 @@ export function ChatSurface({ conversationId }: { conversationId: string | undef
 
   useEffect(() => {
     if (!conversationId || hydratedConversationId === conversationId || status !== 'ready' || !storedMessages.data) return
-    setMessages(initialMessages)
+    setChatMessages(initialMessages)
     setHydratedConversationId(conversationId)
-  }, [conversationId, hydratedConversationId, initialMessages, setMessages, status, storedMessages.data])
+  }, [conversationId, hydratedConversationId, initialMessages, setChatMessages, status, storedMessages.data])
 
   const providerClosed = modelStatus.data && !modelStatus.data.canRun ? modelStatus.data.reason : null
   const providerSetupState = modelSettings.isPending
@@ -123,7 +170,7 @@ export function ChatSurface({ conversationId }: { conversationId: string | undef
   const historyUnavailable = Boolean(conversationId && storedMessages.isError)
   const waitingForHydration = Boolean(conversationId && !conversationHydrated && !historyUnavailable)
   const composerPending = pending || waitingForHydration || historyUnavailable ||
-    messages.some(messageHasAwaitingToolApproval)
+    executingApprovalCount > 0 || messages.some(messageHasAwaitingToolApproval)
 
   // Show the generic Thinking indicator only before the first assistant content arrives.
   const lastMessage = messages[messages.length - 1]
@@ -162,7 +209,7 @@ export function ChatSurface({ conversationId }: { conversationId: string | undef
   function startNewChat(): void {
     const nextConversationId = createChatId()
     setDraft('')
-    setMessages([])
+    setChatMessages([])
     setDraftConversationId(nextConversationId)
     setHydratedConversationId(null)
     if (conversationId) {
@@ -174,7 +221,7 @@ export function ChatSurface({ conversationId }: { conversationId: string | undef
     await deleteConversation.mutateAsync(id)
     if (id === conversationId) {
       setDraft('')
-      setMessages([])
+      setChatMessages([])
       setDraftConversationId(createChatId())
       setHydratedConversationId(null)
       navigate({ kind: 'chat' })
@@ -217,7 +264,7 @@ export function ChatSurface({ conversationId }: { conversationId: string | undef
             messages={displayedMessages}
             streamingMessageId={streamingMessageId}
             showThinking={showThinking}
-            onToolApprovalResponse={addToolApprovalResponse}
+            onToolApprovalResponse={handleToolApprovalResponse}
           />
         )}
         {error ? <Alert variant="error" className="mx-auto mb-3 w-full max-w-2xl">{error.message}</Alert> : null}

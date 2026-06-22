@@ -265,10 +265,19 @@ export {
   createChatId,
   createConversation,
   appendChatMessage,
+  updateChatMessageSnapshot,
   archiveConversation,
+  type ChatMessageSnapshot,
   type NewChatConversation,
   type NewChatMessage,
 } from './domains/chat/setters'
+export {
+  CHAT_WRITE_TOOL_NAMES,
+  executeChatWriteTool,
+  isChatWriteToolName,
+  type ChatWriteToolName,
+  type ChatWriteToolOutput,
+} from './ai/chat/tools'
 
 // Relationship intelligence (derived recency and strength from interactions/tasks)
 export {

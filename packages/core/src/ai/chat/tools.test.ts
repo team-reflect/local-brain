@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ZodType } from 'zod'
-import { buildChatTools } from './tools'
+import { buildChatTools, executeChatWriteTool } from './tools'
 
 const coreMocks = vi.hoisted(() => ({
   completeTask: vi.fn(),
@@ -221,6 +221,24 @@ describe('buildChatTools', () => {
     expect(coreMocks.updateTask).toHaveBeenCalledWith('task-1', { status: 'waiting' })
     expect(coreMocks.completeTask).toHaveBeenCalledWith('task-1', undefined)
     expect(coreMocks.completeTask).toHaveBeenCalledWith('task-2', undefined)
+  })
+
+  it('executes approved write tools directly from persisted tool input', async () => {
+    coreMocks.createTask.mockResolvedValue('task-1')
+
+    await expect(
+      executeChatWriteTool('create_task', {
+        title: 'Send budget',
+        status: 'open',
+        priority: 2,
+      }),
+    ).resolves.toEqual({ kind: 'task', action: 'created', id: 'task-1' })
+
+    expect(coreMocks.createTask).toHaveBeenCalledWith({
+      title: 'Send budget',
+      status: 'open',
+      priority: 2,
+    })
   })
 
   it('throws when an approved update affects no rows', async () => {

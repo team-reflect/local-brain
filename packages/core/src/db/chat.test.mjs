@@ -5,6 +5,7 @@ import {
   createConversation,
   listConversations,
   listMessages,
+  updateChatMessageSnapshot,
 } from '../index'
 import { freshDatabase, installSqliteBridge } from './sqlite-harness.mjs'
 
@@ -84,6 +85,137 @@ describe('Chat persistence', () => {
       model: message.model,
     }))).toEqual([
       { id: 'msg-assistant', text: 'Task created.', status: 'done', model: 'openai/gpt-5.5' },
+    ])
+  })
+
+  it('updates a persisted assistant message snapshot without clearing model metadata', async () => {
+    const conversationId = await createConversation({ id: 'chat-1', title: 'Tasks' })
+    await appendChatMessage({
+      id: 'msg-assistant',
+      conversationId,
+      role: 'assistant',
+      contentText: '',
+      uiMessageJson: {
+        id: 'msg-assistant',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'tool-create_task',
+            state: 'approval-requested',
+            approval: { id: 'approval-1' },
+            input: { title: 'Send budget' },
+          },
+        ],
+      },
+      model: 'openai/gpt-5.5',
+      status: 'streaming',
+    })
+
+    await expect(
+      updateChatMessageSnapshot({
+        id: 'msg-assistant',
+        conversationId,
+        contentText: '',
+        uiMessageJson: {
+          id: 'msg-assistant',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'tool-create_task',
+              state: 'output-available',
+              approval: { id: 'approval-1', approved: true },
+              input: { title: 'Send budget' },
+              output: { kind: 'task', action: 'created', id: 'task-1' },
+            },
+          ],
+        },
+        status: 'done',
+        error: null,
+      }),
+    ).resolves.toBe(1)
+
+    expect((await listMessages(conversationId)).map((message) => ({
+      id: message.id,
+      status: message.status,
+      model: message.model,
+      parts: message.uiMessageJson['parts'],
+    }))).toEqual([
+      {
+        id: 'msg-assistant',
+        status: 'done',
+        model: 'openai/gpt-5.5',
+        parts: [
+          {
+            type: 'tool-create_task',
+            state: 'output-available',
+            approval: { id: 'approval-1', approved: true },
+            input: { title: 'Send budget' },
+            output: { kind: 'task', action: 'created', id: 'task-1' },
+          },
+        ],
+      },
+    ])
+  })
+
+  it('does not let stale streaming snapshots overwrite a resolved assistant message', async () => {
+    const conversationId = await createConversation({ id: 'chat-1', title: 'Tasks' })
+    await appendChatMessage({
+      id: 'msg-assistant',
+      conversationId,
+      role: 'assistant',
+      contentText: '',
+      uiMessageJson: {
+        id: 'msg-assistant',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'tool-create_task',
+            state: 'output-available',
+            approval: { id: 'approval-1', approved: true },
+            input: { title: 'Send budget' },
+            output: { kind: 'task', action: 'created', id: 'task-1' },
+          },
+        ],
+      },
+      status: 'done',
+    })
+
+    await appendChatMessage({
+      id: 'msg-assistant',
+      conversationId,
+      role: 'assistant',
+      contentText: '',
+      uiMessageJson: {
+        id: 'msg-assistant',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'tool-create_task',
+            state: 'approval-requested',
+            approval: { id: 'approval-1' },
+            input: { title: 'Send budget' },
+          },
+        ],
+      },
+      status: 'streaming',
+    })
+
+    expect((await listMessages(conversationId)).map((message) => ({
+      status: message.status,
+      parts: message.uiMessageJson['parts'],
+    }))).toEqual([
+      {
+        status: 'done',
+        parts: [
+          {
+            type: 'tool-create_task',
+            state: 'output-available',
+            approval: { id: 'approval-1', approved: true },
+            input: { title: 'Send budget' },
+            output: { kind: 'task', action: 'created', id: 'task-1' },
+          },
+        ],
+      },
     ])
   })
 
