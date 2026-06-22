@@ -6,6 +6,7 @@ import { registerAppCommands } from './lib/commands/app-commands'
 import { installModel } from './lib/ai/install-model'
 import { installTauriBridge } from './lib/ipc/tauri-bridge'
 import { queryClient } from './lib/query-client'
+import { UpdateProvider } from './providers/update-provider'
 import './app/globals.css'
 
 installTauriBridge()
@@ -20,7 +21,9 @@ if (!rootElement) {
 createRoot(rootElement).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <App />
+      <UpdateProvider>
+        <App />
+      </UpdateProvider>
     </QueryClientProvider>
   </StrictMode>,
 )

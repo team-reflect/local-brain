@@ -10,7 +10,7 @@ export {
   squish,
   trimToNull,
 } from './text/normalize'
-export { type IpcBridge, setBridge, getBridge } from './ipc/bridge'
+export { type IpcBridge, setBridge, getBridge, hasBridge } from './ipc/bridge'
 export { call } from './ipc/invoke'
 export { appVersion, type AppInfo } from './ipc/commands'
 export {

@@ -71,10 +71,11 @@ update-path decision.
    - `sqlite-vec` and embedding runtime dylibs signed
    - `brain` sidecar signed inside the app bundle
    - unsigned local builds remain supported before public release
-9. Decide update path:
-   - defer auto-update for alpha, or
+9. Add auto-update:
    - use official Tauri updater plugin with GitHub Releases-hosted artifacts
+   - publish under `team-reflect/local-brain`
    - keep updater signing key separate from Apple signing key
+   - add release bump and macOS publish commands mirroring Reflect Open
 10. Add launch docs:
    - install
    - local storage
