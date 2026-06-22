@@ -19,7 +19,17 @@ pub fn archive_record(
         return Err(CliError::Runtime("--reason cannot be blank".into()));
     }
     match args.kind {
-        ArchiveKind::Person => require_active_person(conn, args.id)?,
+        ArchiveKind::Person => {
+            require_active_person(conn, args.id)?;
+            let is_self: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM people WHERE id = ?1 AND is_self = 1)",
+                params![args.id],
+                |row| row.get(0),
+            )?;
+            if is_self {
+                return Err(CliError::Runtime("cannot archive the self person".into()));
+            }
+        }
         ArchiveKind::Organization => {
             require_active_organization(conn, args.id)?;
             let current_affiliations: i64 = conn.query_row(

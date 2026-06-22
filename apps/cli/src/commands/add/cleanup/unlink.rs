@@ -4,7 +4,7 @@ use serde_json::json;
 use super::super::identity::{insert_record_provenance, RecordProvenanceWrite};
 use super::super::record_ref::{parse_record_ref, require_record};
 use super::super::text::normalize_optional;
-use super::UnlinkArgs;
+use super::{sync_person_current_affiliation, UnlinkArgs};
 use crate::error::CliError;
 use crate::output::print_json;
 
@@ -71,17 +71,19 @@ pub fn unlink_records(
     let key = relation_key(&left_kind, &right_kind);
     let tx = conn.transaction()?;
     let changed = match key.as_str() {
-        "organization|person" => tx.execute(
-            "DELETE FROM affiliations WHERE person_id = ?1 AND organization_id = ?2",
-            params![
-                id_for("person", (&left_kind, &left_id), (&right_kind, &right_id)),
-                id_for(
-                    "organization",
-                    (&left_kind, &left_id),
-                    (&right_kind, &right_id)
-                )
-            ],
-        )?,
+        "organization|person" => {
+            let person_id = id_for("person", (&left_kind, &left_id), (&right_kind, &right_id));
+            let organization_id =
+                id_for("organization", (&left_kind, &left_id), (&right_kind, &right_id));
+            let changed = tx.execute(
+                "DELETE FROM affiliations WHERE person_id = ?1 AND organization_id = ?2",
+                params![person_id, organization_id],
+            )?;
+            if changed > 0 {
+                sync_person_current_affiliation(&tx, person_id)?;
+            }
+            changed
+        }
         "person|project" => tx.execute(
             "DELETE FROM project_people WHERE person_id = ?1 AND project_id = ?2",
             params![

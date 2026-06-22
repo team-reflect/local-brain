@@ -1700,6 +1700,7 @@ fn merge_person_dedupes_conflicts_and_preserves_source_provenance() {
             org["id"].as_str().unwrap(),
             "--title",
             "Advisor",
+            "--current",
         ],
     );
     run_json(
@@ -1855,6 +1856,15 @@ fn merge_person_dedupes_conflicts_and_preserves_source_provenance() {
         )
         .unwrap();
     assert_eq!(source_external_identity_count, 0);
+    let (current_org, current_title): (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT current_organization_id, current_title FROM people WHERE id = ?1",
+            [target_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(current_org.as_deref(), org["id"].as_str());
+    assert_eq!(current_title.as_deref(), Some("Advisor"));
 }
 
 #[test]
@@ -1942,6 +1952,38 @@ fn archive_person_soft_archives_and_records_provenance() {
 }
 
 #[test]
+fn archive_person_refuses_self_person() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let self_person = run_json(
+        &db,
+        &[
+            "--json",
+            "self",
+            "set",
+            "--full-name",
+            "Alex MacCaw",
+            "--email",
+            "alex@example.com",
+        ],
+    );
+
+    let out = run(
+        &db,
+        &[
+            "--json",
+            "archive",
+            "person",
+            self_person["id"].as_str().unwrap(),
+            "--reason",
+            "bad cleanup",
+        ],
+    );
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("cannot archive the self person"));
+}
+
+#[test]
 fn archive_organization_blocks_current_affiliations_until_unlinked() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
@@ -2000,6 +2042,16 @@ fn archive_organization_blocks_current_affiliations_until_unlinked() {
         ],
     );
     assert_eq!(unlinked["rowsRemoved"], 1);
+    let conn = Connection::open(&db).unwrap();
+    let current_org: Option<String> = conn
+        .query_row(
+            "SELECT current_organization_id FROM people WHERE id = ?1",
+            [person["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(current_org, None);
+    drop(conn);
     let archived = run_json(
         &db,
         &[
@@ -2125,6 +2177,73 @@ fn person_contact_commands_and_phone_move_relink_participants() {
 }
 
 #[test]
+fn person_contact_add_repairs_orphan_primary_contact_fields() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let person = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Primary Repair",
+            "--email",
+            "primary@example.com",
+            "--phone",
+            "+1 555 0100",
+        ],
+    );
+    let person_id = person["id"].as_str().unwrap();
+    let conn = Connection::open(&db).unwrap();
+    conn.execute(
+        "UPDATE people
+         SET primary_email = 'orphan@example.com',
+             primary_phone = '+1 999 9999'
+         WHERE id = ?1",
+        [person_id],
+    )
+    .unwrap();
+    drop(conn);
+
+    run_json(
+        &db,
+        &[
+            "--json",
+            "person",
+            "email",
+            "add",
+            person_id,
+            "--email",
+            "secondary@example.com",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "person",
+            "phone",
+            "add",
+            person_id,
+            "--phone",
+            "+1 555 0101",
+        ],
+    );
+
+    let conn = Connection::open(&db).unwrap();
+    let (primary_email, primary_phone): (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT primary_email, primary_phone FROM people WHERE id = ?1",
+            [person_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(primary_email.as_deref(), Some("primary@example.com"));
+    assert_eq!(primary_phone.as_deref(), Some("+1 555 0100"));
+}
+
+#[test]
 fn repair_person_phone_move_rejects_third_active_owner() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
@@ -2186,6 +2305,77 @@ fn repair_person_phone_move_rejects_third_active_owner() {
     );
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("also owned by active person"));
+}
+
+#[test]
+fn repair_participants_force_requires_from_person() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let wrong = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Wrong Participant",
+            "--email",
+            "force@example.com",
+        ],
+    );
+    let right = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Right Participant",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Force linked",
+            "--text",
+            "Readable source body.",
+            "--participant",
+            "from:Wrong Participant <force@example.com>",
+        ],
+    );
+
+    let out = run(
+        &db,
+        &[
+            "--json",
+            "repair",
+            "participants",
+            "relink",
+            "--handle",
+            "force@example.com",
+            "--person",
+            right["id"].as_str().unwrap(),
+            "--force",
+        ],
+    );
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--force requires --from-person"));
+
+    let conn = Connection::open(&db).unwrap();
+    let participant_owner: String = conn
+        .query_row(
+            "SELECT person_id FROM interaction_participants WHERE normalized_handle = 'force@example.com'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(participant_owner, wrong["id"].as_str().unwrap());
 }
 
 #[test]

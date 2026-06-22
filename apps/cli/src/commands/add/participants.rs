@@ -528,7 +528,7 @@ pub(super) fn relink_participants_for_handle(
     normalized_handle: &str,
     person_id: &str,
     from_person_id: Option<&str>,
-    force: bool,
+    _force: bool,
     display_handle: Option<&str>,
     display_name: Option<&str>,
 ) -> Result<RelinkResult, CliError> {
@@ -540,22 +540,13 @@ pub(super) fn relink_participants_for_handle(
                AND (
                  person_id IS NULL
                  OR (?2 IS NOT NULL AND person_id = ?2)
-                 OR (?3 = 1 AND person_id <> ?4)
                )
              ORDER BY interaction_id, created_at, id",
         )?;
-        let rows = stmt
-            .query_map(
-                params![
-                    normalized_handle,
-                    from_person_id,
-                    i64::from(force),
-                    person_id
-                ],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-            )?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        rows
+        let rows = stmt.query_map(params![normalized_handle, from_person_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
     };
 
     let mut by_interaction: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -829,6 +820,11 @@ pub fn repair_participants_relink(
     if args.from_person_id == Some(args.person_id) {
         return Err(CliError::Runtime(
             "--from-person must differ from --person".into(),
+        ));
+    }
+    if args.force && args.from_person_id.is_none() {
+        return Err(CliError::Runtime(
+            "--force requires --from-person to avoid moving unrelated participants".into(),
         ));
     }
     if let Some(from_person_id) = args.from_person_id {

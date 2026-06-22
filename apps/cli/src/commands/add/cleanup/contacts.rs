@@ -60,9 +60,7 @@ pub(super) fn normalize_primary_email(conn: &Connection, person_id: &str) -> Res
         )?;
         conn.execute(
             "UPDATE people
-             SET primary_email = CASE
-                   WHEN primary_email IS NULL OR trim(primary_email) = '' THEN ?2
-                   ELSE primary_email END,
+             SET primary_email = ?2,
                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
              WHERE id = ?1",
             params![person_id, email],
@@ -127,9 +125,7 @@ pub(super) fn normalize_primary_phone(conn: &Connection, person_id: &str) -> Res
         )?;
         conn.execute(
             "UPDATE people
-             SET primary_phone = CASE
-                   WHEN primary_phone IS NULL OR trim(primary_phone) = '' THEN ?2
-                   ELSE primary_phone END,
+             SET primary_phone = ?2,
                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
              WHERE id = ?1",
             params![person_id, phone],

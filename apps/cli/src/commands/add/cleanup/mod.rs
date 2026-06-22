@@ -165,3 +165,38 @@ fn refresh_person_chunks(conn: &Connection, person_id: &str) -> Result<usize, Cl
     let text = person_profile_text(conn, person_id)?;
     replace_chunks(conn, "person", person_id, &text)
 }
+
+fn sync_person_current_affiliation(conn: &Connection, person_id: &str) -> Result<(), CliError> {
+    conn.execute(
+        "UPDATE people
+         SET current_organization_id = (
+               SELECT organization_id FROM affiliations
+               WHERE person_id = ?1 AND is_current = 1
+               ORDER BY is_primary DESC, updated_at DESC, id DESC LIMIT 1
+             ),
+             current_title = (
+               SELECT title FROM affiliations
+               WHERE person_id = ?1 AND is_current = 1
+               ORDER BY is_primary DESC, updated_at DESC, id DESC LIMIT 1
+             ),
+             current_department = (
+               SELECT department FROM affiliations
+               WHERE person_id = ?1 AND is_current = 1
+               ORDER BY is_primary DESC, updated_at DESC, id DESC LIMIT 1
+             ),
+             role_family = (
+               SELECT role_family FROM affiliations
+               WHERE person_id = ?1 AND is_current = 1
+               ORDER BY is_primary DESC, updated_at DESC, id DESC LIMIT 1
+             ),
+             seniority = (
+               SELECT seniority FROM affiliations
+               WHERE person_id = ?1 AND is_current = 1
+               ORDER BY is_primary DESC, updated_at DESC, id DESC LIMIT 1
+             ),
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE id = ?1",
+        params![person_id],
+    )?;
+    Ok(())
+}

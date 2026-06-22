@@ -5,7 +5,8 @@ use super::super::identity::{insert_record_provenance, RecordProvenanceWrite};
 use super::super::text::normalize_optional;
 use super::contacts::{normalize_primary_email, normalize_primary_phone};
 use super::{
-    insert_cleanup_provenance, refresh_person_chunks, require_active_person, MergePersonArgs,
+    insert_cleanup_provenance, refresh_person_chunks, require_active_person,
+    sync_person_current_affiliation, MergePersonArgs,
 };
 use crate::commands::now_iso;
 use crate::error::CliError;
@@ -600,17 +601,36 @@ fn move_affiliations(
     let mut current_taken = target_has_current;
     let mut primary_taken = target_has_primary;
     for (id, organization_id, title, is_current, is_primary) in rows {
-        let exists: bool = conn.query_row(
-            "SELECT EXISTS(
-               SELECT 1 FROM affiliations
+        let existing_target_id: Option<String> = conn
+            .query_row(
+                "SELECT id FROM affiliations
                WHERE person_id = ?1
                  AND organization_id = ?2
                  AND COALESCE(title, '') = ?3
-             )",
-            params![to_person_id, organization_id, title],
-            |row| row.get(0),
-        )?;
-        if exists {
+               LIMIT 1",
+                params![to_person_id, organization_id, title],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(existing_target_id) = existing_target_id {
+            let promote_current = is_current == 1 && !current_taken;
+            let promote_primary = is_primary == 1 && !primary_taken;
+            if promote_current || promote_primary {
+                conn.execute(
+                    "UPDATE affiliations
+                     SET is_current = CASE WHEN ?2 = 1 THEN 1 ELSE is_current END,
+                         is_primary = CASE WHEN ?3 = 1 THEN 1 ELSE is_primary END,
+                         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                     WHERE id = ?1",
+                    params![
+                        existing_target_id,
+                        i64::from(promote_current),
+                        i64::from(promote_primary)
+                    ],
+                )?;
+                current_taken |= promote_current;
+                primary_taken |= promote_primary;
+            }
             stats.merged += conn.execute("DELETE FROM affiliations WHERE id = ?1", params![id])?;
         } else {
             let keep_current = is_current == 1 && !current_taken;
@@ -969,6 +989,8 @@ fn apply_person_merge(
     normalize_primary_email(conn, to_person_id)?;
     normalize_primary_phone(conn, to_person_id)?;
     plan.affiliations = move_affiliations(conn, from_person_id, to_person_id)?;
+    sync_person_current_affiliation(conn, to_person_id)?;
+    sync_person_current_affiliation(conn, from_person_id)?;
     plan.participants = move_interaction_participants(conn, from_person_id, to_person_id)?;
     plan.document_links = move_relation_rows(
         conn,
