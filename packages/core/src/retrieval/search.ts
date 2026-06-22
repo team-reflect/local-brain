@@ -1,9 +1,13 @@
-import { sql, type RawBuilder } from 'kysely'
+import { sql } from 'kysely'
 import { db } from '../db/client'
 import type { RecordKind } from '../domains/relations/types'
 import { combineScore, lexicalScore, recencyScore } from './ranking'
 import { toLikePattern, toMatchQuery } from './match-query'
 import { parseSearchQuery } from './search-query'
+import { dedupeAndRank } from './search-merge'
+import { shouldSearchTaggedRecords, taggedRecordRows, tagFilterClauses, type TagRecordRow } from './search-tags'
+import type { SearchHit, SearchOptions } from './search-types'
+export type { SearchHit, SearchOptions } from './search-types'
 
 /**
  * Global search across the visible record types, for the command/search
@@ -17,26 +21,6 @@ import { parseSearchQuery } from './search-query'
  * is {@link retrieve} over `content_chunks`; both share the same FTS index and
  * ranking helpers.
  */
-
-export interface SearchHit {
-  kind: RecordKind
-  id: string
-  title: string
-  subtitle: string | null
-  /** A short matched excerpt for FTS hits; null for name hits. */
-  snippet: string | null
-  score: number
-}
-
-export interface SearchOptions {
-  /** Max hits per kind before the final merge. */
-  perKind?: number
-  /** Final result cap. */
-  limit?: number
-  /** Restrict to a subset of record kinds. */
-  kinds?: readonly RecordKind[]
-  now?: Date
-}
 
 const DEFAULT_PER_KIND = 6
 const DEFAULT_LIMIT = 20
@@ -54,15 +38,6 @@ interface NameRow {
   id: string
   title: string | null
   subtitle: string | null
-  recordDate: string | null
-}
-
-interface TagRecordRow {
-  kind: RecordKind
-  id: string
-  title: string | null
-  subtitle: string | null
-  snippet: string | null
   recordDate: string | null
 }
 
@@ -224,12 +199,19 @@ export async function globalSearch(query: string, options: SearchOptions = {}): 
 
   if (parsed.tagFilters.length > 0 || tagLike) {
     tasks.push(
-      tagHits({
+      shouldSearchTaggedRecords({
+        hasText: parsed.text.trim().length > 0,
         tagFilters: parsed.tagFilters,
         tagLike,
-        limit: perKind * 7,
-        now,
-        ...(options.kinds ? { kinds: options.kinds } : {}),
+      }).then(async (shouldSearchTags) => {
+        if (!shouldSearchTags) return []
+        const rows = await taggedRecordRows({
+          tagFilters: parsed.tagFilters,
+          tagLike,
+          limit: perKind * 7,
+          ...(options.kinds ? { kinds: options.kinds } : {}),
+        })
+        return rows.map((row) => tagHit(row, now))
       }),
     )
   }
@@ -275,153 +257,4 @@ function tagHit(row: TagRecordRow, now: Date): SearchHit {
     snippet: row.snippet,
     score: combineScore({ lexical: TAG_HIT_SCORE, recency }),
   }
-}
-
-function tagFilterClauses(
-  recordType: RecordKind,
-  recordId: RawBuilder<unknown>,
-  tagFilters: readonly string[],
-): RawBuilder<unknown> {
-  if (tagFilters.length === 0) return sql``
-  const clauses = tagFilters.map(
-    (tag) => sql`EXISTS (
-      SELECT 1
-      FROM taggings filter_taggings
-      JOIN tags filter_tags ON filter_tags.id = filter_taggings.tag_id
-      WHERE filter_taggings.record_type = ${recordType}
-        AND filter_taggings.record_id = ${recordId}
-        AND (
-          lower(COALESCE(filter_tags.slug, filter_tags.name)) = ${tag}
-          OR lower(filter_tags.name) = ${tag}
-        )
-    )`,
-  )
-  return sql`AND ${sql.join(clauses, sql` AND `)}`
-}
-
-function tagTextClause(tagLike: string | null): RawBuilder<unknown> {
-  if (!tagLike) return sql``
-  return sql`AND EXISTS (
-    SELECT 1
-    FROM taggings text_taggings
-    JOIN tags text_tags ON text_tags.id = text_taggings.tag_id
-    WHERE text_taggings.record_type = records.kind
-      AND text_taggings.record_id = records.id
-      AND (
-        lower(text_tags.name) LIKE ${tagLike} ESCAPE '\\'
-        OR lower(COALESCE(text_tags.slug, '')) LIKE ${tagLike} ESCAPE '\\'
-      )
-  )`
-}
-
-function wantsTagKinds(kinds: readonly RecordKind[] | undefined): RawBuilder<unknown> {
-  if (!kinds || kinds.length === 0) return sql``
-  const navigable = kinds.filter((kind) => kind !== 'memory')
-  if (navigable.length === 0) return sql`AND 0`
-  const values = sql.join(navigable.map((kind) => sql`${kind}`))
-  return sql`AND records.kind IN (${values})`
-}
-
-async function tagHits(options: {
-  tagFilters: readonly string[]
-  tagLike: string | null
-  limit: number
-  now: Date
-  kinds?: readonly RecordKind[]
-}): Promise<SearchHit[]> {
-  const result = await sql<TagRecordRow>`
-    WITH records(kind, id, title, subtitle, record_date) AS (
-      SELECT 'person', id, full_name, headline, updated_at
-      FROM people
-      WHERE archived_at IS NULL
-      UNION ALL
-      SELECT 'organization', id, name, kind, updated_at
-      FROM organizations
-      WHERE archived_at IS NULL
-      UNION ALL
-      SELECT 'project', id, name, status, updated_at
-      FROM projects
-      WHERE archived_at IS NULL
-      UNION ALL
-      SELECT 'task', id, title, status, COALESCE(due_at, scheduled_for, updated_at)
-      FROM tasks
-      WHERE archived_at IS NULL
-      UNION ALL
-      SELECT 'document', id, title, kind, updated_at
-      FROM documents
-      WHERE archived_at IS NULL
-      UNION ALL
-      SELECT 'interaction', id, title, kind, COALESCE(occurred_at, updated_at)
-      FROM interactions
-      WHERE archived_at IS NULL
-      UNION ALL
-      SELECT 'asset',
-             id,
-             COALESCE(NULLIF(trim(original_filename), ''), storage_path),
-             COALESCE(NULLIF(trim(mime_type), ''), NULLIF(trim(kind), '')),
-             updated_at
-      FROM assets
-      WHERE archived_at IS NULL
-    )
-    SELECT
-      records.kind AS "kind",
-      records.id AS "id",
-      records.title AS "title",
-      records.subtitle AS "subtitle",
-      (
-        SELECT 'Tagged #' || group_concat(label, ', #')
-        FROM (
-          SELECT DISTINCT COALESCE(NULLIF(trim(tags.slug), ''), tags.name) AS label
-          FROM taggings
-          JOIN tags ON tags.id = taggings.tag_id
-          WHERE taggings.record_type = records.kind
-            AND taggings.record_id = records.id
-          ORDER BY label ASC
-        )
-      ) AS "snippet",
-      records.record_date AS "recordDate"
-    FROM records
-    WHERE 1 = 1
-      ${wantsTagKinds(options.kinds)}
-      ${tagFilterClausesForRecords(options.tagFilters)}
-      ${tagTextClause(options.tagLike)}
-    ORDER BY records.record_date DESC
-    LIMIT ${options.limit}
-  `.execute(db)
-
-  return result.rows.map((row) => tagHit(row, options.now))
-}
-
-function tagFilterClausesForRecords(tagFilters: readonly string[]): RawBuilder<unknown> {
-  if (tagFilters.length === 0) return sql``
-  const clauses = tagFilters.map(
-    (tag) => sql`EXISTS (
-      SELECT 1
-      FROM taggings filter_taggings
-      JOIN tags filter_tags ON filter_tags.id = filter_taggings.tag_id
-      WHERE filter_taggings.record_type = records.kind
-        AND filter_taggings.record_id = records.id
-        AND (
-          lower(COALESCE(filter_tags.slug, filter_tags.name)) = ${tag}
-          OR lower(filter_tags.name) = ${tag}
-        )
-    )`,
-  )
-  return sql`AND ${sql.join(clauses, sql` AND `)}`
-}
-
-function dedupeAndRank(hits: SearchHit[]): SearchHit[] {
-  const unique = new Map<string, SearchHit>()
-  for (const hit of hits) {
-    const key = `${hit.kind}:${hit.id}`
-    const existing = unique.get(key)
-    if (
-      !existing ||
-      hit.score > existing.score ||
-      (hit.score === existing.score && existing.snippet === null && hit.snippet !== null)
-    ) {
-      unique.set(key, hit)
-    }
-  }
-  return [...unique.values()].sort((a, b) => b.score - a.score || a.title.localeCompare(b.title))
 }

@@ -3245,7 +3245,20 @@ fn search_finds_tagged_records_by_hash_filter_and_plain_tag_name() {
             "Office receipt and budget details.",
         ],
     );
+    let tagged_no_text_match = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "document",
+            "--title",
+            "Travel itinerary",
+            "--text",
+            "Packing list and flight details.",
+        ],
+    );
     let tagged_ref = format!("document:{}", tagged["id"].as_str().unwrap());
+    let tagged_no_text_ref = format!("document:{}", tagged_no_text_match["id"].as_str().unwrap());
     run_json(
         &db,
         &[
@@ -3270,6 +3283,18 @@ fn search_finds_tagged_records_by_hash_filter_and_plain_tag_name() {
             &tagged_ref,
         ],
     );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "tag",
+            "attach",
+            "--tag",
+            "project-alpha",
+            "--record",
+            &tagged_no_text_ref,
+        ],
+    );
 
     let by_hash = run_json(&db, &["--json", "search", "#project-alpha"]);
     let by_hash_hits = by_hash["results"].as_array().unwrap();
@@ -3289,6 +3314,9 @@ fn search_finds_tagged_records_by_hash_filter_and_plain_tag_name() {
     let constrained_hits = constrained["results"].as_array().unwrap();
     assert!(constrained_hits.iter().any(|h| h["id"] == tagged["id"]));
     assert!(!constrained_hits.iter().any(|h| h["id"] == untagged["id"]));
+    assert!(!constrained_hits
+        .iter()
+        .any(|h| h["id"] == tagged_no_text_match["id"]));
 }
 
 #[test]

@@ -113,6 +113,8 @@ export function CommandPalette({
     return [...recordItems, ...commandItems]
   }, [commandsOnly, trimmed.length, recordItems, commandItems])
   const itemKey = items.map((item) => item.key).join('\n')
+  const waitingForRecords =
+    !commandsOnly && trimmed.length > 0 && recordItems.length === 0 && search.isFetching
 
   useEffect(() => {
     setSelectedValue((value) => {
@@ -144,7 +146,7 @@ export function CommandPalette({
             />
           </div>
           <CommandList>
-            {items.length === 0 ? <CommandEmpty>No matches</CommandEmpty> : null}
+            {items.length === 0 && !waitingForRecords ? <CommandEmpty>No matches</CommandEmpty> : null}
             {!commandsOnly && trimmed.length > 0 && recordItems.length > 0 ? (
               <Group label="Records" items={recordItems} />
             ) : null}

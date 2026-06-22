@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, params_from_iter, types::Value as SqlValue, Connection, OptionalExtension};
 use serde_json::{json, Value};
 
 use super::{to_like_pattern, to_like_pattern_lower, to_match_query};
@@ -42,55 +42,99 @@ fn parse_search_query(query: &str) -> ParsedSearchQuery {
 
 fn parse_tag_filter(token: &str) -> Option<String> {
     let raw = token.strip_prefix('#')?;
-    if raw.is_empty() {
+    let mut chars = raw.chars();
+    let first = chars.next()?;
+    if !first.is_alphanumeric() {
         return None;
     }
-    if raw
-        .chars()
-        .all(|ch| ch.is_alphanumeric() || matches!(ch, '-' | '_' | '/'))
-    {
+    if chars.all(|ch| ch.is_alphanumeric() || matches!(ch, '-' | '_' | '/')) {
         Some(raw.to_lowercase())
     } else {
         None
     }
 }
 
-fn sql_string(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
+#[derive(Default)]
+struct SqlFragment {
+    sql: String,
+    params: Vec<SqlValue>,
 }
 
-fn tag_filter_sql(record_type: &str, record_id_expr: &str, tag_filters: &[String]) -> String {
-    tag_filter_sql_for_expr(&sql_string(record_type), record_id_expr, tag_filters)
+fn tag_filter_sql(record_type: &str, record_id_expr: &str, tag_filters: &[String]) -> SqlFragment {
+    tag_filter_sql_inner("?", Some(record_type), record_id_expr, tag_filters)
 }
 
 fn tag_filter_sql_for_expr(
     record_type_expr: &str,
     record_id_expr: &str,
     tag_filters: &[String],
-) -> String {
+) -> SqlFragment {
+    tag_filter_sql_inner(record_type_expr, None, record_id_expr, tag_filters)
+}
+
+fn tag_filter_sql_inner(
+    record_type_expr: &str,
+    record_type_param: Option<&str>,
+    record_id_expr: &str,
+    tag_filters: &[String],
+) -> SqlFragment {
     if tag_filters.is_empty() {
-        return String::new();
+        return SqlFragment::default();
     }
-    tag_filters
-        .iter()
-        .map(|tag| {
-            let tag = sql_string(tag);
-            format!(
-                " AND EXISTS (
+    let mut fragment = SqlFragment::default();
+    for tag in tag_filters {
+        fragment.sql.push_str(&format!(
+            " AND EXISTS (
                     SELECT 1
                     FROM taggings filter_taggings
                     JOIN tags filter_tags ON filter_tags.id = filter_taggings.tag_id
                     WHERE filter_taggings.record_type = {record_type_expr}
                       AND filter_taggings.record_id = {record_id_expr}
                       AND (
-                        lower(COALESCE(filter_tags.slug, filter_tags.name)) = {tag}
-                        OR lower(filter_tags.name) = {tag}
+                        lower(COALESCE(filter_tags.slug, filter_tags.name)) = ?
+                        OR lower(filter_tags.name) = ?
                       )
                  )"
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("")
+        ));
+        if let Some(record_type) = record_type_param {
+            fragment
+                .params
+                .push(SqlValue::from(record_type.to_string()));
+        }
+        fragment.params.push(SqlValue::from(tag.clone()));
+        fragment.params.push(SqlValue::from(tag.clone()));
+    }
+    fragment
+}
+
+fn has_plain_tag_match(conn: &Connection, tag_like: &str) -> Result<bool, CliError> {
+    let hit: Option<i64> = conn
+        .query_row(
+            "SELECT 1
+             FROM tags
+             WHERE lower(name) LIKE ?1 ESCAPE '\\'
+                OR lower(COALESCE(slug, '')) LIKE ?1 ESCAPE '\\'
+             LIMIT 1",
+            params![tag_like],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(hit.is_some())
+}
+
+fn should_search_tag_hits(
+    conn: &Connection,
+    text: &str,
+    tag_like: Option<&str>,
+    tag_filters: &[String],
+) -> Result<bool, CliError> {
+    if text.trim().is_empty() && !tag_filters.is_empty() {
+        return Ok(true);
+    }
+    match tag_like {
+        Some(tag_like) => has_plain_tag_match(conn, tag_like),
+        None => Ok(false),
+    }
 }
 
 /// `brain search` — full-text across records, name matches, assets, and tags.
@@ -118,6 +162,7 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
             // summary (a curated digest / Granola note), then the raw body. Snippet from
             // body, falling back to summary then title so a summary-only record (no body)
             // still shows useful matched text.
+            let tag_filter = tag_filter_sql(kind, "t.id", &parsed.tag_filters);
             let sql = format!(
                 "SELECT t.id, t.title,
                         COALESCE(
@@ -127,14 +172,17 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
                         ),
                         bm25({fts}, 10.0, 1.0, 2.0)
                  FROM {fts} JOIN {table} t ON t.rowid = {fts}.rowid
-                 WHERE {fts} MATCH ?1
+                 WHERE {fts} MATCH ?
                    AND t.archived_at IS NULL
                    {}
-                 ORDER BY bm25({fts}, 10.0, 1.0, 2.0) LIMIT ?2",
-                tag_filter_sql(kind, "t.id", &parsed.tag_filters)
+                 ORDER BY bm25({fts}, 10.0, 1.0, 2.0) LIMIT ?",
+                tag_filter.sql
             );
             let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt.query_map(params![mq, limit as i64], |row| {
+            let mut query_params = vec![SqlValue::from(mq.to_string())];
+            query_params.extend(tag_filter.params);
+            query_params.push(SqlValue::from(limit as i64));
+            let rows = stmt.query_map(params_from_iter(query_params), |row| {
                 Ok(json!({
                     "kind": kind,
                     "id": row.get::<_, String>(0)?,
@@ -148,6 +196,7 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
             }
         }
 
+        let asset_tag_filter = tag_filter_sql("asset", "s.asset_id", &parsed.tag_filters);
         let asset_sql = format!(
             "SELECT s.asset_id,
                     s.title,
@@ -162,15 +211,18 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
              FROM assets_fts
              JOIN asset_search s ON s.rowid = assets_fts.rowid
              JOIN assets a ON a.id = s.asset_id
-             WHERE assets_fts MATCH ?1
+             WHERE assets_fts MATCH ?
                AND a.archived_at IS NULL
                {}
              ORDER BY bm25(assets_fts, 10.0, 2.0, 2.0, 1.0)
-             LIMIT ?2",
-            tag_filter_sql("asset", "s.asset_id", &parsed.tag_filters)
+             LIMIT ?",
+            asset_tag_filter.sql
         );
         let mut asset_stmt = conn.prepare(&asset_sql)?;
-        let asset_rows = asset_stmt.query_map(params![mq, limit as i64], |row| {
+        let mut asset_params = vec![SqlValue::from(mq.to_string())];
+        asset_params.extend(asset_tag_filter.params);
+        asset_params.push(SqlValue::from(limit as i64));
+        let asset_rows = asset_stmt.query_map(params_from_iter(asset_params), |row| {
             Ok(json!({
                 "kind": "asset",
                 "id": row.get::<_, String>(0)?,
@@ -184,6 +236,8 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
             hits.push(row?);
         }
 
+        let chunk_tag_filter =
+            tag_filter_sql_for_expr("cc.record_type", "cc.record_id", &parsed.tag_filters);
         let chunk_sql = format!(
             "SELECT cc.record_type,
                     cc.record_id,
@@ -223,7 +277,7 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
                ON cc.record_type = 'extracted_fact' AND ef.id = cc.record_id
              LEFT JOIN memories m
                ON cc.record_type = 'memory' AND m.id = cc.record_id
-             WHERE content_chunks_fts MATCH ?1
+             WHERE content_chunks_fts MATCH ?
                AND cc.record_type NOT IN ('document', 'interaction', 'asset')
                {}
                AND (
@@ -238,11 +292,14 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
                  OR (cc.record_type = 'memory' AND m.archived_at IS NULL)
                )
              ORDER BY bm25(content_chunks_fts)
-             LIMIT ?2",
-            tag_filter_sql_for_expr("cc.record_type", "cc.record_id", &parsed.tag_filters)
+             LIMIT ?",
+            chunk_tag_filter.sql
         );
         let mut chunk_stmt = conn.prepare(&chunk_sql)?;
-        let chunk_rows = chunk_stmt.query_map(params![mq, limit as i64], |row| {
+        let mut chunk_params = vec![SqlValue::from(mq.to_string())];
+        chunk_params.extend(chunk_tag_filter.params);
+        chunk_params.push(SqlValue::from(limit as i64));
+        let chunk_rows = chunk_stmt.query_map(params_from_iter(chunk_params), |row| {
             Ok(json!({
                 "kind": row.get::<_, String>(0)?,
                 "id": row.get::<_, String>(1)?,
@@ -264,17 +321,21 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
             ("tasks", "title", "task"),
         ] {
             let record_id = format!("{table}.id");
+            let tag_filter = tag_filter_sql(kind, &record_id, &parsed.tag_filters);
             let sql = format!(
                 "SELECT {table}.id, {name_col}
                  FROM {table}
                  WHERE archived_at IS NULL
-                   AND {name_col} LIKE ?1 ESCAPE '\\'
+                   AND {name_col} LIKE ? ESCAPE '\\'
                    {}
-                 LIMIT ?2",
-                tag_filter_sql(kind, &record_id, &parsed.tag_filters)
+                 LIMIT ?",
+                tag_filter.sql
             );
             let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt.query_map(params![like, limit as i64], |row| {
+            let mut query_params = vec![SqlValue::from(like.to_string())];
+            query_params.extend(tag_filter.params);
+            query_params.push(SqlValue::from(limit as i64));
+            let rows = stmt.query_map(params_from_iter(query_params), |row| {
                 Ok(json!({
                     "kind": kind,
                     "id": row.get::<_, String>(0)?,
@@ -289,7 +350,7 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
         }
     }
 
-    if !parsed.tag_filters.is_empty() || tag_like.is_some() {
+    if should_search_tag_hits(conn, &parsed.text, tag_like.as_deref(), &parsed.tag_filters)? {
         hits.extend(tag_hits(
             conn,
             tag_like.as_deref(),
@@ -298,6 +359,11 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
         )?);
     }
 
+    let hits = dedupe_and_rank_hits(hits, limit);
+    emit_search(json, query, &hits)
+}
+
+fn dedupe_and_rank_hits(hits: Vec<Value>, limit: usize) -> Vec<Value> {
     // Merge all kinds, rank by score, and apply one final cap — like the app's
     // `globalSearch`, instead of returning up to `limit` rows per source table.
     let mut unique_hits: Vec<Value> = Vec::new();
@@ -310,7 +376,11 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
         if let Some(index) = seen.get(&key).copied() {
             let existing_score = unique_hits[index]["score"].as_f64().unwrap_or(0.0);
             let new_score = hit["score"].as_f64().unwrap_or(0.0);
-            if new_score > existing_score {
+            let existing_has_snippet = unique_hits[index]["snippet"].as_str().is_some();
+            let new_has_snippet = hit["snippet"].as_str().is_some();
+            if new_score > existing_score
+                || (new_score == existing_score && !existing_has_snippet && new_has_snippet)
+            {
                 unique_hits[index] = hit;
             }
         } else {
@@ -318,15 +388,13 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
             unique_hits.push(hit);
         }
     }
-    let mut hits = unique_hits;
-    hits.sort_by(|a, b| {
+    unique_hits.sort_by(|a, b| {
         let sb = b["score"].as_f64().unwrap_or(0.0);
         let sa = a["score"].as_f64().unwrap_or(0.0);
         sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
     });
-    hits.truncate(limit);
-
-    emit_search(json, query, &hits)
+    unique_hits.truncate(limit);
+    unique_hits
 }
 
 fn tag_hits(
@@ -343,13 +411,14 @@ fn tag_hits(
             WHERE text_taggings.record_type = records.kind
               AND text_taggings.record_id = records.id
               AND (
-                lower(text_tags.name) LIKE ?1 ESCAPE '\\'
-                OR lower(COALESCE(text_tags.slug, '')) LIKE ?1 ESCAPE '\\'
+                lower(text_tags.name) LIKE ? ESCAPE '\\'
+                OR lower(COALESCE(text_tags.slug, '')) LIKE ? ESCAPE '\\'
               )
           )"
     } else {
         ""
     };
+    let tag_filter = tag_filter_sql_for_expr("records.kind", "records.id", tag_filters);
     let sql = format!(
         "WITH records(kind, id, title, subtitle, record_date) AS (
            SELECT 'person', id, full_name, headline, updated_at
@@ -405,21 +474,20 @@ fn tag_hits(
            {}
            {tag_text_sql}
          ORDER BY records.record_date DESC
-         LIMIT {limit}",
-        tag_filter_sql_for_expr("records.kind", "records.id", tag_filters)
+         LIMIT ?",
+        tag_filter.sql
     );
     let mut stmt = conn.prepare(&sql)?;
     let mut hits = Vec::new();
+    let mut query_params = tag_filter.params;
     if let Some(tag_like) = tag_like {
-        let rows = stmt.query_map(params![tag_like], tag_hit_from_row)?;
-        for row in rows {
-            hits.push(row?);
-        }
-    } else {
-        let rows = stmt.query_map([], tag_hit_from_row)?;
-        for row in rows {
-            hits.push(row?);
-        }
+        query_params.push(SqlValue::from(tag_like.to_string()));
+        query_params.push(SqlValue::from(tag_like.to_string()));
+    }
+    query_params.push(SqlValue::from(limit as i64));
+    let rows = stmt.query_map(params_from_iter(query_params), tag_hit_from_row)?;
+    for row in rows {
+        hits.push(row?);
     }
     Ok(hits)
 }
@@ -621,4 +689,39 @@ fn snake_to_camel(name: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_search_query;
+
+    #[test]
+    fn parses_search_query_like_core() {
+        let parsed = parse_search_query("   ");
+        assert_eq!(parsed.text, "");
+        assert!(parsed.tag_filters.is_empty());
+
+        let parsed = parse_search_query("budget revised plan");
+        assert_eq!(parsed.text, "budget revised plan");
+        assert!(parsed.tag_filters.is_empty());
+
+        let parsed = parse_search_query("#Travel #project-alpha");
+        assert_eq!(parsed.text, "");
+        assert_eq!(
+            parsed.tag_filters,
+            vec!["travel".to_string(), "project-alpha".to_string()]
+        );
+
+        let parsed = parse_search_query("#travel #travel receipts");
+        assert_eq!(parsed.text, "receipts");
+        assert_eq!(parsed.tag_filters, vec!["travel".to_string()]);
+
+        let parsed = parse_search_query("# travel ##work #! #- #_ #/");
+        assert_eq!(parsed.text, "# travel ##work #! #- #_ #/");
+        assert!(parsed.tag_filters.is_empty());
+
+        let parsed = parse_search_query("Project Alpha");
+        assert_eq!(parsed.text, "Project Alpha");
+        assert!(parsed.tag_filters.is_empty());
+    }
 }

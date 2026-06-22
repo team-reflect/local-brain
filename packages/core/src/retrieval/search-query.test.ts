@@ -28,8 +28,8 @@ describe('parseSearchQuery', () => {
   })
 
   it('keeps malformed hash tokens as search text', () => {
-    expect(parseSearchQuery('# travel ##work #!')).toEqual({
-      text: '# travel ##work #!',
+    expect(parseSearchQuery('# travel ##work #! #- #_ #/')).toEqual({
+      text: '# travel ##work #! #- #_ #/',
       tagFilters: [],
     })
   })

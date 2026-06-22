@@ -40,4 +40,21 @@ describe('globalSearch asset results', () => {
       subtitle: 'application/pdf',
     })
   })
+
+  it('skips tagged-record lookup when plain text matches no tag names', async () => {
+    const sqlSeen: string[] = []
+    setBridge({
+      invoke: (command, args) => {
+        if (command !== 'db_query') return Promise.resolve(null)
+        const sql = String((args as { sql?: unknown }).sql ?? '')
+        sqlSeen.push(sql)
+        return Promise.resolve([])
+      },
+    })
+
+    await globalSearch('not-a-tag')
+
+    expect(sqlSeen.some((sql) => sql.includes('FROM tags'))).toBe(true)
+    expect(sqlSeen.some((sql) => sql.includes('WITH records(kind'))).toBe(false)
+  })
 })

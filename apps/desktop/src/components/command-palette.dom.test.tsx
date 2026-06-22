@@ -108,6 +108,23 @@ describe('CommandPalette', () => {
     expect(Boolean(records.compareDocumentPosition(commands) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
   })
 
+  it('waits for global search before showing no matches', async () => {
+    let resolveQuery: (rows: unknown[]) => void = () => {}
+    const pendingQuery = new Promise<unknown[]>((resolve) => {
+      resolveQuery = resolve
+    })
+    installFakeBridge({ query: () => pendingQuery })
+
+    renderWithProviders(<CommandPalette open onClose={() => {}} context={context()} />)
+    const input = screen.getByPlaceholderText(/Search records or run a command/)
+    fireEvent.change(input, { target: { value: 'zzzznotfound' } })
+
+    expect(screen.queryByText('No matches')).toBeNull()
+
+    resolveQuery([])
+    await waitFor(() => expect(screen.getByText('No matches')).toBeDefined())
+  })
+
   it('keeps > as command-only mode', () => {
     const query = vi.fn(() => [])
     installFakeBridge({ query })

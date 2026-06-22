@@ -143,12 +143,21 @@ describe('Plan 06 retrieval + search', () => {
       title: 'Office budget',
       bodyText: 'The office budget needs review.',
     })
-    await tagRecord('document', tagged.id, 'Travel', 'travel')
+    const taggedNoTextMatch = await ingestDocument({
+      title: 'Travel itinerary',
+      bodyText: 'Packing list and flight details.',
+    })
+    const travelTagId = await tagRecord('document', tagged.id, 'Travel', 'travel')
+    await db
+      .insertInto('taggings')
+      .values({ id: newId(), tagId: travelTagId, recordType: 'document', recordId: taggedNoTextMatch.id })
+      .execute()
 
     const hits = await globalSearch('budget #travel')
 
     expect(hits.map((hit) => hit.id)).toContain(tagged.id)
     expect(hits.map((hit) => hit.id)).not.toContain(untagged.id)
+    expect(hits.map((hit) => hit.id)).not.toContain(taggedNoTextMatch.id)
   })
 
   it('global search finds records by plain tag names with spaces', async () => {
