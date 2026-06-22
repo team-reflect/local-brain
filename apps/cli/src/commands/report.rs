@@ -186,26 +186,26 @@ fn source_value(row: Option<(Option<String>, Option<String>, Option<String>)>) -
 }
 
 fn interaction_source(conn: &Connection, interaction_id: &str) -> Result<Option<Value>, CliError> {
-    let identity = conn
-        .query_row(
-            "SELECT s.name, s.slug, ei.kind
-             FROM external_identities ei
-             LEFT JOIN sources s ON s.id = ei.source_id
-             WHERE ei.entity_type = 'interaction' AND ei.entity_id = ?1
-             ORDER BY ei.created_at ASC LIMIT 1",
-            params![interaction_id],
-            |row| {
-                Ok((
-                    row.get::<_, Option<String>>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                ))
-            },
-        )
-        .optional()?;
-    if let Some(source) = source_value(identity) {
-        return Ok(Some(source));
+    let mut stmt = conn.prepare(
+        "SELECT s.name, s.slug, ei.kind
+         FROM external_identities ei
+         LEFT JOIN sources s ON s.id = ei.source_id
+         WHERE ei.entity_type = 'interaction' AND ei.entity_id = ?1
+         ORDER BY ei.created_at ASC",
+    )?;
+    let identities = stmt.query_map(params![interaction_id], |row| {
+        Ok((
+            row.get::<_, Option<String>>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, Option<String>>(2)?,
+        ))
+    })?;
+    for identity in identities {
+        if let Some(source) = source_value(Some(identity?)) {
+            return Ok(Some(source));
+        }
     }
+    drop(stmt);
 
     let provenance = conn
         .query_row(
