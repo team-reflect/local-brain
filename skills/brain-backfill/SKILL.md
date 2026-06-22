@@ -1,6 +1,6 @@
 ---
 name: brain-backfill
-description: Source-led first-run or large historical Local Brain import. Use when setting up a new brain from Gmail/GWS, Granola, Reflect notes, Calendar, contacts, or other personal data sources, especially when the user asks for a comprehensive backfill.
+description: Source-led first-run or large historical Local Brain import. Use when setting up a new brain from Gmail/GWS, Granola, WhatsApp, Reflect notes, Calendar, contacts, or other personal data sources, especially when the user asks for a comprehensive backfill.
 ---
 
 # Local Brain Backfill
@@ -56,6 +56,7 @@ brain --brain "$BRAIN_ROOT" --json source ensure --slug granola --name Granola
 brain --brain "$BRAIN_ROOT" --json source ensure --slug reflect_notes --name "Reflect Notes"
 brain --brain "$BRAIN_ROOT" --json source ensure --slug google_calendar --name "Google Calendar"
 brain --brain "$BRAIN_ROOT" --json source ensure --slug google_people --name "Google People"
+brain --brain "$BRAIN_ROOT" --json source ensure --slug whatsapp --name WhatsApp
 ```
 
 Before starting source passes, inspect the returned `projects` and
@@ -358,6 +359,64 @@ tag, a concise archive AI note for each chat, finalize with narrow waivers when
 the pass intentionally skips project/action/fact extraction, then run
 participant audit and `merge person --dry-run` / `merge person` for duplicate
 contact shells.
+
+### WhatsApp
+
+For local WhatsApp backfills, copy the source database and its `-wal` / `-shm`
+companions into the pass directory before reading it. Common macOS sources are
+under `~/Library/Group Containers/group.net.whatsapp.WhatsApp.shared/`, with
+`ChatStorage.sqlite` as the main SQLite database. Treat the copied database as
+read-only source material and write to Brain only through the CLI:
+
+```bash
+brain --brain "$BRAIN_ROOT" --json source ensure \
+  --slug whatsapp --name WhatsApp
+```
+
+Inspect the schema before extraction; WhatsApp Core Data table names vary by
+version. Common useful tables include `ZWAMESSAGE`, `ZWACHATSESSION`,
+`ZWAGROUPMEMBER`, `ZWAMEDIAITEM`, and `ZWAPROFILEPUSHNAME`. Convert WhatsApp
+Core Data timestamps as seconds since `2001-01-01T00:00:00Z` by adding
+`978307200` seconds.
+
+For small or high-signal chats, import one interaction per chat. For very large
+histories, import one interaction per chat-month so search chunks and summaries
+stay useful:
+
+```bash
+brain --brain "$BRAIN_ROOT" --json import interaction --kind message \
+  --title "WhatsApp: <chat name> (<YYYY-MM>)" \
+  --summary "<concise archive summary>" \
+  --text-file transcript.md \
+  --metadata-json-file metadata.json \
+  --source whatsapp --external-kind chat_month \
+  --external-id "<chat-jid>:<YYYY-MM>" \
+  --participant "sender:<display name or handle>" \
+  --link project:<id>
+```
+
+Preserve the full readable transcript in the body: local timestamp, sender,
+text, deleted/system markers, media captions, media filenames/paths, quoted
+reply context when available, and message ids or stanza ids in metadata. Do not
+bulk-import WhatsApp media binaries by default; record media metadata and local
+paths, then attach selected files only when the user explicitly wants binary
+assets or the file is clearly durable evidence.
+
+Participant handling is the fragile part. For direct chats, prefer phone-backed
+JIDs when present. For group chats, sender identity usually comes from group
+member rows such as `ZMEMBERJID`, not the group chat JID. Preserve source-native
+handles like `<phone>@s.whatsapp.net`, group JIDs, and opaque `@lid` handles as
+participants. Use contacts, push names, repeated context, and phone numbers to
+promote safely; do not create people for every group member. Ledger unresolved
+LID-only handles and recurring group participants for the final participant
+audit.
+
+After import, add a `WhatsApp` tag, source-keyed AI notes, facts/tasks/memories
+only where evidence is durable, and finalize each interaction. For archive-only
+chat-month imports, use narrow waivers such as `--no-derived-actions`,
+`--no-extracted-facts`, or `--no-project-or-task-link` rather than inventing
+intelligence. Run `brain import participants audit --source whatsapp` and
+report unresolved handles, promoted people, relinks, and skipped media.
 
 ### Contacts And People
 
