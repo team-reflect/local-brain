@@ -16,9 +16,119 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      node: ${{ steps.paths.outputs.node }}
+      rust_fmt: ${{ steps.paths.outputs.rust_fmt }}
+      rust_core: ${{ steps.paths.outputs.rust_core }}
+      rust_desktop: ${{ steps.paths.outputs.rust_desktop }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Detect changed paths
+        id: paths
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          node=false
+          rust_fmt=false
+          rust_core=false
+          rust_desktop=false
+          run_all=false
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            run_all=true
+          else
+            changed_files="$(mktemp)"
+            zero_sha="0000000000000000000000000000000000000000"
+            if [ "$EVENT_NAME" = "pull_request" ]; then
+              base="$BASE_SHA"
+              head="$GITHUB_SHA"
+              git diff --name-only "$base" "$head" > "$changed_files"
+            elif [ "$EVENT_NAME" = "push" ]; then
+              base="$BEFORE_SHA"
+              head="$GITHUB_SHA"
+              if [ -z "$base" ] || [ "$base" = "$zero_sha" ]; then
+                git diff-tree --no-commit-id --name-only -r "$head" > "$changed_files"
+              else
+                git diff --name-only "$base" "$head" > "$changed_files"
+              fi
+            else
+              run_all=true
+              : > "$changed_files"
+            fi
+
+            while IFS= read -r changed_path; do
+              [ -n "$changed_path" ] || continue
+              echo "changed: $changed_path"
+
+              case "$changed_path" in
+                .github/workflows/*)
+                  run_all=true
+                  ;;
+              esac
+
+              case "$changed_path" in
+                package.json|pnpm-lock.yaml|pnpm-workspace.yaml|turbo.json|tsconfig.base.json|\
+                apps/desktop/package.json|apps/desktop/tsconfig.json|apps/desktop/vite.config.*|\
+                apps/desktop/vitest.config.*|apps/desktop/index.html|apps/desktop/components.json|\
+                apps/desktop/assets/*|apps/desktop/scripts/*|apps/desktop/src/*|packages/*|\
+                crates/brain-schema/migrations/*)
+                  node=true
+                  ;;
+              esac
+
+              case "$changed_path" in
+                Cargo.toml|Cargo.lock|apps/cli/*|crates/brain-schema/*|apps/desktop/src-tauri/*)
+                  rust_fmt=true
+                  ;;
+              esac
+
+              case "$changed_path" in
+                Cargo.toml|Cargo.lock|apps/cli/*|crates/brain-schema/*)
+                  rust_core=true
+                  ;;
+              esac
+
+              case "$changed_path" in
+                Cargo.toml|Cargo.lock|crates/brain-schema/*|apps/desktop/src-tauri/*|\
+                apps/desktop/scripts/build-sidecar.mjs)
+                  rust_desktop=true
+                  ;;
+              esac
+            done < "$changed_files"
+          fi
+
+          if [ "$run_all" = true ]; then
+            node=true
+            rust_fmt=true
+            rust_core=true
+            rust_desktop=true
+          fi
+
+          {
+            echo "node=$node"
+            echo "rust_fmt=$rust_fmt"
+            echo "rust_core=$rust_core"
+            echo "rust_desktop=$rust_desktop"
+          } >> "$GITHUB_OUTPUT"
+
   node:
     name: Lint / typecheck / test / build (Node)
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.node == 'true'
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -54,9 +164,55 @@ jobs:
       - name: Build
         run: pnpm build
 
-  rust:
-    name: fmt / clippy / test (Rust)
+  rust-fmt:
+    name: Format check (Rust)
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.rust_fmt == 'true'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          components: rustfmt
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+  rust-core:
+    name: Clippy / test (Rust core)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.rust_core == 'true'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          components: clippy
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          cache-on-failure: true
+
+      - name: Clippy
+        run: cargo clippy -p brain-schema -p brain-cli --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test -p brain-schema -p brain-cli
+
+  rust-desktop:
+    name: Clippy / test (Rust desktop)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.rust_desktop == 'true'
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -78,7 +234,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          components: rustfmt, clippy
+          components: clippy
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -98,14 +254,46 @@ jobs:
         run: mkdir -p ~/.cache/ort.pyke.io
 
       # tauri-build requires the sidecar to exist before the desktop crate compiles.
+      # Check-only CI only needs the expected path, not a release-built CLI.
       - name: Stage the brain CLI sidecar
-        run: node apps/desktop/scripts/build-sidecar.mjs
-
-      - name: Format check
-        run: cargo fmt --all -- --check
+        run: LOCAL_BRAIN_SIDECAR_MODE=stub node apps/desktop/scripts/build-sidecar.mjs
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy -p local-brain-desktop --all-targets -- -D warnings
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test -p local-brain-desktop
+
+  ci-complete:
+    name: CI Complete
+    runs-on: ubuntu-latest
+    needs: [changes, node, rust-fmt, rust-core, rust-desktop]
+    if: always()
+    steps:
+      - name: Verify required jobs
+        env:
+          NEEDS_JSON: ${{ toJson(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          bad = {
+              name: data["result"]
+              for name, data in needs.items()
+              if data["result"] in {"failure", "cancelled"}
+          }
+          if bad:
+              for name, result in bad.items():
+                  print(f"::error::{name} finished with result={result}")
+              sys.exit(1)
+
+          skipped = sorted(
+              name for name, data in needs.items() if data["result"] == "skipped"
+          )
+          if skipped:
+              print(f"Skipped path-irrelevant jobs: {', '.join(skipped)}")
+          print("CI complete")
+          PY

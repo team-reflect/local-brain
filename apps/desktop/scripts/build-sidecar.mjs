@@ -6,7 +6,7 @@
 // Rust toolchain (`cargo`, `rustc`).
 
 import { execFileSync, execSync } from 'node:child_process'
-import { copyFileSync, mkdirSync } from 'node:fs'
+import { chmodSync, copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -30,6 +30,26 @@ if (!triple) {
 
 const SIDECARS = [{ crate: 'brain-cli', binary: 'brain' }]
 
+const sidecarMode = process.env.LOCAL_BRAIN_SIDECAR_MODE ?? 'build'
+if (sidecarMode !== 'build' && sidecarMode !== 'stub') {
+  throw new Error(`build-sidecar: unknown LOCAL_BRAIN_SIDECAR_MODE "${sidecarMode}"`)
+}
+
+const extension = triple.includes('windows') ? '.exe' : ''
+mkdirSync(binariesDir, { recursive: true })
+
+if (sidecarMode === 'stub') {
+  for (const { binary } of SIDECARS) {
+    const staged = join(binariesDir, `${binary}-${triple}${extension}`)
+    writeFileSync(staged, '#!/bin/sh\n# Local Brain check-only sidecar stub.\n')
+    if (!extension) {
+      chmodSync(staged, 0o755)
+    }
+    console.log(`build-sidecar: staged check-only stub ${staged}`)
+  }
+  process.exit(0)
+}
+
 // Build with an explicit --target so artifacts land in target/<triple>/release/.
 const packageArgs = SIDECARS.flatMap(({ crate }) => ['-p', crate])
 execFileSync('cargo', ['build', '--release', ...packageArgs, '--target', triple], {
@@ -37,8 +57,6 @@ execFileSync('cargo', ['build', '--release', ...packageArgs, '--target', triple]
   stdio: 'inherit',
 })
 
-const extension = triple.includes('windows') ? '.exe' : ''
-mkdirSync(binariesDir, { recursive: true })
 for (const { binary } of SIDECARS) {
   const built = join(repoRoot, 'target', triple, 'release', `${binary}${extension}`)
   const staged = join(binariesDir, `${binary}-${triple}${extension}`)
