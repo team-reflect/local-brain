@@ -19,6 +19,7 @@ including a graph view centered on the user.
 - [Reflect Open Technology Base](reflect-open-technology-base.md)
 - [Launch Schema](launch-schema.md)
 - [Agent Interface](agent-interface.md)
+- [Using Codex To Backfill Local Brain](codex-brain-backfill.md)
 - [UI Direction](ui-direction.md)
 - [Design System](design-system.md)
 - [Frontend Architecture](frontend-architecture.md)
