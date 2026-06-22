@@ -1521,6 +1521,8 @@ fn merge_person_dry_run_then_apply_moves_links_and_archives_source() {
             "email",
             "--title",
             "Source participant",
+            "--occurred-at",
+            "2026-06-20T12:00:00Z",
             "--text",
             "Readable source body.",
             "--participant",
@@ -1596,6 +1598,17 @@ fn merge_person_dry_run_then_apply_moves_links_and_archives_source() {
         )
         .unwrap();
     assert_eq!(participant_owner, target_id);
+    let target_last_interaction_at: Option<String> = conn
+        .query_row(
+            "SELECT last_interaction_at FROM people WHERE id = ?1",
+            [target_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        target_last_interaction_at.as_deref(),
+        Some("2026-06-20T12:00:00Z")
+    );
     let archived_provenance: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM record_provenance

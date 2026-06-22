@@ -999,6 +999,8 @@ fn apply_person_merge(
     plan.taggings = move_taggings(conn, from_person_id, to_person_id)?;
 
     plan.external_identities = move_external_identities(conn, from_person_id, to_person_id)?;
+    super::super::participants::recompute_relationship_intelligence(conn, to_person_id)?;
+    super::super::participants::recompute_relationship_intelligence(conn, from_person_id)?;
     plan.evidence_refs = conn.execute(
         "UPDATE evidence_refs SET subject_id = ?2
          WHERE subject_type = 'person' AND subject_id = ?1",

@@ -494,7 +494,7 @@ fn apply_promotion_affiliation(
     Ok(())
 }
 
-fn recompute_relationship_intelligence(
+pub(super) fn recompute_relationship_intelligence(
     conn: &Connection,
     person_id: &str,
 ) -> Result<Option<String>, CliError> {
