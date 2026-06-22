@@ -29,8 +29,10 @@ pub(super) fn normalize_email(raw: Option<&str>) -> Option<String> {
     normalize_optional(raw).map(|value| value.to_lowercase())
 }
 
-/// Reduce a phone number to its ASCII digits, collapsing empty to `None`.
-pub(super) fn normalize_phone(raw: Option<&str>) -> Option<String> {
+/// Reduce a phone number to its ASCII digits, collapsing empty to `None`. Also
+/// registered as the SQL `normalize_phone(...)` function (see `db::open`) so phone
+/// comparisons in SQL and Rust can never disagree.
+pub(crate) fn normalize_phone(raw: Option<&str>) -> Option<String> {
     normalize_optional(raw)
         .map(|value| value.chars().filter(|c| c.is_ascii_digit()).collect())
         .filter(|value: &String| !value.is_empty())

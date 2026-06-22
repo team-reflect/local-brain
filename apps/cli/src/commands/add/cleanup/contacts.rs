@@ -12,12 +12,12 @@ use crate::error::CliError;
 use crate::id::new_id;
 use crate::output::print_json;
 
-/// Approximate SQL twin of [`normalize_phone`] for the denormalized
-/// `people.primary_phone` column (which has no stored normalized form). It strips
-/// the common separators `+`, space, `-`, `(`, `)`; [`normalize_phone`] is
-/// stricter (ASCII digits only), so keep them roughly in sync if either changes.
-const PHONE_PRIMARY_NORMALIZED_SQL: &str =
-    "replace(replace(replace(replace(replace(COALESCE(p.primary_phone, ''), '+', ''), ' ', ''), '-', ''), '(', ''), ')', '')";
+/// SQL that normalizes the denormalized `people.primary_phone` column (which has
+/// no stored normalized form) for cross-person ownership comparisons. Backed by the
+/// `normalize_phone` SQL function registered in `db::open`, so it matches the Rust
+/// [`normalize_phone`] — and therefore the handle table's `normalized_phone` —
+/// exactly, with no formatting drift.
+const PHONE_PRIMARY_NORMALIZED_SQL: &str = "normalize_phone(p.primary_phone)";
 
 /// One person contact channel (email or phone). A single descriptor parameterizes
 /// the otherwise identical add / remove / primary-normalization machinery so the
@@ -481,10 +481,16 @@ pub fn repair_person_phone_move(
             outside_owners.join(", ")
         )));
     }
+    // Match how `active_phone_owners` decides ownership: a handle row OR the
+    // denormalized primary column, so a source that holds the number only on
+    // `primary_phone` still counts as the owner.
     let owned_by_from: bool = tx.query_row(
         "SELECT EXISTS(
-           SELECT 1 FROM person_phones
-           WHERE person_id = ?1 AND normalized_phone = ?2
+           SELECT 1
+           FROM people p
+           LEFT JOIN person_phones pp ON pp.person_id = p.id
+           WHERE p.id = ?1
+             AND (pp.normalized_phone = ?2 OR normalize_phone(p.primary_phone) = ?2)
          )",
         params![args.from_person_id, normalized_phone],
         |row| row.get(0),

@@ -31,7 +31,7 @@ mod project;
 mod record_ref;
 mod suggestion;
 mod task;
-mod text;
+pub(crate) mod text;
 
 use rusqlite::{types::Value as SqlValue, Connection};
 use serde_json::json;

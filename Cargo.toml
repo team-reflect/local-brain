@@ -11,7 +11,7 @@ members = [
 
 [workspace.dependencies]
 brain-schema = { path = "crates/brain-schema" }
-rusqlite = { version = "0.40.1", features = ["bundled"] }
+rusqlite = { version = "0.40.1", features = ["bundled", "functions"] }
 rusqlite_migration = "2.6.0"
 sqlite-vec = "0.1.9"
 serde = { version = "1", features = ["derive"] }

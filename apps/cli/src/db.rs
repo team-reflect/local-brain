@@ -6,8 +6,10 @@
 
 use std::path::{Path, PathBuf};
 
+use rusqlite::functions::FunctionFlags;
 use rusqlite::Connection;
 
+use crate::commands::add::text::normalize_phone;
 use crate::error::CliError;
 
 #[derive(Debug, Clone)]
@@ -66,7 +68,26 @@ pub fn open(path: &Path) -> Result<Connection, CliError> {
             })?;
         }
     }
-    Ok(brain_schema::open_and_migrate(path)?)
+    let conn = brain_schema::open_and_migrate(path)?;
+    register_sql_functions(&conn)?;
+    Ok(conn)
+}
+
+/// Register CLI-side SQL helper functions on the connection. `normalize_phone`
+/// mirrors the Rust [`normalize_phone`] exactly, so ownership/dedup checks can
+/// normalize the denormalized `people.primary_phone` column (which has no stored
+/// normalized form) without drifting from the handle table's `normalized_phone`.
+fn register_sql_functions(conn: &Connection) -> Result<(), CliError> {
+    conn.create_scalar_function(
+        "normalize_phone",
+        1,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        |ctx| {
+            let raw = ctx.get::<Option<String>>(0)?;
+            Ok(normalize_phone(raw.as_deref()))
+        },
+    )?;
+    Ok(())
 }
 
 /// Open a database that must already exist (read commands). Errors clearly when

@@ -2506,6 +2506,87 @@ fn person_contact_add_repairs_orphan_primary_contact_fields() {
 }
 
 #[test]
+fn repair_person_phone_move_accepts_primary_only_source_with_loose_format() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let target = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Target Person",
+            "--email",
+            "target@example.com",
+        ],
+    );
+    let source = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Source Person",
+            "--email",
+            "source@example.com",
+        ],
+    );
+    let target_id = target["id"].as_str().unwrap();
+    let source_id = source["id"].as_str().unwrap();
+
+    // Put the number on the source's denormalized primary column only (no
+    // person_phones row), in a dotted format the old replace()-based normalizer
+    // could not reduce to digits. The SQL normalize_phone function must still
+    // recognize the source as the owner.
+    {
+        let conn = Connection::open(&db).unwrap();
+        conn.execute(
+            "UPDATE people SET primary_phone = '(555) 123.4567' WHERE id = ?1",
+            [source_id],
+        )
+        .unwrap();
+    }
+
+    let moved = run_json(
+        &db,
+        &[
+            "--json",
+            "repair",
+            "person-phone",
+            "move",
+            "--phone",
+            "555-123-4567",
+            "--from",
+            source_id,
+            "--to",
+            target_id,
+        ],
+    );
+    assert_eq!(moved["phoneAttached"], true);
+    assert_eq!(moved["phoneRowsMoved"], 0);
+
+    let conn = Connection::open(&db).unwrap();
+    let target_phone: String = conn
+        .query_row(
+            "SELECT normalized_phone FROM person_phones WHERE person_id = ?1",
+            [target_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(target_phone, "5551234567");
+    let source_primary: Option<String> = conn
+        .query_row(
+            "SELECT primary_phone FROM people WHERE id = ?1",
+            [source_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(source_primary, None);
+}
+
+#[test]
 fn repair_person_phone_move_rejects_third_active_owner() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
