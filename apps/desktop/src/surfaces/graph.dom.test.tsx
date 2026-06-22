@@ -316,6 +316,27 @@ describe('GraphSurface', () => {
     })
   })
 
+  it('does not resurrect the panel after every node type is filtered off', async () => {
+    renderWithProviders(<GraphSurface showHeader={false} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Select person Ada Lovelace' }))
+    expect(await screen.findByRole('group', { name: 'Selected node' })).toBeDefined()
+
+    // Hide every node type — there is no layout object in this state at all.
+    fireEvent.click(screen.getByRole('checkbox', { name: 'You' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'People' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Organizations' }))
+
+    await waitFor(() => {
+      expect(screen.queryByRole('group', { name: 'Selected node' })).toBeNull()
+    })
+
+    // Re-showing the node's type must not bring the panel back without a click.
+    fireEvent.click(screen.getByRole('checkbox', { name: 'People' }))
+    await screen.findByRole('button', { name: 'Select person Ada Lovelace' })
+    expect(screen.queryByRole('group', { name: 'Selected node' })).toBeNull()
+  })
+
   it('draws interactions as clickable links and opens the interaction on click', async () => {
     window.history.pushState({}, '', '/network?tab=graph')
     const { container } = renderWithProviders(<GraphSurface showHeader={false} />)

@@ -110,12 +110,15 @@ export function GraphSurface({
   )
 
   // Drop the selection if a filter (or refresh) removes the node from the graph.
+  // Keyed off the filtered graph, not the async layout: with every node type
+  // filtered off there is no layout object at all, but the selection must still
+  // clear (otherwise re-enabling a filter would resurrect the panel).
   useEffect(() => {
-    if (!layout || !selectedNodeId) return
-    if (!layout.nodes.some((node) => node.id === selectedNodeId)) {
+    if (!selectedNodeId || !filteredGraph) return
+    if (!filteredGraph.nodes.some((node) => node.id === selectedNodeId)) {
       setSelectedNodeId(null)
     }
-  }, [layout, selectedNodeId])
+  }, [filteredGraph, selectedNodeId])
 
   // Escape clears the current selection.
   useEffect(() => {
