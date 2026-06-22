@@ -29,6 +29,12 @@ search chunks in SQLite. Use the `brain` CLI; do not write SQLite directly.
    after the user has signed off on that project boundary. Link existing
    projects/orgs; use suggestions for unapproved project candidates or
    high-impact inferred organizations.
+9. **Use entity external IDs only for entities.** For people/orgs, `--external-id`
+   must identify that person/org itself, not an email thread, message, meeting,
+   event, document, or other source record.
+10. **Finish participant normalization.** Backfills are not complete until
+    unresolved participant handles are audited and recurring real people are
+    promoted or ledgered.
 
 ## Brain selection
 
@@ -99,6 +105,8 @@ brain --json add fact --subject interaction:<id> --key decision --value-text "..
 brain --json promote fact <fact-id> --memory-kind decision
 brain --json tag ensure --name "Picardo"
 brain --json tag attach --tag picardo --record interaction:<id>
+brain --json import participants audit --min-count 2
+brain --json import participants promote --handle maya@example.com --full-name "Maya Chen"
 brain --json import finalize --record interaction:<id>
 ```
 
@@ -118,6 +126,10 @@ be stored locally. If a good import intentionally lacks a stage, finalize with
 the narrow waiver that explains it: `--raw-text-unavailable`,
 `--no-entities`, `--no-project-or-task-link`, `--no-derived-actions`, or
 `--no-extracted-facts`.
+
+Record-level finalize does not replace global normalization. Before a backfill
+final report, run `brain --json import participants audit --fail-on-promote-candidates`
+after promoting recurring real people or ledgering unresolved cases.
 
 ## People And Organizations
 
@@ -140,10 +152,25 @@ Skip machine/shared mailboxes and low-signal domains as entities:
 - personal or email-provider domains such as gmail.com, icloud.com, outlook.com
 
 Creating people/orgs improves future participant normalization. Existing
-imported participant rows may still need a CLI repair/relink command before old
-records point at the new canonical entities. Use read-only SQL only for audits
-and candidate discovery; all creates, enrichments, affiliations, and repairs go
-through `brain`.
+imported participant rows can be audited and normalized with:
+
+```bash
+brain --json import participants audit --source gmail --min-count 2 --limit 100
+brain --json import participants promote --handle maya@example.com \
+  --full-name "Maya Chen" --headline "Picardo vendor contact" \
+  --org "Example Labs" --org-domain example.com --title "Operations lead" --current
+brain --json repair participants relink --handle maya@example.com --person <person-id>
+brain --json repair person-email move --email maya@example.com \
+  --from <wrong-person-id> --to <right-person-id> --relink-participants
+```
+
+Use read-only SQL only for audits and candidate discovery; all creates,
+enrichments, affiliations, promotions, and repairs go through `brain`.
+
+If `brain --json add person`, `brain --json add person-from-email`, or
+`brain --json add organization` returns `external_identity_conflict`, stop and
+fix the import identity. Do not retry by forcing enrichment onto the matched
+record.
 
 Trusted contact:
 
@@ -158,8 +185,12 @@ Untrusted email sender:
 
 ```bash
 brain --json add person-from-email --full-name "Maya Chen" \
-  --email maya@example.com --source gmail --external-id msg-123
+  --email maya@example.com --source gmail
 ```
+
+Only pass `--external-id` here when the upstream id is a stable contact/person
+id for Maya herself. Do not use the Gmail message or thread id; that belongs on
+the imported interaction.
 
 Enrichment:
 

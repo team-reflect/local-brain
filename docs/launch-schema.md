@@ -50,6 +50,11 @@ launch. Reimport from source instead of carrying old incremental migrations.
 `interaction`, `interaction_transcript`, `ai_note`, `extracted_fact`, `memory`,
 and `asset`.
 
+For people and organizations, the external identity must identify the entity
+itself, not a source record that mentioned it. Reusing an email thread/message,
+meeting, event, note, or document id as a person/org external id is rejected
+when it conflicts with the incoming email, domain, or normalized name.
+
 `record_provenance` stores import/enrichment metadata such as source, external
 URL/path, imported time, model, prompt fingerprint, and opaque metadata JSON.
 
@@ -180,3 +185,8 @@ source limitations (`--raw-text-unavailable`, `--no-entities`,
 `--no-project-or-task-link`, `--no-derived-actions`, and
 `--no-extracted-facts`) and writes durable `finalized` provenance when a record
 passes.
+
+Record finalization is separate from global participant normalization. Backfill
+completion also requires `brain --json import participants audit`, promotion or
+ledgering of recurring real people, and a clean
+`--fail-on-promote-candidates` gate.

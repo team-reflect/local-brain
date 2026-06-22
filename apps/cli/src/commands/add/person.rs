@@ -4,6 +4,8 @@
 //! Every write — new record, enrichment, handles, external identity — runs in one
 //! transaction so a late failure can never leave a half-updated person.
 
+use std::collections::BTreeSet;
+
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::json;
 
@@ -167,6 +169,92 @@ fn find_duplicate_person(
         }
     }
     Ok(None)
+}
+
+fn find_person_by_normalized_email(
+    conn: &Connection,
+    normalized_email: &str,
+) -> Result<Option<String>, CliError> {
+    let id = conn
+        .query_row(
+            "SELECT p.id
+             FROM people p
+             LEFT JOIN person_emails pe ON pe.person_id = p.id
+             WHERE p.archived_at IS NULL
+               AND (
+                 lower(p.primary_email) = ?1
+                 OR pe.normalized_email = ?1
+               )
+             ORDER BY p.created_at ASC, p.id ASC
+             LIMIT 1",
+            params![normalized_email],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    Ok(id)
+}
+
+fn person_identity_snapshot(
+    conn: &Connection,
+    person_id: &str,
+) -> Result<(String, BTreeSet<String>), CliError> {
+    let (full_name, primary_email): (String, Option<String>) = conn.query_row(
+        "SELECT full_name, primary_email FROM people WHERE id = ?1",
+        params![person_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let mut emails = BTreeSet::new();
+    if let Some(email) = normalize_email(primary_email.as_deref()) {
+        emails.insert(email);
+    }
+    let mut stmt =
+        conn.prepare("SELECT normalized_email FROM person_emails WHERE person_id = ?1")?;
+    let rows = stmt.query_map(params![person_id], |row| row.get::<_, String>(0))?;
+    for row in rows {
+        emails.insert(row?);
+    }
+    Ok((full_name, emails))
+}
+
+fn external_person_conflicts(
+    conn: &Connection,
+    existing_person_id: &str,
+    incoming_name: &str,
+    incoming_emails: &[EmailHandle],
+) -> Result<Vec<String>, CliError> {
+    let (existing_name, existing_emails) = person_identity_snapshot(conn, existing_person_id)?;
+    let mut fields = Vec::new();
+    if normalize_name(&existing_name) != normalize_name(incoming_name) {
+        fields.push("full_name".to_string());
+    }
+    if incoming_emails
+        .iter()
+        .any(|email| !existing_emails.contains(&email.normalized))
+    {
+        fields.push("email".to_string());
+    }
+    Ok(fields)
+}
+
+fn guard_external_person_match(
+    conn: &Connection,
+    existing_person_id: Option<&str>,
+    incoming_name: &str,
+    incoming_emails: &[EmailHandle],
+) -> Result<(), CliError> {
+    let Some(existing_person_id) = existing_person_id else {
+        return Ok(());
+    };
+    let conflicts =
+        external_person_conflicts(conn, existing_person_id, incoming_name, incoming_emails)?;
+    if conflicts.is_empty() {
+        Ok(())
+    } else {
+        Err(CliError::external_identity_conflict(
+            existing_person_id,
+            conflicts,
+        ))
+    }
 }
 
 /// Collapse a blank-or-missing string column to `None` so callers can treat an
@@ -356,6 +444,9 @@ pub fn add_person(conn: &mut Connection, json: bool, args: AddPersonArgs) -> Res
         &kind,
         args.external_id,
     )?;
+    if !args.allow_duplicate {
+        guard_external_person_match(conn, existing_by_external.as_deref(), full_name, &emails)?;
+    }
     let existing = existing_by_external.or(find_duplicate_person(conn, full_name, &emails)?);
     // True when we fall through to the new-record path *despite* a match existing,
     // i.e. `--allow-duplicate` forced a fork. The new record must not steal the
@@ -502,6 +593,10 @@ pub fn add_person_from_email(
     let source_id = source_id(conn, args.source_slug)?;
     let emails = normalize_email_handles([args.email]);
     let phones = normalize_values(args.phone, normalize_optional);
+    let existing_by_email = match emails.first() {
+        Some(email) => find_person_by_normalized_email(conn, &email.normalized)?,
+        None => None,
+    };
     let existing_by_external = find_external_identity(
         conn,
         "person",
@@ -509,11 +604,30 @@ pub fn add_person_from_email(
         "contact",
         args.external_id,
     )?;
-    let existing = existing_by_external.or(find_duplicate_person(
+    if let (Some(external), Some(email_match)) = (
+        existing_by_external.as_deref(),
+        existing_by_email.as_deref(),
+    ) {
+        if external != email_match {
+            return Err(CliError::external_identity_conflict(
+                external,
+                vec!["email".to_string()],
+            ));
+        }
+    }
+    guard_external_person_match(
         conn,
+        existing_by_external.as_deref(),
         &assessment.normalized_name,
         &emails,
-    )?);
+    )?;
+    let existing = existing_by_email
+        .or(existing_by_external)
+        .or(find_duplicate_person(
+            conn,
+            &assessment.normalized_name,
+            &emails,
+        )?);
     if let Some(existing) = existing {
         // Same atomicity guarantee as add_person's duplicate path: handle,
         // enrichment, and external-identity writes commit together or not at all.
@@ -1271,10 +1385,9 @@ mod tests {
         .unwrap();
         let bob_id = single_person_id(&conn, "Bob Other");
 
-        // Re-import ext-bob (resolves to Bob via external identity, skipping
-        // email-based dedupe) but supplying Alice's email. Bob must not absorb an
-        // address another active person already owns.
-        add_person(
+        // Re-import ext-bob while supplying Alice's email. The external id now
+        // conflicts with the incoming email and must stop before enrichment.
+        let result = add_person(
             &mut conn,
             true,
             person_args(
@@ -1283,8 +1396,11 @@ mod tests {
                 vec![],
                 Some("ext-bob"),
             ),
-        )
-        .unwrap();
+        );
+        assert!(matches!(
+            result,
+            Err(CliError::ExternalIdentityConflict { .. })
+        ));
 
         let bob_has_alice_email: i64 = conn
             .query_row(
@@ -1371,9 +1487,10 @@ mod tests {
             "archived re-import must re-point the external identity to the active record"
         );
 
-        // A later import with the same external id now dedupes onto the active
-        // record instead of creating a third person.
-        add_person(
+        // A later import with the same live external id but a different
+        // name/email is now rejected instead of silently enriching the wrong
+        // person.
+        let result = add_person(
             &mut conn,
             true,
             person_args(
@@ -1382,8 +1499,11 @@ mod tests {
                 vec![],
                 Some("ext-1"),
             ),
-        )
-        .unwrap();
+        );
+        assert!(matches!(
+            result,
+            Err(CliError::ExternalIdentityConflict { .. })
+        ));
         let active_people: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM people WHERE archived_at IS NULL",
@@ -1393,7 +1513,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             active_people, 1,
-            "external-id dedupe must reuse the active record after a re-point"
+            "a conflicting external-id re-import must not fork a third active person"
         );
     }
 
@@ -1604,6 +1724,55 @@ mod tests {
     }
 
     #[test]
+    fn person_from_email_reused_source_record_id_conflicts_instead_of_merging() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        add_person_from_email(
+            &mut conn,
+            true,
+            AddPersonFromEmailArgs {
+                full_name: "Alana Owner",
+                email: "alana@example.com",
+                source_slug: Some("gmail"),
+                external_id: Some("thread-1"),
+                headline: None,
+                phone: None,
+                location: None,
+                org: None,
+                org_domain: None,
+                title: None,
+                current: false,
+            },
+        )
+        .unwrap();
+
+        let result = add_person_from_email(
+            &mut conn,
+            true,
+            AddPersonFromEmailArgs {
+                full_name: "Scott Shreeve",
+                email: "scott@example.com",
+                source_slug: Some("gmail"),
+                external_id: Some("thread-1"),
+                headline: None,
+                phone: None,
+                location: None,
+                org: None,
+                org_domain: None,
+                title: None,
+                current: false,
+            },
+        );
+        assert!(matches!(
+            result,
+            Err(CliError::ExternalIdentityConflict { .. })
+        ));
+        let people: i64 = conn
+            .query_row("SELECT COUNT(*) FROM people", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(people, 1, "conflict must not merge or create a person");
+    }
+
+    #[test]
     fn add_person_from_email_duplicate_path_rolls_back_on_late_failure() {
         let mut conn = brain_schema::open_in_memory().unwrap();
         // Seed an active person with a blank primary email so the duplicate path
@@ -1682,12 +1851,9 @@ mod tests {
         .unwrap();
         let bob_id = single_person_id(&conn, "Bob Other");
 
-        // Re-import ext-bob (resolves to Bob via external identity, skipping
-        // email-based dedupe) supplying Alice's address. insert_person_handles
-        // already refuses the owned email; the denormalized enrichment path must
-        // refuse it too, or people.primary_email gets stamped with Alice's address
-        // while person_emails stays clean.
-        add_person(
+        // Re-import ext-bob supplying Alice's address. The conflict is rejected
+        // before any handle or denormalized primary_email enrichment can run.
+        let result = add_person(
             &mut conn,
             true,
             person_args(
@@ -1696,8 +1862,11 @@ mod tests {
                 vec![],
                 Some("ext-bob"),
             ),
-        )
-        .unwrap();
+        );
+        assert!(matches!(
+            result,
+            Err(CliError::ExternalIdentityConflict { .. })
+        ));
 
         let bob_primary: Option<String> = conn
             .query_row(
@@ -1740,9 +1909,7 @@ mod tests {
         .unwrap();
 
         // Bob: an active person with a blank primary_email and a Gmail-sourced
-        // external identity, so an add_person_from_email re-import resolves to him
-        // via external identity (skipping email-based dedupe) and exercises
-        // enrich_duplicate_person_email.
+        // external identity.
         let bob_id = new_id();
         conn.execute(
             "INSERT INTO people (id, full_name) VALUES (?1, 'Bob Other')",
@@ -1757,7 +1924,7 @@ mod tests {
         )
         .unwrap();
 
-        add_person_from_email(
+        let result = add_person_from_email(
             &mut conn,
             true,
             AddPersonFromEmailArgs {
@@ -1773,8 +1940,11 @@ mod tests {
                 title: None,
                 current: false,
             },
-        )
-        .unwrap();
+        );
+        assert!(matches!(
+            result,
+            Err(CliError::ExternalIdentityConflict { .. })
+        ));
 
         let bob_primary: Option<String> = conn
             .query_row(

@@ -815,7 +815,7 @@ fn add_person_stores_handles_and_external_identity() {
             "add",
             "person",
             "--full-name",
-            "Someone Else",
+            "Robin Spencer",
             "--email",
             "robin@example.com",
             "--source",
@@ -994,6 +994,53 @@ fn add_person_from_email_creates_humans_and_skips_machine_senders() {
 }
 
 #[test]
+fn person_from_email_external_identity_conflict_is_machine_readable() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person-from-email",
+            "--full-name",
+            "Alana Owner",
+            "--email",
+            "alana@example.com",
+            "--source",
+            "gmail",
+            "--external-id",
+            "thread-1",
+        ],
+    );
+
+    let out = run(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person-from-email",
+            "--full-name",
+            "Scott Shreeve",
+            "--email",
+            "scott@example.com",
+            "--source",
+            "gmail",
+            "--external-id",
+            "thread-1",
+        ],
+    );
+    assert!(!out.status.success());
+    assert!(out.stdout.is_empty(), "errors must not write to stdout");
+    let error: Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "external_identity_conflict");
+    assert_eq!(error["error"]["existingRecordId"], first["id"]);
+    let fields = error["error"]["conflictingFields"].as_array().unwrap();
+    assert!(fields.iter().any(|field| field == "email"));
+    assert!(fields.iter().any(|field| field == "full_name"));
+}
+
+#[test]
 fn add_interaction_dedupes_by_source_and_preserves_raw_participants() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
@@ -1055,6 +1102,241 @@ fn add_interaction_dedupes_by_source_and_preserves_raw_participants() {
     assert_eq!(row.0, None);
     assert_eq!(row.1.as_deref(), Some("robin@example.com"));
     assert_eq!(row.2.as_deref(), Some("Robin Spencer"));
+}
+
+#[test]
+fn import_participants_audit_promote_and_fail_gate() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    for (id, title) in [
+        ("gmail-msg-ada-1", "Intro"),
+        ("gmail-msg-ada-2", "Follow-up"),
+    ] {
+        run_json(
+            &db,
+            &[
+                "--json",
+                "add",
+                "interaction",
+                "--kind",
+                "email",
+                "--title",
+                title,
+                "--text",
+                "Readable source body.",
+                "--source",
+                "gmail",
+                "--external-id",
+                id,
+                "--participant",
+                "from:Ada Lovelace <ada@example.com>",
+            ],
+        );
+    }
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Notification",
+            "--text",
+            "Readable source body.",
+            "--source",
+            "gmail",
+            "--external-id",
+            "gmail-msg-machine",
+            "--participant",
+            "from:Notifications <notifications@example.com>",
+        ],
+    );
+
+    let audit = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "participants",
+            "audit",
+            "--source",
+            "gmail",
+            "--min-count",
+            "1",
+        ],
+    );
+    let participants = audit["participants"].as_array().unwrap();
+    let ada = participants
+        .iter()
+        .find(|row| row["handle"] == "ada@example.com")
+        .unwrap();
+    assert_eq!(ada["count"], 2);
+    assert_eq!(ada["recommendation"], "promote");
+    let machine = participants
+        .iter()
+        .find(|row| row["handle"] == "notifications@example.com")
+        .unwrap();
+    assert_eq!(machine["recommendation"], "skip");
+
+    let blocked = run(
+        &db,
+        &[
+            "--json",
+            "import",
+            "participants",
+            "audit",
+            "--source",
+            "gmail",
+            "--fail-on-promote-candidates",
+        ],
+    );
+    assert!(!blocked.status.success());
+    assert!(String::from_utf8_lossy(&blocked.stderr).contains("participant promotion candidate"));
+
+    let promoted = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "participants",
+            "promote",
+            "--handle",
+            "ada@example.com",
+            "--full-name",
+            "Ada Lovelace",
+        ],
+    );
+    assert_eq!(promoted["createdPerson"], true);
+    assert_eq!(promoted["participantsRelinked"], 2);
+
+    let clean = run(
+        &db,
+        &[
+            "--json",
+            "import",
+            "participants",
+            "audit",
+            "--source",
+            "gmail",
+            "--fail-on-promote-candidates",
+        ],
+    );
+    assert!(
+        clean.status.success(),
+        "skip-only unresolved participants should not fail the promote gate: {}",
+        String::from_utf8_lossy(&clean.stderr)
+    );
+}
+
+#[test]
+fn repair_person_email_move_and_participant_relink() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let wrong = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Wrong Owner",
+            "--email",
+            "wrong@example.com",
+        ],
+    );
+    let right = run_json(
+        &db,
+        &["--json", "add", "person", "--full-name", "Right Owner"],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Wrongly linked",
+            "--text",
+            "Readable source body.",
+            "--participant",
+            "from:Wrong Owner <wrong@example.com>",
+        ],
+    );
+
+    let moved = run_json(
+        &db,
+        &[
+            "--json",
+            "repair",
+            "person-email",
+            "move",
+            "--email",
+            "wrong@example.com",
+            "--from",
+            wrong["id"].as_str().unwrap(),
+            "--to",
+            right["id"].as_str().unwrap(),
+            "--relink-participants",
+        ],
+    );
+    assert_eq!(moved["participantsRelinked"], 1);
+
+    let conn = Connection::open(&db).unwrap();
+    let owner: String = conn
+        .query_row(
+            "SELECT person_id FROM person_emails WHERE normalized_email = 'wrong@example.com'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(owner, right["id"].as_str().unwrap());
+    let linked: String = conn
+        .query_row(
+            "SELECT person_id FROM interaction_participants WHERE normalized_handle = 'wrong@example.com'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(linked, right["id"].as_str().unwrap());
+
+    let grace = run_json(
+        &db,
+        &["--json", "add", "person", "--full-name", "Grace Hopper"],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Unresolved participant",
+            "--text",
+            "Readable source body.",
+            "--participant",
+            "from:Grace Hopper <grace@example.com>",
+        ],
+    );
+    let relink = run_json(
+        &db,
+        &[
+            "--json",
+            "repair",
+            "participants",
+            "relink",
+            "--handle",
+            "grace@example.com",
+            "--person",
+            grace["id"].as_str().unwrap(),
+        ],
+    );
+    assert_eq!(relink["participantsRelinked"], 1);
 }
 
 #[test]

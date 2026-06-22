@@ -122,6 +122,54 @@ fn enrich_duplicate_organization(
     )
 }
 
+fn external_organization_conflicts(
+    conn: &Connection,
+    existing_organization_id: &str,
+    incoming_name: &str,
+    incoming_domain: Option<&str>,
+) -> Result<Vec<String>, CliError> {
+    let (existing_name, existing_domain): (String, Option<String>) = conn.query_row(
+        "SELECT name, domain FROM organizations WHERE id = ?1",
+        params![existing_organization_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let mut fields = Vec::new();
+    if normalize_name(&existing_name) != normalize_name(incoming_name) {
+        fields.push("name".to_string());
+    }
+    if let Some(domain) = normalize_domain(incoming_domain) {
+        if normalize_domain(existing_domain.as_deref()).as_deref() != Some(domain.as_str()) {
+            fields.push("domain".to_string());
+        }
+    }
+    Ok(fields)
+}
+
+fn guard_external_organization_match(
+    conn: &Connection,
+    existing_organization_id: Option<&str>,
+    incoming_name: &str,
+    incoming_domain: Option<&str>,
+) -> Result<(), CliError> {
+    let Some(existing_organization_id) = existing_organization_id else {
+        return Ok(());
+    };
+    let conflicts = external_organization_conflicts(
+        conn,
+        existing_organization_id,
+        incoming_name,
+        incoming_domain,
+    )?;
+    if conflicts.is_empty() {
+        Ok(())
+    } else {
+        Err(CliError::external_identity_conflict(
+            existing_organization_id,
+            conflicts,
+        ))
+    }
+}
+
 /// Find-or-create an organization by name (then domain), filling a blank domain
 /// and kind when supplied. Shared by the person affiliation path and
 /// `suggestion accept` so importing/ratifying an employer never forks a second
@@ -171,6 +219,14 @@ pub fn add_organization(
         &identity_kind,
         args.external_id,
     )?;
+    if !args.allow_duplicate {
+        guard_external_organization_match(
+            conn,
+            existing_by_external.as_deref(),
+            &name,
+            args.domain,
+        )?;
+    }
     let existing =
         existing_by_external
             .clone()
@@ -293,6 +349,41 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1, "name and domain dedupe must reuse one org");
+    }
+
+    #[test]
+    fn external_identity_conflict_rejects_different_domain() {
+        let mut conn = brain_schema::open_in_memory().unwrap();
+        add_organization(
+            &mut conn,
+            true,
+            AddOrganizationArgs {
+                external_id: Some("thread-1"),
+                ..org_args("Quest Diagnostics", Some("questdiagnostics.com"))
+            },
+        )
+        .unwrap();
+
+        let result = add_organization(
+            &mut conn,
+            true,
+            AddOrganizationArgs {
+                external_id: Some("thread-1"),
+                ..org_args("PWN Health", Some("pwnhealth.com"))
+            },
+        );
+        assert!(matches!(
+            result,
+            Err(CliError::ExternalIdentityConflict { .. })
+        ));
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM organizations WHERE archived_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "conflicting org import must not enrich or fork");
     }
 
     #[test]

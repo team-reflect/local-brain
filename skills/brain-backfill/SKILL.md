@@ -33,7 +33,12 @@ personal intelligence database, not a dump of every byte.
    `brain enrich organization` profile rows during the import.
 8. Attach imported files as assets and provide searchable extracted text when
    useful; binary PDFs/images are otherwise metadata-only.
-9. Skip deliberately: secrets, passwords, one-time links, medical/financial
+9. For people and organizations, `--external-id` must identify that person/org
+   itself. Never use a Gmail thread/message id, meeting id, event id, note id, or
+   other source-record id as a person/org external id.
+10. Completion requires participant normalization: run the participant audit,
+    promote recurring real people, and rerun the fail gate before final report.
+11. Skip deliberately: secrets, passwords, one-time links, medical/financial
    boilerplate, promos, alerts, receipts, and private material usually do not
    belong in the brain. Do not redact imported source bodies; if a source record
    should not be stored locally, skip the whole record and ledger the reason.
@@ -141,7 +146,9 @@ Normalization/audit workers must:
 - report unresolved participants, unresolved domains, and recommended actions.
 
 The main coordinator merges ledger shards, performs any people/org/affiliation
-normalization writes through the CLI, then runs one global audit.
+normalization writes through the CLI, then runs one global audit. Use
+`brain import participants audit/promote` and `brain repair ...` commands for
+participant normalization rather than direct SQLite writes.
 
 ## Source Passes
 
@@ -280,11 +287,15 @@ so profiles are not left blank:
 ```bash
 brain --brain "$BRAIN_ROOT" --json add person-from-email \
   --full-name "Name" --email name@example.com \
-  --source gmail --external-id <message-or-thread-id> \
+  --source gmail \
   --headline "Picardo contact from Gmail correspondence" \
   --org "Example Labs" --org-domain example.com --title "Operations lead" \
   --current
 ```
+
+Only include `--external-id` for `add person` or `person-from-email` when it is
+a stable upstream person/contact id, such as a Google People contact id. A Gmail
+message id or thread id belongs on `import interaction`, not on the person.
 
 Enrich existing people:
 
@@ -314,7 +325,7 @@ or high-impact inferred organizations.
 ```bash
 brain --brain "$BRAIN_ROOT" --json add organization \
   --name "Example Labs" --domain example.com \
-  --headline "Clinical lab partner" --source gmail --external-id example.com
+  --headline "Clinical lab partner" --source gmail --external-kind domain --external-id example.com
 
 brain --brain "$BRAIN_ROOT" --json enrich organization <org-id> \
   --headline "Clinical lab partner" \
@@ -324,6 +335,10 @@ brain --brain "$BRAIN_ROOT" --json enrich organization <org-id> \
   --model "agent-research" --prompt-fingerprint "org-profile-v1" \
   --source gmail
 ```
+
+Only use an organization external id when the identity is for the organization
+itself, such as a normalized domain or a stable org/contact-provider id. Do not
+reuse the source email/thread/meeting/event id that merely mentioned the org.
 
 For companies, keep one company-level project unless the user explicitly accepts
 subprojects. Do not create project-like organizations or organization-like
@@ -389,8 +404,28 @@ gmail.com         40                gmail.com            unresolved: consumer do
 Audit for recurring unresolved participants/domains across all imported records.
 Create/enrich only when evidence is sufficient; otherwise create
 evidence-backed suggestions or leave unresolved with a reason. If normalization
-changes an entity after imports are linked, relink affected records when the CLI
-has a repair command; otherwise report the relink caveat and affected records.
+changes an entity after imports are linked, relink affected records with the CLI
+repair commands.
+
+Required participant audit flow:
+
+```bash
+brain --brain "$BRAIN_ROOT" --json import participants audit --min-count 2 --limit 300
+brain --brain "$BRAIN_ROOT" --json import participants promote \
+  --handle jane@example.com --full-name "Jane Doe" \
+  --headline "Picardo contact from imported correspondence"
+brain --brain "$BRAIN_ROOT" --json repair participants relink \
+  --handle jane@example.com --person <person-id>
+brain --brain "$BRAIN_ROOT" --json repair person-email move \
+  --email jane@example.com --from <wrong-person-id> --to <right-person-id> \
+  --relink-participants
+brain --brain "$BRAIN_ROOT" --json import participants audit \
+  --min-count 2 --fail-on-promote-candidates
+```
+
+If the fail gate still reports promote candidates, the backfill is incomplete
+unless each remaining candidate is explicitly ledgered as unresolved with a
+reason.
 
 Run a no-surprise-project audit: compare final projects to the baseline plus
 explicitly user-approved creations. Any unapproved project created during the
@@ -415,6 +450,8 @@ End with:
 ```bash
 brain --brain "$BRAIN_ROOT" --json doctor
 brain --brain "$BRAIN_ROOT" --json import audit --limit 500
+brain --brain "$BRAIN_ROOT" --json import participants audit \
+  --min-count 2 --fail-on-promote-candidates
 brain --brain "$BRAIN_ROOT" --json import-context --limit 300
 brain --brain "$BRAIN_ROOT" --json suggest list
 brain --brain "$BRAIN_ROOT" --json tasks plan-day --limit 25
@@ -427,7 +464,8 @@ Completion is blocked until:
 
 - every imported record is finalized or ledgered incomplete;
 - people/org normalization ledgers are complete;
-- recurring unresolved participants/domains are audited;
+- recurring unresolved participants/domains are audited and the participant
+  promotion fail gate is clean or explicitly ledgered;
 - project count changes match approved creations only;
 - a fresh final `import-context` is compared to the baseline snapshot.
 
@@ -442,7 +480,7 @@ Final report:
 - people/orgs created during import and coordinator normalization;
 - unresolved participant/domain gaps and reasons;
 - no-surprise-project audit result;
-- relink caveat and affected records if the CLI lacks a repair command;
+- participant promotion/repair actions and affected row counts;
 - incomplete import audit results;
 - suggestions created;
 - known gaps and recommended next pass.
