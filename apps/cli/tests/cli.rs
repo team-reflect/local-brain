@@ -3226,6 +3226,116 @@ fn search_finds_added_records_by_full_text() {
 }
 
 #[test]
+fn search_finds_tagged_records_by_hash_filter_and_plain_tag_name() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let tagged = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "document",
+            "--title",
+            "Travel receipt",
+            "--text",
+            "Hotel receipt and budget details.",
+        ],
+    );
+    let untagged = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "document",
+            "--title",
+            "Office receipt",
+            "--text",
+            "Office receipt and budget details.",
+        ],
+    );
+    let tagged_no_text_match = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "document",
+            "--title",
+            "Travel itinerary",
+            "--text",
+            "Packing list and flight details.",
+        ],
+    );
+    let tagged_ref = format!("document:{}", tagged["id"].as_str().unwrap());
+    let tagged_no_text_ref = format!("document:{}", tagged_no_text_match["id"].as_str().unwrap());
+    run_json(
+        &db,
+        &[
+            "--json",
+            "tag",
+            "ensure",
+            "--name",
+            "Project Alpha",
+            "--slug",
+            "project-alpha",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "tag",
+            "attach",
+            "--tag",
+            "project-alpha",
+            "--record",
+            &tagged_ref,
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "tag",
+            "attach",
+            "--tag",
+            "project-alpha",
+            "--record",
+            &tagged_no_text_ref,
+        ],
+    );
+
+    let by_hash = run_json(&db, &["--json", "search", "#project-alpha"]);
+    let by_hash_hits = by_hash["results"].as_array().unwrap();
+    assert!(by_hash_hits.iter().any(|h| h["kind"] == "document"
+        && h["id"] == tagged["id"]
+        && h["snippet"] == "Tagged #project-alpha"));
+    let tagged_hash_hit = by_hash_hits
+        .iter()
+        .find(|h| h["id"] == tagged["id"])
+        .expect("tagged document should be returned");
+    assert!(
+        tagged_hash_hit["score"].as_f64().unwrap() > 0.58,
+        "tag hits should blend recency instead of using the old flat score"
+    );
+    assert!(!by_hash_hits.iter().any(|h| h["id"] == untagged["id"]));
+
+    let by_name = run_json(&db, &["--json", "search", "Project Alpha"]);
+    assert!(by_name["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|h| h["id"] == tagged["id"]));
+
+    let constrained = run_json(&db, &["--json", "search", "receipt #project-alpha"]);
+    let constrained_hits = constrained["results"].as_array().unwrap();
+    assert!(constrained_hits.iter().any(|h| h["id"] == tagged["id"]));
+    assert!(!constrained_hits.iter().any(|h| h["id"] == untagged["id"]));
+    assert!(!constrained_hits
+        .iter()
+        .any(|h| h["id"] == tagged_no_text_match["id"]));
+}
+
+#[test]
 fn add_task_with_assignee_creates_role_row_and_json_includes_assignee_count() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);

@@ -1,16 +1,28 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Search } from 'lucide-react'
 import { VisuallyHidden } from 'radix-ui'
 import { listCommands } from '../lib/commands/registry'
 import type { CommandContext } from '../lib/commands/types'
-import { useQuickSearch } from '../lib/queries'
+import { useGlobalSearch } from '../lib/queries'
 import { routeForRecord } from '../routing/route'
+import { cn } from '../lib/utils'
+import type { SearchHit } from '@local-brain/core'
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from './ui/command'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 
 interface PaletteItem {
   key: string
   label: string
   hint: string | null
+  detail: string | null
+  snippet: string | null
   run: () => void
 }
 
@@ -25,9 +37,9 @@ const KIND_LABEL: Record<string, string> = {
 }
 
 /**
- * Command palette: fuzzy-ish command filtering plus live record search
- * (people, organizations, projects, tasks, documents, interactions, assets). Arrow keys
- * move the selection across both groups, Enter runs/opens it, Escape closes.
+ * Command palette: one minimal surface for full-text record search and command
+ * execution. Normal queries show ranked record hits first; `>` filters to
+ * commands only.
  */
 export function CommandPalette({
   open,
@@ -39,22 +51,30 @@ export function CommandPalette({
   context: CommandContext
 }): ReactNode {
   const [query, setQuery] = useState('')
-  const [selected, setSelected] = useState(0)
-  const search = useQuickSearch(open ? query : '')
+  const [selectedValue, setSelectedValue] = useState('')
+  // Tracks the value the auto-select effect last chose. If the user moves the
+  // selection manually (see handleSelectedValueChange) this is cleared, so the
+  // effect leaves their choice alone instead of snapping back to the top hit.
+  const autoSelectedValue = useRef('')
+  const trimmed = query.trim()
+  const commandsOnly = trimmed.startsWith('>')
+  const search = useGlobalSearch(open && !commandsOnly ? query : '')
 
   useEffect(() => {
     if (open) {
+      autoSelectedValue.current = ''
       setQuery('')
-      setSelected(0)
+      setSelectedValue('')
     }
   }, [open])
 
   useEffect(() => {
-    setSelected(0)
+    autoSelectedValue.current = ''
+    setSelectedValue('')
   }, [query])
 
   const commandItems = useMemo<PaletteItem[]>(() => {
-    const needle = query.trim().toLowerCase()
+    const needle = (commandsOnly ? trimmed.slice(1) : trimmed).trim().toLowerCase()
     const all = listCommands()
     const matched = needle
       ? all.filter(
@@ -67,12 +87,14 @@ export function CommandPalette({
       key: `command:${command.id}`,
       label: command.title,
       hint: command.keybinding ?? null,
+      detail: null,
+      snippet: null,
       run: () => {
         onClose()
         void command.run(context)
       },
     }))
-  }, [query, context, onClose])
+  }, [commandsOnly, trimmed, context, onClose])
 
   const recordItems = useMemo<PaletteItem[]>(() => {
     return (search.data ?? []).map((hit) => {
@@ -81,6 +103,8 @@ export function CommandPalette({
         key: `record:${hit.kind}:${hit.id}`,
         label: hit.title,
         hint: KIND_LABEL[hit.kind] ?? hit.kind,
+        detail: recordDetail(hit),
+        snippet: hit.snippet,
         run: () => {
           onClose()
           if (route) context.navigate(route)
@@ -89,8 +113,52 @@ export function CommandPalette({
     })
   }, [search.data, context, onClose])
 
-  const items = useMemo(() => [...commandItems, ...recordItems], [commandItems, recordItems])
-  const activeIndex = Math.min(selected, Math.max(items.length - 1, 0))
+  const items = useMemo(() => {
+    if (commandsOnly) return commandItems
+    if (trimmed.length === 0) return commandItems
+    return [...recordItems, ...commandItems]
+  }, [commandsOnly, trimmed.length, recordItems, commandItems])
+  // Stable content key for the effect dependency: re-run when the set of items
+  // actually changes, not on every render that rebuilds the array identity.
+  const itemKey = items.map((item) => item.key).join('\n')
+  const waitingForRecords =
+    !commandsOnly && trimmed.length > 0 && recordItems.length === 0 && search.isFetching
+
+  // Keep a valid selection as items change: default to the first item, and once
+  // record hits arrive (they load async, after commands are already showing)
+  // promote the first record over the auto-selected top command — but only if
+  // the user hasn't manually selected something in the meantime.
+  useEffect(() => {
+    setSelectedValue((value) => {
+      if (!open || items.length === 0) {
+        autoSelectedValue.current = ''
+        return ''
+      }
+      const hasSelection = items.some((item) => item.key === value)
+      if (!hasSelection) {
+        const next = items[0]!.key
+        autoSelectedValue.current = next
+        return next
+      }
+      if (
+        !commandsOnly &&
+        trimmed.length > 0 &&
+        recordItems.length > 0 &&
+        value.startsWith('command:') &&
+        autoSelectedValue.current === value
+      ) {
+        const next = recordItems[0]!.key
+        autoSelectedValue.current = next
+        return next
+      }
+      return value
+    })
+  }, [open, itemKey, commandsOnly, trimmed.length, recordItems, items])
+
+  function handleSelectedValueChange(value: string): void {
+    autoSelectedValue.current = ''
+    setSelectedValue(value)
+  }
 
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? undefined : onClose())}>
@@ -98,49 +166,25 @@ export function CommandPalette({
         <VisuallyHidden.Root>
           <DialogTitle>Command palette</DialogTitle>
         </VisuallyHidden.Root>
-        <div className="flex items-center gap-2.5 border-b border-border px-4">
-          <Search className="size-4 shrink-0 text-muted-foreground" />
-          <input
-            // eslint-disable-next-line jsx-a11y/no-autofocus
-            autoFocus
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'ArrowDown') {
-                event.preventDefault()
-                setSelected((index) => Math.min(index + 1, items.length - 1))
-              } else if (event.key === 'ArrowUp') {
-                event.preventDefault()
-                setSelected((index) => Math.max(index - 1, 0))
-              } else if (event.key === 'Enter') {
-                event.preventDefault()
-                items[activeIndex]?.run()
-              }
-            }}
-            placeholder="Search records or run a command…"
-            className="w-full bg-transparent py-3 text-sm text-foreground outline-none placeholder:text-muted-foreground"
-          />
-        </div>
-        <div className="max-h-80 overflow-y-auto p-1.5">
-          {items.length === 0 ? (
-            <p className="px-3 py-6 text-center text-sm text-muted-foreground">No matches</p>
-          ) : (
-            <>
-              {commandItems.length > 0 ? (
-                <Group label="Commands" items={commandItems} startIndex={0} activeIndex={activeIndex} onSelect={setSelected} />
-              ) : null}
-              {recordItems.length > 0 ? (
-                <Group
-                  label="Records"
-                  items={recordItems}
-                  startIndex={commandItems.length}
-                  activeIndex={activeIndex}
-                  onSelect={setSelected}
-                />
-              ) : null}
-            </>
-          )}
-        </div>
+        <Command shouldFilter={false} value={selectedValue} onValueChange={handleSelectedValueChange}>
+          <div className="flex items-center gap-2.5 border-b border-border px-4">
+            <Search className="size-4 shrink-0 text-muted-foreground" />
+            <CommandInput
+              // eslint-disable-next-line jsx-a11y/no-autofocus
+              autoFocus
+              value={query}
+              onValueChange={setQuery}
+              placeholder="Search records or run a command…"
+            />
+          </div>
+          <CommandList>
+            {items.length === 0 && !waitingForRecords ? <CommandEmpty>No matches</CommandEmpty> : null}
+            {!commandsOnly && trimmed.length > 0 && recordItems.length > 0 ? (
+              <Group label="Records" items={recordItems} />
+            ) : null}
+            {commandItems.length > 0 ? <Group label="Commands" items={commandItems} /> : null}
+          </CommandList>
+        </Command>
       </DialogContent>
     </Dialog>
   )
@@ -149,41 +193,55 @@ export function CommandPalette({
 function Group({
   label,
   items,
-  startIndex,
-  activeIndex,
-  onSelect,
 }: {
   label: string
   items: PaletteItem[]
-  startIndex: number
-  activeIndex: number
-  onSelect: (index: number) => void
 }): ReactNode {
   return (
-    <ul className="py-1">
-      <li className="px-2.5 pb-1 pt-1.5 text-[11px] font-medium tracking-wide text-muted-foreground">
-        {label}
-      </li>
-      {items.map((item, offset) => {
-        const index = startIndex + offset
-        return (
-          <li key={item.key}>
-            <button
-              type="button"
-              onMouseMove={() => onSelect(index)}
-              onClick={item.run}
-              className={`flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-2 text-left text-sm transition-colors ${
-                index === activeIndex ? 'bg-secondary text-foreground' : 'text-foreground'
-              }`}
-            >
+    <CommandGroup heading={label}>
+      {items.map((item) => (
+        <CommandItem key={item.key} value={item.key} onSelect={item.run}>
+          <span className="min-w-0 flex-1">
+            <span className="flex min-w-0 items-center gap-2">
               <span className="truncate">{item.label}</span>
-              {item.hint ? (
-                <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{item.hint}</span>
+              {item.detail ? (
+                <span className="truncate text-xs text-muted-foreground">{item.detail}</span>
               ) : null}
-            </button>
-          </li>
+            </span>
+            {item.snippet ? <Snippet text={item.snippet} /> : null}
+          </span>
+          {item.hint ? (
+            <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{item.hint}</span>
+          ) : null}
+        </CommandItem>
+      ))}
+    </CommandGroup>
+  )
+}
+
+function recordDetail(hit: SearchHit): string | null {
+  const kind = KIND_LABEL[hit.kind] ?? hit.kind
+  return hit.subtitle ? `${kind} · ${hit.subtitle}` : kind
+}
+
+function Snippet({ text }: { text: string }): ReactNode {
+  // Highlights the matched terms that SQLite's `snippet()` wraps in `[` … `]`.
+  // The delimiters are defined in the core search FTS queries
+  // (packages/core/src/retrieval/search.ts) and CLI read.rs — keep them aligned.
+  return (
+    <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+      {text.split(/(\[[^\]]+\])/g).map((part, index) => {
+        const highlighted = part.startsWith('[') && part.endsWith(']')
+        const content = highlighted ? part.slice(1, -1) : part
+        return (
+          <span
+            key={`${part}:${index}`}
+            className={cn(highlighted && 'rounded-sm bg-accent/15 px-0.5 text-foreground')}
+          >
+            {content}
+          </span>
         )
       })}
-    </ul>
+    </span>
   )
 }

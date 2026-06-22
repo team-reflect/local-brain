@@ -16,6 +16,7 @@ describe('CommandPalette', () => {
     resetCommands()
     registerAppCommands()
     installFakeBridge({ queryRows: [] })
+    HTMLElement.prototype.scrollIntoView = vi.fn()
   })
 
   it('filters commands by query and runs the selected one on Enter', () => {
@@ -59,11 +60,10 @@ describe('CommandPalette', () => {
 
   it('searches records and opens the selected one', async () => {
     const ctx = context()
-    // Only the people query returns a row; other record queries stay empty.
     installFakeBridge({
       query: (sql) =>
-        sql.includes('from "people"')
-          ? [{ id: 'p1', fullName: 'Ada Lovelace', headline: 'Mathematician' }]
+        sql.includes('FROM people') && sql.includes('full_name LIKE')
+          ? [{ id: 'p1', title: 'Ada Lovelace', subtitle: 'Mathematician', recordDate: '2026-06-01T00:00:00.000Z' }]
           : [],
     })
 
@@ -76,5 +76,101 @@ describe('CommandPalette', () => {
 
     fireEvent.click(screen.getByText('Ada Lovelace'))
     expect(ctx.navigate).toHaveBeenCalledWith({ kind: 'person', id: 'p1' })
+  })
+
+  it('uses global search snippets and lists records before commands', async () => {
+    installFakeBridge({
+      query: (sql) =>
+        sql.includes('documents_fts')
+          ? [
+              {
+                id: 'd1',
+                title: 'Chat research note',
+                subtitle: 'note',
+                snippet: '[Chat] research',
+                recordDate: '2026-06-01T00:00:00.000Z',
+                bm25: -8,
+              },
+            ]
+          : [],
+    })
+
+    renderWithProviders(<CommandPalette open onClose={() => {}} context={context()} />)
+    const input = screen.getByPlaceholderText(/Search records or run a command/)
+    fireEvent.change(input, { target: { value: 'chat' } })
+
+    await waitFor(() => expect(screen.getByText('Chat research note')).toBeDefined())
+    expect(screen.getByText((_, element) => element?.textContent === 'Chat research')).toBeDefined()
+    expect(screen.getByText('Go to Chat')).toBeDefined()
+
+    const records = screen.getByText('Records')
+    const commands = screen.getByText('Commands')
+    expect(Boolean(records.compareDocumentPosition(commands) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+  })
+
+  it('waits for global search before showing no matches', async () => {
+    let resolveQuery: (rows: unknown[]) => void = () => {}
+    const pendingQuery = new Promise<unknown[]>((resolve) => {
+      resolveQuery = resolve
+    })
+    installFakeBridge({ query: () => pendingQuery })
+
+    renderWithProviders(<CommandPalette open onClose={() => {}} context={context()} />)
+    const input = screen.getByPlaceholderText(/Search records or run a command/)
+    fireEvent.change(input, { target: { value: 'zzzznotfound' } })
+
+    expect(screen.queryByText('No matches')).toBeNull()
+
+    resolveQuery([])
+    await waitFor(() => expect(screen.getByText('No matches')).toBeDefined())
+  })
+
+  it('does not steal a user-selected command when record results arrive', async () => {
+    const ctx = context()
+    let resolveDocuments: (rows: unknown[]) => void = () => {}
+    const documentQuery = new Promise<unknown[]>((resolve) => {
+      resolveDocuments = resolve
+    })
+    installFakeBridge({
+      query: (sql) =>
+        sql.includes('documents_fts')
+          ? documentQuery
+          : [],
+    })
+
+    renderWithProviders(<CommandPalette open onClose={() => {}} context={ctx} />)
+    const input = screen.getByPlaceholderText(/Search records or run a command/)
+    fireEvent.change(input, { target: { value: 'go' } })
+
+    expect(screen.getByText('Go to Today')).toBeDefined()
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+
+    resolveDocuments([
+      {
+        id: 'd1',
+        title: 'Go market notes',
+        subtitle: 'note',
+        snippet: '[Go] market',
+        recordDate: '2026-06-01T00:00:00.000Z',
+        bm25: -8,
+      },
+    ])
+    await waitFor(() => expect(screen.getByText('Go market notes')).toBeDefined())
+
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(ctx.navigate).toHaveBeenCalledWith({ kind: 'tasks' })
+  })
+
+  it('keeps > as command-only mode', () => {
+    const query = vi.fn(() => [])
+    installFakeBridge({ query })
+
+    renderWithProviders(<CommandPalette open onClose={() => {}} context={context()} />)
+    const input = screen.getByPlaceholderText(/Search records or run a command/)
+    fireEvent.change(input, { target: { value: '>graph' } })
+
+    expect(screen.getByText('Open Graph')).toBeDefined()
+    expect(screen.queryByText('Records')).toBeNull()
+    expect(query).not.toHaveBeenCalled()
   })
 })

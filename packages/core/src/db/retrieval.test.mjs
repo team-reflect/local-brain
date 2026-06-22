@@ -51,6 +51,19 @@ async function seedCorpus() {
   })
 }
 
+async function tagRecord(recordType, recordId, name, slug = name.toLowerCase().replace(/\s+/g, '-')) {
+  const tagId = newId()
+  await db
+    .insertInto('tags')
+    .values({ id: tagId, name, slug })
+    .execute()
+  await db
+    .insertInto('taggings')
+    .values({ id: newId(), tagId, recordType, recordId })
+    .execute()
+  return tagId
+}
+
 describe('Plan 06 retrieval + search', () => {
   beforeEach(() => {
     installSqliteBridge(freshDatabase())
@@ -100,6 +113,90 @@ describe('Plan 06 retrieval + search', () => {
     const interaction = hits.find((h) => h.kind === 'interaction')
     expect(interaction?.title).toBe('Kickoff')
     expect(interaction?.snippet).toBeTruthy()
+  })
+
+  it('global search treats #tag as an exact tagged-record filter', async () => {
+    const travelDoc = await ingestDocument({
+      title: 'Itinerary',
+      bodyText: 'Packing list and flight details.',
+    })
+    const workDoc = await ingestDocument({
+      title: 'Launch checklist',
+      bodyText: 'Packing release notes for the beta.',
+    })
+    await tagRecord('document', travelDoc.id, 'Travel', 'travel')
+    await tagRecord('document', workDoc.id, 'Work', 'work')
+
+    const hits = await globalSearch('#travel')
+
+    expect(hits.map((hit) => hit.id)).toContain(travelDoc.id)
+    expect(hits.map((hit) => hit.id)).not.toContain(workDoc.id)
+    expect(hits.find((hit) => hit.id === travelDoc.id)?.snippet).toBe('Tagged #travel')
+  })
+
+  it('global search combines tag filters with ordinary text search', async () => {
+    const tagged = await ingestDocument({
+      title: 'Travel budget',
+      bodyText: 'The hotel budget needs a receipt.',
+    })
+    const untagged = await ingestDocument({
+      title: 'Office budget',
+      bodyText: 'The office budget needs review.',
+    })
+    const taggedNoTextMatch = await ingestDocument({
+      title: 'Travel itinerary',
+      bodyText: 'Packing list and flight details.',
+    })
+    const travelTagId = await tagRecord('document', tagged.id, 'Travel', 'travel')
+    await db
+      .insertInto('taggings')
+      .values({ id: newId(), tagId: travelTagId, recordType: 'document', recordId: taggedNoTextMatch.id })
+      .execute()
+
+    const hits = await globalSearch('budget #travel')
+
+    expect(hits.map((hit) => hit.id)).toContain(tagged.id)
+    expect(hits.map((hit) => hit.id)).not.toContain(untagged.id)
+    expect(hits.map((hit) => hit.id)).not.toContain(taggedNoTextMatch.id)
+  })
+
+  it('global search finds records by plain tag names with spaces', async () => {
+    const doc = await ingestDocument({
+      title: 'Kickoff archive',
+      bodyText: 'A short archived note for the project.',
+    })
+    await tagRecord('document', doc.id, 'Project Alpha', 'project-alpha')
+
+    const hits = await globalSearch('Project Alpha')
+
+    expect(hits.find((hit) => hit.id === doc.id)).toMatchObject({
+      kind: 'document',
+      title: 'Kickoff archive',
+      snippet: 'Tagged #project-alpha',
+    })
+  })
+
+  it('global search excludes archived tagged records', async () => {
+    const doc = await ingestDocument({
+      title: 'Archived trip',
+      bodyText: 'Old flight details.',
+    })
+    await tagRecord('document', doc.id, 'Travel', 'travel')
+    await db.updateTable('documents').set({ archivedAt: '2026-06-01T00:00:00.000Z' }).where('id', '=', doc.id).execute()
+
+    expect(await globalSearch('#travel')).toEqual([])
+  })
+
+  it('global search dedupes text and tag hits for the same record', async () => {
+    const doc = await ingestDocument({
+      title: 'Project Alpha',
+      bodyText: 'Project Alpha budget notes.',
+    })
+    await tagRecord('document', doc.id, 'Project Alpha', 'project-alpha')
+
+    const hits = await globalSearch('Project Alpha')
+
+    expect(hits.filter((hit) => hit.kind === 'document' && hit.id === doc.id)).toHaveLength(1)
   })
 })
 
