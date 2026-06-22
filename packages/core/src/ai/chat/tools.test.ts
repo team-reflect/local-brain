@@ -10,6 +10,7 @@ const coreMocks = vi.hoisted(() => ({
   createPerson: vi.fn(),
   createProject: vi.fn(),
   createTask: vi.fn(),
+  getChatRecords: vi.fn(),
   listProjects: vi.fn(),
   retrieve: vi.fn(),
   updateMemory: vi.fn(),
@@ -43,6 +44,12 @@ vi.mock('../../retrieval/retrieve', () => ({
 
 vi.mock('../../domains/projects/getters', () => ({
   listProjects: coreMocks.listProjects,
+}))
+
+vi.mock('./record-details', () => ({
+  DEFAULT_RECORD_DETAIL_CHARS: 4000,
+  MAX_RECORD_DETAIL_CHARS: 12000,
+  getChatRecords: coreMocks.getChatRecords,
 }))
 
 vi.mock('../../domains/people/setters', () => ({
@@ -113,16 +120,34 @@ describe('buildChatTools', () => {
     coreMocks.listProjects.mockResolvedValue([
       { id: 'p1', name: 'Atlas', status: 'active', summary: null, targetDate: null, completedOn: null },
     ])
+    coreMocks.getChatRecords.mockResolvedValue([
+      {
+        recordType: 'interaction',
+        recordId: 'i1',
+        found: true,
+        title: 'Sync',
+        date: null,
+        metadata: {},
+        chunks: [],
+        truncated: false,
+      },
+    ])
 
     const tools = chatTools()
     const searchRecords = toolByName(tools, 'search_records')
+    const getRecords = toolByName(tools, 'get_records')
     const listProjectsTool = toolByName(tools, 'list_projects')
     const searchOutput = await searchRecords.execute(searchRecords.inputSchema.parse({ query: 'budget' }))
+    const recordsOutput = await getRecords.execute(
+      getRecords.inputSchema.parse({ records: [{ recordType: 'interaction', recordId: 'i1' }] }),
+    )
     const projectsOutput = await listProjectsTool.execute(listProjectsTool.inputSchema.parse({ status: 'active' }))
 
     expect(searchRecords.needsApproval).toBeUndefined()
+    expect(getRecords.needsApproval).toBeUndefined()
     expect(listProjectsTool.needsApproval).toBeUndefined()
     expect(searchOutput).toMatchObject({ count: 1, semanticAvailable: true })
+    expect(recordsOutput).toMatchObject({ count: 1 })
     expect(projectsOutput).toMatchObject({ count: 1 })
   })
 
@@ -130,6 +155,8 @@ describe('buildChatTools', () => {
     coreMocks.retrieve.mockResolvedValue({
       chunks: [
         {
+          chunkId: 'chunk-1',
+          chunkIndex: 0,
           recordType: 'interaction',
           recordId: 'i1',
           recordTitle: 'Budget email',
@@ -154,7 +181,7 @@ describe('buildChatTools', () => {
 
     expect(coreMocks.retrieve).toHaveBeenCalledWith('', {
       mode: 'hybrid',
-      limit: 8,
+      limit: 20,
       recordTypes: ['interaction'],
       kinds: ['email'],
       after: '2026-06-07T00:00:00.000Z',
@@ -162,8 +189,71 @@ describe('buildChatTools', () => {
     })
     expect(output).toMatchObject({
       count: 1,
-      hits: [{ recordType: 'interaction', date: '2026-06-18T00:00:00.000Z' }],
+      hits: [{
+        chunkId: 'chunk-1',
+        chunkIndex: 0,
+        recordType: 'interaction',
+        date: '2026-06-18T00:00:00.000Z',
+      }],
     })
+    expect(JSON.stringify(output)).not.toContain('send the budget')
+  })
+
+  it('accepts search limit 50 and rejects larger searches', async () => {
+    coreMocks.retrieve.mockResolvedValue({ chunks: [], semanticAvailable: false })
+    const searchRecords = toolByName(chatTools(), 'search_records')
+
+    await searchRecords.execute(searchRecords.inputSchema.parse({ query: 'budget', limit: 50 }))
+
+    expect(coreMocks.retrieve).toHaveBeenCalledWith('budget', expect.objectContaining({ limit: 50 }))
+    expect(() => searchRecords.inputSchema.parse({ query: 'budget', limit: 51 })).toThrow()
+  })
+
+  it('passes searchable kinds through get_records with chunk focus and char budget', async () => {
+    coreMocks.getChatRecords.mockResolvedValue([])
+    const getRecords = toolByName(chatTools(), 'get_records')
+    const recordTypes = [
+      'person',
+      'organization',
+      'organization_profile',
+      'project',
+      'task',
+      'document',
+      'interaction',
+      'interaction_transcript',
+      'ai_note',
+      'extracted_fact',
+      'memory',
+      'asset',
+    ]
+    const records = recordTypes.map((recordType, index) => ({
+      recordType,
+      recordId: `record-${index}`,
+      chunkIds: [`chunk-${index}`],
+    }))
+
+    for (const record of records) {
+      expect(() => getRecords.inputSchema.parse({ records: [record] })).not.toThrow()
+    }
+
+    await getRecords.execute(getRecords.inputSchema.parse({ records: records.slice(0, 10), maxCharsPerRecord: 12000 }))
+
+    expect(coreMocks.getChatRecords).toHaveBeenCalledWith(
+      records.slice(0, 10),
+      { maxCharsPerRecord: 12000 },
+    )
+    expect(() => getRecords.inputSchema.parse({ records })).toThrow()
+    expect(() =>
+      getRecords.inputSchema.parse({
+        records: [{ recordType: 'interaction', recordId: 'i1', chunkIds: ['a', 'b', 'c', 'd', 'e', 'f'] }],
+      }),
+    ).toThrow()
+    expect(() =>
+      getRecords.inputSchema.parse({
+        records: [{ recordType: 'interaction', recordId: 'i1' }],
+        maxCharsPerRecord: 12001,
+      }),
+    ).toThrow()
   })
 
   it('rejects a search with neither a query nor a filter', async () => {

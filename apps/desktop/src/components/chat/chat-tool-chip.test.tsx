@@ -178,6 +178,30 @@ describe('ChatToolChip — list_projects', () => {
   })
 })
 
+describe('ChatToolChip — get_records', () => {
+  it('shows generic label while pending', () => {
+    renderChip({
+      type: 'tool-get_records',
+      toolCallId: 'tc-3',
+      state: 'input-available',
+      input: { records: [{ recordType: 'interaction', recordId: 'i1' }] },
+    })
+    expect(screen.getByText(/Loaded records/)).not.toBeNull()
+  })
+
+  it('shows record count when settled', () => {
+    renderChip({
+      type: 'tool-get_records',
+      toolCallId: 'tc-3',
+      state: 'output-available',
+      input: { records: [{ recordType: 'interaction', recordId: 'i1' }] },
+      output: { records: [{}, {}], count: 2 },
+    })
+    expect(screen.getByText(/Loaded records/)).not.toBeNull()
+    expect(screen.getByText(/2 records/)).not.toBeNull()
+  })
+})
+
 describe('ChatToolChip — write tools', () => {
   it('renders a compact approval preview with icon-only controls', () => {
     const onApprovalResponse = vi.fn()

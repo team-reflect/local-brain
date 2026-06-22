@@ -62,7 +62,7 @@ vi.mock('ai', async (importActual) => {
   }
 })
 
-const stubTools = { search_records: {}, list_projects: {} }
+const stubTools = { search_records: {}, get_records: {}, list_projects: {} }
 
 const userMessage: UIMessage = {
   id: 'user-1',

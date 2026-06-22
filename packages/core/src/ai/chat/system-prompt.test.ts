@@ -29,6 +29,8 @@ describe('buildChatSystemPrompt', () => {
   it('includes grounding rules', () => {
     const prompt = buildChatSystemPrompt({ today: '2026-06-19', projects: [] })
     expect(prompt).toContain('search_records')
+    expect(prompt).toContain('get_records')
+    expect(prompt).toContain('load structured details and bounded grounding chunks')
     expect(prompt).toContain('list_projects')
     expect(prompt.toLowerCase()).toContain('do not use outside knowledge or invent facts')
   })
