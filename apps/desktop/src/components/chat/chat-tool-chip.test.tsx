@@ -154,7 +154,7 @@ describe('ChatToolChip — list_projects', () => {
 })
 
 describe('ChatToolChip — write tools', () => {
-  it('renders approval buttons and calls the approval responder', () => {
+  it('renders a concrete approval preview with icon-only controls', () => {
     const onApprovalResponse = vi.fn()
     render(
       <ChatToolChip
@@ -162,18 +162,68 @@ describe('ChatToolChip — write tools', () => {
           type: 'tool-create_task',
           toolCallId: 'tc-4',
           state: 'approval-requested',
-          input: { title: 'Send budget' },
+          input: { title: 'Send budget', status: 'open', dueAt: '2026-06-24' },
           approval: { id: 'approval-1' },
         }}
         onApprovalResponse={onApprovalResponse}
       />,
     )
 
-    expect(screen.getByText('Create task needs approval')).not.toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: /Approve/ }))
+    expect(screen.getByText('Create task')).not.toBeNull()
+    expect(screen.getByText('Needs approval')).not.toBeNull()
+    expect(screen.getByText('Send budget')).not.toBeNull()
+    expect(screen.getByText('Status')).not.toBeNull()
+    expect(screen.getByText('open')).not.toBeNull()
+    expect(screen.getByText('Due')).not.toBeNull()
+    expect(screen.getByText('2026-06-24')).not.toBeNull()
+    expect(screen.queryByText('Approve')).toBeNull()
+    expect(screen.queryByText('Deny')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /Approve create task/ }))
     expect(onApprovalResponse).toHaveBeenCalledWith({ id: 'approval-1', approved: true })
-    fireEvent.click(screen.getByRole('button', { name: /Deny/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Deny create task/ }))
     expect(onApprovalResponse).toHaveBeenCalledWith({ id: 'approval-1', approved: false })
+  })
+
+  it('renders memory approvals with the claim and linked subject summary', () => {
+    renderChip({
+      type: 'tool-remember_fact',
+      toolCallId: 'tc-7',
+      state: 'approval-requested',
+      input: {
+        claim: 'Maya prefers async updates.',
+        kind: 'preference',
+        confidence: 0.8,
+        subjects: [{ recordType: 'person', recordId: 'person-1', role: 'about' }],
+      },
+      approval: { id: 'approval-2' },
+    })
+
+    expect(screen.getByText('Remember fact')).not.toBeNull()
+    expect(screen.getByText('Maya prefers async updates.')).not.toBeNull()
+    expect(screen.getByText('Subjects')).not.toBeNull()
+    expect(screen.getByText('person-1')).not.toBeNull()
+    expect(screen.getByText('Kind')).not.toBeNull()
+    expect(screen.getByText('preference')).not.toBeNull()
+    expect(screen.getByText('Confidence')).not.toBeNull()
+    expect(screen.getByText('0.8')).not.toBeNull()
+  })
+
+  it('renders update approvals with target id and changed fields', () => {
+    renderChip({
+      type: 'tool-update_task',
+      toolCallId: 'tc-8',
+      state: 'approval-requested',
+      input: { id: 'task-1', status: 'done', projectId: null },
+      approval: { id: 'approval-3' },
+    })
+
+    expect(screen.getByText('Update task')).not.toBeNull()
+    expect(screen.getByText('task-1')).not.toBeNull()
+    expect(screen.getByText('Status')).not.toBeNull()
+    expect(screen.getByText('done')).not.toBeNull()
+    expect(screen.getByText('Project')).not.toBeNull()
+    expect(screen.getByText('Clear')).not.toBeNull()
   })
 
   it('renders settled write output with action and id', () => {
