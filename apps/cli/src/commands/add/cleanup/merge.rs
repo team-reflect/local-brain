@@ -31,6 +31,8 @@ struct AffiliationMergeRow {
     is_primary: i64,
 }
 
+type ExternalIdentityConflict = (String, String, String, String, String);
+
 #[derive(Debug, Default)]
 struct MergePlan {
     emails: MoveStats,
@@ -148,6 +150,7 @@ fn external_identity_plan(
     from_person_id: &str,
     to_person_id: &str,
 ) -> Result<MoveStats, CliError> {
+    ensure_external_identities_mergeable(conn, from_person_id, to_person_id)?;
     let total = count(
         conn,
         "SELECT COUNT(*) FROM external_identities
@@ -174,6 +177,45 @@ fn external_identity_plan(
         moved: total.saturating_sub(merged),
         merged,
     })
+}
+
+fn ensure_external_identities_mergeable(
+    conn: &Connection,
+    from_person_id: &str,
+    to_person_id: &str,
+) -> Result<(), CliError> {
+    let conflict: Option<ExternalIdentityConflict> = conn
+        .query_row(
+            "SELECT source.source_id, source.kind, source.external_id,
+                    owner.entity_type, owner.entity_id
+             FROM external_identities source
+             JOIN external_identities owner
+               ON owner.source_id = source.source_id
+              AND owner.kind = source.kind
+              AND owner.external_id = source.external_id
+              AND owner.id <> source.id
+             WHERE source.entity_type = 'person'
+               AND source.entity_id = ?1
+               AND NOT (owner.entity_type = 'person' AND owner.entity_id = ?2)
+             LIMIT 1",
+            params![from_person_id, to_person_id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .optional()?;
+    if let Some((source_id, kind, external_id, entity_type, entity_id)) = conflict {
+        return Err(CliError::Runtime(format!(
+            "external identity {source_id}:{kind}:{external_id} is already owned by {entity_type}:{entity_id}"
+        )));
+    }
+    Ok(())
 }
 
 fn profile_fields_filled(
@@ -1149,5 +1191,50 @@ pub fn merge_person(
             args.from_person_id, args.to_person_id
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dry_run_preflight_detects_external_identity_owner_conflict() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE external_identities (
+               id TEXT PRIMARY KEY,
+               entity_type TEXT NOT NULL,
+               entity_id TEXT NOT NULL,
+               source_id TEXT NOT NULL,
+               kind TEXT NOT NULL,
+               external_id TEXT NOT NULL
+             );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO external_identities
+               (id, entity_type, entity_id, source_id, kind, external_id)
+             VALUES
+               ('source-identity', 'person', 'source-person', 'src', 'record', 'shared'),
+               ('conflict-identity', 'person', 'other-person', 'src', 'record', 'shared')",
+            [],
+        )
+        .unwrap();
+
+        let err = ensure_external_identities_mergeable(&conn, "source-person", "target-person")
+            .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("src:record:shared is already owned by person:other-person"));
+
+        conn.execute(
+            "UPDATE external_identities
+             SET entity_id = 'target-person'
+             WHERE id = 'conflict-identity'",
+            [],
+        )
+        .unwrap();
+        ensure_external_identities_mergeable(&conn, "source-person", "target-person").unwrap();
     }
 }

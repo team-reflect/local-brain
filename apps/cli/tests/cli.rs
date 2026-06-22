@@ -2585,6 +2585,126 @@ fn repair_participants_relink_can_move_already_linked_rows() {
 }
 
 #[test]
+fn repair_participants_relink_force_merges_target_duplicates() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let wrong = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Wrong Participant",
+            "--email",
+            "merge-force@example.com",
+        ],
+    );
+    let right = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Right Participant",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Duplicate linked participant",
+            "--text",
+            "Readable source body.",
+            "--participant",
+            "from:Wrong Participant <merge-force@example.com>",
+        ],
+    );
+    let conn = Connection::open(&db).unwrap();
+    let interaction_id: String = conn
+        .query_row(
+            "SELECT id FROM interactions WHERE title = 'Duplicate linked participant'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    conn.execute(
+        "INSERT INTO interaction_participants
+           (id, interaction_id, person_id, role, handle, normalized_handle)
+         VALUES ('target-force-participant', ?1, ?2, 'to',
+                 'merge-force@example.com', 'merge-force@example.com')",
+        [interaction_id.as_str(), right["id"].as_str().unwrap()],
+    )
+    .unwrap();
+    drop(conn);
+
+    let without_force = run(
+        &db,
+        &[
+            "--json",
+            "repair",
+            "participants",
+            "relink",
+            "--handle",
+            "merge-force@example.com",
+            "--person",
+            right["id"].as_str().unwrap(),
+            "--from-person",
+            wrong["id"].as_str().unwrap(),
+        ],
+    );
+    assert!(!without_force.status.success());
+    assert!(String::from_utf8_lossy(&without_force.stderr)
+        .contains("--force required to merge participant rows"));
+
+    let relinked = run_json(
+        &db,
+        &[
+            "--json",
+            "repair",
+            "participants",
+            "relink",
+            "--handle",
+            "merge-force@example.com",
+            "--person",
+            right["id"].as_str().unwrap(),
+            "--from-person",
+            wrong["id"].as_str().unwrap(),
+            "--force",
+        ],
+    );
+    assert_eq!(relinked["participantsRelinked"], 0);
+    assert_eq!(relinked["participantsMerged"], 1);
+    let conn = Connection::open(&db).unwrap();
+    let wrong_rows: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM interaction_participants
+             WHERE normalized_handle = 'merge-force@example.com' AND person_id = ?1",
+            [wrong["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let right_rows: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM interaction_participants
+             WHERE normalized_handle = 'merge-force@example.com' AND person_id = ?1",
+            [right["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(wrong_rows, 0);
+    assert_eq!(right_rows, 1);
+}
+
+#[test]
 fn add_fact_source_identity_is_idempotent_and_refreshable() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);

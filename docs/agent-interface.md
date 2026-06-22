@@ -225,6 +225,10 @@ brain --json repair person-phone move --phone "+1 555 0100" \
 brain --json import participants audit --min-count 2 --fail-on-promote-candidates
 ```
 
+Use `repair participants relink --from-person <wrong-person-id>` for rows already
+linked to the wrong person. Add `--force` only when the target is already linked in
+the same interaction and the duplicate participant row should be merged away.
+
 Promoting a fact stores the fact value as the memory claim. The fact key,
 subject, source record, and evidence remain available through the extracted fact,
 memory links, and citations.

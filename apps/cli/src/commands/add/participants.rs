@@ -528,7 +528,7 @@ pub(super) fn relink_participants_for_handle(
     normalized_handle: &str,
     person_id: &str,
     from_person_id: Option<&str>,
-    _force: bool,
+    force: bool,
     display_handle: Option<&str>,
     display_name: Option<&str>,
 ) -> Result<RelinkResult, CliError> {
@@ -536,7 +536,7 @@ pub(super) fn relink_participants_for_handle(
         && normalize_phone(Some(normalized_handle)).as_deref() == Some(normalized_handle);
     let rows = {
         let mut stmt = conn.prepare(
-            "SELECT id, interaction_id, normalized_handle
+            "SELECT id, interaction_id, person_id, normalized_handle
              FROM interaction_participants
              WHERE normalized_handle IS NOT NULL
                AND (
@@ -560,12 +560,13 @@ pub(super) fn relink_participants_for_handle(
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
                 ))
             },
         )?;
         let mut matched = Vec::new();
         for row in rows {
-            let (id, interaction_id, row_handle) = row?;
+            let (id, interaction_id, row_person_id, row_handle) = row?;
             let exact_match = row_handle.as_deref() == Some(normalized_handle);
             let legacy_phone_match = is_phone_handle
                 && !row_handle
@@ -573,15 +574,18 @@ pub(super) fn relink_participants_for_handle(
                     .is_some_and(|handle| handle.contains('@'))
                 && normalize_phone(row_handle.as_deref()).as_deref() == Some(normalized_handle);
             if exact_match || legacy_phone_match {
-                matched.push((id, interaction_id));
+                matched.push((id, interaction_id, row_person_id));
             }
         }
         Ok::<_, rusqlite::Error>(matched)
     }?;
 
-    let mut by_interaction: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for (id, interaction_id) in rows {
-        by_interaction.entry(interaction_id).or_default().push(id);
+    let mut by_interaction: BTreeMap<String, Vec<(String, Option<String>)>> = BTreeMap::new();
+    for (id, interaction_id, row_person_id) in rows {
+        by_interaction
+            .entry(interaction_id)
+            .or_default()
+            .push((id, row_person_id));
     }
 
     let mut updated_rows = 0;
@@ -596,7 +600,16 @@ pub(super) fn relink_participants_for_handle(
             |row| row.get(0),
         )?;
         if already_linked {
-            for id in ids {
+            let has_linked_source = ids.iter().any(|(_, row_person_id)| {
+                from_person_id.is_some() && row_person_id.as_deref() == from_person_id
+            });
+            if has_linked_source && !force {
+                return Err(CliError::Runtime(
+                    "--force required to merge participant rows when the target is already linked"
+                        .into(),
+                ));
+            }
+            for (id, _) in ids {
                 merged_rows += conn.execute(
                     "DELETE FROM interaction_participants WHERE id = ?1",
                     params![id],
@@ -621,14 +634,14 @@ pub(super) fn relink_participants_for_handle(
                  normalized_handle = ?5
              WHERE id = ?1",
             params![
-                keep,
+                keep.0,
                 person_id,
                 display_handle,
                 display_name,
                 normalized_handle
             ],
         )?;
-        for id in ids {
+        for (id, _) in ids {
             merged_rows += conn.execute(
                 "DELETE FROM interaction_participants WHERE id = ?1",
                 params![id],

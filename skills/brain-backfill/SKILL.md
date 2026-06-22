@@ -507,6 +507,9 @@ brain --brain "$BRAIN_ROOT" --json archive person <person-id> \
   --reason "mistaken person shell"
 ```
 
+Add `--force` to participant relink only when the target is already linked in the
+same interaction and the wrong-person participant row should be merged away.
+
 Person merges move source identities to the canonical target but preserve source
 provenance on the archived duplicate; use the target merge provenance event for
 the cleanup audit trail.

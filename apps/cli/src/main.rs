@@ -2254,8 +2254,8 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
                 "purpose": "Move a phone handle between existing people and optionally relink matching phone-like participant rows.",
             },
             "repairParticipantsRelink": {
-                "usage": "brain --json repair participants relink --handle <email|phone> --person <person-id> [--from-person <person-id>|--force]",
-                "purpose": "Relink unresolved participant rows for one handle to an existing person. Use --from-person or --force to move already-linked bad participant rows.",
+                "usage": "brain --json repair participants relink --handle <email|phone> --person <person-id> [--from-person <person-id>] [--force]",
+                "purpose": "Relink unresolved participant rows for one handle to an existing person. Use --from-person to move rows from a wrong person; add --force only when the target is already linked and duplicate participant rows must be merged.",
             },
             "mergePerson": {
                 "usage": "brain --json merge person --from <source-person-id> --to <target-person-id> [--dry-run] [--reason <text>]",

@@ -243,6 +243,9 @@ brain --json repair participants relink --handle wrong@example.com \
   --person <right-person-id> --from-person <wrong-person-id>
 ```
 
+Add `--force` only when the target is already linked in the same interaction and the
+wrong-person participant row should be merged away.
+
 Always dry-run `merge person` before applying it in a large backfill. It moves
 handles, affiliations, participant rows, typed links, tags, source identities, and
 fact/memory references to the target, then archives the source. Source provenance
