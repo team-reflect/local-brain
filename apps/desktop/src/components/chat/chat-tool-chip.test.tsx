@@ -154,7 +154,7 @@ describe('ChatToolChip — list_projects', () => {
 })
 
 describe('ChatToolChip — write tools', () => {
-  it('renders a concrete approval preview with icon-only controls', () => {
+  it('renders a compact approval preview with icon-only controls', () => {
     const onApprovalResponse = vi.fn()
     render(
       <ChatToolChip
@@ -172,12 +172,16 @@ describe('ChatToolChip — write tools', () => {
     expect(screen.getByText('Create task')).not.toBeNull()
     expect(screen.getByText('Needs approval')).not.toBeNull()
     expect(screen.getByText('Send budget')).not.toBeNull()
-    expect(screen.getByText('Status')).not.toBeNull()
-    expect(screen.getByText('open')).not.toBeNull()
-    expect(screen.getByText('Due')).not.toBeNull()
-    expect(screen.getByText('2026-06-24')).not.toBeNull()
+    expect(screen.queryByText('Status')).toBeNull()
+    expect(screen.queryByText('open')).toBeNull()
+    expect(screen.queryByText('Due')).toBeNull()
+    expect(screen.queryByText('2026-06-24')).toBeNull()
     expect(screen.queryByText('Approve')).toBeNull()
     expect(screen.queryByText('Deny')).toBeNull()
+
+    const buttons = screen.getAllByRole('button')
+    expect(buttons[0]?.getAttribute('aria-label')).toBe('Deny create task')
+    expect(buttons[1]?.getAttribute('aria-label')).toBe('Approve create task')
 
     fireEvent.click(screen.getByRole('button', { name: /Approve create task/ }))
     expect(onApprovalResponse).toHaveBeenCalledWith({ id: 'approval-1', approved: true })
@@ -185,7 +189,7 @@ describe('ChatToolChip — write tools', () => {
     expect(onApprovalResponse).toHaveBeenCalledWith({ id: 'approval-1', approved: false })
   })
 
-  it('renders memory approvals with the claim and linked subject summary', () => {
+  it('renders memory approvals with the claim only', () => {
     renderChip({
       type: 'tool-remember_fact',
       toolCallId: 'tc-7',
@@ -201,15 +205,15 @@ describe('ChatToolChip — write tools', () => {
 
     expect(screen.getByText('Remember fact')).not.toBeNull()
     expect(screen.getByText('Maya prefers async updates.')).not.toBeNull()
-    expect(screen.getByText('Subjects')).not.toBeNull()
-    expect(screen.getByText('person-1')).not.toBeNull()
-    expect(screen.getByText('Kind')).not.toBeNull()
-    expect(screen.getByText('preference')).not.toBeNull()
-    expect(screen.getByText('Confidence')).not.toBeNull()
-    expect(screen.getByText('0.8')).not.toBeNull()
+    expect(screen.queryByText('Subjects')).toBeNull()
+    expect(screen.queryByText('person-1')).toBeNull()
+    expect(screen.queryByText('Kind')).toBeNull()
+    expect(screen.queryByText('preference')).toBeNull()
+    expect(screen.queryByText('Confidence')).toBeNull()
+    expect(screen.queryByText('0.8')).toBeNull()
   })
 
-  it('renders update approvals with target id and changed fields', () => {
+  it('renders update approvals without a field table', () => {
     renderChip({
       type: 'tool-update_task',
       toolCallId: 'tc-8',
@@ -220,13 +224,55 @@ describe('ChatToolChip — write tools', () => {
 
     expect(screen.getByText('Update task')).not.toBeNull()
     expect(screen.getByText('task-1')).not.toBeNull()
-    expect(screen.getByText('Status')).not.toBeNull()
-    expect(screen.getByText('done')).not.toBeNull()
-    expect(screen.getByText('Project')).not.toBeNull()
-    expect(screen.getByText('Clear')).not.toBeNull()
+    expect(screen.queryByText('Status')).toBeNull()
+    expect(screen.queryByText('done')).toBeNull()
+    expect(screen.queryByText('Project')).toBeNull()
+    expect(screen.queryByText('Clear')).toBeNull()
   })
 
-  it('renders settled write output with action and id', () => {
+  it('keeps the approval row stable after approval', () => {
+    renderChip({
+      type: 'tool-create_task',
+      toolCallId: 'tc-9',
+      state: 'approval-responded',
+      input: { title: 'Send budget' },
+      approval: { id: 'approval-4', approved: true },
+    })
+
+    expect(screen.getByText('Create task')).not.toBeNull()
+    expect(screen.getByText('Approved')).not.toBeNull()
+    expect(screen.getByText('Send budget')).not.toBeNull()
+    expect(screen.queryByText('Needs approval')).toBeNull()
+
+    const buttons = screen.getAllByRole('button')
+    expect(buttons[0]?.getAttribute('aria-label')).toBe('Deny create task')
+    expect(buttons[0]).toHaveProperty('disabled', true)
+    expect(buttons[1]?.getAttribute('aria-label')).toBe('Approved create task')
+    expect(buttons[1]).toHaveProperty('disabled', true)
+    expect(buttons[1]?.className).toContain('text-emerald-600')
+  })
+
+  it('keeps the approval row stable after denial', () => {
+    renderChip({
+      type: 'tool-create_task',
+      toolCallId: 'tc-10',
+      state: 'approval-responded',
+      input: { title: 'Send budget' },
+      approval: { id: 'approval-5', approved: false },
+    })
+
+    expect(screen.getByText('Create task')).not.toBeNull()
+    expect(screen.getByText('Denied')).not.toBeNull()
+    expect(screen.getByText('Send budget')).not.toBeNull()
+
+    const buttons = screen.getAllByRole('button')
+    expect(buttons[0]?.getAttribute('aria-label')).toBe('Denied create task')
+    expect(buttons[0]).toHaveProperty('disabled', true)
+    expect(buttons[1]?.getAttribute('aria-label')).toBe('Approve create task')
+    expect(buttons[1]).toHaveProperty('disabled', true)
+  })
+
+  it('renders settled write output as an approved stable row', () => {
     renderChip({
       type: 'tool-remember_fact',
       toolCallId: 'tc-5',
@@ -235,11 +281,13 @@ describe('ChatToolChip — write tools', () => {
       output: { kind: 'memory', action: 'existing', id: 'memory-1' },
     })
 
-    expect(screen.getByText(/Remember fact existing/)).not.toBeNull()
-    expect(screen.getByText(/memory-1/)).not.toBeNull()
+    expect(screen.getByText('Remember fact')).not.toBeNull()
+    expect(screen.getByText('Approved')).not.toBeNull()
+    expect(screen.getByText('Alex prefers async updates.')).not.toBeNull()
+    expect(screen.queryByText(/memory-1/)).toBeNull()
   })
 
-  it('renders denied write output', () => {
+  it('renders denied write output as a stable row', () => {
     renderChip({
       type: 'tool-update_task',
       toolCallId: 'tc-6',
@@ -247,7 +295,9 @@ describe('ChatToolChip — write tools', () => {
       input: { id: 'task-1', status: 'done' },
     })
 
-    expect(screen.getByText(/Denied update task/)).not.toBeNull()
+    expect(screen.getByText('Update task')).not.toBeNull()
+    expect(screen.getByText('Denied')).not.toBeNull()
+    expect(screen.getByText('task-1')).not.toBeNull()
   })
 })
 
