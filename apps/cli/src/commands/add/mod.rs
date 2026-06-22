@@ -15,6 +15,7 @@
 
 mod affiliation;
 mod asset;
+mod cleanup;
 mod document;
 mod identity;
 mod import_completion;
@@ -30,7 +31,7 @@ mod project;
 mod record_ref;
 mod suggestion;
 mod task;
-mod text;
+pub(crate) mod text;
 
 use rusqlite::{types::Value as SqlValue, Connection};
 use serde_json::json;
@@ -93,6 +94,12 @@ pub(super) fn fill_blanks(
 
 pub use affiliation::{affiliate, AffiliateArgs};
 pub use asset::{add_asset, set_asset_text, AddAssetArgs};
+pub use cleanup::{
+    archive_record, merge_person, person_email_add, person_email_remove, person_phone_add,
+    person_phone_remove, rename_person, repair_person_phone_move, unlink_records, ArchiveArgs,
+    ArchiveKind, MergePersonArgs, PersonContactArgs, PersonPhoneMoveArgs, PersonRenameArgs,
+    UnlinkArgs,
+};
 pub use document::{add_document, AddDocumentArgs};
 pub use import_completion::{import_audit, import_finalize, ImportAuditArgs, ImportFinalizeArgs};
 pub use intelligence::{

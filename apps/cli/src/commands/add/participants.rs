@@ -10,7 +10,8 @@ use serde_json::{json, Value};
 
 use super::identity::source_id;
 use super::text::{
-    normalize_email, normalize_name, normalize_optional, normalize_title, valid_email,
+    normalize_email, normalize_name, normalize_optional, normalize_phone, normalize_title,
+    valid_email,
 };
 use crate::error::CliError;
 use crate::id::new_id;
@@ -43,6 +44,8 @@ pub struct PersonEmailMoveArgs<'a> {
 pub struct ParticipantRelinkArgs<'a> {
     pub handle: &'a str,
     pub person_id: &'a str,
+    pub from_person_id: Option<&'a str>,
+    pub force: bool,
 }
 
 #[derive(Default)]
@@ -57,9 +60,10 @@ struct AuditGroup {
     sample_titles: Vec<String>,
 }
 
-struct RelinkResult {
-    updated_rows: usize,
-    merged_rows: usize,
+#[derive(Default)]
+pub(super) struct RelinkResult {
+    pub updated_rows: usize,
+    pub merged_rows: usize,
 }
 
 struct PromotedPerson {
@@ -78,6 +82,24 @@ fn normalized_email_handle(raw: &str, flag: &str) -> Result<(String, String), Cl
             "{flag} must be a valid email address"
         )));
     }
+    Ok((display, normalized))
+}
+
+fn normalized_repair_handle(raw: &str, flag: &str) -> Result<(String, String), CliError> {
+    let display = normalize_optional(Some(raw))
+        .ok_or_else(|| CliError::Runtime(format!("{flag} cannot be blank")))?;
+    if display.contains('@') {
+        let normalized = normalize_email(Some(&display))
+            .ok_or_else(|| CliError::Runtime(format!("{flag} must be an email or phone")))?;
+        if !valid_email(&normalized) {
+            return Err(CliError::Runtime(format!(
+                "{flag} must be a valid email address"
+            )));
+        }
+        return Ok((display, normalized));
+    }
+    let normalized = normalize_phone(Some(&display))
+        .ok_or_else(|| CliError::Runtime(format!("{flag} must be an email or phone")))?;
     Ok((display, normalized))
 }
 
@@ -456,12 +478,23 @@ fn apply_promotion_affiliation(
     };
     let org_id = super::organization::find_or_create_organization(conn, org, org_domain, None)?;
     super::affiliation::upsert_affiliation(
-        conn, person_id, &org_id, title, None, None, None, None, current, current,
+        conn,
+        super::affiliation::AffiliationUpsert {
+            person_id,
+            organization_id: &org_id,
+            title,
+            department: None,
+            role: None,
+            role_family: None,
+            seniority: None,
+            is_current: current,
+            is_primary: current,
+        },
     )?;
     Ok(())
 }
 
-fn recompute_relationship_intelligence(
+pub(super) fn recompute_relationship_intelligence(
     conn: &Connection,
     person_id: &str,
 ) -> Result<Option<String>, CliError> {
@@ -490,36 +523,69 @@ fn recompute_relationship_intelligence(
     Ok(last_interaction_at)
 }
 
-fn relink_participants_for_handle(
+pub(super) fn relink_participants_for_handle(
     conn: &Connection,
     normalized_handle: &str,
     person_id: &str,
     from_person_id: Option<&str>,
+    force: bool,
     display_handle: Option<&str>,
     display_name: Option<&str>,
 ) -> Result<RelinkResult, CliError> {
+    let is_phone_handle = !normalized_handle.contains('@')
+        && normalize_phone(Some(normalized_handle)).as_deref() == Some(normalized_handle);
     let rows = {
         let mut stmt = conn.prepare(
-            "SELECT id, interaction_id
+            "SELECT id, interaction_id, person_id, normalized_handle
              FROM interaction_participants
-             WHERE normalized_handle = ?1
+             WHERE normalized_handle IS NOT NULL
+               AND (
+                 normalized_handle = ?1
+                 OR ?3 = 1
+               )
                AND (
                  person_id IS NULL
                  OR (?2 IS NOT NULL AND person_id = ?2)
                )
              ORDER BY interaction_id, created_at, id",
         )?;
-        let rows = stmt
-            .query_map(params![normalized_handle, from_person_id], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        rows
-    };
+        let rows = stmt.query_map(
+            params![
+                normalized_handle,
+                from_person_id,
+                i64::from(is_phone_handle)
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            },
+        )?;
+        let mut matched = Vec::new();
+        for row in rows {
+            let (id, interaction_id, row_person_id, row_handle) = row?;
+            let exact_match = row_handle.as_deref() == Some(normalized_handle);
+            let legacy_phone_match = is_phone_handle
+                && !row_handle
+                    .as_deref()
+                    .is_some_and(|handle| handle.contains('@'))
+                && normalize_phone(row_handle.as_deref()).as_deref() == Some(normalized_handle);
+            if exact_match || legacy_phone_match {
+                matched.push((id, interaction_id, row_person_id));
+            }
+        }
+        Ok::<_, rusqlite::Error>(matched)
+    }?;
 
-    let mut by_interaction: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for (id, interaction_id) in rows {
-        by_interaction.entry(interaction_id).or_default().push(id);
+    let mut by_interaction: BTreeMap<String, Vec<(String, Option<String>)>> = BTreeMap::new();
+    for (id, interaction_id, row_person_id) in rows {
+        by_interaction
+            .entry(interaction_id)
+            .or_default()
+            .push((id, row_person_id));
     }
 
     let mut updated_rows = 0;
@@ -534,7 +600,16 @@ fn relink_participants_for_handle(
             |row| row.get(0),
         )?;
         if already_linked {
-            for id in ids {
+            let has_linked_source = ids.iter().any(|(_, row_person_id)| {
+                from_person_id.is_some() && row_person_id.as_deref() == from_person_id
+            });
+            if has_linked_source && !force {
+                return Err(CliError::Runtime(
+                    "--force required to merge participant rows when the target is already linked"
+                        .into(),
+                ));
+            }
+            for (id, _) in ids {
                 merged_rows += conn.execute(
                     "DELETE FROM interaction_participants WHERE id = ?1",
                     params![id],
@@ -555,11 +630,18 @@ fn relink_participants_for_handle(
                    THEN ?3 ELSE handle END,
                  display_name = CASE
                    WHEN (display_name IS NULL OR trim(display_name) = '') AND ?4 IS NOT NULL
-                   THEN ?4 ELSE display_name END
+                   THEN ?4 ELSE display_name END,
+                 normalized_handle = ?5
              WHERE id = ?1",
-            params![keep, person_id, display_handle, display_name],
+            params![
+                keep.0,
+                person_id,
+                display_handle,
+                display_name,
+                normalized_handle
+            ],
         )?;
-        for id in ids {
+        for (id, _) in ids {
             merged_rows += conn.execute(
                 "DELETE FROM interaction_participants WHERE id = ?1",
                 params![id],
@@ -607,6 +689,7 @@ pub fn promote_participant(
         &normalized_email,
         &person.id,
         None,
+        false,
         Some(&display_email),
         Some(&full_name),
     )?;
@@ -744,6 +827,7 @@ pub fn repair_person_email_move(
             &normalized_email,
             args.to_person_id,
             Some(args.from_person_id),
+            false,
             Some(&stored_email),
             None,
         )?
@@ -780,30 +864,46 @@ pub fn repair_participants_relink(
     json_output: bool,
     args: ParticipantRelinkArgs,
 ) -> Result<(), CliError> {
-    let (display_email, normalized_email) = normalized_email_handle(args.handle, "--handle")?;
+    let (display_handle, normalized_handle) = normalized_repair_handle(args.handle, "--handle")?;
     let tx = conn.transaction()?;
     require_active_person(&tx, args.person_id)?;
+    if args.from_person_id == Some(args.person_id) {
+        return Err(CliError::Runtime(
+            "--from-person must differ from --person".into(),
+        ));
+    }
+    if args.force && args.from_person_id.is_none() {
+        return Err(CliError::Runtime(
+            "--force requires --from-person to avoid moving unrelated participants".into(),
+        ));
+    }
+    if let Some(from_person_id) = args.from_person_id {
+        require_active_person(&tx, from_person_id)?;
+    }
     let relink = relink_participants_for_handle(
         &tx,
-        &normalized_email,
+        &normalized_handle,
         args.person_id,
-        None,
-        Some(&display_email),
+        args.from_person_id,
+        args.force,
+        Some(&display_handle),
         None,
     )?;
     tx.commit()?;
     if json_output {
         print_json(&json!({
             "kind": "participant_relink",
-            "handle": normalized_email,
+            "handle": normalized_handle,
             "personId": args.person_id,
+            "fromPersonId": args.from_person_id,
+            "force": args.force,
             "participantsRelinked": relink.updated_rows,
             "participantsMerged": relink.merged_rows,
         }))
     } else {
         println!(
             "participant {} -> person {} ({} relinked, {} merged)",
-            normalized_email, args.person_id, relink.updated_rows, relink.merged_rows
+            normalized_handle, args.person_id, relink.updated_rows, relink.merged_rows
         );
         Ok(())
     }

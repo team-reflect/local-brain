@@ -204,6 +204,7 @@ brain --json add fact --subject interaction:<id> \
   --key "decision" \
   --value-text "The team agreed to ship the credential flow before launch." \
   --source-record interaction:<id> \
+  --source gmail --external-kind extracted-fact --external-id thread-123:decision:credential-flow \
   --evidence interaction:<id>~"ship the credential flow"
 
 # Transcript evidence works the same way through universal chunks.
@@ -229,8 +230,14 @@ brain --json import participants promote --handle maya@example.com \
 brain --json repair participants relink --handle maya@example.com --person <person-id>
 brain --json repair person-email move --email maya@example.com \
   --from <wrong-person-id> --to <right-person-id> --relink-participants
+brain --json repair person-phone move --phone "+1 555 0100" \
+  --from <wrong-person-id> --to <right-person-id> --relink-participants
 brain --json import participants audit --min-count 2 --fail-on-promote-candidates
 ```
+
+Use `repair participants relink --from-person <wrong-person-id>` for rows already
+linked to the wrong person. Add `--force` only when the target is already linked in
+the same interaction and the duplicate participant row should be merged away.
 
 Promoting a fact stores the fact value as the memory claim. The fact key,
 subject, source record, and evidence remain available through the extracted fact,
@@ -252,6 +259,40 @@ brain --json enrich organization <org-id> \
   --why-it-matters "Relevant to credentialing and ordering paths." \
   --source-urls-json '["https://example.com"]' \
   --model "agent-research" --prompt-fingerprint "org-profile-v1"
+```
+
+Clean up a mistaken import or duplicate shell:
+
+```bash
+brain --json merge person --from <duplicate-person-id> --to <canonical-person-id> --dry-run
+brain --json merge person --from <duplicate-person-id> --to <canonical-person-id> \
+  --reason "duplicate contact shell"
+
+brain --json unlink person:<person-id> organization:<org-id> \
+  --reason "org field contained a city, not an employer"
+brain --json archive organization <org-id> --reason "mistaken organization import"
+
+brain --json person rename <person-id> --full-name "Juvy Lastname"
+brain --json person email add <person-id> --email juvy@example.com
+brain --json person phone add <person-id> --phone "+1 555 0100"
+```
+
+`merge person` moves contact handles, affiliations, participant rows, typed links,
+tags, source identities, and fact/memory references onto the target, then archives
+the source. Source provenance stays attached to the archived source, and the
+target gets an explicit merge provenance event. It refuses to merge away the self
+person; merge duplicate shells into self instead. Always dry-run large cleanup
+merges first.
+
+Facts remain append-only by default. For low-level import facts that should be
+stable across reruns, include a source identity and pass `--refresh` only when the
+source-keyed fact should be replaced:
+
+```bash
+brain --json add fact --subject person:<person-id> --key membership \
+  --value-text "Jane is part of Friend CRM." \
+  --source friend_crm --external-kind membership \
+  --external-id friend-crm:<person-id>:membership --refresh
 ```
 
 Create a task with evidence:

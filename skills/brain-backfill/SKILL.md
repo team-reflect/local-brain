@@ -408,6 +408,8 @@ citations. Prefer facts first, then promote only durable facts to memories.
 brain --brain "$BRAIN_ROOT" --json add fact \
   --subject interaction:<id> --key decision \
   --value-text "<specific claim>" \
+  --source <source-slug> --external-kind extracted-fact \
+  --external-id "<source-record-id>:decision:<stable-key>" \
   --source-record interaction:<id> \
   --evidence interaction:<id>~"<short distinctive quote>"
 
@@ -460,6 +462,9 @@ brain --brain "$BRAIN_ROOT" --json repair participants relink \
 brain --brain "$BRAIN_ROOT" --json repair person-email move \
   --email jane@example.com --from <wrong-person-id> --to <right-person-id> \
   --relink-participants
+brain --brain "$BRAIN_ROOT" --json repair person-phone move \
+  --phone "+1 555 0100" --from <wrong-person-id> --to <right-person-id> \
+  --relink-participants
 brain --brain "$BRAIN_ROOT" --json import participants audit \
   --min-count 2 --fail-on-promote-candidates
 ```
@@ -481,10 +486,43 @@ Promotion judgment:
   `repair person-email move --relink-participants` to move the email back to
   the canonical person and relink old participant rows.
 
+Use merge/archive/link cleanup primitives for duplicate shells and mistaken
+entities. Always dry-run merges before applying them:
+
+```bash
+brain --brain "$BRAIN_ROOT" --json merge person \
+  --from <duplicate-person-id> --to <canonical-person-id> --dry-run
+brain --brain "$BRAIN_ROOT" --json merge person \
+  --from <duplicate-person-id> --to <canonical-person-id> \
+  --reason "duplicate shell from backfill"
+
+brain --brain "$BRAIN_ROOT" --json repair participants relink \
+  --handle wrong@example.com --person <right-person-id> \
+  --from-person <wrong-person-id>
+brain --brain "$BRAIN_ROOT" --json unlink person:<person-id> organization:<org-id> \
+  --reason "org field contained a city"
+brain --brain "$BRAIN_ROOT" --json archive organization <org-id> \
+  --reason "mistaken organization import"
+brain --brain "$BRAIN_ROOT" --json archive person <person-id> \
+  --reason "mistaken person shell"
+```
+
+Add `--force` to participant relink only when the target is already linked in the
+same interaction and the wrong-person participant row should be merged away.
+
+Person merges move source identities to the canonical target but preserve source
+provenance on the archived duplicate; use the target merge provenance event for
+the cleanup audit trail.
+
+For source-derived low-level facts, use stable `--source` / `--external-id`
+keys and pass `--refresh` on reruns that should replace the same imported fact.
+Do not patch `interaction_participants`, handles, affiliations, or archive
+state directly in SQLite.
+
 Run a no-surprise-project audit: compare final projects to the baseline plus
 explicitly user-approved creations. Any unapproved project created during the
-backfill blocks completion; convert it to an evidence-backed suggestion when the
-CLI supports repair, otherwise report the project and linked records as a gap.
+backfill blocks completion; convert it to an evidence-backed suggestion or
+unlink/archive the mistaken records with the cleanup commands above.
 
 ## Completion And Audit
 

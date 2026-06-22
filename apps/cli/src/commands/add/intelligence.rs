@@ -76,6 +76,10 @@ pub struct AddFactArgs<'a> {
     pub model: Option<&'a str>,
     pub prompt_fingerprint: Option<&'a str>,
     pub metadata_json: Option<&'a str>,
+    pub source_slug: Option<&'a str>,
+    pub external_kind: &'a str,
+    pub external_id: Option<&'a str>,
+    pub refresh: bool,
     pub evidence: Vec<EvidenceRef>,
 }
 
@@ -444,6 +448,105 @@ pub fn add_fact(
         None => (None, None),
     };
     let metadata_json = normalize_json(args.metadata_json, "--metadata-json")?;
+    let source_id = source_id(conn, args.source_slug)?;
+    let identity_kind = external_kind(args.external_kind);
+    let existing_by_identity = find_external_identity(
+        conn,
+        "extracted_fact",
+        source_id.as_deref(),
+        &identity_kind,
+        args.external_id,
+    )?;
+    if let Some(existing_id) = existing_by_identity.as_deref() {
+        if !args.refresh {
+            let chunk_count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM content_chunks
+                 WHERE record_type = 'extracted_fact' AND record_id = ?1",
+                params![existing_id],
+                |row| row.get(0),
+            )?;
+            if json_output {
+                return print_json(&json!({
+                    "kind": "extracted_fact",
+                    "id": existing_id,
+                    "isDuplicate": true,
+                    "refreshed": false,
+                    "chunkCount": chunk_count,
+                }));
+            }
+            println!("extracted_fact {existing_id} (duplicate)");
+            return Ok(());
+        }
+        let tx = conn.transaction()?;
+        tx.execute(
+            "UPDATE extracted_facts
+             SET subject_type = ?2,
+                 subject_id = ?3,
+                 key = ?4,
+                 value_text = ?5,
+                 value_json = ?6,
+                 confidence = ?7,
+                 source_record_type = ?8,
+                 source_record_id = ?9,
+                 source_excerpt = ?10,
+                 observed_at = ?11,
+                 model = ?12,
+                 prompt_fingerprint = ?13,
+                 metadata_json = ?14,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             WHERE id = ?1",
+            params![
+                existing_id,
+                subject_type,
+                subject_id,
+                key,
+                value_text,
+                value_json,
+                args.confidence,
+                source_record_type.as_deref(),
+                source_record_id.as_deref(),
+                normalize_optional(args.source_excerpt),
+                normalize_optional(args.observed_at),
+                normalize_optional(args.model),
+                normalize_optional(args.prompt_fingerprint),
+                metadata_json,
+            ],
+        )?;
+        tx.execute(
+            "DELETE FROM evidence_refs
+             WHERE subject_type = 'extracted_fact' AND subject_id = ?1",
+            params![existing_id],
+        )?;
+        let chunk_text = fact_chunk_text(&tx, existing_id)?;
+        let count = replace_chunks(&tx, "extracted_fact", existing_id, &chunk_text)?;
+        insert_evidence_refs(&tx, "extracted_fact", existing_id, &args.evidence)?;
+        insert_record_provenance(
+            &tx,
+            RecordProvenanceWrite {
+                record_type: "extracted_fact",
+                record_id: existing_id,
+                provenance_kind: "refreshed",
+                source_id: source_id.as_deref(),
+                original_path: None,
+                original_url: None,
+                model: args.model,
+                prompt_fingerprint: args.prompt_fingerprint,
+                metadata_json: metadata_json.as_deref(),
+            },
+        )?;
+        tx.commit()?;
+        if json_output {
+            return print_json(&json!({
+                "kind": "extracted_fact",
+                "id": existing_id,
+                "isDuplicate": true,
+                "refreshed": true,
+                "chunkCount": count,
+            }));
+        }
+        println!("extracted_fact {existing_id} (refreshed)");
+        return Ok(());
+    }
     let id = new_id();
     let tx = conn.transaction()?;
     tx.execute(
@@ -472,13 +575,25 @@ pub fn add_fact(
     let chunk_text = fact_chunk_text(&tx, &id)?;
     let count = insert_chunks(&tx, "extracted_fact", &id, &chunk_text)?;
     insert_evidence_refs(&tx, "extracted_fact", &id, &args.evidence)?;
+    insert_external_identity(
+        &tx,
+        ExternalIdentityWrite {
+            entity_type: "extracted_fact",
+            entity_id: &id,
+            source_id: source_id.as_deref(),
+            kind: &identity_kind,
+            external_id: args.external_id,
+            url: None,
+            force_duplicate: false,
+        },
+    )?;
     insert_record_provenance(
         &tx,
         RecordProvenanceWrite {
             record_type: "extracted_fact",
             record_id: &id,
             provenance_kind: "extracted",
-            source_id: None,
+            source_id: source_id.as_deref(),
             original_path: None,
             original_url: None,
             model: args.model,
@@ -487,7 +602,18 @@ pub fn add_fact(
         },
     )?;
     tx.commit()?;
-    report_written(json_output, "extracted_fact", &id, count)
+    if json_output {
+        print_json(&json!({
+            "kind": "extracted_fact",
+            "id": id,
+            "isDuplicate": false,
+            "refreshed": false,
+            "chunkCount": count,
+        }))
+    } else {
+        println!("extracted_fact {id} ({count} chunks)");
+        Ok(())
+    }
 }
 
 pub fn promote_fact(

@@ -57,7 +57,18 @@ fn apply_affiliation(
     };
     let org_id = super::organization::find_or_create_organization(tx, org, org_domain, None)?;
     super::affiliation::upsert_affiliation(
-        tx, person_id, &org_id, title, None, role, None, None, current, current,
+        tx,
+        super::affiliation::AffiliationUpsert {
+            person_id,
+            organization_id: &org_id,
+            title,
+            department: None,
+            role,
+            role_family: None,
+            seniority: None,
+            is_current: current,
+            is_primary: current,
+        },
     )?;
     Ok(())
 }
