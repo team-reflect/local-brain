@@ -115,8 +115,25 @@ export interface ChunkFilters {
   kinds?: readonly string[]
   /** Lower bound (inclusive) on {@link chunkRecordDate}, ISO 8601 (UTC). */
   after?: string
-  /** Upper bound (inclusive) on {@link chunkRecordDate}, ISO 8601 (UTC). */
+  /**
+   * Upper bound (inclusive) on {@link chunkRecordDate}, ISO 8601 (UTC). A
+   * date-only value (`YYYY-MM-DD`) covers the whole day — see
+   * {@link inclusiveUpperBound}.
+   */
   before?: string
+}
+
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/
+
+/**
+ * Expand a date-only upper bound to the end of that day so a `<=` string
+ * comparison still includes records timestamped later on the same day. Without
+ * this, `before: '2026-06-18'` would drop a record at `2026-06-18T09:00:00Z`
+ * because `'2026-06-18T09:00:00Z' <= '2026-06-18'` is false. Full timestamps
+ * pass through untouched.
+ */
+function inclusiveUpperBound(before: string): string {
+  return DATE_ONLY.test(before) ? `${before}T23:59:59.999Z` : before
 }
 
 /**
@@ -136,7 +153,7 @@ export function chunkFilterClauses(filters: ChunkFilters = {}): RawBuilder<unkno
     clauses.push(sql`(i.kind IN (${kinds}) OR transcript_interaction.kind IN (${kinds}))`)
   }
   if (filters.after) clauses.push(sql`${chunkRecordDate} >= ${filters.after}`)
-  if (filters.before) clauses.push(sql`${chunkRecordDate} <= ${filters.before}`)
+  if (filters.before) clauses.push(sql`${chunkRecordDate} <= ${inclusiveUpperBound(filters.before)}`)
   if (clauses.length === 0) return sql``
   return sql`AND ${sql.join(clauses, sql` AND `)}`
 }

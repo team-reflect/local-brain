@@ -150,6 +150,18 @@ describe('retrieval filters and browse', () => {
     expect(titles).not.toContain('Old sync')
   })
 
+  it('includes same-day records for a date-only before bound', async () => {
+    await seedDated()
+    // The June email is timestamped 09:00 on the bound date; a naive string `<=`
+    // against the bare date would drop it. The whole day must be inclusive.
+    const upToTheEmailDay = await retrieve('budget', { before: '2026-06-18' })
+    const titles = upToTheEmailDay.chunks.map((c) => c.recordTitle)
+    expect(titles).toContain('Budget email')
+    expect(titles).toContain('Old sync')
+    // The spec doc's date falls back to its (current) updated_at, after the bound.
+    expect(titles).not.toContain('Spec doc')
+  })
+
   it('browse returns nothing when filters match no records', async () => {
     await seedDated()
     const result = await retrieve('', { recordTypes: ['task'] })
