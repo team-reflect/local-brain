@@ -10,6 +10,11 @@ import {
   type AiProviderConfig,
 } from '@local-brain/core'
 
+export interface LanguageModelSelection {
+  configId: string
+  modelId: string
+}
+
 export function languageModelFor(config: AiProviderConfig, apiKey: string): LanguageModel {
   switch (config.provider) {
     case 'openai':
@@ -26,12 +31,33 @@ export function languageModelFor(config: AiProviderConfig, apiKey: string): Lang
   return unreachable
 }
 
-export async function resolveLanguageModel(): Promise<{ model: LanguageModel; label: string }> {
+function configuredProvider(
+  settings: Awaited<ReturnType<typeof getModelSettings>>,
+  selection: LanguageModelSelection | null | undefined,
+): AiProviderConfig | null {
+  if (!selection) {
+    return defaultAiProvider({
+      providers: settings.providers,
+      defaultProviderId: settings.defaultProviderId,
+    })
+  }
+
+  const selected = settings.providers.find((provider) => provider.id === selection.configId)
+  if (!selected) {
+    return defaultAiProvider({
+      providers: settings.providers,
+      defaultProviderId: settings.defaultProviderId,
+    })
+  }
+
+  return { ...selected, model: selection.modelId }
+}
+
+export async function resolveLanguageModel(
+  selection?: LanguageModelSelection | null,
+): Promise<{ model: LanguageModel; label: string }> {
   const settings = await getModelSettings()
-  const config = defaultAiProvider({
-    providers: settings.providers,
-    defaultProviderId: settings.defaultProviderId,
-  })
+  const config = configuredProvider(settings, selection)
   if (!config) throw new Error('No AI provider is configured. Add one in Settings.')
 
   const apiKey = await keychainGet(aiKeySecretName(config.id))

@@ -16,7 +16,10 @@ const chatMocks = vi.hoisted(() => ({
 }))
 
 const transportMocks = vi.hoisted(() => ({
-  options: null as { onConversationTitleUpdated?: (conversationId: string) => void } | null,
+  options: null as {
+    modelSelection?: { configId: string; modelId: string } | null
+    onConversationTitleUpdated?: (conversationId: string) => void
+  } | null,
   transport: {
     sendMessages: vi.fn(),
     reconnectToStream: vi.fn(),
@@ -38,7 +41,10 @@ vi.mock('@ai-sdk/react', () => ({
 }))
 
 vi.mock('../lib/ai/chat-transport', () => ({
-  createChatTransport: (options?: { onConversationTitleUpdated?: (conversationId: string) => void }) => {
+  createChatTransport: (options?: {
+    modelSelection?: { configId: string; modelId: string } | null
+    onConversationTitleUpdated?: (conversationId: string) => void
+  }) => {
     transportMocks.options = options ?? null
     return transportMocks.transport
   },
@@ -187,6 +193,24 @@ describe('ChatSurface', () => {
 
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['chat-conversations'] })
     invalidateSpy.mockRestore()
+  })
+
+  it('lets the chat composer choose another configured provider model', async () => {
+    await renderReadyChat()
+
+    const modelSelect = screen.getByLabelText('Model') as HTMLSelectElement
+    const mini = Array.from(modelSelect.options).find((option) => option.text === 'GPT-5.4 mini')
+    expect(mini).toBeDefined()
+    if (!mini) throw new Error('Expected GPT-5.4 mini to be available.')
+
+    fireEvent.change(modelSelect, { target: { value: mini.value } })
+
+    await waitFor(() =>
+      expect(transportMocks.options?.modelSelection).toEqual({
+        configId: 'provider-1',
+        modelId: 'gpt-5.4-mini',
+      }),
+    )
   })
 
   it('renders settled assistant text as markdown (bold and list)', async () => {

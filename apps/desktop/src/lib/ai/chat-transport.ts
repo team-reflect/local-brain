@@ -19,12 +19,13 @@ import {
   localDateString,
 } from '@local-brain/core'
 import { generateAndPersistConversationTitle } from './conversation-title'
-import { resolveLanguageModel } from './provider'
+import { resolveLanguageModel, type LanguageModelSelection } from './provider'
 
 const TOOL_STEPS = 5
 type PersistedChatStatus = 'submitted' | 'streaming' | 'done' | 'error'
 
 export interface ChatTransportOptions {
+  modelSelection?: LanguageModelSelection | null
   onConversationTitleUpdated?: (conversationId: string) => void
 }
 
@@ -211,7 +212,7 @@ export function createChatTransport(options: ChatTransportOptions = {}): ChatTra
 
       try {
         const [{ model, label }, { system }] = await Promise.all([
-          resolveLanguageModel(),
+          resolveLanguageModel(options.modelSelection),
           loadChatContext(),
         ])
         const result = streamText({

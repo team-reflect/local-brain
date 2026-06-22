@@ -5,11 +5,10 @@ import {
   useRef,
   useState,
   type FormEvent,
-  type KeyboardEvent,
   type ReactNode,
 } from 'react'
 import { useChat } from '@ai-sdk/react'
-import { MessageSquare, Send } from 'lucide-react'
+import { MessageSquare } from 'lucide-react'
 import { z } from 'zod'
 import { createChatId, type ChatMessage } from '@local-brain/core'
 import { lastAssistantMessageIsCompleteWithApprovalResponses, type UIMessage } from 'ai'
@@ -18,6 +17,12 @@ import { Alert } from '../components/alert'
 import { Button } from '../components/button'
 import { EmptyState } from '../components/empty-state'
 import { Loading } from '../components/loading'
+import {
+  buildChatModelOptions,
+  ChatComposer,
+  defaultModelValue,
+  modelSelectionForValue,
+} from '../components/chat/chat-composer'
 import { ChatMarkdown } from '../components/chat/chat-markdown'
 import {
   ChatToolChip,
@@ -80,6 +85,7 @@ function streamingMessageHasContent(message: UIMessage | undefined): boolean {
 export function ChatSurface({ conversationId }: { conversationId: string | undefined }): ReactNode {
   const [draftConversationId, setDraftConversationId] = useState(() => createChatId())
   const [hydratedConversationId, setHydratedConversationId] = useState<string | null>(null)
+  const [selectedModelValue, setSelectedModelValue] = useState<string | null>(null)
   const chatId = conversationId ?? draftConversationId
   const storedMessages = useMessages(conversationId)
   const conversations = useConversations()
@@ -88,11 +94,20 @@ export function ChatSurface({ conversationId }: { conversationId: string | undef
   const queryClient = useQueryClient()
   const deleteConversation = useDeleteConversation()
   const { navigate } = useRouter()
+  const chatModelOptions = useMemo(
+    () => buildChatModelOptions(modelSettings.data),
+    [modelSettings.data],
+  )
+  const modelSelection = useMemo(
+    () => modelSelectionForValue(chatModelOptions, selectedModelValue),
+    [chatModelOptions, selectedModelValue],
+  )
   const transport = useMemo(() => createChatTransport({
+    modelSelection,
     onConversationTitleUpdated: () => {
       void queryClient.invalidateQueries({ queryKey: ['chat-conversations'] })
     },
-  }), [queryClient])
+  }), [modelSelection, queryClient])
   const initialMessages = useMemo(() => persistedMessages(storedMessages.data), [storedMessages.data])
   const [draft, setDraft] = useState('')
   const [executingApprovalCount, setExecutingApprovalCount] = useState(0)
@@ -103,6 +118,14 @@ export function ChatSurface({ conversationId }: { conversationId: string | undef
       lastAssistantMessageIsCompleteWithApprovalResponses(options),
     [],
   )
+
+  useEffect(() => {
+    const stillAvailable = selectedModelValue
+      ? chatModelOptions.some((option) => option.value === selectedModelValue)
+      : false
+    if (stillAvailable) return
+    setSelectedModelValue(defaultModelValue(modelSettings.data, chatModelOptions))
+  }, [chatModelOptions, modelSettings.data, selectedModelValue])
 
   const chat = useChat({
     id: chatId,
@@ -273,7 +296,15 @@ export function ChatSurface({ conversationId }: { conversationId: string | undef
           />
         )}
         {error ? <Alert variant="error" className="mx-auto mb-3 w-full max-w-2xl">{error.message}</Alert> : null}
-        <Composer draft={draft} setDraft={setDraft} pending={composerPending} onSubmit={onSubmit} />
+        <ChatComposer
+          draft={draft}
+          modelOptions={chatModelOptions}
+          pending={composerPending}
+          selectedModelValue={selectedModelValue}
+          setDraft={setDraft}
+          setSelectedModelValue={setSelectedModelValue}
+          onSubmit={onSubmit}
+        />
       </>
     )
   }
@@ -451,61 +482,5 @@ function MessageRow({
         return null
       })}
     </div>
-  )
-}
-
-function Composer({
-  draft,
-  setDraft,
-  pending,
-  onSubmit,
-}: {
-  draft: string
-  setDraft: (draft: string) => void
-  pending: boolean
-  onSubmit: (event: FormEvent) => Promise<void>
-}): ReactNode {
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-
-  useEffect(() => {
-    const textarea = textareaRef.current
-    if (!textarea) return
-
-    textarea.style.height = 'auto'
-    textarea.style.height = `${textarea.scrollHeight}px`
-  }, [draft])
-
-  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault()
-      event.currentTarget.form?.requestSubmit()
-    }
-  }
-
-  const empty = draft.trim().length === 0
-  return (
-    <form onSubmit={onSubmit} className="mx-auto w-full max-w-2xl pt-4">
-      <div className="relative rounded-lg border border-border bg-card focus-within:border-ring">
-        <textarea
-          ref={textareaRef}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={onKeyDown}
-          rows={1}
-          aria-label="Chat message"
-          className="field-sizing-content max-h-60 min-h-12 w-full resize-none overflow-y-auto bg-transparent px-3 py-2 pr-28 text-sm text-foreground outline-none"
-        />
-        <Button
-          type="submit"
-          size="sm"
-          variant="primary"
-          disabled={empty || pending}
-          className="absolute bottom-2 right-2"
-        >
-          <Send className="size-3.5" />
-          Send
-        </Button>
-      </div>
-    </form>
   )
 }
