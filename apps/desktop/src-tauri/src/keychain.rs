@@ -8,10 +8,12 @@
 //! The service is the app identifier; the account is the provider id (e.g.
 //! `anthropic`), so multiple providers can each hold a key.
 
+#[cfg(target_os = "macos")]
 use std::process::Command;
 
 use crate::error::{AppError, AppResult};
 
+#[cfg(target_os = "macos")]
 const SERVICE: &str = "app.localbrain.desktop";
 
 /// `security` exit code for `errSecItemNotFound` — the only non-zero status that
