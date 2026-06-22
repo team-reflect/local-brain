@@ -34,6 +34,12 @@ const assistantMessage = (id: string, text: string, state: 'done' | 'streaming' 
   parts: [{ type: 'text', text, state }],
 })
 
+const userMessage = (id: string, text: string): UIMessage => ({
+  id,
+  role: 'user',
+  parts: [{ type: 'text', text }],
+})
+
 const toolMessage = (
   id: string,
   toolName: string,
@@ -83,6 +89,27 @@ async function renderReadyChat(): Promise<void> {
   await screen.findByLabelText('Chat message')
 }
 
+function setScrollMetrics(
+  element: HTMLElement,
+  {
+    scrollHeight,
+    clientHeight,
+    scrollTop,
+  }: {
+    scrollHeight: number
+    clientHeight: number
+    scrollTop: number
+  },
+): void {
+  Object.defineProperty(element, 'scrollHeight', { configurable: true, value: scrollHeight })
+  Object.defineProperty(element, 'clientHeight', { configurable: true, value: clientHeight })
+  Object.defineProperty(element, 'scrollTop', { configurable: true, value: scrollTop, writable: true })
+}
+
+function triggerChatRender(value: string): void {
+  fireEvent.change(screen.getByLabelText('Chat message'), { target: { value } })
+}
+
 describe('ChatSurface', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -109,7 +136,10 @@ describe('ChatSurface', () => {
   it('sends a new UI message instead of replacing a missing message id', async () => {
     await renderReadyChat()
 
-    fireEvent.change(screen.getByLabelText('Chat message'), {
+    const textarea = screen.getByLabelText('Chat message')
+    expect(textarea.getAttribute('placeholder')).toBeNull()
+
+    fireEvent.change(textarea, {
       target: { value: 'What changed this week?' },
     })
     fireEvent.click(screen.getByRole('button', { name: /Send/ }))
@@ -198,6 +228,53 @@ describe('ChatSurface', () => {
     await renderReadyChat()
 
     expect(screen.getByLabelText('Thinking')).not.toBeNull()
+  })
+
+  it('keeps streaming content pinned when the user is near the latest message', async () => {
+    chatMocks.messages = [assistantMessage('a1', 'Initial answer')]
+    await renderReadyChat()
+
+    const scroller = screen.getByLabelText('Chat messages')
+    setScrollMetrics(scroller, { scrollHeight: 1000, clientHeight: 400, scrollTop: 520 })
+    fireEvent.scroll(scroller)
+
+    chatMocks.status = 'streaming'
+    chatMocks.messages = [assistantMessage('a1', 'Initial answer with more streamed content', 'streaming')]
+    setScrollMetrics(scroller, { scrollHeight: 1200, clientHeight: 400, scrollTop: 520 })
+    triggerChatRender('tick')
+
+    expect(scroller.scrollTop).toBe(800)
+  })
+
+  it('does not pull the user back to the bottom while they are reading older messages', async () => {
+    chatMocks.messages = [assistantMessage('a1', 'Initial answer')]
+    await renderReadyChat()
+
+    const scroller = screen.getByLabelText('Chat messages')
+    setScrollMetrics(scroller, { scrollHeight: 1000, clientHeight: 400, scrollTop: 200 })
+    fireEvent.scroll(scroller)
+
+    chatMocks.status = 'streaming'
+    chatMocks.messages = [assistantMessage('a1', 'Initial answer with more streamed content', 'streaming')]
+    setScrollMetrics(scroller, { scrollHeight: 1200, clientHeight: 400, scrollTop: 200 })
+    triggerChatRender('reading')
+
+    expect(scroller.scrollTop).toBe(200)
+  })
+
+  it('scrolls a newly submitted user message into view even after reading older messages', async () => {
+    chatMocks.messages = [assistantMessage('a1', 'Earlier answer')]
+    await renderReadyChat()
+
+    const scroller = screen.getByLabelText('Chat messages')
+    setScrollMetrics(scroller, { scrollHeight: 1000, clientHeight: 400, scrollTop: 200 })
+    fireEvent.scroll(scroller)
+
+    chatMocks.messages = [assistantMessage('a1', 'Earlier answer'), userMessage('u1', 'Follow up')]
+    setScrollMetrics(scroller, { scrollHeight: 1200, clientHeight: 400, scrollTop: 200 })
+    triggerChatRender('follow up')
+
+    expect(scroller.scrollTop).toBe(800)
   })
 
   it('renders earlier text parts as plain text when a tool part follows during streaming', async () => {

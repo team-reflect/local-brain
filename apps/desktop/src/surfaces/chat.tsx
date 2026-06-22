@@ -24,6 +24,7 @@ import {
   type ToolApprovalResponse,
   type ToolPart,
 } from '../components/chat/chat-tool-chip'
+import { useChatScroll } from '../components/chat/use-chat-scroll'
 import { ConversationRail } from '../components/chat/conversation-rail'
 import { createChatTransport } from '../lib/ai/chat-transport'
 import {
@@ -285,16 +286,7 @@ function MessageList({
   showThinking: boolean
   onToolApprovalResponse: (response: ToolApprovalResponse) => void | PromiseLike<void>
 }): ReactNode {
-  const scrollRef = useRef<HTMLDivElement | null>(null)
-  const pinnedRef = useRef(true)
-
-  // Auto-scroll to bottom when messages change, but only while pinned.
-  useEffect(() => {
-    const container = scrollRef.current
-    if (container && pinnedRef.current) {
-      container.scrollTop = container.scrollHeight
-    }
-  }, [messages, showThinking])
+  const { scrollRef, contentRef, bottomRef, onScroll } = useChatScroll(messages, showThinking)
 
   if (messages.length === 0 && !showThinking) {
     return (
@@ -310,13 +302,11 @@ function MessageList({
   return (
     <div
       ref={scrollRef}
-      onScroll={(event) => {
-        const t = event.currentTarget
-        pinnedRef.current = t.scrollHeight - t.scrollTop - t.clientHeight < 48
-      }}
+      aria-label="Chat messages"
+      onScroll={onScroll}
       className="min-h-0 flex-1 overflow-y-auto"
     >
-      <ol className="mx-auto flex w-full max-w-2xl flex-col gap-5 py-2">
+      <ol ref={contentRef} className="mx-auto flex w-full max-w-2xl flex-col gap-5 py-2">
         {messages.map((message) => (
           <li key={message.id}>
             <MessageRow
@@ -332,6 +322,7 @@ function MessageList({
           </li>
         ) : null}
       </ol>
+      <div ref={bottomRef} aria-hidden className="h-px" />
     </div>
   )
 }
@@ -449,10 +440,9 @@ function Composer({
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={onKeyDown}
-          rows={2}
-          placeholder="Chat about your people, projects, documents, interactions, or tasks..."
+          rows={1}
           aria-label="Chat message"
-          className="field-sizing-content max-h-60 min-h-24 w-full resize-none overflow-y-auto bg-transparent px-3 py-2 pb-12 pr-28 text-sm text-foreground outline-none placeholder:text-muted-foreground"
+          className="field-sizing-content max-h-60 min-h-12 w-full resize-none overflow-y-auto bg-transparent px-3 py-2 pr-28 text-sm text-foreground outline-none"
         />
         <Button
           type="submit"
