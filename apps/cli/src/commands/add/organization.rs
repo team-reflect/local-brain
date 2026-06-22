@@ -138,7 +138,10 @@ fn external_organization_conflicts(
         fields.push("name".to_string());
     }
     if let Some(domain) = normalize_domain(incoming_domain) {
-        if normalize_domain(existing_domain.as_deref()).as_deref() != Some(domain.as_str()) {
+        if normalize_domain(existing_domain.as_deref())
+            .as_deref()
+            .is_some_and(|existing| existing != domain)
+        {
             fields.push("domain".to_string());
         }
     }

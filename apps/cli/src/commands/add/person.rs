@@ -227,11 +227,16 @@ fn external_person_conflicts(
     if normalize_name(&existing_name) != normalize_name(incoming_name) {
         fields.push("full_name".to_string());
     }
-    if incoming_emails
-        .iter()
-        .any(|email| !existing_emails.contains(&email.normalized))
-    {
-        fields.push("email".to_string());
+    for email in incoming_emails {
+        if existing_emails.contains(&email.normalized) {
+            continue;
+        }
+        if !existing_emails.is_empty()
+            || email_owned_by_other(conn, existing_person_id, &email.normalized)?
+        {
+            fields.push("email".to_string());
+            break;
+        }
     }
     Ok(fields)
 }

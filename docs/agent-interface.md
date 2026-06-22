@@ -217,6 +217,10 @@ brain --json repair person-email move --email maya@example.com \
 brain --json import participants audit --min-count 2 --fail-on-promote-candidates
 ```
 
+Promoting a fact stores the fact value as the memory claim. The fact key,
+subject, source record, and evidence remain available through the extracted fact,
+memory links, and citations.
+
 Enrich a person and organization:
 
 ```bash

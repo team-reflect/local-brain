@@ -280,7 +280,7 @@ function ConversationRail({
       </div>
       <nav className="flex flex-col gap-1">
         {conversations.length === 0 ? (
-          <p className="px-1 py-2 text-xs text-muted-foreground">No chats yet</p>
+          <p className="-ml-2 -mr-1 px-2 py-2 text-xs text-muted-foreground">No chats yet</p>
         ) : (
           conversations.map((conversation) => (
             <button
@@ -288,7 +288,7 @@ function ConversationRail({
               type="button"
               onClick={() => onOpen(conversation.id)}
               className={cn(
-                'rounded-md px-2 py-1.5 text-left text-xs transition-colors',
+                '-ml-2 -mr-1 rounded-md px-2 py-1.5 text-left text-xs transition-colors',
                 conversation.id === activeId
                   ? 'bg-secondary text-foreground'
                   : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
@@ -481,8 +481,7 @@ function Composer({
           rows={2}
           placeholder="Chat about your people, projects, documents, interactions, or tasks..."
           aria-label="Chat message"
-          disabled={pending}
-          className="field-sizing-content max-h-60 min-h-24 w-full resize-none overflow-y-auto bg-transparent px-3 py-2 pb-12 pr-28 text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+          className="field-sizing-content max-h-60 min-h-24 w-full resize-none overflow-y-auto bg-transparent px-3 py-2 pb-12 pr-28 text-sm text-foreground outline-none placeholder:text-muted-foreground"
         />
         <Button
           type="submit"

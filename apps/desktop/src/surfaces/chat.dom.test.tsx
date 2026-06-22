@@ -277,7 +277,7 @@ describe('ChatSurface', () => {
     expect(chatMocks.addToolApprovalResponse).toHaveBeenCalledWith({ id: 'approval-1', approved: true })
   })
 
-  it('disables the composer while tool approval is pending', async () => {
+  it('keeps the input editable but blocks submit while tool approval is pending', async () => {
     chatMocks.messages = [
       toolMessage(
         'a1',
@@ -292,10 +292,28 @@ describe('ChatSurface', () => {
 
     const textarea = screen.getByLabelText('Chat message')
     const sendButton = screen.getByRole('button', { name: /Send/ })
-    expect(textarea).toHaveProperty('disabled', true)
+    expect(textarea).toHaveProperty('disabled', false)
     expect(sendButton).toHaveProperty('disabled', true)
     fireEvent.change(textarea, { target: { value: 'Start a new turn' } })
+    expect(textarea).toHaveProperty('value', 'Start a new turn')
     fireEvent.click(sendButton)
+    expect(chatMocks.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('keeps the input editable but blocks submit while chat is streaming', async () => {
+    chatMocks.status = 'streaming'
+    chatMocks.messages = [
+      assistantMessage('a1', 'Checking local context...', 'streaming'),
+    ]
+    await renderReadyChat()
+
+    const textarea = screen.getByLabelText('Chat message')
+    const sendButton = screen.getByRole('button', { name: /Send/ })
+    expect(textarea).toHaveProperty('disabled', false)
+    fireEvent.change(textarea, { target: { value: 'Follow up' } })
+    expect(textarea).toHaveProperty('value', 'Follow up')
+    expect(sendButton).toHaveProperty('disabled', true)
+    fireEvent.keyDown(textarea, { key: 'Enter' })
     expect(chatMocks.sendMessage).not.toHaveBeenCalled()
   })
 

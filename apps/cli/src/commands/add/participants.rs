@@ -220,7 +220,6 @@ pub fn audit_participants(
             .then_with(|| b.latest_interaction_at.cmp(&a.latest_interaction_at))
             .then_with(|| a.key.cmp(&b.key))
     });
-    groups.truncate(args.limit);
     let promote_candidates = groups
         .iter()
         .filter(|group| recommendation(group) == "promote")
@@ -230,6 +229,8 @@ pub fn audit_participants(
             "{promote_candidates} participant promotion candidate(s) remain"
         )));
     }
+
+    groups.truncate(args.limit);
 
     if json_output {
         print_json(&json!({

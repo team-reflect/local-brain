@@ -2027,7 +2027,7 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
             },
             "promoteFact": {
                 "usage": "brain --json promote fact <fact-id> --memory-kind <kind>",
-                "purpose": "Promote a selected extracted fact into a curated hidden memory.",
+                "purpose": "Promote a selected extracted fact into a curated hidden memory using the fact value as the memory claim.",
             },
             "tag": {
                 "usage": "brain --json tag ensure --name <name> [--slug <slug>] | brain --json tag attach --tag <id|slug|name> --record <kind:id>",

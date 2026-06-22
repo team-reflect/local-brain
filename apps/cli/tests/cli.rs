@@ -1041,6 +1041,59 @@ fn person_from_email_external_identity_conflict_is_machine_readable() {
 }
 
 #[test]
+fn person_from_email_external_identity_can_fill_blank_email() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let seeded = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Robin Spencer",
+            "--source",
+            "google_people",
+            "--external-kind",
+            "contact",
+            "--external-id",
+            "people/robin",
+        ],
+    );
+
+    let enriched = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person-from-email",
+            "--full-name",
+            "Robin Spencer",
+            "--email",
+            "robin@example.com",
+            "--source",
+            "google_people",
+            "--external-id",
+            "people/robin",
+        ],
+    );
+    assert_eq!(enriched["created"], false);
+    assert_eq!(enriched["isDuplicate"], true);
+    assert_eq!(enriched["id"], seeded["id"]);
+
+    let conn = Connection::open(&db).unwrap();
+    let email_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM person_emails
+             WHERE person_id = ?1 AND normalized_email = 'robin@example.com'",
+            [seeded["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(email_count, 1);
+}
+
+#[test]
 fn add_interaction_dedupes_by_source_and_preserves_raw_participants() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
@@ -1228,6 +1281,76 @@ fn import_participants_audit_promote_and_fail_gate() {
         "skip-only unresolved participants should not fail the promote gate: {}",
         String::from_utf8_lossy(&clean.stderr)
     );
+}
+
+#[test]
+fn import_participants_fail_gate_counts_candidates_beyond_limit() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    for id in ["gmail-msg-machine-1", "gmail-msg-machine-2"] {
+        run_json(
+            &db,
+            &[
+                "--json",
+                "add",
+                "interaction",
+                "--kind",
+                "email",
+                "--title",
+                "Notification",
+                "--text",
+                "Readable source body.",
+                "--source",
+                "gmail",
+                "--external-id",
+                id,
+                "--participant",
+                "from:Notifications <notifications@example.com>",
+            ],
+        );
+    }
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Intro",
+            "--text",
+            "Readable source body.",
+            "--source",
+            "gmail",
+            "--external-id",
+            "gmail-msg-ada",
+            "--participant",
+            "from:Ada Lovelace <ada@example.com>",
+        ],
+    );
+
+    let blocked = run(
+        &db,
+        &[
+            "--json",
+            "import",
+            "participants",
+            "audit",
+            "--source",
+            "gmail",
+            "--min-count",
+            "1",
+            "--limit",
+            "1",
+            "--fail-on-promote-candidates",
+        ],
+    );
+    assert!(
+        !blocked.status.success(),
+        "hidden promote candidates beyond the output limit must fail the gate"
+    );
+    assert!(String::from_utf8_lossy(&blocked.stderr).contains("participant promotion candidate"));
 }
 
 #[test]
@@ -3751,6 +3874,59 @@ fn add_organization_json_contract_and_dedupe() {
 }
 
 #[test]
+fn add_organization_external_identity_can_fill_blank_domain() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let seeded = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "organization",
+            "--name",
+            "Quest Diagnostics",
+            "--source",
+            "agent",
+            "--external-kind",
+            "organization",
+            "--external-id",
+            "org/quest",
+        ],
+    );
+
+    let enriched = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "organization",
+            "--name",
+            "Quest Diagnostics",
+            "--domain",
+            "questdiagnostics.com",
+            "--source",
+            "agent",
+            "--external-kind",
+            "organization",
+            "--external-id",
+            "org/quest",
+        ],
+    );
+    assert_eq!(enriched["isDuplicate"], true);
+    assert_eq!(enriched["id"], seeded["id"]);
+
+    let conn = Connection::open(&db).unwrap();
+    let domain: Option<String> = conn
+        .query_row(
+            "SELECT domain FROM organizations WHERE id = ?1",
+            [seeded["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(domain.as_deref(), Some("questdiagnostics.com"));
+}
+
+#[test]
 fn affiliate_json_contract_and_missing_person_is_not_found() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
@@ -3985,6 +4161,157 @@ fn remember_evidence_by_quote_resolves_chunk() {
         ],
     );
     assert!(!out.status.success(), "an unmatched quote must error");
+}
+
+#[test]
+fn promote_fact_uses_value_only_claim_and_repairs_duplicate_claim() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let interaction = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Picardo feedback",
+            "--text",
+            "Scott Shreeve wanted a clearer place in Picardo to see uploaded records.",
+        ],
+    );
+    let interaction_id = interaction["id"].as_str().unwrap();
+    let interaction_ref = format!("interaction:{interaction_id}");
+    let evidence = format!("{interaction_ref}~uploaded records");
+    let claim = "Scott Shreeve wanted a clearer place in Picardo to see uploaded records.";
+    let fact = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "fact",
+            "--subject",
+            &interaction_ref,
+            "--key",
+            "product_feedback",
+            "--value-text",
+            claim,
+            "--source-record",
+            &interaction_ref,
+            "--evidence",
+            &evidence,
+        ],
+    );
+    let fact_id = fact["id"].as_str().unwrap();
+    let memory = run_json(
+        &db,
+        &[
+            "--json",
+            "promote",
+            "fact",
+            fact_id,
+            "--memory-kind",
+            "fact",
+        ],
+    );
+    let memory_id = memory["id"].as_str().unwrap();
+    assert_eq!(memory["isDuplicate"], false);
+
+    let conn = Connection::open(&db).unwrap();
+    let (stored_claim, promoted_from_fact_id): (String, Option<String>) = conn
+        .query_row(
+            "SELECT claim, promoted_from_fact_id FROM memories WHERE id = ?1",
+            [memory_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(stored_claim, claim);
+    assert!(!stored_claim.contains("interaction:"));
+    assert!(!stored_claim.contains("product_feedback"));
+    assert_eq!(promoted_from_fact_id.as_deref(), Some(fact_id));
+
+    let fact_key: String = conn
+        .query_row(
+            "SELECT key FROM extracted_facts WHERE id = ?1",
+            [fact_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(fact_key, "product_feedback");
+
+    let link_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM memory_links
+             WHERE memory_id = ?1 AND record_type = 'interaction' AND record_id = ?2",
+            (memory_id, interaction_id),
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(link_count, 1);
+
+    let chunk_text: String = conn
+        .query_row(
+            "SELECT text FROM content_chunks
+             WHERE record_type = 'memory' AND record_id = ?1 AND chunk_index = 0",
+            [memory_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(chunk_text, claim);
+
+    let evidence_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM evidence_refs
+             WHERE subject_type = 'memory' AND subject_id = ?1",
+            [memory_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(evidence_count, 1);
+
+    let old_claim = format!("interaction:{interaction_id} product_feedback: {claim}");
+    conn.execute(
+        "UPDATE memories SET claim = ?1 WHERE id = ?2",
+        (old_claim.as_str(), memory_id),
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE content_chunks SET text = ?1
+         WHERE record_type = 'memory' AND record_id = ?2 AND chunk_index = 0",
+        (old_claim.as_str(), memory_id),
+    )
+    .unwrap();
+
+    let duplicate = run_json(
+        &db,
+        &[
+            "--json",
+            "promote",
+            "fact",
+            fact_id,
+            "--memory-kind",
+            "fact",
+        ],
+    );
+    assert_eq!(duplicate["id"], memory["id"]);
+    assert_eq!(duplicate["isDuplicate"], true);
+
+    let (repaired_claim, repaired_chunk): (String, String) = conn
+        .query_row(
+            "SELECT m.claim, cc.text
+             FROM memories m
+             JOIN content_chunks cc
+               ON cc.record_type = 'memory'
+              AND cc.record_id = m.id
+              AND cc.chunk_index = 0
+             WHERE m.id = ?1",
+            [memory_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(repaired_claim, claim);
+    assert_eq!(repaired_chunk, claim);
 }
 
 #[test]

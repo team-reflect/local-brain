@@ -11,10 +11,12 @@ const GRAPH: Graph = {
     { id: 'self', kind: 'self', label: 'You' },
     { id: 'p1', kind: 'person', label: 'Ada Lovelace' },
     { id: 'org1', kind: 'organization', label: 'Analytical Engines' },
+    { id: 'm1', kind: 'memory', label: 'Prefers written summaries' },
   ],
   edges: [
     { source: 'self', target: 'p1', kind: 'knows' },
     { source: 'p1', target: 'org1', kind: 'affiliation' },
+    { source: 'p1', target: 'm1', kind: 'memory' },
     { source: 'self', target: 'p1', kind: 'interaction', weight: 3, interactionId: 'int1' },
   ],
 }
@@ -74,6 +76,8 @@ describe('GraphSurface', () => {
     renderWithProviders(<GraphSurface showHeader={false} />)
 
     expect(screen.getByRole('group', { name: 'Graph node filters' })).toBeDefined()
+    expect(screen.queryByRole('checkbox', { name: 'Known context' })).toBeNull()
+    expect(screen.queryByText('Prefers written summaries')).toBeNull()
     const people = screen.getByRole('checkbox', { name: 'People' })
     expect(people.getAttribute('aria-checked')).toBe('true')
     expect(screen.getByText('Ada Lovelace')).toBeDefined()
