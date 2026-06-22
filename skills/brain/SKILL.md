@@ -84,12 +84,20 @@ brain --json show person <id>
 brain --json suggest list
 brain --json import audit --limit 100
 brain --json today
+brain --json report daily
 brain --json tasks plan-day --limit 25
 brain --json graph --center self
 ```
 
 For answer generation, use `brain search`, `brain show`, tasks, memories, and
 evidence. The CLI does not synthesize answers for you.
+
+For a daily brief, use `brain --json report daily` as the complete context
+payload. It includes the self display name, task buckets, waiting items, recent
+interactions with excerpts and participants, recent changes, relationship
+context, active projects, counts, and generated date metadata. Generate the
+narrative outside Local Brain from that JSON; do not scrape the Tauri Today
+surface.
 
 ## Staged Import
 

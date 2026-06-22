@@ -54,10 +54,13 @@ Use `brain import-context` at the start of an import. It returns self identity,
 registered sources, existing projects and organizations, open suggestions, import
 watermarks, and counts.
 
-`brain today` and `brain report daily` return task buckets plus richer operating
-context: waiting items, recent write-time changes, relationship hints, and recent
-interactions with source, participant, summary, and readable excerpt fields when
-imported source text is available.
+`brain today` and `brain report daily` return the AI-ready daily brief context in
+one call: generated timestamp, local date, self display name, task buckets,
+waiting items, recent write-time changes, relationship hints, active projects,
+counts, and recent interactions with source, participant, summary, and readable
+excerpt fields when imported source text is available. External agents can use
+`brain --json report daily` as the complete context payload for generating a
+narrative daily brief outside Tauri.
 
 ## Write Phases
 

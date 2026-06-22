@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 
-use super::today;
+use super::{now_iso, today};
 use crate::error::CliError;
 use crate::output::print_json;
 
@@ -429,8 +429,43 @@ fn recent_changes_since(
     Ok(out)
 }
 
+fn self_user_name(conn: &Connection) -> Result<Option<String>, CliError> {
+    conn.query_row(
+        "SELECT COALESCE(NULLIF(trim(preferred_name), ''), full_name)
+         FROM people
+         WHERE is_self = 1 AND archived_at IS NULL
+         LIMIT 1",
+        [],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(CliError::from)
+}
+
+fn active_projects(conn: &Connection, limit: i64) -> Result<Vec<Value>, CliError> {
+    let mut stmt = conn.prepare(
+        "SELECT name, status, kind, summary, target_date
+         FROM projects
+         WHERE archived_at IS NULL AND completed_on IS NULL
+         ORDER BY created_at DESC
+         LIMIT ?1",
+    )?;
+    let rows = stmt.query_map(params![limit], |row| {
+        Ok(json!({
+            "name": row.get::<_, String>(0)?,
+            "status": row.get::<_, String>(1)?,
+            "kind": row.get::<_, Option<String>>(2)?,
+            "summary": row.get::<_, Option<String>>(3)?,
+            "targetDate": row.get::<_, Option<String>>(4)?,
+        }))
+    })?;
+    rows.collect::<rusqlite::Result<_>>()
+        .map_err(CliError::from)
+}
+
 /// Build the daily brief value shared by `brain today` and `brain report daily`.
 fn daily_brief(conn: &Connection) -> Result<Value, CliError> {
+    let generated_at = now_iso(conn)?;
     let today = today(conn)?;
     let cutoff = soon_cutoff(conn, 7)?;
     let (recent_change_since, recent_change_until): (String, String) = conn.query_row(
@@ -462,13 +497,18 @@ fn daily_brief(conn: &Connection) -> Result<Value, CliError> {
     let recent_changes =
         recent_changes_since(conn, &recent_change_since, Some(&recent_change_until), 12)?;
     let relationships = relationship_context(conn, 8)?;
+    let user_name = self_user_name(conn)?;
+    let active_projects = active_projects(conn, 12)?;
     Ok(json!({
+        "generatedAt": generated_at,
         "date": today,
+        "userName": user_name,
         "tasks": { "overdue": overdue, "today": due_today, "soon": soon, "open": open },
         "waitingItems": waiting_items,
         "recentInteractions": interactions,
         "recentChanges": recent_changes,
         "relationshipContext": relationships,
+        "activeProjects": active_projects,
         "counts": {
             "openTasks": tasks.len(),
             "overdueTasks": overdue.len(),
