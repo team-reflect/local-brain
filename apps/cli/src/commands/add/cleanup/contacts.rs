@@ -239,6 +239,39 @@ fn handle_owned_by_other(
     )?)
 }
 
+/// The first *active* person other than `exclude_a` / `exclude_b` that owns
+/// `normalized` on this channel (via a handle row or the denormalized primary
+/// column), if any. Person merge uses this to avoid handing a contact to a second
+/// active owner.
+pub(super) fn active_contact_owner_excluding(
+    conn: &Connection,
+    is_email: bool,
+    normalized: &str,
+    exclude_a: &str,
+    exclude_b: &str,
+) -> Result<Option<String>, CliError> {
+    let kind = if is_email { &EMAIL } else { &PHONE };
+    Ok(conn
+        .query_row(
+            &format!(
+                "SELECT p.id
+                 FROM people p
+                 LEFT JOIN {table} h ON h.person_id = p.id
+                 WHERE p.archived_at IS NULL
+                   AND p.id <> ?1
+                   AND p.id <> ?2
+                   AND (h.{normalized_col} = ?3 OR {primary_expr} = ?3)
+                 LIMIT 1",
+                table = kind.table,
+                normalized_col = kind.normalized_col,
+                primary_expr = kind.primary_normalized_sql,
+            ),
+            params![exclude_a, exclude_b, normalized],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
 fn active_phone_owners(conn: &Connection, normalized_phone: &str) -> Result<Vec<String>, CliError> {
     let mut stmt = conn.prepare(&format!(
         "SELECT DISTINCT p.id

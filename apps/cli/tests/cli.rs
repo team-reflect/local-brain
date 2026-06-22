@@ -1621,6 +1621,83 @@ fn merge_person_dry_run_then_apply_moves_links_and_archives_source() {
 }
 
 #[test]
+fn merge_person_dry_run_reports_notes_copied_into_empty_target() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let target = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Canonical Person",
+            "--email",
+            "canon@example.com",
+        ],
+    );
+    let source = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Duplicate Person",
+            "--email",
+            "dup@example.com",
+            "--notes",
+            "Imported note worth keeping.",
+        ],
+    );
+    let target_id = target["id"].as_str().unwrap();
+    let source_id = source["id"].as_str().unwrap();
+
+    // Target has no notes, so the apply step copies the source's in. The dry-run
+    // must report that as a change rather than claiming nothing happens.
+    let dry = run_json(
+        &db,
+        &[
+            "--json",
+            "merge",
+            "person",
+            "--from",
+            source_id,
+            "--to",
+            target_id,
+            "--dry-run",
+        ],
+    );
+    assert_eq!(dry["notesAppended"], true);
+
+    let merged = run_json(
+        &db,
+        &[
+            "--json",
+            "merge",
+            "person",
+            "--from",
+            source_id,
+            "--to",
+            target_id,
+            "--reason",
+            "duplicate",
+        ],
+    );
+    assert_eq!(merged["notesAppended"], true);
+
+    let conn = Connection::open(&db).unwrap();
+    let notes: Option<String> = conn
+        .query_row(
+            "SELECT notes FROM people WHERE id = ?1",
+            [target_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(notes.as_deref(), Some("Imported note worth keeping."));
+}
+
+#[test]
 fn merge_person_dedupes_conflicts_and_preserves_source_provenance() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);

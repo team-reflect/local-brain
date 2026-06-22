@@ -3,7 +3,9 @@ use serde_json::{json, Value};
 
 use super::super::identity::{insert_record_provenance, RecordProvenanceWrite};
 use super::super::text::normalize_optional;
-use super::contacts::{normalize_primary_email, normalize_primary_phone};
+use super::contacts::{
+    active_contact_owner_excluding, normalize_primary_email, normalize_primary_phone,
+};
 use super::{
     insert_cleanup_provenance, refresh_person_chunks, require_active_person,
     sync_person_current_affiliation, MergePersonArgs,
@@ -153,6 +155,35 @@ const EXTERNAL_IDENTITIES: RelationSpec = RelationSpec {
     dedup_cols: &["source_id", "kind", "external_id"],
     touch_updated_at: false,
 };
+/// Counted and applied generically; deduped on the cited chunk + quote span so two
+/// people citing the same chunk don't leave the target with duplicate evidence.
+const EVIDENCE_REFS: RelationSpec = RelationSpec {
+    table: "evidence_refs",
+    person_col: "subject_id",
+    filters: &[("subject_type", "person")],
+    dedup_cols: &["chunk_id", "quote_start", "quote_end"],
+    touch_updated_at: false,
+};
+
+/// A person contact channel (email or phone). Used by the merge's
+/// third-party-ownership guard: a handle can have only one active owner, so one
+/// still claimed by some *other* active person is left on the (about-to-be
+/// archived) source rather than handed to the target.
+struct ContactChannel {
+    spec: &'static RelationSpec,
+    is_email: bool,
+    noun: &'static str,
+}
+const EMAIL_CHANNEL: ContactChannel = ContactChannel {
+    spec: &EMAILS,
+    is_email: true,
+    noun: "email",
+};
+const PHONE_CHANNEL: ContactChannel = ContactChannel {
+    spec: &PHONES,
+    is_email: false,
+    noun: "phone",
+};
 
 #[derive(Debug, Default)]
 struct MergePlan {
@@ -167,7 +198,7 @@ struct MergePlan {
     memory_links: MoveStats,
     taggings: MoveStats,
     external_identities: MoveStats,
-    evidence_refs: usize,
+    evidence_refs: MoveStats,
     facts: usize,
     ai_notes: usize,
     source_records: usize,
@@ -206,7 +237,8 @@ impl MergePlan {
             "taggingsMerged": self.taggings.merged,
             "externalIdentitiesMoved": self.external_identities.moved,
             "externalIdentitiesMerged": self.external_identities.merged,
-            "evidenceRefsMoved": self.evidence_refs,
+            "evidenceRefsMoved": self.evidence_refs.moved,
+            "evidenceRefsMerged": self.evidence_refs.merged,
             "factsMoved": self.facts,
             "aiNotesMoved": self.ai_notes,
             "sourceRecordRefsMoved": self.source_records,
@@ -302,7 +334,9 @@ fn move_relation(
             let id: String = row.get(0)?;
             let mut keys = Vec::with_capacity(key_count);
             for index in 0..key_count {
-                keys.push(row.get::<_, Option<String>>(index + 1)?);
+                // Read as a dynamic Value so non-text dedup columns (e.g. the
+                // integer evidence quote offsets) bind back correctly.
+                keys.push(row.get::<_, rusqlite::types::Value>(index + 1)?);
             }
             Ok((id, keys))
         })?;
@@ -356,6 +390,122 @@ fn move_relation(
         }
     }
     Ok(stats)
+}
+
+enum ContactAction {
+    Move,
+    Merge,
+    /// Another active person (id carried for the warning) still owns the handle;
+    /// leave it on the source rather than create a second active owner.
+    Skip(String),
+}
+
+struct ContactDecision {
+    normalized: String,
+    id: String,
+    action: ContactAction,
+}
+
+/// Classify each source contact handle as move / merge-into-target / skip (a third
+/// active person already owns it). Read-only, so the dry-run plan and the apply
+/// step classify identically.
+fn classify_contact_moves(
+    conn: &Connection,
+    channel: &ContactChannel,
+    from_person_id: &str,
+    to_person_id: &str,
+) -> Result<Vec<ContactDecision>, CliError> {
+    let table = channel.spec.table;
+    let normalized_col = channel.spec.dedup_cols[0];
+    let rows = {
+        let mut stmt = conn.prepare(&format!(
+            "SELECT id, {normalized_col} FROM {table} WHERE person_id = ?1 ORDER BY {normalized_col}, id"
+        ))?;
+        let rows = stmt.query_map(params![from_person_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let mut decisions = Vec::with_capacity(rows.len());
+    for (id, normalized) in rows {
+        let action = if let Some(owner) = active_contact_owner_excluding(
+            conn,
+            channel.is_email,
+            &normalized,
+            from_person_id,
+            to_person_id,
+        )? {
+            ContactAction::Skip(owner)
+        } else {
+            let target_has: bool = conn.query_row(
+                &format!(
+                    "SELECT EXISTS(SELECT 1 FROM {table} WHERE person_id = ?1 AND {normalized_col} = ?2)"
+                ),
+                params![to_person_id, normalized],
+                |row| row.get(0),
+            )?;
+            if target_has {
+                ContactAction::Merge
+            } else {
+                ContactAction::Move
+            }
+        };
+        decisions.push(ContactDecision {
+            normalized,
+            id,
+            action,
+        });
+    }
+    Ok(decisions)
+}
+
+/// Summarize contact decisions into move/merge counts plus a warning per handle
+/// left on the source because another active person still owns it.
+fn contact_stats(decisions: &[ContactDecision], noun: &str) -> (MoveStats, Vec<String>) {
+    let mut stats = MoveStats::default();
+    let mut warnings = Vec::new();
+    for decision in decisions {
+        match &decision.action {
+            ContactAction::Move => stats.moved += 1,
+            ContactAction::Merge => stats.merged += 1,
+            ContactAction::Skip(owner) => warnings.push(format!(
+                "{noun} {} left on source: still owned by active person {owner}",
+                decision.normalized
+            )),
+        }
+    }
+    (stats, warnings)
+}
+
+/// Execute contact decisions: re-point moves onto the target, delete merges, and
+/// leave skips in place.
+fn apply_contact_decisions(
+    conn: &Connection,
+    channel: &ContactChannel,
+    to_person_id: &str,
+    decisions: &[ContactDecision],
+) -> Result<(), CliError> {
+    let table = channel.spec.table;
+    for decision in decisions {
+        match decision.action {
+            ContactAction::Move => {
+                conn.execute(
+                    &format!(
+                        "UPDATE {table} SET person_id = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1"
+                    ),
+                    params![decision.id, to_person_id],
+                )?;
+            }
+            ContactAction::Merge => {
+                conn.execute(
+                    &format!("DELETE FROM {table} WHERE id = ?1"),
+                    params![decision.id],
+                )?;
+            }
+            ContactAction::Skip(_) => {}
+        }
+    }
+    Ok(())
 }
 
 /// Reject the merge (even on dry-run) when a source external identity is already
@@ -449,7 +599,10 @@ fn profile_fields_filled(
     Ok(filled)
 }
 
-fn notes_would_append(
+/// Whether the merge would change the target's notes. Mirrors
+/// `fill_person_profile_from_source`: source notes are copied into an empty target
+/// and appended when both are non-empty and differ — either way the notes change.
+fn notes_would_change(
     conn: &Connection,
     from_person_id: &str,
     to_person_id: &str,
@@ -465,10 +618,10 @@ fn notes_would_append(
     let Some(source_notes) = normalize_optional(source_notes.as_deref()) else {
         return Ok(false);
     };
-    let Some(target_notes) = normalize_optional(target_notes.as_deref()) else {
-        return Ok(false);
-    };
-    Ok(source_notes != target_notes)
+    Ok(match normalize_optional(target_notes.as_deref()) {
+        None => true,
+        Some(target_notes) => target_notes != source_notes,
+    })
 }
 
 fn source_provenance_rows(conn: &Connection, from_person_id: &str) -> Result<usize, CliError> {
@@ -488,9 +641,17 @@ fn plan_person_merge(
     to_person_id: &str,
 ) -> Result<MergePlan, CliError> {
     ensure_external_identities_mergeable(conn, from_person_id, to_person_id)?;
+    let email_decisions =
+        classify_contact_moves(conn, &EMAIL_CHANNEL, from_person_id, to_person_id)?;
+    let phone_decisions =
+        classify_contact_moves(conn, &PHONE_CHANNEL, from_person_id, to_person_id)?;
+    let (emails, email_warnings) = contact_stats(&email_decisions, EMAIL_CHANNEL.noun);
+    let (phones, phone_warnings) = contact_stats(&phone_decisions, PHONE_CHANNEL.noun);
+    let mut warnings = email_warnings;
+    warnings.extend(phone_warnings);
     Ok(MergePlan {
-        emails: count_relation(conn, &EMAILS, from_person_id, to_person_id)?,
-        phones: count_relation(conn, &PHONES, from_person_id, to_person_id)?,
+        emails,
+        phones,
         affiliations: count_relation(conn, &AFFILIATIONS, from_person_id, to_person_id)?,
         participants: count_relation(conn, &PARTICIPANTS, from_person_id, to_person_id)?,
         document_links: count_relation(conn, &DOCUMENT_LINKS, from_person_id, to_person_id)?,
@@ -505,11 +666,7 @@ fn plan_person_merge(
             from_person_id,
             to_person_id,
         )?,
-        evidence_refs: count(
-            conn,
-            "SELECT COUNT(*) FROM evidence_refs WHERE subject_type = 'person' AND subject_id = ?1",
-            &[from_person_id],
-        )?,
+        evidence_refs: count_relation(conn, &EVIDENCE_REFS, from_person_id, to_person_id)?,
         facts: count(
             conn,
             "SELECT COUNT(*) FROM extracted_facts WHERE subject_type = 'person' AND subject_id = ?1",
@@ -530,8 +687,8 @@ fn plan_person_merge(
         )?,
         source_provenance_rows_preserved: source_provenance_rows(conn, from_person_id)?,
         profile_fields_filled: profile_fields_filled(conn, from_person_id, to_person_id)?,
-        notes_appended: notes_would_append(conn, from_person_id, to_person_id)?,
-        warnings: Vec::new(),
+        notes_appended: notes_would_change(conn, from_person_id, to_person_id)?,
+        warnings,
     })
 }
 
@@ -832,13 +989,21 @@ fn apply_person_merge(
     // mutation, since `fill_person_profile_from_source` and the moves below would
     // otherwise change what these report.
     let profile_fields_filled = profile_fields_filled(conn, from_person_id, to_person_id)?;
-    let notes_appended = notes_would_append(conn, from_person_id, to_person_id)?;
+    let notes_appended = notes_would_change(conn, from_person_id, to_person_id)?;
     let source_provenance_rows_preserved = source_provenance_rows(conn, from_person_id)?;
 
     fill_person_profile_from_source(conn, from_person_id, to_person_id)?;
 
-    let emails = move_relation(conn, &EMAILS, from_person_id, to_person_id)?;
-    let phones = move_relation(conn, &PHONES, from_person_id, to_person_id)?;
+    let email_decisions =
+        classify_contact_moves(conn, &EMAIL_CHANNEL, from_person_id, to_person_id)?;
+    let phone_decisions =
+        classify_contact_moves(conn, &PHONE_CHANNEL, from_person_id, to_person_id)?;
+    apply_contact_decisions(conn, &EMAIL_CHANNEL, to_person_id, &email_decisions)?;
+    apply_contact_decisions(conn, &PHONE_CHANNEL, to_person_id, &phone_decisions)?;
+    let (emails, email_warnings) = contact_stats(&email_decisions, EMAIL_CHANNEL.noun);
+    let (phones, phone_warnings) = contact_stats(&phone_decisions, PHONE_CHANNEL.noun);
+    let mut warnings = email_warnings;
+    warnings.extend(phone_warnings);
     normalize_primary_email(conn, to_person_id)?;
     normalize_primary_phone(conn, to_person_id)?;
     let affiliations = move_affiliations(conn, from_person_id, to_person_id)?;
@@ -856,11 +1021,7 @@ fn apply_person_merge(
     super::super::participants::recompute_relationship_intelligence(conn, to_person_id)?;
     super::super::participants::recompute_relationship_intelligence(conn, from_person_id)?;
 
-    let evidence_refs = conn.execute(
-        "UPDATE evidence_refs SET subject_id = ?2
-         WHERE subject_type = 'person' AND subject_id = ?1",
-        params![from_person_id, to_person_id],
-    )?;
+    let evidence_refs = move_relation(conn, &EVIDENCE_REFS, from_person_id, to_person_id)?;
     let facts = conn.execute(
         "UPDATE extracted_facts
          SET subject_id = ?2,
@@ -927,7 +1088,7 @@ fn apply_person_merge(
         source_provenance_rows_preserved,
         profile_fields_filled,
         notes_appended,
-        warnings: Vec::new(),
+        warnings,
     })
 }
 
@@ -1019,5 +1180,115 @@ mod tests {
         )
         .unwrap();
         ensure_external_identities_mergeable(&conn, "source-person", "target-person").unwrap();
+    }
+
+    #[test]
+    fn evidence_refs_merge_dedupes_shared_citations_and_keeps_plan_in_step() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE evidence_refs (
+               id TEXT PRIMARY KEY,
+               subject_type TEXT NOT NULL,
+               subject_id TEXT NOT NULL,
+               chunk_id TEXT NOT NULL,
+               quote_start INTEGER,
+               quote_end INTEGER
+             );",
+        )
+        .unwrap();
+        // Source cites chunk-a (span 1..5) and chunk-b (no span); the target already
+        // cites chunk-a with the same span. The shared citation must collapse while
+        // the distinct one moves.
+        conn.execute(
+            "INSERT INTO evidence_refs
+               (id, subject_type, subject_id, chunk_id, quote_start, quote_end)
+             VALUES
+               ('e1', 'person', 'source', 'chunk-a', 1, 5),
+               ('e2', 'person', 'source', 'chunk-b', NULL, NULL),
+               ('e3', 'person', 'target', 'chunk-a', 1, 5)",
+            [],
+        )
+        .unwrap();
+
+        // The dry-run estimate must match what the apply step actually does.
+        let plan = count_relation(&conn, &EVIDENCE_REFS, "source", "target").unwrap();
+        let applied = move_relation(&conn, &EVIDENCE_REFS, "source", "target").unwrap();
+        assert_eq!((plan.moved, plan.merged), (applied.moved, applied.merged));
+        assert_eq!((applied.moved, applied.merged), (1, 1));
+
+        let target_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM evidence_refs WHERE subject_id = 'target'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(target_count, 2);
+        let source_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM evidence_refs WHERE subject_id = 'source'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(source_count, 0);
+    }
+
+    #[test]
+    fn contact_merge_skips_handles_owned_by_a_third_active_person() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE people (
+               id TEXT PRIMARY KEY,
+               archived_at TEXT,
+               primary_email TEXT,
+               primary_phone TEXT
+             );
+             CREATE TABLE person_emails (
+               id TEXT PRIMARY KEY,
+               person_id TEXT NOT NULL,
+               normalized_email TEXT NOT NULL
+             );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO people (id, archived_at) VALUES
+               ('source', NULL), ('target', NULL), ('third', NULL)",
+            [],
+        )
+        .unwrap();
+        // The source and an unrelated active person both hold the same handle.
+        conn.execute(
+            "INSERT INTO person_emails (id, person_id, normalized_email) VALUES
+               ('pe1', 'source', 'shared@example.com'),
+               ('pe2', 'third', 'shared@example.com')",
+            [],
+        )
+        .unwrap();
+
+        let decisions = classify_contact_moves(&conn, &EMAIL_CHANNEL, "source", "target").unwrap();
+        assert_eq!(decisions.len(), 1);
+        assert!(
+            matches!(decisions[0].action, ContactAction::Skip(ref owner) if owner == "third"),
+            "handle owned by a third active person should be skipped"
+        );
+
+        let (stats, warnings) = contact_stats(&decisions, EMAIL_CHANNEL.noun);
+        assert_eq!((stats.moved, stats.merged), (0, 0));
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("shared@example.com"));
+        assert!(warnings[0].contains("third"));
+
+        // Applying leaves the handle on the source rather than handing it to target.
+        apply_contact_decisions(&conn, &EMAIL_CHANNEL, "target", &decisions).unwrap();
+        let owner: String = conn
+            .query_row(
+                "SELECT person_id FROM person_emails
+                 WHERE normalized_email = 'shared@example.com' AND person_id <> 'third'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(owner, "source");
     }
 }
