@@ -93,6 +93,7 @@ export interface DailyBrief {
 }
 
 export interface DailyBriefOptions {
+  /** As-of instant for the generated brief date, task buckets, relationship hints, and change window. */
   now?: Date
   /** Window (days) for the "soon" bucket. */
   soonDays?: number
@@ -446,24 +447,24 @@ async function relationshipContext(now: Date, limit: number): Promise<BriefRelat
 
 /** Assemble the daily brief: bucketed open tasks and recent interactions. */
 export async function getDailyBrief(options: DailyBriefOptions = {}): Promise<DailyBrief> {
-  const generatedAt = new Date()
-  const asOf = options.now ?? generatedAt
+  const now = options.now ?? new Date()
   const soonDays = options.soonDays ?? 7
   const recentLimit = options.recentLimit ?? 5
   const changeLimit = options.changeLimit ?? 12
   const relationshipLimit = options.relationshipLimit ?? 8
-  const recentChangeSince = new Date(generatedAt.getTime() - RECENT_CHANGE_DAYS * 86_400_000).toISOString()
+  const recentChangeSince = new Date(now.getTime() - RECENT_CHANGE_DAYS * 86_400_000).toISOString()
+  const recentChangeUntil = now.toISOString()
 
   const [tasks, interactions, recentChanges, relationships] = await Promise.all([
-    bucketedBriefTasks(asOf, soonDays),
+    bucketedBriefTasks(now, soonDays),
     recentInteractions(recentLimit),
-    getChangesSince(recentChangeSince, changeLimit),
-    relationshipContext(asOf, relationshipLimit),
+    getChangesSince(recentChangeSince, changeLimit, recentChangeUntil),
+    relationshipContext(now, relationshipLimit),
   ])
 
   return {
-    generatedAt: generatedAt.toISOString(),
-    date: dayKey(asOf),
+    generatedAt: now.toISOString(),
+    date: dayKey(now),
     tasks: {
       overdue: tasks.overdue,
       today: tasks.today,
@@ -534,8 +535,14 @@ export interface ChangedRecord {
 }
 
 /** Records created or updated since an ISO timestamp, newest first. */
-export async function getChangesSince(sinceIso: string, limit = 50): Promise<ChangedRecord[]> {
+export async function getChangesSince(
+  sinceIso: string,
+  limit = 50,
+  untilIso?: string,
+): Promise<ChangedRecord[]> {
   const since = sinceIso || nowIso()
+  const until = untilIso || null
+  const inWindow = (row: { updatedAt: string }): boolean => until === null || row.updatedAt <= until
   const [people, organizations, projects, tasks, documents, interactions] = await Promise.all([
     db
       .selectFrom('people')
@@ -575,7 +582,7 @@ export async function getChangesSince(sinceIso: string, limit = 50): Promise<Cha
       .execute(),
   ])
   const tag = (kind: ChangedRecord['kind'], rows: { id: string; title: string | null; updatedAt: string }[]) =>
-    rows.map((r) => ({ kind, id: r.id, title: r.title ?? '(untitled)', updatedAt: r.updatedAt }))
+    rows.filter(inWindow).map((r) => ({ kind, id: r.id, title: r.title ?? '(untitled)', updatedAt: r.updatedAt }))
   return [
     ...tag('person', people),
     ...tag('organization', organizations),

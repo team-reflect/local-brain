@@ -213,6 +213,11 @@ describe('Plan 06 agent report endpoints', () => {
       occurredAt: '2026-06-17T16:00:00Z',
     })
     await db
+      .updateTable('interactions')
+      .set({ updatedAt: '2026-06-17T17:00:00.000Z' })
+      .where('id', '=', interaction.id)
+      .execute()
+    await db
       .insertInto('externalIdentities')
       .values({
         id: newId(),
@@ -235,7 +240,9 @@ describe('Plan 06 agent report endpoints', () => {
       .execute()
     await createTask({ title: 'Waiting on vendor reply', status: 'waiting' })
 
-    const brief = await getDailyBrief({ now: new Date('2026-06-17T18:00:00Z') })
+    const briefNow = new Date('2026-06-17T18:00:00Z')
+    const brief = await getDailyBrief({ now: briefNow })
+    expect(brief.generatedAt).toBe(briefNow.toISOString())
     const email = brief.recentInteractions.find((item) => item.id === interaction.id)
     expect(email?.source?.slug).toBe('gmail')
     expect(email?.participants.map((participant) => participant.name)).toContain('Maya Chen')
@@ -247,7 +254,7 @@ describe('Plan 06 agent report endpoints', () => {
 
     const futureBrief = await getDailyBrief({ now: new Date('2036-01-01T18:00:00Z') })
     expect(futureBrief.date).toBe('2036-01-01')
-    expect(futureBrief.recentChanges.some((change) => change.id === interaction.id)).toBe(true)
+    expect(futureBrief.recentChanges.some((change) => change.id === interaction.id)).toBe(false)
   })
 
   it('reports records changed since a timestamp', async () => {
