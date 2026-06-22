@@ -17,6 +17,21 @@ fn lexical_score(bm25: f64) -> f64 {
     magnitude / (magnitude + 4.0)
 }
 
+const RECENCY_HALF_LIFE_DAYS: f64 = 90.0;
+const NAME_HIT_SCORE: f64 = 0.6;
+const TAG_HIT_SCORE: f64 = 0.58;
+
+fn recency_score(age_days: Option<f64>) -> f64 {
+    match age_days {
+        Some(age) if age.is_finite() => 0.5_f64.powf(age.max(0.0) / RECENCY_HALF_LIFE_DAYS),
+        _ => 0.25,
+    }
+}
+
+fn combined_search_score(lexical: f64, age_days: Option<f64>) -> f64 {
+    lexical * 0.7 + recency_score(age_days) * 0.3
+}
+
 struct ParsedSearchQuery {
     text: String,
     tag_filters: Vec<String>,
@@ -154,9 +169,14 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
     let tag_like = to_like_pattern_lower(&parsed.text);
 
     if let Some(mq) = mq.as_deref() {
-        for (table, fts, kind) in [
-            ("documents", "documents_fts", "document"),
-            ("interactions", "interactions_fts", "interaction"),
+        for (table, fts, kind, record_date) in [
+            ("documents", "documents_fts", "document", "t.updated_at"),
+            (
+                "interactions",
+                "interactions_fts",
+                "interaction",
+                "t.occurred_at",
+            ),
         ] {
             // Columns: 0=title, 1=body_text, 2=summary. Weight title highest, then the
             // summary (a curated digest / Granola note), then the raw body. Snippet from
@@ -170,7 +190,8 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
                           NULLIF(snippet({fts}, 2, '[', ']', '…', 10), ''),
                           NULLIF(snippet({fts}, 0, '[', ']', '…', 10), '')
                         ),
-                        bm25({fts}, 10.0, 1.0, 2.0)
+                        bm25({fts}, 10.0, 1.0, 2.0),
+                        julianday('now') - julianday({record_date})
                  FROM {fts} JOIN {table} t ON t.rowid = {fts}.rowid
                  WHERE {fts} MATCH ?
                    AND t.archived_at IS NULL
@@ -188,7 +209,10 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
                     "id": row.get::<_, String>(0)?,
                     "title": row.get::<_, Option<String>>(1)?.unwrap_or_else(|| "(untitled)".into()),
                     "snippet": row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                    "score": lexical_score(row.get::<_, f64>(3)?),
+                    "score": combined_search_score(
+                        lexical_score(row.get::<_, f64>(3)?),
+                        row.get::<_, Option<f64>>(4)?
+                    ),
                 }))
             })?;
             for row in rows {
@@ -207,7 +231,8 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
                       NULLIF(snippet(assets_fts, 3, '[', ']', '…', 10), ''),
                       NULLIF(snippet(assets_fts, 1, '[', ']', '…', 10), '')
                     ),
-                    bm25(assets_fts, 10.0, 2.0, 2.0, 1.0)
+                    bm25(assets_fts, 10.0, 2.0, 2.0, 1.0),
+                    julianday('now') - julianday(s.updated_at)
              FROM assets_fts
              JOIN asset_search s ON s.rowid = assets_fts.rowid
              JOIN assets a ON a.id = s.asset_id
@@ -229,7 +254,10 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
                 "title": row.get::<_, String>(1)?,
                 "subtitle": row.get::<_, Option<String>>(2)?,
                 "snippet": row.get::<_, Option<String>>(3)?,
-                "score": lexical_score(row.get::<_, f64>(4)?),
+                "score": combined_search_score(
+                    lexical_score(row.get::<_, f64>(4)?),
+                    row.get::<_, Option<f64>>(5)?
+                ),
             }))
         })?;
         for row in asset_rows {
@@ -254,7 +282,18 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
                       '(untitled)'
                     ) AS title,
                     snippet(content_chunks_fts, 0, '[', ']', '…', 10),
-                    bm25(content_chunks_fts)
+                    bm25(content_chunks_fts),
+                    julianday('now') - julianday(COALESCE(
+                      p.updated_at,
+                      o.updated_at,
+                      op.updated_at,
+                      pr.updated_at,
+                      t.updated_at,
+                      ti.updated_at,
+                      an.updated_at,
+                      ef.updated_at,
+                      m.updated_at
+                    ))
              FROM content_chunks_fts
              JOIN content_chunks cc ON cc.rowid = content_chunks_fts.rowid
              LEFT JOIN people p
@@ -305,7 +344,10 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
                 "id": row.get::<_, String>(1)?,
                 "title": row.get::<_, Option<String>>(2)?.unwrap_or_else(|| "(untitled)".into()),
                 "snippet": row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                "score": lexical_score(row.get::<_, f64>(4)?),
+                "score": combined_search_score(
+                    lexical_score(row.get::<_, f64>(4)?),
+                    row.get::<_, Option<f64>>(5)?
+                ),
             }))
         })?;
         for row in chunk_rows {
@@ -322,8 +364,9 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
         ] {
             let record_id = format!("{table}.id");
             let tag_filter = tag_filter_sql(kind, &record_id, &parsed.tag_filters);
+            let record_date = format!("{table}.updated_at");
             let sql = format!(
-                "SELECT {table}.id, {name_col}
+                "SELECT {table}.id, {name_col}, julianday('now') - julianday({record_date})
                  FROM {table}
                  WHERE archived_at IS NULL
                    AND {name_col} LIKE ? ESCAPE '\\'
@@ -341,7 +384,7 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
                     "id": row.get::<_, String>(0)?,
                     "title": row.get::<_, Option<String>>(1)?.unwrap_or_else(|| "(untitled)".into()),
                     "snippet": Value::Null,
-                    "score": 0.6,
+                    "score": combined_search_score(NAME_HIT_SCORE, row.get::<_, Option<f64>>(2)?),
                 }))
             })?;
             for row in rows {
@@ -469,6 +512,8 @@ fn tag_hits(
                ORDER BY label ASC
              )
            ) AS snippet
+           ,
+           julianday('now') - julianday(records.record_date)
          FROM records
          WHERE 1 = 1
            {}
@@ -499,7 +544,7 @@ fn tag_hit_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
         "title": row.get::<_, Option<String>>(2)?.unwrap_or_else(|| "(untitled)".into()),
         "subtitle": row.get::<_, Option<String>>(3)?,
         "snippet": row.get::<_, Option<String>>(4)?,
-        "score": 0.58,
+        "score": combined_search_score(TAG_HIT_SCORE, row.get::<_, Option<f64>>(5)?),
     }))
 }
 
@@ -693,7 +738,7 @@ fn snake_to_camel(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_search_query;
+    use super::{combined_search_score, parse_search_query};
 
     #[test]
     fn parses_search_query_like_core() {
@@ -723,5 +768,15 @@ mod tests {
         let parsed = parse_search_query("Project Alpha");
         assert_eq!(parsed.text, "Project Alpha");
         assert!(parsed.tag_filters.is_empty());
+    }
+
+    #[test]
+    fn search_score_blends_recency_like_core() {
+        let fresh = combined_search_score(0.6, Some(0.0));
+        let recent = combined_search_score(0.6, Some(30.0));
+        let undated = combined_search_score(0.6, None);
+
+        assert!(fresh > recent);
+        assert!(recent > undated);
     }
 }

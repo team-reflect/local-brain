@@ -3301,6 +3301,14 @@ fn search_finds_tagged_records_by_hash_filter_and_plain_tag_name() {
     assert!(by_hash_hits.iter().any(|h| h["kind"] == "document"
         && h["id"] == tagged["id"]
         && h["snippet"] == "Tagged #project-alpha"));
+    let tagged_hash_hit = by_hash_hits
+        .iter()
+        .find(|h| h["id"] == tagged["id"])
+        .expect("tagged document should be returned");
+    assert!(
+        tagged_hash_hit["score"].as_f64().unwrap() > 0.58,
+        "tag hits should blend recency instead of using the old flat score"
+    );
     assert!(!by_hash_hits.iter().any(|h| h["id"] == untagged["id"]));
 
     let by_name = run_json(&db, &["--json", "search", "Project Alpha"]);
