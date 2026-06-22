@@ -99,10 +99,11 @@ export function ConversationRail({
                         <MoreHorizontal className="size-3.5" />
                       </button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-44">
+                    <DropdownMenuContent align="end" className="w-max min-w-44">
                       <DropdownMenuItem
                         variant="destructive"
                         disabled={deleting}
+                        className="whitespace-nowrap"
                         onSelect={() => {
                           setDeleteError(null)
                           setDeleteTarget(conversation)
