@@ -485,7 +485,7 @@ function Composer({
   const empty = draft.trim().length === 0
   return (
     <form onSubmit={onSubmit} className="mx-auto w-full max-w-2xl pt-4">
-      <div className="relative rounded-lg border border-border bg-card focus-within:border-ring">
+      <div className="flex items-end gap-2 rounded-lg border border-border bg-card px-3 py-2 focus-within:border-ring">
         <textarea
           ref={textareaRef}
           value={draft}
@@ -493,14 +493,14 @@ function Composer({
           onKeyDown={onKeyDown}
           rows={1}
           aria-label="Chat message"
-          className="field-sizing-content max-h-60 min-h-12 w-full resize-none overflow-y-auto bg-transparent px-3 py-2 pr-28 text-sm text-foreground outline-none"
+          className="field-sizing-content max-h-60 min-h-7 min-w-0 flex-1 resize-none overflow-y-auto bg-transparent py-1 text-sm leading-6 text-foreground outline-none"
         />
         <Button
           type="submit"
           size="sm"
           variant="primary"
           disabled={empty || pending}
-          className="absolute bottom-2 right-2"
+          className="shrink-0"
         >
           <Send className="size-3.5" />
           Send
