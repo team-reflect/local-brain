@@ -1,4 +1,4 @@
-import { sql } from 'kysely'
+import { sql, type RawBuilder } from 'kysely'
 
 /**
  * Shared SQL fragments for joining `content_chunks` back to their owning typed
@@ -71,3 +71,72 @@ export const chunkRecordTitle = sql`COALESCE(
     a.original_filename,
     a.storage_path
   )`
+
+/**
+ * The single "when did this happen" date for a chunk's owning record, resolved
+ * by record type. Prefers the meaningful event date (occurred/authored/due/…)
+ * and falls back through `updated_at`. This is the one date both the recency
+ * ranking ({@link import('./ranking').recencyScore}) and the date-window filters
+ * read, so "recent" means the same thing whether sorting or filtering. Splice it
+ * into a SELECT (`AS "recordDate"`), a WHERE bound, or an `ORDER BY`.
+ */
+export const chunkRecordDate = sql`COALESCE(
+    i.occurred_at,
+    transcript_interaction.occurred_at,
+    d.occurred_at,
+    d.authored_at,
+    t.due_at,
+    an.generated_at,
+    ef.observed_at,
+    m.valid_from,
+    p.last_interaction_at,
+    d.updated_at,
+    i.updated_at,
+    p.updated_at,
+    o.updated_at,
+    pr.updated_at,
+    t.updated_at,
+    an.updated_at,
+    ef.updated_at,
+    m.updated_at,
+    a.updated_at
+  )`
+
+/** Optional structural filters narrowing which chunks a retriever considers. */
+export interface ChunkFilters {
+  /** Restrict to these record types (`cc.record_type IN …`). */
+  recordTypes?: readonly string[]
+  /**
+   * Restrict interaction-backed chunks to these interaction kinds
+   * (e.g. `email`, `meeting`, `call`). Applies to an interaction and to the
+   * parent interaction of a transcript; setting it naturally excludes
+   * non-interaction records, which carry no kind.
+   */
+  kinds?: readonly string[]
+  /** Lower bound (inclusive) on {@link chunkRecordDate}, ISO 8601 (UTC). */
+  after?: string
+  /** Upper bound (inclusive) on {@link chunkRecordDate}, ISO 8601 (UTC). */
+  before?: string
+}
+
+/**
+ * Build the optional `AND …` filter clauses spliced into a chunk WHERE clause,
+ * shared by the lexical, browse, and semantic retrievers so the three never
+ * drift. Returns an empty fragment when no filter is set. Assumes the outer query
+ * binds the record aliases from {@link chunkRecordJoins}.
+ */
+export function chunkFilterClauses(filters: ChunkFilters = {}): RawBuilder<unknown> {
+  const clauses: RawBuilder<unknown>[] = []
+  if (filters.recordTypes && filters.recordTypes.length > 0) {
+    const types = sql.join(filters.recordTypes.map((t) => sql`${t}`))
+    clauses.push(sql`cc.record_type IN (${types})`)
+  }
+  if (filters.kinds && filters.kinds.length > 0) {
+    const kinds = sql.join(filters.kinds.map((k) => sql`${k}`))
+    clauses.push(sql`(i.kind IN (${kinds}) OR transcript_interaction.kind IN (${kinds}))`)
+  }
+  if (filters.after) clauses.push(sql`${chunkRecordDate} >= ${filters.after}`)
+  if (filters.before) clauses.push(sql`${chunkRecordDate} <= ${filters.before}`)
+  if (clauses.length === 0) return sql``
+  return sql`AND ${sql.join(clauses, sql` AND `)}`
+}

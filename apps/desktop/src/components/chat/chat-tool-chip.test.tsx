@@ -106,6 +106,31 @@ describe('ChatToolChip — search_records', () => {
     })
     expect(screen.getByText(/0 results/)).not.toBeNull()
   })
+
+  it('labels a query-less browse by its filters instead of an empty query', () => {
+    renderChip({
+      type: 'tool-search_records',
+      toolCallId: 'tc-1',
+      state: 'output-available',
+      input: { recordTypes: ['interaction_transcript'], kinds: ['email'], sort: 'recency' },
+      output: { hits: [{}, {}, {}], count: 3 },
+    })
+    // Kinds win over types for the label, and recency reads as "recent".
+    expect(screen.getByText(/Browsed recent email/)).not.toBeNull()
+    expect(screen.getByText(/3 results/)).not.toBeNull()
+    expect(screen.queryByText(/Searched ""/)).toBeNull()
+  })
+
+  it('falls back to record-type labels when no kinds are given', () => {
+    renderChip({
+      type: 'tool-search_records',
+      toolCallId: 'tc-1',
+      state: 'output-available',
+      input: { recordTypes: ['interaction_transcript'], after: '2026-06-07' },
+      output: { hits: [{}], count: 1 },
+    })
+    expect(screen.getByText(/Browsed recent transcripts/)).not.toBeNull()
+  })
 })
 
 describe('ChatToolChip — list_projects', () => {

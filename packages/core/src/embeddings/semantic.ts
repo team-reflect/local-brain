@@ -1,6 +1,13 @@
 import { sql } from 'kysely'
 import { db } from '../db/client'
-import { chunkRecordJoins, chunkRecordTitle, chunkVisibilityFilter } from '../retrieval/chunk-sources'
+import {
+  chunkFilterClauses,
+  chunkRecordDate,
+  chunkRecordJoins,
+  chunkRecordTitle,
+  chunkVisibilityFilter,
+  type ChunkFilters,
+} from '../retrieval/chunk-sources'
 import type { RetrievedChunk, SourceRecordType } from '../retrieval/retrieve'
 import { EMBEDDING_MODEL_ID } from './model'
 
@@ -30,6 +37,7 @@ interface SemanticHitRow {
   recordType: SourceRecordType
   recordId: string
   recordTitle: string | null
+  recordDate: string | null
   chunkIndex: number
   distance: number
 }
@@ -51,13 +59,10 @@ function previewOf(text: string, max = 240): string {
  */
 export async function semanticHits(
   queryVector: readonly number[],
-  options: { limit: number; recordType?: SourceRecordType | undefined } = { limit: 12 },
+  options: { limit: number; filters?: ChunkFilters } = { limit: 12 },
 ): Promise<RetrievedChunk[]> {
   const k = Math.max(options.limit, KNN_CANDIDATES)
   const vectorJson = JSON.stringify(Array.from(queryVector))
-  const recordTypeFilter = options.recordType
-    ? sql`AND cc.record_type = ${options.recordType}`
-    : sql``
 
   const result = await sql<SemanticHitRow>`
     WITH knn AS (
@@ -72,13 +77,14 @@ export async function semanticHits(
       cc.record_id    AS "recordId",
       cc.chunk_index  AS "chunkIndex",
       ${chunkRecordTitle} AS "recordTitle",
+      ${chunkRecordDate}  AS "recordDate",
       knn.distance               AS "distance"
     FROM knn
     JOIN chunk_embeddings ce ON ce.id = knn.rowid AND ce.model_id = ${EMBEDDING_MODEL_ID}
     JOIN content_chunks cc   ON cc.id = ce.chunk_id
     ${chunkRecordJoins}
     WHERE ${chunkVisibilityFilter}
-      ${recordTypeFilter}
+      ${chunkFilterClauses(options.filters)}
     ORDER BY knn.distance
   `.execute(db)
 
@@ -93,6 +99,7 @@ export async function semanticHits(
         recordType: row.recordType,
         recordId: row.recordId,
         recordTitle: row.recordTitle,
+        recordDate: row.recordDate ?? null,
         chunkIndex: Number(row.chunkIndex),
         score: similarity,
         lexicalScore: 0,

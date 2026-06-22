@@ -101,6 +101,62 @@ describe('Plan 06 retrieval + search', () => {
   })
 })
 
+describe('retrieval filters and browse', () => {
+  beforeEach(() => {
+    installSqliteBridge(freshDatabase())
+  })
+
+  async function seedDated() {
+    await ingestInteraction({
+      kind: 'email',
+      title: 'Budget email',
+      bodyText: 'Please send the budget by Friday.',
+      occurredAt: '2026-06-18T09:00:00Z',
+    })
+    await ingestInteraction({
+      kind: 'meeting',
+      title: 'Old sync',
+      bodyText: 'Talked about the budget last quarter.',
+      occurredAt: '2026-01-05T09:00:00Z',
+    })
+    await ingestDocument({ title: 'Spec doc', bodyText: 'The budget section of the spec.' })
+  }
+
+  it('browses recent records of a type with no query, newest first', async () => {
+    await seedDated()
+    const result = await retrieve('', { recordTypes: ['interaction'], sort: 'recency' })
+    expect(result.chunks.length).toBeGreaterThan(0)
+    expect(result.chunks.every((c) => c.recordType === 'interaction')).toBe(true)
+    // Newest interaction (the June email) leads; each hit carries its record date.
+    expect(result.chunks[0].recordTitle).toBe('Budget email')
+    expect(result.chunks[0].recordDate).toContain('2026-06-18')
+  })
+
+  it('filters interactions by kind so "emails" excludes meetings', async () => {
+    await seedDated()
+    const result = await retrieve('', { recordTypes: ['interaction'], kinds: ['email'] })
+    const titles = result.chunks.map((c) => c.recordTitle)
+    expect(titles).toContain('Budget email')
+    expect(titles).not.toContain('Old sync')
+    expect(titles).not.toContain('Spec doc')
+  })
+
+  it('applies an after-date window to a keyword search', async () => {
+    await seedDated()
+    // "budget" matches all three records, but the January meeting predates the cutoff.
+    const recent = await retrieve('budget', { after: '2026-06-01T00:00:00Z' })
+    const titles = recent.chunks.map((c) => c.recordTitle)
+    expect(titles).toContain('Budget email')
+    expect(titles).not.toContain('Old sync')
+  })
+
+  it('browse returns nothing when filters match no records', async () => {
+    await seedDated()
+    const result = await retrieve('', { recordTypes: ['task'] })
+    expect(result.chunks).toEqual([])
+  })
+})
+
 describe('Plan 06 model boundary', () => {
   beforeEach(() => {
     installSqliteBridge(freshDatabase())

@@ -232,4 +232,32 @@ describe('retrieve modes', () => {
     expect(result.chunks).toEqual([])
     expect(commands).not.toContain('embed_texts')
   })
+
+  it('browses by filter when there is no query, without consulting embeddings', async () => {
+    const commands = installBridge({ status: 'ready' })
+    const result = await retrieve('', { recordTypes: ['document'] })
+    // A query-less browse never embeds — there is nothing to embed.
+    expect(commands).not.toContain('embed_status')
+    expect(commands).not.toContain('embed_texts')
+    expect(result.semanticAvailable).toBe(false)
+    expect(result.chunks.length).toBeGreaterThan(0)
+    // Browse hits carry their record date so the model can reason about freshness.
+    expect(result.chunks[0]?.recordDate).toBe('2026-06-01T00:00:00Z')
+  })
+
+  it('returns nothing for a blank query with no filters', async () => {
+    const result = await retrieve('   ', {})
+    expect(result.chunks).toEqual([])
+  })
+
+  it('keeps recency sort lexical even when the runtime is ready', async () => {
+    // Recency is chronological; a semantic re-rank would fight the ordering, so a
+    // recency-sorted query must stay lexical and never touch the embedding runtime.
+    const commands = installBridge({ status: 'ready' })
+    const result = await retrieve('quarterly planning', { sort: 'recency' })
+    expect(result.semanticAvailable).toBe(false)
+    expect(commands).not.toContain('embed_status')
+    expect(commands).not.toContain('embed_texts')
+    expect(result.chunks.length).toBeGreaterThan(0)
+  })
 })

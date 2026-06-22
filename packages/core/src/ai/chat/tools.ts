@@ -1,6 +1,6 @@
 import { tool } from 'ai'
 import { z } from 'zod'
-import { retrieve } from '../../retrieval/retrieve'
+import { retrieve, RETRIEVABLE_SOURCE_KINDS, type SourceRecordType } from '../../retrieval/retrieve'
 import { listProjects } from '../../domains/projects/getters'
 import {
   createPerson,
@@ -53,6 +53,7 @@ const DEFAULT_SEARCH_LIMIT = 8
 const MAX_SEARCH_LIMIT = 20
 const DEFAULT_PROJECTS_LIMIT = 30
 const MAX_CHUNK_CHARS = 1200
+const recordTypeEnum = z.enum([...RETRIEVABLE_SOURCE_KINDS] as [string, ...string[]])
 const MEMORY_KINDS = ['fact', 'preference', 'decision', 'commitment', 'instruction', 'risk', 'idea'] as const
 
 const optionalString = z.string().optional()
@@ -192,11 +193,36 @@ export function buildChatTools() {
   return {
     search_records: tool({
       description:
-        'Search Local Brain records (documents and interactions) by keyword or topic. ' +
-        'Returns relevant text excerpts grounded in local data. ' +
-        'Use this to find specific facts, events, promises, or details from documents and meetings.',
+        'Search and browse Local Brain records — documents, interactions, transcripts, emails, tasks, people, and more. ' +
+        'Pass `query` to search by topic or keyword. Add filters to narrow by record type (`recordTypes`), ' +
+        'interaction kind (`kinds`, e.g. ["email"]), or date window (`after`/`before`), and `sort` to order by relevance or recency. ' +
+        'To list RECENT items (e.g. "recent transcripts / emails"), OMIT `query` and instead set `recordTypes` ' +
+        '(and `kinds` like ["email"]) with `sort: "recency"` and an `after` date — do not put "recent" in the query text. ' +
+        'Each hit includes its record date so you can judge freshness.',
       inputSchema: z.object({
-        query: z.string().min(1).describe('Search query — plain language or keywords'),
+        query: optionalString.describe(
+          'Topic or keywords. Omit to browse by filters (record type / kind / date) instead of searching.',
+        ),
+        recordTypes: z
+          .array(recordTypeEnum)
+          .optional()
+          .describe(
+            'Restrict to these record types. Use ["interaction_transcript"] for transcripts, ["interaction"] for emails/meetings/calls, ["document"] for docs.',
+          ),
+        kinds: z
+          .array(z.string())
+          .optional()
+          .describe(
+            'Restrict interactions to these kinds (e.g. email, meeting, call, message, note). Use ["email"] for emails only.',
+          ),
+        after: optionalString.describe(
+          'Only records on/after this ISO 8601 (UTC) date. For "recent", use a date one or two weeks before today.',
+        ),
+        before: optionalString.describe('Only records on/before this ISO 8601 (UTC) date.'),
+        sort: z
+          .enum(['relevance', 'recency'])
+          .optional()
+          .describe('relevance (default with a query) or recency (newest first; default when browsing without a query).'),
         limit: z
           .number()
           .int()
@@ -205,13 +231,33 @@ export function buildChatTools() {
           .optional()
           .describe(`Max results to return (default ${DEFAULT_SEARCH_LIMIT})`),
       }),
-      execute: async ({ query, limit }) => {
-        const result = await retrieve(query, { mode: 'hybrid', limit: limit ?? DEFAULT_SEARCH_LIMIT })
+      execute: async ({ query, recordTypes, kinds, after, before, sort, limit }) => {
+        const trimmedQuery = optionalNonBlank(query)
+        const hasFilter =
+          (recordTypes?.length ?? 0) > 0 || (kinds?.length ?? 0) > 0 || Boolean(after) || Boolean(before)
+        if (!trimmedQuery && !hasFilter) {
+          throw new Error(
+            'Provide a query or at least one filter (recordTypes, kinds, after, before). ' +
+              'To list recent items, set recordTypes (and kinds) with sort:"recency" and an after date.',
+          )
+        }
+        const result = await retrieve(trimmedQuery ?? '', {
+          mode: 'hybrid',
+          limit: limit ?? DEFAULT_SEARCH_LIMIT,
+          ...(recordTypes && recordTypes.length > 0
+            ? { recordTypes: recordTypes as SourceRecordType[] }
+            : {}),
+          ...(kinds && kinds.length > 0 ? { kinds } : {}),
+          ...(after ? { after } : {}),
+          ...(before ? { before } : {}),
+          ...(sort ? { sort } : {}),
+        })
         return {
           hits: result.chunks.map((chunk) => ({
             recordType: chunk.recordType,
             recordId: chunk.recordId,
             title: chunk.recordTitle ?? null,
+            date: chunk.recordDate ?? null,
             snippet: chunk.snippet,
             text: chunk.text.length > MAX_CHUNK_CHARS ? chunk.text.slice(0, MAX_CHUNK_CHARS) : chunk.text,
           })),
