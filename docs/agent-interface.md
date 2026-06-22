@@ -54,6 +54,11 @@ Use `brain import-context` at the start of an import. It returns self identity,
 registered sources, existing projects and organizations, open suggestions, import
 watermarks, and counts.
 
+`brain today` and `brain report daily` return task buckets plus richer operating
+context: waiting items, recent changes, relationship hints, and recent interactions
+with source, participant, summary, and readable excerpt fields when imported source
+text is available.
+
 ## Write Phases
 
 Source-led imports should move through explicit phases:

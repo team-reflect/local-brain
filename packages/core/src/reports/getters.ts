@@ -34,6 +34,33 @@ export interface BriefInteraction {
   title: string | null
   kind: string
   occurredAt: string | null
+  summary: string | null
+  excerpt: string | null
+  source: BriefSource | null
+  participants: BriefParticipant[]
+}
+
+export interface BriefSource {
+  name: string | null
+  slug: string | null
+  externalKind: string | null
+}
+
+export interface BriefParticipant {
+  id: string | null
+  name: string
+  role: string | null
+  handle: string | null
+}
+
+export interface BriefRelationshipContext {
+  personId: string
+  name: string
+  headline: string | null
+  lastInteractionAt: string | null
+  relationshipStrength: number | null
+  recentInteractions: number
+  openTasks: number
 }
 
 export interface DailyBrief {
@@ -45,11 +72,17 @@ export interface DailyBrief {
     soon: BriefTask[]
     open: BriefTask[]
   }
+  waitingItems: BriefTask[]
   recentInteractions: BriefInteraction[]
+  recentChanges: ChangedRecord[]
+  relationshipContext: BriefRelationshipContext[]
   counts: {
     openTasks: number
     overdueTasks: number
     dueToday: number
+    waitingItems: number
+    recentInteractions: number
+    recentChanges: number
   }
 }
 
@@ -59,10 +92,30 @@ export interface DailyBriefOptions {
   soonDays?: number
   /** How many recent interactions to include. */
   recentLimit?: number
+  /** How many changed records to include. */
+  changeLimit?: number
+  /** How many relationship hints to include. */
+  relationshipLimit?: number
 }
+
+const INTERACTION_EXCERPT_CHARS = 900
+const INTERACTION_CHUNK_LIMIT = 2
+const RECENT_CHANGE_DAYS = 2
 
 function dayKey(date: Date): string {
   return localDateString(date)
+}
+
+function compactWhitespace(value: string | null | undefined): string | null {
+  const compact = value?.replace(/\s+/g, ' ').trim()
+  return compact ? compact : null
+}
+
+function clippedText(value: string | null | undefined, limit: number): string | null {
+  const compact = compactWhitespace(value)
+  if (!compact) return null
+  if (compact.length <= limit) return compact
+  return `${compact.slice(0, limit - 1).trimEnd()}…`
 }
 
 function bucketFor(task: { dueAt: string | null; scheduledFor: string | null }, now: Date, soonDays: number): TaskBucket {
@@ -100,13 +153,200 @@ function toBriefTask(
   }
 }
 
+interface RecentInteractionRow {
+  id: string
+  title: string | null
+  kind: string
+  occurredAt: string | null
+  summary: string | null
+  bodyText: string | null
+}
+
+async function interactionChunkMap(interactionIds: readonly string[]): Promise<Map<string, string[]>> {
+  const byInteraction = new Map<string, string[]>()
+  if (interactionIds.length === 0) return byInteraction
+
+  const rows = await db
+    .selectFrom('contentChunks')
+    .select(['recordId', 'text', 'chunkIndex'])
+    .where('recordType', '=', 'interaction')
+    .where('recordId', 'in', [...interactionIds])
+    .where('chunkIndex', '<', INTERACTION_CHUNK_LIMIT)
+    .orderBy('recordId', 'asc')
+    .orderBy('chunkIndex', 'asc')
+    .execute()
+
+  for (const row of rows) {
+    const list = byInteraction.get(row.recordId) ?? []
+    list.push(row.text)
+    byInteraction.set(row.recordId, list)
+  }
+  return byInteraction
+}
+
+async function interactionParticipantMap(
+  interactionIds: readonly string[],
+): Promise<Map<string, BriefParticipant[]>> {
+  const byInteraction = new Map<string, BriefParticipant[]>()
+  if (interactionIds.length === 0) return byInteraction
+
+  const rows = await db
+    .selectFrom('interactionParticipants')
+    .leftJoin('people', 'people.id', 'interactionParticipants.personId')
+    .select([
+      'interactionParticipants.interactionId',
+      'interactionParticipants.personId as id',
+      'interactionParticipants.role',
+      'interactionParticipants.handle',
+      'interactionParticipants.displayName',
+      'people.fullName as fullName',
+    ])
+    .where('interactionParticipants.interactionId', 'in', [...interactionIds])
+    .orderBy('interactionParticipants.createdAt', 'asc')
+    .execute()
+
+  for (const row of rows) {
+    const list = byInteraction.get(row.interactionId) ?? []
+    list.push({
+      id: row.id,
+      name: row.fullName ?? row.displayName ?? row.handle ?? 'Unknown participant',
+      role: row.role,
+      handle: row.handle,
+    })
+    byInteraction.set(row.interactionId, list)
+  }
+  return byInteraction
+}
+
+async function interactionSourceMap(interactionIds: readonly string[]): Promise<Map<string, BriefSource>> {
+  const byInteraction = new Map<string, BriefSource>()
+  if (interactionIds.length === 0) return byInteraction
+
+  const identityRows = await db
+    .selectFrom('externalIdentities')
+    .leftJoin('sources', 'sources.id', 'externalIdentities.sourceId')
+    .select([
+      'externalIdentities.entityId',
+      'externalIdentities.kind as externalKind',
+      'sources.name as sourceName',
+      'sources.slug as sourceSlug',
+    ])
+    .where('externalIdentities.entityType', '=', 'interaction')
+    .where('externalIdentities.entityId', 'in', [...interactionIds])
+    .orderBy('externalIdentities.createdAt', 'asc')
+    .execute()
+
+  for (const row of identityRows) {
+    if (byInteraction.has(row.entityId)) continue
+    byInteraction.set(row.entityId, {
+      name: row.sourceName,
+      slug: row.sourceSlug,
+      externalKind: row.externalKind,
+    })
+  }
+
+  const provenanceRows = await db
+    .selectFrom('recordProvenance')
+    .leftJoin('sources', 'sources.id', 'recordProvenance.sourceId')
+    .leftJoin('externalIdentities', 'externalIdentities.id', 'recordProvenance.externalIdentityId')
+    .select([
+      'recordProvenance.recordId',
+      'externalIdentities.kind as externalKind',
+      'sources.name as sourceName',
+      'sources.slug as sourceSlug',
+    ])
+    .where('recordProvenance.recordType', '=', 'interaction')
+    .where('recordProvenance.recordId', 'in', [...interactionIds])
+    .orderBy('recordProvenance.importedAt', 'desc')
+    .orderBy('recordProvenance.createdAt', 'desc')
+    .execute()
+
+  for (const row of provenanceRows) {
+    if (byInteraction.has(row.recordId)) continue
+    if (!row.sourceName && !row.sourceSlug && !row.externalKind) continue
+    byInteraction.set(row.recordId, {
+      name: row.sourceName,
+      slug: row.sourceSlug,
+      externalKind: row.externalKind,
+    })
+  }
+
+  return byInteraction
+}
+
+async function recentInteractions(limit: number): Promise<BriefInteraction[]> {
+  const rows: RecentInteractionRow[] = await db
+    .selectFrom('interactions')
+    .select(['id', 'title', 'kind', 'occurredAt', 'summary', 'bodyText'])
+    .where('archivedAt', 'is', null)
+    .orderBy('occurredAt', 'desc')
+    .orderBy('updatedAt', 'desc')
+    .limit(limit)
+    .execute()
+  const ids = rows.map((row) => row.id)
+  const [chunks, participants, sources] = await Promise.all([
+    interactionChunkMap(ids),
+    interactionParticipantMap(ids),
+    interactionSourceMap(ids),
+  ])
+
+  return rows.map((interaction) => {
+    const chunkExcerpt = chunks.get(interaction.id)?.join('\n\n')
+    return {
+      id: interaction.id,
+      title: interaction.title,
+      kind: interaction.kind,
+      occurredAt: interaction.occurredAt,
+      summary: clippedText(interaction.summary, INTERACTION_EXCERPT_CHARS),
+      excerpt: clippedText(chunkExcerpt ?? interaction.bodyText, INTERACTION_EXCERPT_CHARS),
+      source: sources.get(interaction.id) ?? null,
+      participants: (participants.get(interaction.id) ?? []).slice(0, 8),
+    }
+  })
+}
+
+async function relationshipContext(limit: number): Promise<BriefRelationshipContext[]> {
+  const rows = await db
+    .selectFrom('relationshipStrengths')
+    .innerJoin('people', 'people.id', 'relationshipStrengths.personId')
+    .select([
+      'people.id as personId',
+      'people.fullName as name',
+      'people.headline',
+      'relationshipStrengths.lastInteractionAt',
+      'relationshipStrengths.relationshipStrength',
+      'relationshipStrengths.recentInteractions',
+      'relationshipStrengths.openTasks',
+    ])
+    .where('people.archivedAt', 'is', null)
+    .where('people.isSelf', '=', 0)
+    .where('relationshipStrengths.relationshipStrength', 'is not', null)
+    .orderBy('relationshipStrengths.relationshipStrength', 'desc')
+    .orderBy('relationshipStrengths.lastInteractionAt', 'desc')
+    .limit(limit)
+    .execute()
+
+  return rows.map((row) => ({
+    personId: row.personId,
+    name: row.name,
+    headline: row.headline,
+    lastInteractionAt: row.lastInteractionAt,
+    relationshipStrength: row.relationshipStrength,
+    recentInteractions: row.recentInteractions ?? 0,
+    openTasks: row.openTasks ?? 0,
+  }))
+}
+
 /** Assemble the daily brief: bucketed open tasks and recent interactions. */
 export async function getDailyBrief(options: DailyBriefOptions = {}): Promise<DailyBrief> {
   const now = options.now ?? new Date()
   const soonDays = options.soonDays ?? 7
   const recentLimit = options.recentLimit ?? 5
+  const changeLimit = options.changeLimit ?? 12
+  const relationshipLimit = options.relationshipLimit ?? 8
+  const recentChangeSince = new Date(now.getTime() - RECENT_CHANGE_DAYS * 86_400_000).toISOString()
 
-  const [openTasks, interactions, assigneeRows] = await Promise.all([
+  const [openTasks, interactions, recentChanges, relationships, assigneeRows] = await Promise.all([
     db
       .selectFrom('tasks')
       .selectAll()
@@ -114,13 +354,9 @@ export async function getDailyBrief(options: DailyBriefOptions = {}): Promise<Da
       .where('status', 'in', [...OPEN_TASK_STATUSES])
       .orderBy('dueAt', 'asc')
       .execute(),
-    db
-      .selectFrom('interactions')
-      .select(['id', 'title', 'kind', 'occurredAt'])
-      .where('archivedAt', 'is', null)
-      .orderBy('occurredAt', 'desc')
-      .limit(recentLimit)
-      .execute(),
+    recentInteractions(recentLimit),
+    getChangesSince(recentChangeSince, changeLimit),
+    relationshipContext(relationshipLimit),
     db
       .selectFrom('taskPeople')
       .innerJoin('people', 'people.id', 'taskPeople.personId')
@@ -142,11 +378,13 @@ export async function getDailyBrief(options: DailyBriefOptions = {}): Promise<Da
   const today: BriefTask[] = []
   const soon: BriefTask[] = []
   const open: BriefTask[] = []
+  const waitingItems: BriefTask[] = []
   for (const task of openTasks) {
     if (TERMINAL.has(task.status)) continue
     const bucket = bucketFor(task, now, soonDays)
     const assignees = assigneeMap.get(task.id) ?? []
     const brief = toBriefTask(task, bucket, assignees)
+    if (task.status === 'waiting' || task.status === 'blocked') waitingItems.push(brief)
     if (bucket === 'overdue') overdue.push(brief)
     else if (bucket === 'today') today.push(brief)
     else if (bucket === 'soon') soon.push(brief)
@@ -157,16 +395,17 @@ export async function getDailyBrief(options: DailyBriefOptions = {}): Promise<Da
     generatedAt: now.toISOString(),
     date: dayKey(now),
     tasks: { overdue, today, soon, open },
-    recentInteractions: interactions.map((i) => ({
-      id: i.id,
-      title: i.title,
-      kind: i.kind,
-      occurredAt: i.occurredAt,
-    })),
+    waitingItems,
+    recentInteractions: interactions,
+    recentChanges,
+    relationshipContext: relationships,
     counts: {
       openTasks: openTasks.length,
       overdueTasks: overdue.length,
       dueToday: today.length,
+      waitingItems: waitingItems.length,
+      recentInteractions: interactions.length,
+      recentChanges: recentChanges.length,
     },
   }
 }
