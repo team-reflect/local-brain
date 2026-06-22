@@ -342,7 +342,10 @@ fn recent_changes_since(
         ("documents", "title", "document"),
         ("interactions", "title", "interaction"),
     ] {
-        let sql = format!("SELECT id, {title_col}, updated_at FROM {table} WHERE updated_at >= ?1");
+        let sql = format!(
+            "SELECT id, {title_col}, updated_at FROM {table}
+             WHERE updated_at >= ?1 AND archived_at IS NULL"
+        );
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params![since], |row| {
             Ok(json!({

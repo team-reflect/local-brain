@@ -463,12 +463,42 @@ export interface ChangedRecord {
 export async function getChangesSince(sinceIso: string, limit = 50): Promise<ChangedRecord[]> {
   const since = sinceIso || nowIso()
   const [people, organizations, projects, tasks, documents, interactions] = await Promise.all([
-    db.selectFrom('people').select(['id', 'fullName as title', 'updatedAt']).where('updatedAt', '>=', since).execute(),
-    db.selectFrom('organizations').select(['id', 'name as title', 'updatedAt']).where('updatedAt', '>=', since).execute(),
-    db.selectFrom('projects').select(['id', 'name as title', 'updatedAt']).where('updatedAt', '>=', since).execute(),
-    db.selectFrom('tasks').select(['id', 'title', 'updatedAt']).where('updatedAt', '>=', since).execute(),
-    db.selectFrom('documents').select(['id', 'title', 'updatedAt']).where('updatedAt', '>=', since).execute(),
-    db.selectFrom('interactions').select(['id', 'title', 'updatedAt']).where('updatedAt', '>=', since).execute(),
+    db
+      .selectFrom('people')
+      .select(['id', 'fullName as title', 'updatedAt'])
+      .where('updatedAt', '>=', since)
+      .where('archivedAt', 'is', null)
+      .execute(),
+    db
+      .selectFrom('organizations')
+      .select(['id', 'name as title', 'updatedAt'])
+      .where('updatedAt', '>=', since)
+      .where('archivedAt', 'is', null)
+      .execute(),
+    db
+      .selectFrom('projects')
+      .select(['id', 'name as title', 'updatedAt'])
+      .where('updatedAt', '>=', since)
+      .where('archivedAt', 'is', null)
+      .execute(),
+    db
+      .selectFrom('tasks')
+      .select(['id', 'title', 'updatedAt'])
+      .where('updatedAt', '>=', since)
+      .where('archivedAt', 'is', null)
+      .execute(),
+    db
+      .selectFrom('documents')
+      .select(['id', 'title', 'updatedAt'])
+      .where('updatedAt', '>=', since)
+      .where('archivedAt', 'is', null)
+      .execute(),
+    db
+      .selectFrom('interactions')
+      .select(['id', 'title', 'updatedAt'])
+      .where('updatedAt', '>=', since)
+      .where('archivedAt', 'is', null)
+      .execute(),
   ])
   const tag = (kind: ChangedRecord['kind'], rows: { id: string; title: string | null; updatedAt: string }[]) =>
     rows.map((r) => ({ kind, id: r.id, title: r.title ?? '(untitled)', updatedAt: r.updatedAt }))

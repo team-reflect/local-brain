@@ -248,7 +248,17 @@ describe('Plan 06 agent report endpoints', () => {
 
   it('reports records changed since a timestamp', async () => {
     await createTask({ title: 'Recent', status: 'open' })
+    await db
+      .insertInto('tasks')
+      .values({
+        id: newId(),
+        title: 'Archived recent task',
+        status: 'open',
+        archivedAt: '2026-06-17T12:00:00.000Z',
+      })
+      .execute()
     const changes = await getChangesSince('2000-01-01T00:00:00Z')
     expect(changes.find((c) => c.title === 'Recent')).toBeTruthy()
+    expect(changes.find((c) => c.title === 'Archived recent task')).toBeUndefined()
   })
 })
