@@ -1,4 +1,5 @@
 import {
+  startTransition,
   useCallback,
   useEffect,
   useMemo,
@@ -104,6 +105,54 @@ function interactionEdgeWidth(weight: number | undefined): number {
 
 function clampZoom(scale: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale))
+}
+
+function scheduleAfterPaint(callback: () => void): () => void {
+  let timeoutId: number | undefined
+  let frameId: number | undefined
+
+  const run = (): void => {
+    timeoutId = window.setTimeout(callback, 0)
+  }
+
+  if (typeof window.requestAnimationFrame === 'function') {
+    frameId = window.requestAnimationFrame(run)
+  } else {
+    run()
+  }
+
+  return () => {
+    if (frameId !== undefined) window.cancelAnimationFrame(frameId)
+    if (timeoutId !== undefined) window.clearTimeout(timeoutId)
+  }
+}
+
+function useAsyncGraphLayout(graph: Graph | null): GraphLayout | null {
+  const [layout, setLayout] = useState<GraphLayout | null>(null)
+
+  useEffect(() => {
+    if (!graph || graph.nodes.length === 0) {
+      setLayout(null)
+      return undefined
+    }
+
+    let active = true
+    setLayout(null)
+    const cancel = scheduleAfterPaint(() => {
+      const nextLayout = layoutGraph(graph)
+      if (!active) return
+      startTransition(() => {
+        if (active) setLayout(nextLayout)
+      })
+    })
+
+    return () => {
+      active = false
+      cancel()
+    }
+  }, [graph])
+
+  return layout
 }
 
 interface FitTransform {
@@ -212,7 +261,8 @@ export function GraphSurface({
     }
   }, [graph.data, visibleKinds])
 
-  const layout = useMemo(() => (filteredGraph ? layoutGraph(filteredGraph) : null), [filteredGraph])
+  const layout = useAsyncGraphLayout(filteredGraph)
+  const hasVisibleGraphNodes = (filteredGraph?.nodes.length ?? 0) > 0
 
   const toggleKind = (kind: VisibleGraphFilterKind): void => {
     setVisibleKinds((current) => {
@@ -371,12 +421,16 @@ export function GraphSurface({
               </label>
             ))}
           </div>
-          {!layout || layout.nodes.length === 0 ? (
+          {!hasVisibleGraphNodes ? (
             <div className="flex h-full min-h-[24rem] items-center justify-center pt-48 sm:pt-0 sm:pr-48">
               <EmptyState
                 title="All node types hidden"
                 hint="Turn on a node type to draw the graph."
               />
+            </div>
+          ) : !layout ? (
+            <div className="flex h-full min-h-[24rem] items-center justify-center pt-48 sm:pt-0 sm:pr-48">
+              <Loading />
             </div>
           ) : (
             <svg

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import type { Graph } from '@local-brain/core'
 import { renderWithProviders } from '../test/utils'
+import { layoutGraph } from './graph-layout'
 import { GraphSurface } from './graph'
 
 const GRAPH: Graph = {
@@ -25,12 +26,30 @@ vi.mock('../lib/queries', () => ({
   useGraph: () => ({ data: GRAPH, isLoading: false }),
 }))
 
-function mockGraphBounds(rect?: { width: number; height: number }): SVGSVGElement {
-  const width = rect?.width ?? 880
-  const height = rect?.height ?? 760
-  const svg = screen.getByRole('img', {
+vi.mock('./graph-layout', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./graph-layout')>()
+  return {
+    ...actual,
+    layoutGraph: vi.fn(actual.layoutGraph),
+  }
+})
+
+const layoutGraphMock = vi.mocked(layoutGraph)
+
+beforeEach(() => {
+  layoutGraphMock.mockClear()
+})
+
+async function findGraphSvg(): Promise<SVGSVGElement> {
+  return await screen.findByRole('img', {
     name: 'User-centered knowledge graph',
   }) as unknown as SVGSVGElement
+}
+
+async function mockGraphBounds(rect?: { width: number; height: number }): Promise<SVGSVGElement> {
+  const width = rect?.width ?? 880
+  const height = rect?.height ?? 760
+  const svg = await findGraphSvg()
   Object.defineProperty(svg, 'getBoundingClientRect', {
     configurable: true,
     value: () => ({
@@ -72,7 +91,20 @@ function dispatchPointer(
 }
 
 describe('GraphSurface', () => {
-  it('lets node types be toggled from the graph legend', () => {
+  it('defers graph layout until after the initial tab render', async () => {
+    renderWithProviders(<GraphSurface showHeader={false} />)
+
+    expect(screen.getByRole('group', { name: 'Graph node filters' })).toBeDefined()
+    expect(screen.getByText('Loading…')).toBeDefined()
+    expect(screen.queryByRole('img', { name: 'User-centered knowledge graph' })).toBeNull()
+    expect(layoutGraphMock).not.toHaveBeenCalled()
+
+    await findGraphSvg()
+
+    expect(layoutGraphMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('lets node types be toggled from the graph legend', async () => {
     renderWithProviders(<GraphSurface showHeader={false} />)
 
     expect(screen.getByRole('group', { name: 'Graph node filters' })).toBeDefined()
@@ -80,20 +112,22 @@ describe('GraphSurface', () => {
     expect(screen.queryByText('Prefers written summaries')).toBeNull()
     const people = screen.getByRole('checkbox', { name: 'People' })
     expect(people.getAttribute('aria-checked')).toBe('true')
-    expect(screen.getByText('Ada Lovelace')).toBeDefined()
+    expect(await screen.findByText('Ada Lovelace')).toBeDefined()
     expect(screen.getByText('Analytical Engines')).toBeDefined()
 
     fireEvent.click(people)
 
     expect(people.getAttribute('aria-checked')).toBe('false')
-    expect(screen.queryByText('Ada Lovelace')).toBeNull()
-    expect(screen.getByText('Analytical Engines')).toBeDefined()
+    await waitFor(() => {
+      expect(screen.queryByText('Ada Lovelace')).toBeNull()
+      expect(screen.getByText('Analytical Engines')).toBeDefined()
+    })
   })
 
-  it('pans the graph with pointer drag', () => {
+  it('pans the graph with pointer drag', async () => {
     renderWithProviders(<GraphSurface showHeader={false} />)
 
-    const svg = mockGraphBounds()
+    const svg = await mockGraphBounds()
     const viewport = screen.getByTestId('graph-viewport')
     expect(viewport.getAttribute('transform')).toBe('translate(0 0) scale(1)')
 
@@ -104,14 +138,14 @@ describe('GraphSurface', () => {
     expect(viewport.getAttribute('transform')).toBe('translate(88 0) scale(1)')
   })
 
-  it('maps pan through the uniform letterbox scale, not the per-axis ratio', () => {
+  it('maps pan through the uniform letterbox scale, not the per-axis ratio', async () => {
     renderWithProviders(<GraphSurface showHeader={false} />)
 
     // 440x760 box vs an 880x760 viewBox: width-bound, so the graph renders at a
     // uniform scale of 0.5 with vertical letterboxing. An 88px diagonal drag must
     // move the viewport 176 units on BOTH axes — the per-axis ratio would wrongly
     // give 88 on Y.
-    const svg = mockGraphBounds({ width: 440, height: 760 })
+    const svg = await mockGraphBounds({ width: 440, height: 760 })
     const viewport = screen.getByTestId('graph-viewport')
 
     dispatchPointer(svg, 'pointerdown', { pointerId: 1, button: 0, clientX: 100, clientY: 100 })
@@ -121,13 +155,13 @@ describe('GraphSurface', () => {
     expect(viewport.getAttribute('transform')).toBe('translate(176 176) scale(1)')
   })
 
-  it('anchors zoom on the cursor when the svg is letterboxed', () => {
+  it('anchors zoom on the cursor when the svg is letterboxed', async () => {
     renderWithProviders(<GraphSurface showHeader={false} />)
 
     // Width-bound box (scale 0.5, 190px vertical letterbox). Cursor is above the
     // vertical center so the letterbox offset matters: client (220,200) maps to
     // viewBox (440,20). Zoom must keep that exact point fixed under the cursor.
-    const svg = mockGraphBounds({ width: 440, height: 760 })
+    const svg = await mockGraphBounds({ width: 440, height: 760 })
     const viewport = screen.getByTestId('graph-viewport')
 
     fireEvent.wheel(svg, { deltaY: -100, clientX: 220, clientY: 200 })
@@ -147,10 +181,10 @@ describe('GraphSurface', () => {
     expect(ty + 20 * scale).toBeCloseTo(20, 5)
   })
 
-  it('zooms the graph around the wheel cursor', () => {
+  it('zooms the graph around the wheel cursor', async () => {
     renderWithProviders(<GraphSurface showHeader={false} />)
 
-    const svg = mockGraphBounds()
+    const svg = await mockGraphBounds()
     const viewport = screen.getByTestId('graph-viewport')
 
     fireEvent.wheel(svg, { deltaY: -100, clientX: 440, clientY: 380 })
@@ -160,12 +194,12 @@ describe('GraphSurface', () => {
     expect(transform).toMatch(/scale\(1\.\d+\)/)
   })
 
-  it('does not open a node after dragging from it', () => {
+  it('does not open a node after dragging from it', async () => {
     window.history.pushState({}, '', '/network?tab=graph')
     renderWithProviders(<GraphSurface showHeader={false} />)
 
-    mockGraphBounds()
-    const person = screen.getByText('Ada Lovelace')
+    await mockGraphBounds()
+    const person = await screen.findByText('Ada Lovelace')
 
     dispatchPointer(person, 'pointerdown', { pointerId: 1, button: 0, clientX: 100, clientY: 100 })
     dispatchPointer(person, 'pointermove', { pointerId: 1, clientX: 150, clientY: 100 })
@@ -175,10 +209,10 @@ describe('GraphSurface', () => {
     expect(window.location.pathname + window.location.search).toBe('/network?tab=graph')
   })
 
-  it('fills its container height with a bounded, non-overflowing svg', () => {
+  it('fills its container height with a bounded, non-overflowing svg', async () => {
     renderWithProviders(<GraphSurface showHeader={false} />)
 
-    const svg = screen.getByRole('img', { name: 'User-centered knowledge graph' })
+    const svg = await findGraphSvg()
     // h-full (not h-auto) keeps the svg inside the route height; with the
     // viewBox + default preserveAspectRatio it letterboxes instead of growing.
     expect(svg.getAttribute('class')).toContain('h-full')
@@ -198,7 +232,7 @@ describe('GraphSurface', () => {
     window.history.pushState({}, '', '/network?tab=graph')
     renderWithProviders(<GraphSurface showHeader={false} />)
 
-    fireEvent.click(screen.getByRole('link', { name: 'Open person Ada Lovelace' }))
+    fireEvent.click(await screen.findByRole('link', { name: 'Open person Ada Lovelace' }))
 
     await waitFor(() => {
       expect(window.location.pathname).toBe('/people/p1')
@@ -209,7 +243,9 @@ describe('GraphSurface', () => {
     window.history.pushState({}, '', '/network?tab=graph')
     renderWithProviders(<GraphSurface showHeader={false} />)
 
-    fireEvent.click(screen.getByRole('link', { name: 'Open organization Analytical Engines' }))
+    fireEvent.click(
+      await screen.findByRole('link', { name: 'Open organization Analytical Engines' }),
+    )
 
     await waitFor(() => {
       expect(window.location.pathname).toBe('/organizations/org1')
@@ -220,7 +256,7 @@ describe('GraphSurface', () => {
     window.history.pushState({}, '', '/network?tab=graph')
     renderWithProviders(<GraphSurface showHeader={false} />)
 
-    fireEvent.keyDown(screen.getByRole('link', { name: 'Open person Ada Lovelace' }), {
+    fireEvent.keyDown(await screen.findByRole('link', { name: 'Open person Ada Lovelace' }), {
       key: 'Enter',
     })
 
@@ -233,6 +269,7 @@ describe('GraphSurface', () => {
     window.history.pushState({}, '', '/network?tab=graph')
     const { container } = renderWithProviders(<GraphSurface showHeader={false} />)
 
+    await findGraphSvg()
     const link = container.querySelector('line[stroke="#db2777"]')
     expect(link).not.toBeNull()
 
@@ -243,10 +280,10 @@ describe('GraphSurface', () => {
     })
   })
 
-  it('keeps enlarged node hit targets below interaction links', () => {
+  it('keeps enlarged node hit targets below interaction links', async () => {
     renderWithProviders(<GraphSurface showHeader={false} />)
 
-    const hitLayer = screen.getByTestId('graph-node-hit-layer')
+    const hitLayer = await screen.findByTestId('graph-node-hit-layer')
     const interactionLayer = screen.getByTestId('graph-interaction-edge-layer')
 
     expect(hitLayer.compareDocumentPosition(interactionLayer) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(
@@ -254,11 +291,14 @@ describe('GraphSurface', () => {
     )
   })
 
-  it('hides interaction links when the Interactions filter is turned off', () => {
+  it('hides interaction links when the Interactions filter is turned off', async () => {
     const { container } = renderWithProviders(<GraphSurface showHeader={false} />)
 
+    await findGraphSvg()
     expect(container.querySelector('line[stroke="#db2777"]')).not.toBeNull()
     fireEvent.click(screen.getByRole('checkbox', { name: 'Interactions' }))
-    expect(container.querySelector('line[stroke="#db2777"]')).toBeNull()
+    await waitFor(() => {
+      expect(container.querySelector('line[stroke="#db2777"]')).toBeNull()
+    })
   })
 })
