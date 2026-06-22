@@ -28,6 +28,7 @@
     "@tauri-apps/plugin-opener": "^2",
     "ai": "^6.0.208",
     "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
     "d3-force": "^3.0.0",
     "lucide-react": "^0.469.0",
     "radix-ui": "^1.6.0",

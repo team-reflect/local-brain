@@ -41,6 +41,7 @@ brain --json doctor
 brain path
 brain --json import-context --limit 200
 brain --json search "revised budget"
+brain --json search "#travel"
 brain --json show person <id>
 brain --json today
 brain --json report daily
@@ -58,6 +59,12 @@ watermarks, and counts.
 context: waiting items, recent write-time changes, relationship hints, and recent
 interactions with source, participant, summary, and readable excerpt fields when
 imported source text is available.
+
+`brain search` mirrors the desktop palette's local lexical search. Ordinary text
+searches record names/titles, document and interaction FTS, assets, chunked
+content, and matching tag names or slugs. A `#tag-slug` token is an exact tag
+filter; multiple `#tag` tokens are ANDed. Tags with spaces remain searchable by
+plain text, while precise filters should use the tag slug.
 
 ## Write Phases
 

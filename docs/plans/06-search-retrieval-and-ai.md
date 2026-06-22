@@ -19,6 +19,9 @@ Chat conversations, daily report/todo retrieval, and model boundary settings.
 - FTS5 is the first search path.
 - Embeddings are additive and optional until packaging and speed are proven.
 - Global search ranks visible records, including assets.
+- Global search accepts a small tag grammar: ordinary text searches names, FTS
+  bodies, assets, and matching tag names/slugs; `#tag-slug` filters results to
+  records carrying that tag, with multiple tags ANDed.
 - Retrieval ranks visible records and chunks from documents and interactions.
 - One `retrieve()` API serves daily reports, graph context, search enrichment, and CLI
   reads, plus grounded Chat in the desktop.
@@ -117,6 +120,8 @@ Chat conversations, daily report/todo retrieval, and model boundary settings.
 ## Acceptance Criteria
 
 - Global search finds records by name, title, and body text.
+- Global search finds records by tag name/slug, and `#tag` narrows results to
+  tagged navigable records without adding a separate filter UI.
 - Global search finds assets by filename, MIME/kind/storage metadata, original URL,
   link captions, linked record titles, and optional local asset text.
 - Cmd/Ctrl+K provides one keyboard-native surface for find, navigate, and command

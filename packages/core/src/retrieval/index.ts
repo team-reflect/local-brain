@@ -1,4 +1,5 @@
 export { toMatchQuery, toLikePattern } from './match-query'
+export { parseSearchQuery, type ParsedSearchQuery } from './search-query'
 export {
   lexicalScore,
   recencyScore,

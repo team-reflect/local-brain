@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 
-use super::{to_like_pattern, to_match_query};
+use super::{to_like_pattern, to_like_pattern_lower, to_match_query};
 use crate::error::CliError;
 use crate::output::print_json;
 
@@ -17,175 +17,285 @@ fn lexical_score(bm25: f64) -> f64 {
     magnitude / (magnitude + 4.0)
 }
 
-/// `brain search` — full-text across documents/interactions plus name matches
-/// for people/orgs/projects/tasks. Output is the data array (stdout).
+struct ParsedSearchQuery {
+    text: String,
+    tag_filters: Vec<String>,
+}
+
+fn parse_search_query(query: &str) -> ParsedSearchQuery {
+    let mut text = Vec::new();
+    let mut tag_filters = Vec::new();
+    for token in query.split_whitespace() {
+        if let Some(tag) = parse_tag_filter(token) {
+            if !tag_filters.contains(&tag) {
+                tag_filters.push(tag);
+            }
+        } else {
+            text.push(token);
+        }
+    }
+    ParsedSearchQuery {
+        text: text.join(" "),
+        tag_filters,
+    }
+}
+
+fn parse_tag_filter(token: &str) -> Option<String> {
+    let raw = token.strip_prefix('#')?;
+    if raw.is_empty() {
+        return None;
+    }
+    if raw
+        .chars()
+        .all(|ch| ch.is_alphanumeric() || matches!(ch, '-' | '_' | '/'))
+    {
+        Some(raw.to_lowercase())
+    } else {
+        None
+    }
+}
+
+fn sql_string(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+fn tag_filter_sql(record_type: &str, record_id_expr: &str, tag_filters: &[String]) -> String {
+    tag_filter_sql_for_expr(&sql_string(record_type), record_id_expr, tag_filters)
+}
+
+fn tag_filter_sql_for_expr(
+    record_type_expr: &str,
+    record_id_expr: &str,
+    tag_filters: &[String],
+) -> String {
+    if tag_filters.is_empty() {
+        return String::new();
+    }
+    tag_filters
+        .iter()
+        .map(|tag| {
+            let tag = sql_string(tag);
+            format!(
+                " AND EXISTS (
+                    SELECT 1
+                    FROM taggings filter_taggings
+                    JOIN tags filter_tags ON filter_tags.id = filter_taggings.tag_id
+                    WHERE filter_taggings.record_type = {record_type_expr}
+                      AND filter_taggings.record_id = {record_id_expr}
+                      AND (
+                        lower(COALESCE(filter_tags.slug, filter_tags.name)) = {tag}
+                        OR lower(filter_tags.name) = {tag}
+                      )
+                 )"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+/// `brain search` — full-text across records, name matches, assets, and tags.
+/// Output is the data array (stdout).
 pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Result<(), CliError> {
     let mut hits: Vec<Value> = Vec::new();
+    let parsed = parse_search_query(query);
 
     // Mirror core `globalSearch`: a query with no searchable tokens is "no query",
     // not a request for everything. Returning early stops a wildcard-only input
     // (e.g. "%") from collapsing into a `%%` LIKE that matches every record.
-    let (Some(mq), Some(like)) = (to_match_query(query, false), to_like_pattern(query)) else {
+    let mq = to_match_query(&parsed.text, false);
+    let like = to_like_pattern(&parsed.text);
+    if mq.is_none() && like.is_none() && parsed.tag_filters.is_empty() {
         return emit_search(json, query, &hits);
     };
+    let tag_like = to_like_pattern_lower(&parsed.text);
 
-    for (table, fts, kind) in [
-        ("documents", "documents_fts", "document"),
-        ("interactions", "interactions_fts", "interaction"),
-    ] {
-        // Columns: 0=title, 1=body_text, 2=summary. Weight title highest, then the
-        // summary (a curated digest / Granola note), then the raw body. Snippet from
-        // body, falling back to summary then title so a summary-only record (no body)
-        // still shows useful matched text.
-        let sql = format!(
-            "SELECT t.id, t.title,
+    if let Some(mq) = mq.as_deref() {
+        for (table, fts, kind) in [
+            ("documents", "documents_fts", "document"),
+            ("interactions", "interactions_fts", "interaction"),
+        ] {
+            // Columns: 0=title, 1=body_text, 2=summary. Weight title highest, then the
+            // summary (a curated digest / Granola note), then the raw body. Snippet from
+            // body, falling back to summary then title so a summary-only record (no body)
+            // still shows useful matched text.
+            let sql = format!(
+                "SELECT t.id, t.title,
+                        COALESCE(
+                          NULLIF(snippet({fts}, 1, '[', ']', '…', 10), ''),
+                          NULLIF(snippet({fts}, 2, '[', ']', '…', 10), ''),
+                          NULLIF(snippet({fts}, 0, '[', ']', '…', 10), '')
+                        ),
+                        bm25({fts}, 10.0, 1.0, 2.0)
+                 FROM {fts} JOIN {table} t ON t.rowid = {fts}.rowid
+                 WHERE {fts} MATCH ?1
+                   AND t.archived_at IS NULL
+                   {}
+                 ORDER BY bm25({fts}, 10.0, 1.0, 2.0) LIMIT ?2",
+                tag_filter_sql(kind, "t.id", &parsed.tag_filters)
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(params![mq, limit as i64], |row| {
+                Ok(json!({
+                    "kind": kind,
+                    "id": row.get::<_, String>(0)?,
+                    "title": row.get::<_, Option<String>>(1)?.unwrap_or_else(|| "(untitled)".into()),
+                    "snippet": row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    "score": lexical_score(row.get::<_, f64>(3)?),
+                }))
+            })?;
+            for row in rows {
+                hits.push(row?);
+            }
+        }
+
+        let asset_sql = format!(
+            "SELECT s.asset_id,
+                    s.title,
+                    s.subtitle,
                     COALESCE(
-                      NULLIF(snippet({fts}, 1, '[', ']', '…', 10), ''),
-                      NULLIF(snippet({fts}, 2, '[', ']', '…', 10), ''),
-                      NULLIF(snippet({fts}, 0, '[', ']', '…', 10), '')
+                      NULLIF(snippet(assets_fts, 0, '[', ']', '…', 10), ''),
+                      NULLIF(snippet(assets_fts, 2, '[', ']', '…', 10), ''),
+                      NULLIF(snippet(assets_fts, 3, '[', ']', '…', 10), ''),
+                      NULLIF(snippet(assets_fts, 1, '[', ']', '…', 10), '')
                     ),
-                    bm25({fts}, 10.0, 1.0, 2.0)
-             FROM {fts} JOIN {table} t ON t.rowid = {fts}.rowid
-             WHERE {fts} MATCH ?1 AND t.archived_at IS NULL
-             ORDER BY bm25({fts}, 10.0, 1.0, 2.0) LIMIT ?2"
+                    bm25(assets_fts, 10.0, 2.0, 2.0, 1.0)
+             FROM assets_fts
+             JOIN asset_search s ON s.rowid = assets_fts.rowid
+             JOIN assets a ON a.id = s.asset_id
+             WHERE assets_fts MATCH ?1
+               AND a.archived_at IS NULL
+               {}
+             ORDER BY bm25(assets_fts, 10.0, 2.0, 2.0, 1.0)
+             LIMIT ?2",
+            tag_filter_sql("asset", "s.asset_id", &parsed.tag_filters)
         );
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params![mq, limit as i64], |row| {
+        let mut asset_stmt = conn.prepare(&asset_sql)?;
+        let asset_rows = asset_stmt.query_map(params![mq, limit as i64], |row| {
             Ok(json!({
-                "kind": kind,
+                "kind": "asset",
                 "id": row.get::<_, String>(0)?,
-                "title": row.get::<_, Option<String>>(1)?.unwrap_or_else(|| "(untitled)".into()),
-                "snippet": row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                "score": lexical_score(row.get::<_, f64>(3)?),
+                "title": row.get::<_, String>(1)?,
+                "subtitle": row.get::<_, Option<String>>(2)?,
+                "snippet": row.get::<_, Option<String>>(3)?,
+                "score": lexical_score(row.get::<_, f64>(4)?),
             }))
         })?;
-        for row in rows {
+        for row in asset_rows {
+            hits.push(row?);
+        }
+
+        let chunk_sql = format!(
+            "SELECT cc.record_type,
+                    cc.record_id,
+                    COALESCE(
+                      p.full_name,
+                      o.name,
+                      op.one_line_description,
+                      pr.name,
+                      t.title,
+                      ti.title,
+                      an.title,
+                      ef.key,
+                      m.claim,
+                      '(untitled)'
+                    ) AS title,
+                    snippet(content_chunks_fts, 0, '[', ']', '…', 10),
+                    bm25(content_chunks_fts)
+             FROM content_chunks_fts
+             JOIN content_chunks cc ON cc.rowid = content_chunks_fts.rowid
+             LEFT JOIN people p
+               ON cc.record_type = 'person' AND p.id = cc.record_id
+             LEFT JOIN organizations o
+               ON cc.record_type = 'organization' AND o.id = cc.record_id
+             LEFT JOIN organization_profiles op
+               ON cc.record_type = 'organization_profile' AND op.id = cc.record_id
+             LEFT JOIN projects pr
+               ON cc.record_type = 'project' AND pr.id = cc.record_id
+             LEFT JOIN tasks t
+               ON cc.record_type = 'task' AND t.id = cc.record_id
+             LEFT JOIN interaction_transcripts tr
+               ON cc.record_type = 'interaction_transcript' AND tr.id = cc.record_id
+             LEFT JOIN interactions ti
+               ON ti.id = tr.interaction_id
+             LEFT JOIN ai_notes an
+               ON cc.record_type = 'ai_note' AND an.id = cc.record_id
+             LEFT JOIN extracted_facts ef
+               ON cc.record_type = 'extracted_fact' AND ef.id = cc.record_id
+             LEFT JOIN memories m
+               ON cc.record_type = 'memory' AND m.id = cc.record_id
+             WHERE content_chunks_fts MATCH ?1
+               AND cc.record_type NOT IN ('document', 'interaction', 'asset')
+               {}
+               AND (
+                 (cc.record_type = 'person' AND p.archived_at IS NULL)
+                 OR (cc.record_type = 'organization' AND o.archived_at IS NULL)
+                 OR (cc.record_type = 'organization_profile' AND op.id IS NOT NULL)
+                 OR (cc.record_type = 'project' AND pr.archived_at IS NULL)
+                 OR (cc.record_type = 'task' AND t.archived_at IS NULL)
+                 OR (cc.record_type = 'interaction_transcript' AND tr.id IS NOT NULL AND ti.archived_at IS NULL)
+                 OR (cc.record_type = 'ai_note' AND an.id IS NOT NULL)
+                 OR (cc.record_type = 'extracted_fact' AND ef.archived_at IS NULL)
+                 OR (cc.record_type = 'memory' AND m.archived_at IS NULL)
+               )
+             ORDER BY bm25(content_chunks_fts)
+             LIMIT ?2",
+            tag_filter_sql_for_expr("cc.record_type", "cc.record_id", &parsed.tag_filters)
+        );
+        let mut chunk_stmt = conn.prepare(&chunk_sql)?;
+        let chunk_rows = chunk_stmt.query_map(params![mq, limit as i64], |row| {
+            Ok(json!({
+                "kind": row.get::<_, String>(0)?,
+                "id": row.get::<_, String>(1)?,
+                "title": row.get::<_, Option<String>>(2)?.unwrap_or_else(|| "(untitled)".into()),
+                "snippet": row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                "score": lexical_score(row.get::<_, f64>(4)?),
+            }))
+        })?;
+        for row in chunk_rows {
             hits.push(row?);
         }
     }
 
-    let mut asset_stmt = conn.prepare(
-        "SELECT s.asset_id,
-                s.title,
-                s.subtitle,
-                COALESCE(
-                  NULLIF(snippet(assets_fts, 0, '[', ']', '…', 10), ''),
-                  NULLIF(snippet(assets_fts, 2, '[', ']', '…', 10), ''),
-                  NULLIF(snippet(assets_fts, 3, '[', ']', '…', 10), ''),
-                  NULLIF(snippet(assets_fts, 1, '[', ']', '…', 10), '')
-                ),
-                bm25(assets_fts, 10.0, 2.0, 2.0, 1.0)
-         FROM assets_fts
-         JOIN asset_search s ON s.rowid = assets_fts.rowid
-         JOIN assets a ON a.id = s.asset_id
-         WHERE assets_fts MATCH ?1 AND a.archived_at IS NULL
-         ORDER BY bm25(assets_fts, 10.0, 2.0, 2.0, 1.0)
-         LIMIT ?2",
-    )?;
-    let asset_rows = asset_stmt.query_map(params![mq, limit as i64], |row| {
-        Ok(json!({
-            "kind": "asset",
-            "id": row.get::<_, String>(0)?,
-            "title": row.get::<_, String>(1)?,
-            "subtitle": row.get::<_, Option<String>>(2)?,
-            "snippet": row.get::<_, Option<String>>(3)?,
-            "score": lexical_score(row.get::<_, f64>(4)?),
-        }))
-    })?;
-    for row in asset_rows {
-        hits.push(row?);
-    }
-
-    let mut chunk_stmt = conn.prepare(
-        "SELECT cc.record_type,
-                cc.record_id,
-                COALESCE(
-                  p.full_name,
-                  o.name,
-                  op.one_line_description,
-                  pr.name,
-                  t.title,
-                  ti.title,
-                  an.title,
-                  ef.key,
-                  m.claim,
-                  '(untitled)'
-                ) AS title,
-                snippet(content_chunks_fts, 0, '[', ']', '…', 10),
-                bm25(content_chunks_fts)
-         FROM content_chunks_fts
-         JOIN content_chunks cc ON cc.rowid = content_chunks_fts.rowid
-         LEFT JOIN people p
-           ON cc.record_type = 'person' AND p.id = cc.record_id
-         LEFT JOIN organizations o
-           ON cc.record_type = 'organization' AND o.id = cc.record_id
-         LEFT JOIN organization_profiles op
-           ON cc.record_type = 'organization_profile' AND op.id = cc.record_id
-         LEFT JOIN projects pr
-           ON cc.record_type = 'project' AND pr.id = cc.record_id
-         LEFT JOIN tasks t
-           ON cc.record_type = 'task' AND t.id = cc.record_id
-         LEFT JOIN interaction_transcripts tr
-           ON cc.record_type = 'interaction_transcript' AND tr.id = cc.record_id
-         LEFT JOIN interactions ti
-           ON ti.id = tr.interaction_id
-         LEFT JOIN ai_notes an
-           ON cc.record_type = 'ai_note' AND an.id = cc.record_id
-         LEFT JOIN extracted_facts ef
-           ON cc.record_type = 'extracted_fact' AND ef.id = cc.record_id
-         LEFT JOIN memories m
-           ON cc.record_type = 'memory' AND m.id = cc.record_id
-         WHERE content_chunks_fts MATCH ?1
-           AND cc.record_type NOT IN ('document', 'interaction', 'asset')
-           AND (
-             (cc.record_type = 'person' AND p.archived_at IS NULL)
-             OR (cc.record_type = 'organization' AND o.archived_at IS NULL)
-             OR (cc.record_type = 'organization_profile' AND op.id IS NOT NULL)
-             OR (cc.record_type = 'project' AND pr.archived_at IS NULL)
-             OR (cc.record_type = 'task' AND t.archived_at IS NULL)
-             OR (cc.record_type = 'interaction_transcript' AND tr.id IS NOT NULL AND ti.archived_at IS NULL)
-             OR (cc.record_type = 'ai_note' AND an.id IS NOT NULL)
-             OR (cc.record_type = 'extracted_fact' AND ef.archived_at IS NULL)
-             OR (cc.record_type = 'memory' AND m.archived_at IS NULL)
-           )
-         ORDER BY bm25(content_chunks_fts)
-         LIMIT ?2",
-    )?;
-    let chunk_rows = chunk_stmt.query_map(params![mq, limit as i64], |row| {
-        Ok(json!({
-            "kind": row.get::<_, String>(0)?,
-            "id": row.get::<_, String>(1)?,
-            "title": row.get::<_, Option<String>>(2)?.unwrap_or_else(|| "(untitled)".into()),
-            "snippet": row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-            "score": lexical_score(row.get::<_, f64>(4)?),
-        }))
-    })?;
-    for row in chunk_rows {
-        hits.push(row?);
-    }
-
-    for (table, name_col, kind) in [
-        ("people", "full_name", "person"),
-        ("organizations", "name", "organization"),
-        ("projects", "name", "project"),
-        ("tasks", "title", "task"),
-    ] {
-        let sql = format!(
-            "SELECT id, {name_col} FROM {table} WHERE archived_at IS NULL AND {name_col} LIKE ?1 ESCAPE '\\' LIMIT ?2"
-        );
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params![like, limit as i64], |row| {
-            Ok(json!({
-                "kind": kind,
-                "id": row.get::<_, String>(0)?,
-                "title": row.get::<_, Option<String>>(1)?.unwrap_or_else(|| "(untitled)".into()),
-                "snippet": Value::Null,
-                "score": 0.6,
-            }))
-        })?;
-        for row in rows {
-            hits.push(row?);
+    if let Some(like) = like.as_deref() {
+        for (table, name_col, kind) in [
+            ("people", "full_name", "person"),
+            ("organizations", "name", "organization"),
+            ("projects", "name", "project"),
+            ("tasks", "title", "task"),
+        ] {
+            let record_id = format!("{table}.id");
+            let sql = format!(
+                "SELECT {table}.id, {name_col}
+                 FROM {table}
+                 WHERE archived_at IS NULL
+                   AND {name_col} LIKE ?1 ESCAPE '\\'
+                   {}
+                 LIMIT ?2",
+                tag_filter_sql(kind, &record_id, &parsed.tag_filters)
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(params![like, limit as i64], |row| {
+                Ok(json!({
+                    "kind": kind,
+                    "id": row.get::<_, String>(0)?,
+                    "title": row.get::<_, Option<String>>(1)?.unwrap_or_else(|| "(untitled)".into()),
+                    "snippet": Value::Null,
+                    "score": 0.6,
+                }))
+            })?;
+            for row in rows {
+                hits.push(row?);
+            }
         }
+    }
+
+    if !parsed.tag_filters.is_empty() || tag_like.is_some() {
+        hits.extend(tag_hits(
+            conn,
+            tag_like.as_deref(),
+            &parsed.tag_filters,
+            limit,
+        )?);
     }
 
     // Merge all kinds, rank by score, and apply one final cap — like the app's
@@ -217,6 +327,112 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
     hits.truncate(limit);
 
     emit_search(json, query, &hits)
+}
+
+fn tag_hits(
+    conn: &Connection,
+    tag_like: Option<&str>,
+    tag_filters: &[String],
+    limit: usize,
+) -> Result<Vec<Value>, CliError> {
+    let tag_text_sql = if tag_like.is_some() {
+        " AND EXISTS (
+            SELECT 1
+            FROM taggings text_taggings
+            JOIN tags text_tags ON text_tags.id = text_taggings.tag_id
+            WHERE text_taggings.record_type = records.kind
+              AND text_taggings.record_id = records.id
+              AND (
+                lower(text_tags.name) LIKE ?1 ESCAPE '\\'
+                OR lower(COALESCE(text_tags.slug, '')) LIKE ?1 ESCAPE '\\'
+              )
+          )"
+    } else {
+        ""
+    };
+    let sql = format!(
+        "WITH records(kind, id, title, subtitle, record_date) AS (
+           SELECT 'person', id, full_name, headline, updated_at
+           FROM people
+           WHERE archived_at IS NULL
+           UNION ALL
+           SELECT 'organization', id, name, kind, updated_at
+           FROM organizations
+           WHERE archived_at IS NULL
+           UNION ALL
+           SELECT 'project', id, name, status, updated_at
+           FROM projects
+           WHERE archived_at IS NULL
+           UNION ALL
+           SELECT 'task', id, title, status, COALESCE(due_at, scheduled_for, updated_at)
+           FROM tasks
+           WHERE archived_at IS NULL
+           UNION ALL
+           SELECT 'document', id, title, kind, updated_at
+           FROM documents
+           WHERE archived_at IS NULL
+           UNION ALL
+           SELECT 'interaction', id, title, kind, COALESCE(occurred_at, updated_at)
+           FROM interactions
+           WHERE archived_at IS NULL
+           UNION ALL
+           SELECT 'asset',
+                  id,
+                  COALESCE(NULLIF(trim(original_filename), ''), storage_path),
+                  COALESCE(NULLIF(trim(mime_type), ''), NULLIF(trim(kind), '')),
+                  updated_at
+           FROM assets
+           WHERE archived_at IS NULL
+         )
+         SELECT
+           records.kind,
+           records.id,
+           records.title,
+           records.subtitle,
+           (
+             SELECT 'Tagged #' || group_concat(label, ', #')
+             FROM (
+               SELECT DISTINCT COALESCE(NULLIF(trim(tags.slug), ''), tags.name) AS label
+               FROM taggings
+               JOIN tags ON tags.id = taggings.tag_id
+               WHERE taggings.record_type = records.kind
+                 AND taggings.record_id = records.id
+               ORDER BY label ASC
+             )
+           ) AS snippet
+         FROM records
+         WHERE 1 = 1
+           {}
+           {tag_text_sql}
+         ORDER BY records.record_date DESC
+         LIMIT {limit}",
+        tag_filter_sql_for_expr("records.kind", "records.id", tag_filters)
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let mut hits = Vec::new();
+    if let Some(tag_like) = tag_like {
+        let rows = stmt.query_map(params![tag_like], tag_hit_from_row)?;
+        for row in rows {
+            hits.push(row?);
+        }
+    } else {
+        let rows = stmt.query_map([], tag_hit_from_row)?;
+        for row in rows {
+            hits.push(row?);
+        }
+    }
+    Ok(hits)
+}
+
+fn tag_hit_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
+    Ok(json!({
+        "kind": row.get::<_, String>(0)?,
+        "id": row.get::<_, String>(1)?,
+        "title": row.get::<_, Option<String>>(2)?.unwrap_or_else(|| "(untitled)".into()),
+        "subtitle": row.get::<_, Option<String>>(3)?,
+        "snippet": row.get::<_, Option<String>>(4)?,
+        "score": 0.58,
+    }))
 }
 
 /// Render `brain search` hits as a JSON data array or a compact human table.
