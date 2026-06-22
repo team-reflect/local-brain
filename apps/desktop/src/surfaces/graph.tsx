@@ -46,6 +46,8 @@ interface GraphDragState {
   clientX: number
   clientY: number
   totalDistance: number
+  /** Whether we've taken pointer capture yet (deferred until an actual drag). */
+  captured: boolean
 }
 
 export function GraphSurface({
@@ -168,14 +170,16 @@ export function GraphSurface({
 
   const handlePointerDown = useCallback((event: ReactPointerEvent<SVGSVGElement>): void => {
     if (event.button > 0) return
+    // Capture is deferred to the first real drag move (handlePointerMove).
+    // Capturing on pointerdown retargets the follow-up `click` (and its compat
+    // mouseup) to the <svg>, so a node's onClick would never fire — clicks would
+    // silently do nothing. A plain click now stays uncaptured and lands cleanly.
     dragRef.current = {
       pointerId: event.pointerId,
       clientX: event.clientX,
       clientY: event.clientY,
       totalDistance: 0,
-    }
-    if (typeof event.currentTarget.setPointerCapture === 'function') {
-      event.currentTarget.setPointerCapture(event.pointerId)
+      captured: false,
     }
   }, [])
 
@@ -194,12 +198,24 @@ export function GraphSurface({
         clientDeltaY,
       )
       if (!graphDelta) return
+      const totalDistance =
+        drag.totalDistance + Math.hypot(Math.abs(clientDeltaX), Math.abs(clientDeltaY))
+      // Now that this is a genuine drag, take pointer capture so panning keeps
+      // tracking even if the pointer leaves the svg. (Deferred from pointerdown
+      // so plain clicks still deliver their `click` to the node — see above.)
+      let captured = drag.captured
+      if (!captured && totalDistance > DRAG_CLICK_THRESHOLD) {
+        if (typeof event.currentTarget.setPointerCapture === 'function') {
+          event.currentTarget.setPointerCapture(event.pointerId)
+        }
+        captured = true
+      }
       dragRef.current = {
         pointerId: drag.pointerId,
         clientX: event.clientX,
         clientY: event.clientY,
-        totalDistance:
-          drag.totalDistance + Math.hypot(Math.abs(clientDeltaX), Math.abs(clientDeltaY)),
+        totalDistance,
+        captured,
       }
       event.preventDefault()
       setViewport((current) => ({
@@ -220,7 +236,7 @@ export function GraphSurface({
         suppressNextNodeClickRef.current = false
       }, 0)
     }
-    if (typeof event.currentTarget.releasePointerCapture === 'function') {
+    if (drag.captured && typeof event.currentTarget.releasePointerCapture === 'function') {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
     dragRef.current = null
