@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { setBridge } from '@local-brain/core'
 import { render, type RenderResult } from '@testing-library/react'
 import { RouterProvider } from '../routing/router'
+import { UpdateProvider } from '../providers/update-provider'
 
 export interface FakeBridgeOptions {
   /** Rows returned for every `db_query` (default: none). */
@@ -159,7 +160,9 @@ function Providers({ children }: { children: ReactNode }): ReactElement {
   })
   return (
     <QueryClientProvider client={queryClient}>
-      <RouterProvider>{children}</RouterProvider>
+      <UpdateProvider autoCheck={false}>
+        <RouterProvider>{children}</RouterProvider>
+      </UpdateProvider>
     </QueryClientProvider>
   )
 }

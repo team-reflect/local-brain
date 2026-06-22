@@ -13,8 +13,13 @@ export interface IpcBridge {
 let installed: IpcBridge | null = null
 
 /** Install the process-wide IPC bridge. Called once at app/CLI startup. */
-export function setBridge(bridge: IpcBridge): void {
+export function setBridge(bridge: IpcBridge | null): void {
   installed = bridge
+}
+
+/** True when a native IPC bridge is available. */
+export function hasBridge(): boolean {
+  return installed !== null
 }
 
 /** The installed bridge, or an `unknown` AppError if startup never wired one up. */

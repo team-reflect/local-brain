@@ -1375,7 +1375,10 @@ mod tests {
         assert_eq!(list[0].root_path, key);
         assert_eq!(list[0].name, "Work");
         assert!(list[0].is_active);
-        assert_eq!(list[0].schema_version, Some(4));
+        assert_eq!(
+            list[0].schema_version,
+            Some(brain_schema::LATEST_SCHEMA_VERSION as i64)
+        );
     }
 
     #[test]

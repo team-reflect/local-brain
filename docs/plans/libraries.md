@@ -67,8 +67,10 @@ See [Design System](../design-system.md).
 - **Vitest:** TypeScript unit tests.
 - **@testing-library/react + jsdom:** React component tests.
 - **Rust tests:** migration, CLI, and native behavior tests.
-- **Tauri updater/window-state plugins:** follow Reflect Open for packaging once launch
-  reaches auto-update/window persistence.
+- **Tauri updater plugin:** official updater/process plugins for GitHub
+  Releases-hosted auto-update artifacts.
+- **Tauri window-state plugin:** follow Reflect Open later if window persistence becomes
+  part of packaging.
 
 ## Deferred
 

@@ -27,5 +27,9 @@ sha2 = { workspace = true }
 fastembed = "5"
 hf-hub = { version = "0.5.0", default-features = false, features = ["ureq", "native-tls"] }
 
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+
 [dev-dependencies]
 tempfile = { workspace = true }

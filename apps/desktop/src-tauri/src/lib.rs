@@ -41,9 +41,18 @@ pub fn run() {
         eprintln!("Could not sync agent skill brain manifest at startup: {err}");
     }
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_dialog::init());
+
+    // Auto-update is desktop-only: the updater verifies payloads against the
+    // minisign public key in tauri.conf.json, and process handles relaunch.
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let builder = builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init());
+
+    builder
         .manage(db_state)
         .manage(brains)
         .manage(embed::EmbedState::default())

@@ -76,9 +76,10 @@ thread when added.
 - [x] Extracted memories and tasks persist `evidence_refs` that open the source.
 - [x] CSP restricts `connect-src` to the known provider hosts.
 
-## Signing / notarization checklist (deferred for alpha)
+## Signing / notarization checklist
 
-Unsigned local builds are supported for the alpha. Before public distribution:
+Unsigned local builds are still supported for contributors. Public distribution uses
+the release workflow in [`../macos-distribution.md`](../macos-distribution.md):
 
 - [ ] Apple Developer ID Application certificate; sign the `.app`.
 - [ ] Hardened runtime enabled.
@@ -89,8 +90,10 @@ Unsigned local builds are supported for the alpha. Before public distribution:
 
 ## Update path decision
 
-- **Alpha: defer auto-update.** Distribute the `.app`/`.dmg` directly; users
-  replace the app to update.
-- **Post-alpha:** adopt the official Tauri updater plugin with GitHub
-  Releases-hosted artifacts. Keep the updater signing key separate from the Apple
-  signing key.
+- **Adopted:** use the official Tauri updater plugin with GitHub Releases-hosted
+  artifacts under `team-reflect/local-brain`.
+- The updater signing key is separate from Apple signing. The public key is committed
+  in `tauri.conf.json`; the private key lives in the macOS keychain locally and in
+  `TAURI_SIGNING_PRIVATE_KEY` for CI.
+- Published releases attach the DMG, `Local Brain.app.tar.gz`, its `.sig`, and
+  `latest.json`; installed apps poll `releases/latest/download/latest.json`.
