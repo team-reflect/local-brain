@@ -24,6 +24,12 @@ const EMPTY_GRAPH: Graph = {
   edges: [],
 }
 
+const FILTERED_GRAPH: Graph = {
+  selfId: 'self',
+  nodes: [{ id: 'self', kind: 'self', label: 'You' }],
+  edges: [],
+}
+
 const LAYOUT: GraphLayout = {
   width: 880,
   height: 760,
@@ -32,6 +38,11 @@ const LAYOUT: GraphLayout = {
     { id: 'p1', kind: 'person', label: 'Ada Lovelace', x: 520, y: 380, radius: 7 },
   ],
   edges: [],
+}
+
+const FILTERED_LAYOUT: GraphLayout = {
+  ...LAYOUT,
+  nodes: [{ id: 'self', kind: 'self', label: 'You', x: 440, y: 380, radius: 13 }],
 }
 
 function Probe({
@@ -100,6 +111,34 @@ describe('useAsyncGraphLayout', () => {
 
     expect(computeLayout).not.toHaveBeenCalled()
     expect(screen.getByText('idle')).toBeDefined()
+  })
+
+  it('returns pending immediately instead of exposing a stale ready layout', async () => {
+    const callbacks: Array<() => void> = []
+    const schedule = vi.fn<GraphLayoutScheduler>((callback) => {
+      callbacks.push(callback)
+      return vi.fn()
+    })
+    const computeLayout = vi.fn<GraphLayoutComputer>((graph) =>
+      graph === FILTERED_GRAPH ? FILTERED_LAYOUT : LAYOUT,
+    )
+
+    const { rerender } = render(
+      <Probe graph={GRAPH} schedule={schedule} computeLayout={computeLayout} />,
+    )
+    act(() => callbacks[0]?.())
+    expect(await screen.findByText('ready')).toBeDefined()
+    expect(screen.getByText('2')).toBeDefined()
+
+    rerender(<Probe graph={FILTERED_GRAPH} schedule={schedule} computeLayout={computeLayout} />)
+
+    expect(screen.getByText('pending')).toBeDefined()
+    expect(screen.getByText('no-layout')).toBeDefined()
+
+    act(() => callbacks[1]?.())
+
+    expect(await screen.findByText('ready')).toBeDefined()
+    expect(screen.getByText('1')).toBeDefined()
   })
 
   it('stays idle when there are no visible graph nodes', async () => {

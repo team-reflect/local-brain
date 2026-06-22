@@ -19,6 +19,10 @@ interface UseAsyncGraphLayoutOptions {
 const IDLE_STATE: AsyncGraphLayoutState = { status: 'idle', layout: null }
 const PENDING_STATE: AsyncGraphLayoutState = { status: 'pending', layout: null }
 
+type StoredGraphLayoutState = AsyncGraphLayoutState & { graph: Graph | null }
+
+const STORED_IDLE_STATE: StoredGraphLayoutState = { ...IDLE_STATE, graph: null }
+
 /** Schedule layout work after the browser has had a chance to paint the tab chrome. */
 export function scheduleGraphLayoutAfterPaint(callback: () => void): () => void {
   let timeoutId: number | undefined
@@ -46,22 +50,23 @@ export function useAsyncGraphLayout(
   options: UseAsyncGraphLayoutOptions = {},
 ): AsyncGraphLayoutState {
   const { computeLayout = layoutGraph, schedule = scheduleGraphLayoutAfterPaint } = options
-  const [state, setState] = useState<AsyncGraphLayoutState>(IDLE_STATE)
+  const [state, setState] = useState<StoredGraphLayoutState>(STORED_IDLE_STATE)
+  const hasGraphNodes = (graph?.nodes.length ?? 0) > 0
 
   useEffect(() => {
-    if (!graph || graph.nodes.length === 0) {
-      setState(IDLE_STATE)
+    if (!hasGraphNodes || !graph) {
+      setState(STORED_IDLE_STATE)
       return undefined
     }
 
     let active = true
-    setState(PENDING_STATE)
+    setState({ ...PENDING_STATE, graph })
     const cancel = schedule(() => {
       if (!active) return
       const layout = computeLayout(graph)
       if (!active) return
       startTransition(() => {
-        if (active) setState({ status: 'ready', layout })
+        if (active) setState({ status: 'ready', layout, graph })
       })
     })
 
@@ -69,7 +74,8 @@ export function useAsyncGraphLayout(
       active = false
       cancel()
     }
-  }, [computeLayout, graph, schedule])
+  }, [computeLayout, graph, hasGraphNodes, schedule])
 
-  return state
+  if (!hasGraphNodes) return IDLE_STATE
+  return state.graph === graph ? state : PENDING_STATE
 }
