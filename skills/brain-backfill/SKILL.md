@@ -321,6 +321,44 @@ If the calendar body only says "see Gmail for details", fetch and import the
 linked Gmail source or leave the event incomplete with `--raw-text-unavailable`
 and a ledger note.
 
+### iMessage / Apple Messages
+
+For local Apple Messages backfills, treat `~/Library/Messages/chat.db` as the
+source of truth and read it with SQLite in read-only mode. Ensure a dedicated
+source first:
+
+```bash
+brain --brain "$BRAIN_ROOT" --json source ensure \
+  --slug imessage --name iMessage
+```
+
+Import one Brain interaction per Apple `chat`, not one interaction per message.
+Use `--kind message`, `--source imessage`, `--external-kind chat`, and a stable
+`--external-id` such as `chat.guid`. Keep a per-chat ledger and preserve the
+complete recovered transcript in the interaction body.
+
+Apple Messages has two important text paths:
+
+- `message.text` contains only part of the readable history.
+- many text messages only appear in `message.attributedBody`; extract that text
+  before deciding a row is blank.
+
+Convert Apple timestamps as nanoseconds since `2001-01-01T00:00:00Z`. Preserve
+reactions, replies, system rows, and empty/media-only rows as transcript lines
+when they carry context. For attachments, include filenames, MIME types, sizes,
+and local paths in the transcript and metadata. Do not bulk-copy every image,
+video, sticker, or audio file into Brain unless the user explicitly asks for
+binary asset import; message media can be huge and is often not searchable
+without a separate extraction pass.
+
+Use local Contacts/AddressBook data to enrich chat handles into names when the
+match is safe, but keep opaque phone/email handles as unresolved participants
+until the participant audit supports promotion. After import, add an `iMessage`
+tag, a concise archive AI note for each chat, finalize with narrow waivers when
+the pass intentionally skips project/action/fact extraction, then run
+participant audit and `merge person --dry-run` / `merge person` for duplicate
+contact shells.
+
 ### Contacts And People
 
 Import trusted contacts with `brain add person` or cautious senders with

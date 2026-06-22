@@ -182,11 +182,26 @@ brain --json merge person --from <duplicate-person-id> --to <canonical-person-id
   --dry-run
 brain --json merge person --from <duplicate-person-id> --to <canonical-person-id> \
   --reason "duplicate shell from backfill"
+brain --json person rename <person-id> --full-name "Correct Name"
 brain --json person email add <person-id> --email <email>
 brain --json person phone add <person-id> --phone <phone>
+brain --json repair person-email move --email <email> \
+  --from <wrong-person-id> --to <canonical-person-id> --relink-participants
+brain --json repair person-phone move --phone <phone> \
+  --from <wrong-person-id> --to <canonical-person-id> --relink-participants
+brain --json repair participants relink --handle <email-or-phone> \
+  --person <canonical-person-id> --from-person <wrong-person-id>
 brain --json unlink person:<id> organization:<id> --reason "mistaken affiliation"
+brain --json archive person <person-id> --reason "mistaken person import"
 brain --json archive organization <org-id> --reason "mistaken organization import"
 ```
+
+Always inspect the `warnings[]` array from `merge person --dry-run` before
+applying a merge. Warnings mean some owned handle, external identity, or other
+record was intentionally skipped or blocked; ledger that decision instead of
+assuming the merge was complete. Add `--force` to participant relink only when
+the target is already linked in the same interaction and the wrong-person row
+should be merged away.
 
 For user-provided corrections, ask Codex to store a small evidence document and
 source-keyed facts before updating profiles. For example, if you say "Charlotte
