@@ -20,6 +20,7 @@ import { CommandPalette } from './command-palette'
 import { FirstRun } from './first-run'
 import { RouteContent } from './route-content'
 import { SidebarProjects } from './sidebar-projects'
+import { UpdateNotice } from './update-notice'
 import { WindowDragRegion } from './window-drag-region'
 
 interface NavItem {
@@ -85,7 +86,9 @@ export function AppShell(): ReactNode {
           })}
           <SidebarProjects activeSection={activeSection} route={route} />
         </nav>
-        <div className="mt-auto flex items-center gap-1 px-4 pt-4">
+        <div className="mt-auto" />
+        <UpdateNotice />
+        <div className="flex items-center gap-1 px-4 pt-2">
           <BrainSwitcher />
           <button
             type="button"

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { UpdateProvider } from '../providers/update-provider'
 import { AppShell } from './app-shell'
 
 const queryMocks = vi.hoisted(() => ({
@@ -62,9 +63,17 @@ vi.mock('./route-content', () => ({
 
 afterEach(() => cleanup())
 
+function renderShell(): void {
+  render(
+    <UpdateProvider autoCheck={false}>
+      <AppShell />
+    </UpdateProvider>,
+  )
+}
+
 describe('AppShell', () => {
   it('places Chat directly under Today in the sidebar', () => {
-    render(<AppShell />)
+    renderShell()
 
     const navItems = screen.getAllByRole('button').map((button) => button.textContent?.trim())
 
@@ -72,7 +81,7 @@ describe('AppShell', () => {
   })
 
   it('places history arrows in the main header beside search, not in the sidebar', () => {
-    render(<AppShell />)
+    renderShell()
 
     const search = screen.getByRole('button', { name: 'Search or run a command' })
     const back = screen.getByRole('button', { name: 'Back' })
@@ -88,7 +97,7 @@ describe('AppShell', () => {
   })
 
   it('renders projects as a collapsible sidebar section', () => {
-    render(<AppShell />)
+    renderShell()
 
     const projects = screen.getByRole('button', { name: /Projects/ })
     expect(projects.querySelectorAll('svg')).toHaveLength(1)

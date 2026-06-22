@@ -2,9 +2,12 @@ import type { ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { appVersion } from '@local-brain/core'
 import { Section } from '../../components/section'
+import { useUpdate } from '../../providers/update-provider'
+import { UpdateField } from './update-field'
 
 export function AboutSettings(): ReactNode {
   const info = useQuery({ queryKey: ['app-version'], queryFn: appVersion })
+  const { supported } = useUpdate()
 
   return (
     <Section title="About">
@@ -18,6 +21,7 @@ export function AboutSettings(): ReactNode {
             <dd className="text-foreground">{info.data ? `v${info.data.version}` : '...'}</dd>
           </div>
         </dl>
+        {supported ? <UpdateField /> : null}
       </div>
     </Section>
   )

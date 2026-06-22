@@ -11,25 +11,26 @@ on:
     tags: [v*]
 
 # Never run two releases at once, and never cancel one mid-notarization.
-# Queue instead: a cancelled run can leave a half-published release behind.
+# Queue instead. A cancelled run can leave a half-published release behind.
 concurrency:
   group: release
   cancel-in-progress: false
 
-# `gh release create` pushes the v<version> tag and uploads the DMG.
+# `gh release create` pushes the v<version> tag and uploads the assets.
 permissions:
   contents: write
 
 jobs:
   macos:
-    name: Build / sign / notarize / publish (macOS)
+    name: Build - sign - notarize - publish (macOS)
     runs-on: macos-latest
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          # Unlike CI, credentials stay: publish preflights run `git ls-remote`
-          # against origin. Full history makes tag checkouts branch-aware too.
+          # Unlike CI, credentials stay: the publish preflights run
+          # `git ls-remote` against origin. Full history so the
+          # HEAD-is-on-an-origin-branch check also passes on tag checkouts.
           persist-credentials: true
           fetch-depth: 0
 
@@ -44,8 +45,8 @@ jobs:
             exit 1
           fi
 
-      # Without the certificate, signing only fails at codesign time after the
-      # whole Rust build. Check every required secret up front instead.
+      # Without the certificate, signing only fails at codesign time - after
+      # the whole Rust build. Check every required secret up front instead.
       # docs/macos-distribution.md describes how to produce each one.
       - name: Verify release secrets are configured
         env:
@@ -57,9 +58,10 @@ jobs:
           APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           missing=()
-          for name in APPLE_SIGNING_IDENTITY APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD; do
+          for name in APPLE_SIGNING_IDENTITY APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD TAURI_SIGNING_PRIVATE_KEY; do
             [ -n "${!name}" ] || missing+=("$name")
           done
           if { [ -z "$APPLE_API_KEY" ] || [ -z "$APPLE_API_ISSUER" ] || [ -z "$APPLE_API_KEY_CONTENT" ]; } &&
@@ -86,6 +88,7 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
+          # A failed notarization still compiled everything; keep the cache.
           cache-on-failure: true
 
       - name: Install dependencies
@@ -103,8 +106,9 @@ jobs:
           fi
 
       # Tauri imports APPLE_CERTIFICATE into a temporary keychain, signs and
-      # notarizes the .app; the script then notarizes + staples the DMG, runs
-      # Gatekeeper checks, and creates the GitHub release.
+      # notarizes the .app, and signs the updater archive; the script then
+      # notarizes + staples the DMG, runs the Gatekeeper checks, writes
+      # latest.json, and creates the GitHub release.
       - name: Build, sign, notarize and publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -116,6 +120,8 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # Pass the boolean flag through an env variable so the shell never
           # interpolates ${{ }} expressions directly into the run command.
           DRAFT_FLAG: ${{ inputs.draft && '--draft' || '' }}

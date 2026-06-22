@@ -13,10 +13,10 @@ CLI + agent skill are the primary way local agents read and write your brain.
 
 1. Build the app (see [Building](#building-from-source)) or open the produced
    `Local Brain.app`.
-2. On first launch, macOS Gatekeeper may warn that the app is from an
-   unidentified developer (alpha builds are **unsigned** — see
-   [checklist.md](checklist.md) for the signing plan). Right-click → Open, or
-   `xattr -dr com.apple.quarantine "Local Brain.app"`.
+2. On first launch from an unsigned local build, macOS Gatekeeper may warn that
+   the app is from an unidentified developer. Right-click → Open, or
+   `xattr -dr com.apple.quarantine "Local Brain.app"`. Public releases are
+   signed and notarized; see [`../macos-distribution.md`](../macos-distribution.md).
 3. On first launch, choose the folder that should hold this brain. The app
    creates `brain.sqlite`, `assets/`, and `.local-brain/` inside that folder.
 
@@ -30,8 +30,17 @@ pnpm --filter @local-brain/desktop tauri build
 This stages the `brain` CLI sidecar (`pnpm sidecar`), builds the frontend, and
 compiles the macOS app. The runnable bundle is
 `target/release/bundle/macos/Local Brain.app`, with the `brain` sidecar embedded
-at `Contents/MacOS/brain`. (DMG packaging needs a GUI session; see
-[checklist.md](checklist.md).)
+at `Contents/MacOS/brain`.
+
+For a signed, notarized build or GitHub Release publication:
+
+```bash
+pnpm release:macos
+pnpm release:macos publish
+```
+
+See [`../macos-distribution.md`](../macos-distribution.md) for updater signing,
+notarization, and release-bump commands.
 
 ### Installing the `brain` command and agent skill
 
@@ -148,7 +157,8 @@ extraction is sent through the provider boundary.
 - **"no brain database" (CLI exit 4):** a target was provided, but no database
   exists there. Run `brain add …` with `--brain <dir>` or open the app and choose
   that folder.
-- **Gatekeeper blocks the app:** unsigned alpha build; right-click → Open.
+- **Gatekeeper blocks the app:** unsigned local build; right-click → Open. Public
+  releases should pass Gatekeeper.
 - **Search finds nothing after a bulk delete:** derived indexes rebuild
   automatically after deletes; if needed, the maintenance rebuild runs on next
   ingest.
