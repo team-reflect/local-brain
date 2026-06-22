@@ -2076,6 +2076,55 @@ fn archive_person_soft_archives_and_records_provenance() {
 }
 
 #[test]
+fn unlink_without_matching_link_writes_no_provenance() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let person = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Unlinked Person",
+            "--email",
+            "unlinked@example.com",
+        ],
+    );
+    let org = run_json(
+        &db,
+        &["--json", "add", "organization", "--name", "Unrelated Org"],
+    );
+    let person_ref = format!("person:{}", person["id"].as_str().unwrap());
+    let org_ref = format!("organization:{}", org["id"].as_str().unwrap());
+
+    // No affiliation exists between them, so the unlink removes nothing and must
+    // not record a misleading "unlinked" provenance event.
+    let result = run_json(
+        &db,
+        &[
+            "--json",
+            "unlink",
+            &person_ref,
+            &org_ref,
+            "--reason",
+            "mistaken",
+        ],
+    );
+    assert_eq!(result["rowsRemoved"], 0);
+
+    let conn = Connection::open(&db).unwrap();
+    let unlinked_provenance: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM record_provenance WHERE provenance_kind = 'unlinked'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(unlinked_provenance, 0);
+}
+
+#[test]
 fn archive_person_refuses_self_person() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);

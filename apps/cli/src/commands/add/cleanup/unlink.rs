@@ -318,7 +318,11 @@ pub fn unlink_records(
             }
         }
     };
-    provenance_for_unlink(&tx, &left_kind, &left_id, &right_kind, &right_id, &reason)?;
+    // Only record an unlink when a link was actually removed; otherwise the call
+    // was a no-op and writing "unlinked" provenance would be misleading.
+    if changed > 0 {
+        provenance_for_unlink(&tx, &left_kind, &left_id, &right_kind, &right_id, &reason)?;
+    }
     tx.commit()?;
     if json_output {
         print_json(&json!({
