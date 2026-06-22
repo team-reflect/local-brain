@@ -18,10 +18,26 @@ import {
   listProjects,
   localDateString,
 } from '@local-brain/core'
+import { generateAndPersistConversationTitle } from './conversation-title'
 import { resolveLanguageModel } from './provider'
 
 const TOOL_STEPS = 5
 type PersistedChatStatus = 'submitted' | 'streaming' | 'done' | 'error'
+
+export interface ChatTransportOptions {
+  onConversationTitleUpdated?: (conversationId: string) => void
+}
+
+interface TurnQuestion {
+  question: string
+  shouldGenerateTitle: boolean
+  titleUserText: string
+}
+
+interface ConversationState {
+  createdConversation: boolean
+  title: string | null
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -45,9 +61,11 @@ function titleForQuestion(question: string): string {
   return compact.length > 60 ? `${compact.slice(0, 57)}...` : compact
 }
 
-async function ensureConversation(chatId: string, title: string): Promise<void> {
+async function ensureConversation(chatId: string, title: string): Promise<ConversationState> {
   const existing = await getConversation(chatId)
-  if (!existing) await createConversation({ id: chatId, title })
+  if (existing) return { createdConversation: false, title: existing.title }
+  await createConversation({ id: chatId, title })
+  return { createdConversation: true, title }
 }
 
 function assistantMessage(messageId: string, text: string): UIMessage {
@@ -136,11 +154,17 @@ function watchPendingApprovalPersistence({
   })()
 }
 
-async function persistLatestUser(conversationId: string, messages: readonly UIMessage[]): Promise<string> {
+async function persistLatestUser(
+  conversationId: string,
+  messages: readonly UIMessage[],
+): Promise<{ shouldGenerateTitle: boolean; text: string; titleUserText: string }> {
   const latest = messages[messages.length - 1]
   if (!latest || latest.role !== 'user') throw new Error('Chat needs a user message to send.')
   const text = uiMessageText(latest).trim()
-  await ensureConversation(conversationId, titleForQuestion(text))
+  const titleUserText = uiMessageText(messages.find((message) => message.role === 'user') ?? latest).trim()
+  const conversation = await ensureConversation(conversationId, titleForQuestion(text))
+  const shouldGenerateTitle =
+    conversation.createdConversation || conversation.title === titleForQuestion(titleUserText)
   await appendChatMessage({
     id: latest.id,
     conversationId,
@@ -149,22 +173,23 @@ async function persistLatestUser(conversationId: string, messages: readonly UIMe
     uiMessageJson: uiMessageJson(latest),
     status: 'done',
   })
-  return text
+  return { shouldGenerateTitle, text, titleUserText }
 }
 
 async function questionForTurn(
   trigger: string,
   conversationId: string,
   messages: readonly UIMessage[],
-): Promise<string> {
+): Promise<TurnQuestion> {
   const latest = messages[messages.length - 1]
   const latestUser = messages.filter((message) => message.role === 'user').at(-1)
   if (trigger === 'submit-message' && latest?.role === 'user') {
-    return persistLatestUser(conversationId, messages)
+    const { shouldGenerateTitle, text, titleUserText } = await persistLatestUser(conversationId, messages)
+    return { question: text, shouldGenerateTitle, titleUserText }
   }
   const question = uiMessageText(latestUser ?? latest ?? assistantMessage(createChatId(), '')).trim()
   await ensureConversation(conversationId, titleForQuestion(question))
-  return question
+  return { question, shouldGenerateTitle: false, titleUserText: question }
 }
 
 async function loadChatContext(): Promise<{ system: string }> {
@@ -175,10 +200,10 @@ async function loadChatContext(): Promise<{ system: string }> {
   }
 }
 
-export function createChatTransport(): ChatTransport<UIMessage> {
+export function createChatTransport(options: ChatTransportOptions = {}): ChatTransport<UIMessage> {
   return {
     async sendMessages({ trigger, chatId, messages, abortSignal }) {
-      const question = await questionForTurn(trigger, chatId, messages)
+      const { question, shouldGenerateTitle, titleUserText } = await questionForTurn(trigger, chatId, messages)
 
       if (trigger === 'regenerate-message') {
         await ensureConversation(chatId, titleForQuestion(question))
@@ -213,6 +238,15 @@ export function createChatTransport(): ChatTransport<UIMessage> {
               status,
               finishReason === 'error' ? 'The model response ended with an error.' : null,
             )
+            if (shouldGenerateTitle && finishReason !== 'error') {
+              generateAndPersistConversationTitle({
+                assistantText: uiMessageText(responseMessage),
+                conversationId: chatId,
+                model,
+                onUpdated: options.onConversationTitleUpdated,
+                userText: titleUserText,
+              })
+            }
           },
         })
         const [uiStream, persistenceStream] = stream.tee()

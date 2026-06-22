@@ -264,6 +264,7 @@ export {
 export {
   createChatId,
   createConversation,
+  updateConversationTitle,
   appendChatMessage,
   updateChatMessageSnapshot,
   archiveConversation,

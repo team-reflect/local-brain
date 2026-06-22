@@ -94,6 +94,8 @@ Chat conversations, daily report/todo retrieval, and model boundary settings.
 8. Build Chat:
    - top-level route and sidebar item
    - durable chat conversations and messages in SQLite
+   - sidebar titles generated from the first turn when an AI provider is available,
+     with the first user prompt as an immediate fallback
    - Vercel AI SDK client-side streaming with BYOK provider keys fetched from the
      keychain per request
    - retrieved document/interaction chunks included only in the live model request
