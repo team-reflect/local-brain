@@ -43,6 +43,8 @@ brain --json import-context --limit 200
 brain --json search "revised budget"
 brain --json search "#travel"
 brain --json show person <id>
+brain --json show interaction <id>
+brain --json show ai_note <id>
 brain --json today
 brain --json report daily
 brain --json tasks plan-day --limit 25
@@ -68,6 +70,12 @@ searches record names/titles, document and interaction FTS, assets, chunked
 content, and matching tag names or slugs. A `#tag-slug` token is an exact tag
 filter; multiple `#tag` tokens are ANDed. Tags with spaces remain searchable by
 plain text, while precise filters should use the tag slug.
+
+Every JSON search hit includes `kind`, `id`, `recordRef`, and `showCommand`.
+Agents should use `brain --json show <kind> <id>` (or the supplied
+`showCommand`) to retrieve the full record. The CLI supports `show` for every
+kind returned by search, including interactions, transcripts, AI notes, facts,
+memories, organization profiles, and assets.
 
 ## Write Phases
 
@@ -149,6 +157,13 @@ brain --json import interaction --kind email \
   --participant "from:Maya Chen <maya@example.com>" \
   --link project:<id>
 ```
+
+Pass participant phone numbers through `--participant` too, for example
+`--participant "from:Andy <+1 415 688 0341>"`. The CLI stores a normalized
+participant handle so `brain search "+14156880341"` and
+`brain search "4156880341"` can find the interaction. Do not leave participant
+phones only inside `metadata_json`; metadata is provenance, not the searchable
+participant index.
 
 Import a structured calendar event:
 

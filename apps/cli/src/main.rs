@@ -159,7 +159,7 @@ enum Command {
     Graph(GraphArgs),
     /// Show a record by kind and id.
     Show {
-        /// person | organization | project | task
+        /// Any kind returned by search, e.g. person | interaction | ai_note.
         kind: String,
         id: String,
     },
@@ -2173,11 +2173,12 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
             },
             "search": {
                 "usage": "brain --json search <query> --limit 20",
-                "returns": "ranked records with kind, id, title, snippet, and score",
+                "returns": "ranked records with kind, id, title, snippet, score, recordRef, and showCommand. Every returned kind can be fetched with brain --json show <kind> <id>.",
             },
             "show": {
-                "usage": "brain --json show <person|organization|project|task> <id>",
-                "returns": "core typed fields for one visible record",
+                "usage": "brain --json show <record-kind> <id>",
+                "acceptedKinds": ["person", "organization", "project", "task", "document", "interaction", "asset", "memory", "interaction_transcript", "ai_note", "extracted_fact", "organization_profile"],
+                "returns": "core typed fields for one record. Search results include recordRef and showCommand so agents can retrieve the full record without inspecting SQLite.",
             },
             "addPerson": {
                 "usage": "brain --json add person --full-name <name> [--email <email>...] [--phone <phone>...] [--source <slug> --external-id <id>]",
@@ -2196,6 +2197,7 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
                 "kinds": ["note", "meeting", "call", "email", "message", "event"],
                 "bodyText": "Imported source records need full readable body text when the source has readable content. Use import finalize --raw-text-unavailable only after a good-faith fetch proves raw text is unavailable.",
                 "metadataJson": "Raw provider payload JSON stored on interactions.metadata_json. Do not duplicate the full payload in event child tables.",
+                "participants": "Pass email and phone participants with --participant/--self-participant so handles are normalized and searchable. Do not leave participant phone numbers only inside metadata_json.",
                 "eventJson": {
                     "validOnlyWith": "--kind event",
                     "sections": ["details", "booking", "lodgingStay", "flightSegments"],

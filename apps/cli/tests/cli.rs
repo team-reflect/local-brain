@@ -4793,6 +4793,238 @@ fn search_finds_added_records_by_full_text() {
 }
 
 #[test]
+fn search_results_include_show_affordances_and_show_supports_returned_kinds() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let interaction = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Andy haircut",
+            "--text",
+            "Discussed the Lookup Interaction marker.",
+        ],
+    );
+    let interaction_id = interaction["id"].as_str().unwrap();
+
+    let interaction_search = run_json(&db, &["--json", "search", "Andy haircut"]);
+    let interaction_hit = interaction_search["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|hit| hit["kind"] == "interaction" && hit["id"] == interaction["id"])
+        .expect("search should return the interaction");
+    assert_eq!(
+        interaction_hit["recordRef"],
+        format!("interaction:{interaction_id}")
+    );
+    assert_eq!(
+        interaction_hit["showCommand"],
+        serde_json::json!(["brain", "--json", "show", "interaction", interaction_id])
+    );
+    let shown_interaction = run_json(&db, &["--json", "show", "interaction", interaction_id]);
+    assert_eq!(shown_interaction["title"], "Andy haircut");
+
+    let transcript = run_json(
+        &db,
+        &[
+            "--json",
+            "import",
+            "transcript",
+            "--interaction",
+            interaction_id,
+            "--text",
+            "Lookup Transcript marker.",
+        ],
+    );
+    let ai_note = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "ai-note",
+            "--interaction",
+            interaction_id,
+            "--title",
+            "AI Lookup Note",
+            "--text",
+            "Lookup AI note marker.",
+        ],
+    );
+    let subject = format!("interaction:{interaction_id}");
+    let fact = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "fact",
+            "--subject",
+            &subject,
+            "--key",
+            "lookup_fact_marker",
+            "--value-text",
+            "Lookup Fact marker.",
+        ],
+    );
+    let memory = run_json(
+        &db,
+        &[
+            "--json",
+            "promote",
+            "fact",
+            fact["id"].as_str().unwrap(),
+            "--memory-kind",
+            "fact",
+        ],
+    );
+    let document = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "document",
+            "--title",
+            "Lookup Document",
+            "--text",
+            "Lookup Document marker.",
+        ],
+    );
+    let organization = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "organization",
+            "--name",
+            "Lookup Organization",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "enrich",
+            "organization",
+            organization["id"].as_str().unwrap(),
+            "--one-line-description",
+            "Lookup Organization Profile marker.",
+        ],
+    );
+    let conn = Connection::open(&db).unwrap();
+    let org_profile_id: String = conn
+        .query_row(
+            "SELECT id FROM organization_profiles WHERE organization_id = ?1",
+            [organization["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    drop(conn);
+
+    for (kind, id, query, expected_field, expected_value) in [
+        (
+            "document",
+            document["id"].as_str().unwrap(),
+            "Lookup Document marker",
+            "bodyText",
+            "Lookup Document marker.",
+        ),
+        (
+            "interaction_transcript",
+            transcript["id"].as_str().unwrap(),
+            "Lookup Transcript marker",
+            "rawText",
+            "Lookup Transcript marker.",
+        ),
+        (
+            "ai_note",
+            ai_note["id"].as_str().unwrap(),
+            "Lookup AI note marker",
+            "content",
+            "Lookup AI note marker.",
+        ),
+        (
+            "extracted_fact",
+            fact["id"].as_str().unwrap(),
+            "Lookup Fact marker",
+            "valueText",
+            "Lookup Fact marker.",
+        ),
+        (
+            "memory",
+            memory["id"].as_str().unwrap(),
+            "Lookup Fact marker",
+            "claim",
+            "Lookup Fact marker.",
+        ),
+        (
+            "organization_profile",
+            org_profile_id.as_str(),
+            "Lookup Organization Profile marker",
+            "oneLineDescription",
+            "Lookup Organization Profile marker.",
+        ),
+    ] {
+        let search = run_json(&db, &["--json", "search", query]);
+        assert!(
+            search["results"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|hit| hit["kind"] == kind && hit["id"] == id),
+            "search for {query:?} should return {kind} {id}"
+        );
+        let shown = run_json(&db, &["--json", "show", kind, id]);
+        assert_eq!(shown[expected_field], expected_value);
+    }
+}
+
+#[test]
+fn search_finds_interactions_by_normalized_participant_phone() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let interaction = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "message",
+            "--title",
+            "iMessage thread",
+            "--text",
+            "Readable source body without the phone number.",
+            "--participant",
+            "from:Andy <+1 (415) 688-0341>",
+        ],
+    );
+    let interaction_id = interaction["id"].as_str().unwrap();
+
+    for query in ["+14156880341", "4156880341"] {
+        let search = run_json(&db, &["--json", "search", query]);
+        let hit = search["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|hit| hit["kind"] == "interaction" && hit["id"] == interaction["id"])
+            .unwrap_or_else(|| panic!("search for {query} should return the interaction"));
+        assert_eq!(hit["recordRef"], format!("interaction:{interaction_id}"));
+        assert!(hit["snippet"]
+            .as_str()
+            .unwrap()
+            .contains("+1 (415) 688-0341"));
+    }
+
+    let shown = run_json(&db, &["--json", "show", "interaction", interaction_id]);
+    assert_eq!(shown["participants"][0]["normalizedHandle"], "14156880341");
+}
+
+#[test]
 fn search_finds_tagged_records_by_hash_filter_and_plain_tag_name() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);

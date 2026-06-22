@@ -81,6 +81,8 @@ brain --json contract
 brain --json import-context --limit 200
 brain --json search "northwind kickoff"
 brain --json show person <id>
+brain --json show interaction <id>
+brain --json show ai_note <id>
 brain --json suggest list
 brain --json import audit --limit 100
 brain --json today
@@ -91,6 +93,12 @@ brain --json graph --center self
 
 For answer generation, use `brain search`, `brain show`, tasks, memories, and
 evidence. The CLI does not synthesize answers for you.
+
+Every JSON search hit includes `recordRef` and `showCommand`. Use
+`brain --json show <kind> <id>` for the returned kind instead of reading SQLite
+directly; the CLI supports `show` for all kinds it returns from search,
+including interactions, transcripts, AI notes, facts, memories, organization
+profiles, and assets.
 
 For a daily brief, use `brain --json report daily` as the complete context
 payload. It includes the self display name, task buckets, waiting items, recent
@@ -157,6 +165,14 @@ entities as participants, suggestions, or tags until more evidence appears.
 Before large imports, register the user's known handles with `brain self set` so
 self participants normalize automatically. Use `--self-participant` for a
 source-specific user handle that is not registered yet.
+
+Pass phone participants as handles, not just metadata:
+`--participant "from:Andy <+1 415 688 0341>"`. The CLI normalizes phone handles
+so both `brain --json search "+14156880341"` and
+`brain --json search "4156880341"` can find the interaction. Provider metadata
+belongs in `metadata_json`, but participant phone numbers should also be written
+through `--participant` when they identify a sender, recipient, attendee, or
+chat participant.
 
 Keep headlines and affiliations conservative. Prefer "works on", "contact for",
 or "appears affiliated with" over exact titles unless the source states the

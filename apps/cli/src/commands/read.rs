@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 
 use rusqlite::{params, params_from_iter, types::Value as SqlValue, Connection, OptionalExtension};
+use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::{to_like_pattern, to_like_pattern_lower, to_match_query};
@@ -35,6 +36,67 @@ fn combined_search_score(lexical: f64, age_days: Option<f64>) -> f64 {
 struct ParsedSearchQuery {
     text: String,
     tag_filters: Vec<String>,
+}
+
+#[derive(Clone)]
+struct SearchHit {
+    kind: String,
+    id: String,
+    title: String,
+    subtitle: Option<String>,
+    snippet: Option<String>,
+    score: f64,
+}
+
+#[derive(Serialize)]
+struct SearchHitOutput<'a> {
+    kind: &'a str,
+    id: &'a str,
+    title: &'a str,
+    subtitle: Option<&'a str>,
+    snippet: Option<&'a str>,
+    score: f64,
+    #[serde(rename = "recordRef")]
+    record_ref: String,
+    #[serde(rename = "showCommand")]
+    show_command: [&'a str; 5],
+}
+
+impl SearchHit {
+    fn new(
+        kind: impl Into<String>,
+        id: String,
+        title: Option<String>,
+        snippet: Option<String>,
+        score: f64,
+    ) -> Self {
+        Self {
+            kind: kind.into(),
+            id,
+            title: title.unwrap_or_else(|| "(untitled)".into()),
+            subtitle: None,
+            snippet,
+            score,
+        }
+    }
+
+    fn with_subtitle(mut self, subtitle: Option<String>) -> Self {
+        self.subtitle = subtitle;
+        self
+    }
+
+    fn to_output(&self) -> SearchHitOutput<'_> {
+        SearchHitOutput {
+            kind: &self.kind,
+            id: &self.id,
+            title: &self.title,
+            subtitle: self.subtitle.as_deref(),
+            snippet: self.snippet.as_deref(),
+            score: self.score,
+            record_ref: format!("{}:{}", self.kind, self.id),
+            show_command: ["brain", "--json", "show", &self.kind, &self.id],
+        }
+    }
 }
 
 // `brain search` is the Rust twin of core's `globalSearch`
@@ -159,7 +221,7 @@ fn should_search_tag_hits(
 /// `brain search` — full-text across records, name matches, assets, and tags.
 /// Output is the data array (stdout).
 pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Result<(), CliError> {
-    let mut hits: Vec<Value> = Vec::new();
+    let mut hits: Vec<SearchHit> = Vec::new();
     let parsed = parse_search_query(query);
 
     // Mirror core `globalSearch`: a query with no searchable tokens is "no query",
@@ -208,16 +270,16 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
             query_params.extend(tag_filter.params);
             query_params.push(SqlValue::from(limit as i64));
             let rows = stmt.query_map(params_from_iter(query_params), |row| {
-                Ok(json!({
-                    "kind": kind,
-                    "id": row.get::<_, String>(0)?,
-                    "title": row.get::<_, Option<String>>(1)?.unwrap_or_else(|| "(untitled)".into()),
-                    "snippet": row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                    "score": combined_search_score(
+                Ok(SearchHit::new(
+                    kind,
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    Some(row.get::<_, Option<String>>(2)?.unwrap_or_default()),
+                    combined_search_score(
                         lexical_score(row.get::<_, f64>(3)?),
-                        row.get::<_, Option<f64>>(4)?
+                        row.get::<_, Option<f64>>(4)?,
                     ),
-                }))
+                ))
             })?;
             for row in rows {
                 hits.push(row?);
@@ -252,17 +314,17 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
         asset_params.extend(asset_tag_filter.params);
         asset_params.push(SqlValue::from(limit as i64));
         let asset_rows = asset_stmt.query_map(params_from_iter(asset_params), |row| {
-            Ok(json!({
-                "kind": "asset",
-                "id": row.get::<_, String>(0)?,
-                "title": row.get::<_, String>(1)?,
-                "subtitle": row.get::<_, Option<String>>(2)?,
-                "snippet": row.get::<_, Option<String>>(3)?,
-                "score": combined_search_score(
+            Ok(SearchHit::new(
+                "asset",
+                row.get::<_, String>(0)?,
+                Some(row.get::<_, String>(1)?),
+                row.get::<_, Option<String>>(3)?,
+                combined_search_score(
                     lexical_score(row.get::<_, f64>(4)?),
-                    row.get::<_, Option<f64>>(5)?
+                    row.get::<_, Option<f64>>(5)?,
                 ),
-            }))
+            )
+            .with_subtitle(row.get::<_, Option<String>>(2)?))
         })?;
         for row in asset_rows {
             hits.push(row?);
@@ -343,16 +405,16 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
         chunk_params.extend(chunk_tag_filter.params);
         chunk_params.push(SqlValue::from(limit as i64));
         let chunk_rows = chunk_stmt.query_map(params_from_iter(chunk_params), |row| {
-            Ok(json!({
-                "kind": row.get::<_, String>(0)?,
-                "id": row.get::<_, String>(1)?,
-                "title": row.get::<_, Option<String>>(2)?.unwrap_or_else(|| "(untitled)".into()),
-                "snippet": row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                "score": combined_search_score(
+            Ok(SearchHit::new(
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                Some(row.get::<_, Option<String>>(3)?.unwrap_or_default()),
+                combined_search_score(
                     lexical_score(row.get::<_, f64>(4)?),
-                    row.get::<_, Option<f64>>(5)?
+                    row.get::<_, Option<f64>>(5)?,
                 ),
-            }))
+            ))
         })?;
         for row in chunk_rows {
             hits.push(row?);
@@ -383,17 +445,65 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
             query_params.extend(tag_filter.params);
             query_params.push(SqlValue::from(limit as i64));
             let rows = stmt.query_map(params_from_iter(query_params), |row| {
-                Ok(json!({
-                    "kind": kind,
-                    "id": row.get::<_, String>(0)?,
-                    "title": row.get::<_, Option<String>>(1)?.unwrap_or_else(|| "(untitled)".into()),
-                    "snippet": Value::Null,
-                    "score": combined_search_score(NAME_HIT_SCORE, row.get::<_, Option<f64>>(2)?),
-                }))
+                Ok(SearchHit::new(
+                    kind,
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    None,
+                    combined_search_score(NAME_HIT_SCORE, row.get::<_, Option<f64>>(2)?),
+                ))
             })?;
             for row in rows {
                 hits.push(row?);
             }
+        }
+
+        let participant_tag_filter = tag_filter_sql("interaction", "i.id", &parsed.tag_filters);
+        let participant_sql = format!(
+            "SELECT i.id,
+                    i.title,
+                    COALESCE(ip.handle, ip.normalized_handle, ip.display_name),
+                    julianday('now') - julianday(COALESCE(i.occurred_at, i.updated_at))
+             FROM interaction_participants ip
+             JOIN interactions i ON i.id = ip.interaction_id
+             WHERE i.archived_at IS NULL
+               AND (
+                 ip.handle LIKE ? ESCAPE '\\'
+                 OR ip.normalized_handle LIKE ? ESCAPE '\\'
+                 OR ip.display_name LIKE ? ESCAPE '\\'
+                 OR (
+                   normalize_phone(?) IS NOT NULL
+                   AND normalize_phone(COALESCE(ip.normalized_handle, ip.handle, ''))
+                     LIKE '%' || normalize_phone(?) || '%'
+                 )
+               )
+               {}
+             LIMIT ?",
+            participant_tag_filter.sql
+        );
+        let mut participant_stmt = conn.prepare(&participant_sql)?;
+        let mut participant_params = vec![
+            SqlValue::from(like.to_string()),
+            SqlValue::from(like.to_string()),
+            SqlValue::from(like.to_string()),
+            SqlValue::from(parsed.text.clone()),
+            SqlValue::from(parsed.text.clone()),
+        ];
+        participant_params.extend(participant_tag_filter.params);
+        participant_params.push(SqlValue::from(limit as i64));
+        let participant_rows =
+            participant_stmt.query_map(params_from_iter(participant_params), |row| {
+                let matched: Option<String> = row.get(2)?;
+                Ok(SearchHit::new(
+                    "interaction",
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    matched.map(|value| format!("Participant: {value}")),
+                    combined_search_score(NAME_HIT_SCORE, row.get::<_, Option<f64>>(3)?),
+                ))
+            })?;
+        for row in participant_rows {
+            hits.push(row?);
         }
     }
 
@@ -410,21 +520,18 @@ pub fn search(conn: &Connection, json: bool, query: &str, limit: usize) -> Resul
     emit_search(json, query, &hits)
 }
 
-fn dedupe_and_rank_hits(hits: Vec<Value>, limit: usize) -> Vec<Value> {
+fn dedupe_and_rank_hits(hits: Vec<SearchHit>, limit: usize) -> Vec<SearchHit> {
     // Merge all kinds, rank by score, and apply one final cap — like the app's
     // `globalSearch`, instead of returning up to `limit` rows per source table.
-    let mut unique_hits: Vec<Value> = Vec::new();
+    let mut unique_hits: Vec<SearchHit> = Vec::new();
     let mut seen: HashMap<(String, String), usize> = HashMap::new();
     for hit in hits {
-        let key = (
-            hit["kind"].as_str().unwrap_or("").to_string(),
-            hit["id"].as_str().unwrap_or("").to_string(),
-        );
+        let key = (hit.kind.clone(), hit.id.clone());
         if let Some(index) = seen.get(&key).copied() {
-            let existing_score = unique_hits[index]["score"].as_f64().unwrap_or(0.0);
-            let new_score = hit["score"].as_f64().unwrap_or(0.0);
-            let existing_has_snippet = unique_hits[index]["snippet"].as_str().is_some();
-            let new_has_snippet = hit["snippet"].as_str().is_some();
+            let existing_score = unique_hits[index].score;
+            let new_score = hit.score;
+            let existing_has_snippet = unique_hits[index].snippet.is_some();
+            let new_has_snippet = hit.snippet.is_some();
             if new_score > existing_score
                 || (new_score == existing_score && !existing_has_snippet && new_has_snippet)
             {
@@ -436,18 +543,13 @@ fn dedupe_and_rank_hits(hits: Vec<Value>, limit: usize) -> Vec<Value> {
         }
     }
     unique_hits.sort_by(|a, b| {
-        let sb = b["score"].as_f64().unwrap_or(0.0);
-        let sa = a["score"].as_f64().unwrap_or(0.0);
         // Tie-break equal scores by title so ordering is deterministic, mirroring
         // core's `dedupeAndRank`. (This is byte ordering rather than JS
         // `localeCompare`, so non-ASCII titles can differ slightly.)
-        sb.partial_cmp(&sa)
+        b.score
+            .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| {
-                let ta = a["title"].as_str().unwrap_or("");
-                let tb = b["title"].as_str().unwrap_or("");
-                ta.cmp(tb)
-            })
+            .then_with(|| a.title.cmp(&b.title))
     });
     unique_hits.truncate(limit);
     unique_hits
@@ -458,7 +560,7 @@ fn tag_hits(
     tag_like: Option<&str>,
     tag_filters: &[String],
     limit: usize,
-) -> Result<Vec<Value>, CliError> {
+) -> Result<Vec<SearchHit>, CliError> {
     let tag_text_sql = if tag_like.is_some() {
         " AND EXISTS (
             SELECT 1
@@ -550,32 +652,28 @@ fn tag_hits(
     Ok(hits)
 }
 
-fn tag_hit_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
-    Ok(json!({
-        "kind": row.get::<_, String>(0)?,
-        "id": row.get::<_, String>(1)?,
-        "title": row.get::<_, Option<String>>(2)?.unwrap_or_else(|| "(untitled)".into()),
-        "subtitle": row.get::<_, Option<String>>(3)?,
-        "snippet": row.get::<_, Option<String>>(4)?,
-        "score": combined_search_score(TAG_HIT_SCORE, row.get::<_, Option<f64>>(5)?),
-    }))
+fn tag_hit_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SearchHit> {
+    Ok(SearchHit::new(
+        row.get::<_, String>(0)?,
+        row.get::<_, String>(1)?,
+        row.get::<_, Option<String>>(2)?,
+        row.get::<_, Option<String>>(4)?,
+        combined_search_score(TAG_HIT_SCORE, row.get::<_, Option<f64>>(5)?),
+    )
+    .with_subtitle(row.get::<_, Option<String>>(3)?))
 }
 
 /// Render `brain search` hits as a JSON data array or a compact human table.
-fn emit_search(json: bool, query: &str, hits: &[Value]) -> Result<(), CliError> {
+fn emit_search(json: bool, query: &str, hits: &[SearchHit]) -> Result<(), CliError> {
     if json {
-        return print_json(&json!({ "query": query, "results": hits }));
+        let results = hits.iter().map(SearchHit::to_output).collect::<Vec<_>>();
+        return print_json(&json!({ "query": query, "results": results }));
     }
     if hits.is_empty() {
         println!("(no matches)");
     }
     for hit in hits {
-        println!(
-            "{:>12}  {}  {}",
-            hit["kind"].as_str().unwrap_or(""),
-            hit["id"].as_str().unwrap_or(""),
-            hit["title"].as_str().unwrap_or("")
-        );
+        println!("{:>12}  {}  {}", hit.kind, hit.id, hit.title);
     }
     Ok(())
 }
@@ -583,8 +681,28 @@ fn emit_search(json: bool, query: &str, hits: &[Value]) -> Result<(), CliError> 
 /// `brain show <kind> <id>` — a record's core fields plus its linked neighborhood.
 pub fn show(conn: &Connection, json: bool, kind: &str, id: &str) -> Result<(), CliError> {
     let record = match kind {
-        "person" => fetch_one(
-            conn,
+        "interaction" => fetch_interaction(conn, id)?,
+        "asset" => fetch_asset(conn, id)?,
+        other => match show_sql(other) {
+            Some(sql) => fetch_one(conn, sql, id)?,
+            None => return Err(CliError::Runtime(format!("unknown record kind '{other}'"))),
+        },
+    };
+    let Some(record) = record else {
+        return Err(CliError::NotFound(format!("{kind} {id} not found")));
+    };
+
+    if json {
+        print_json(&record)
+    } else {
+        println!("{}", serde_json::to_string_pretty(&record)?);
+        Ok(())
+    }
+}
+
+fn show_sql(kind: &str) -> Option<&'static str> {
+    match kind {
+        "person" => Some(
             "SELECT people.id,
                     people.full_name AS title,
                     people.preferred_name,
@@ -599,36 +717,217 @@ pub fn show(conn: &Connection, json: bool, kind: &str, id: &str) -> Result<(), C
              FROM people
              LEFT JOIN relationship_strengths ON relationship_strengths.person_id = people.id
              WHERE people.id = ?1",
-            id,
-        )?,
-        "organization" => fetch_one(
-            conn,
-            "SELECT id, name AS title, kind AS subtitle, domain, location, summary, notes FROM organizations WHERE id = ?1",
-            id,
-        )?,
-        "project" => fetch_one(
-            conn,
-            "SELECT id, name AS title, status AS subtitle, kind, summary, target_date FROM projects WHERE id = ?1",
-            id,
-        )?,
-        "task" => fetch_one(
-            conn,
-            "SELECT id, title, status AS subtitle, description, due_at, scheduled_for, priority, project_id FROM tasks WHERE id = ?1",
-            id,
-        )?,
-        "asset" => fetch_asset(conn, id)?,
-        other => return Err(CliError::Runtime(format!("unknown record kind '{other}'"))),
-    };
-    let Some(record) = record else {
-        return Err(CliError::NotFound(format!("{kind} {id} not found")));
+        ),
+        "organization" => Some(
+            "SELECT id, name AS title, kind AS subtitle, domain, location, summary, notes
+             FROM organizations
+             WHERE id = ?1",
+        ),
+        "project" => Some(
+            "SELECT id, name AS title, status AS subtitle, kind, summary, target_date
+             FROM projects
+             WHERE id = ?1",
+        ),
+        "task" => Some(
+            "SELECT id, title, status AS subtitle, description, due_at, scheduled_for, priority, project_id
+             FROM tasks
+             WHERE id = ?1",
+        ),
+        "document" => Some(
+            "SELECT id,
+                    title,
+                    kind AS subtitle,
+                    kind,
+                    body_text,
+                    summary,
+                    mime_type,
+                    original_path,
+                    original_url,
+                    content_hash,
+                    authored_at,
+                    occurred_at,
+                    created_at,
+                    updated_at
+             FROM documents
+             WHERE id = ?1 AND archived_at IS NULL",
+        ),
+        "interaction_transcript" => Some(
+            "SELECT tr.id,
+                    COALESCE(i.title, 'Transcript') AS title,
+                    'transcript' AS subtitle,
+                    tr.interaction_id,
+                    tr.raw_text,
+                    tr.format,
+                    tr.language,
+                    tr.segments_json,
+                    tr.recording_url,
+                    tr.storage_path,
+                    tr.source_id,
+                    tr.source_external_id,
+                    tr.transcribed_by,
+                    tr.transcribed_at,
+                    tr.content_hash,
+                    tr.metadata_json,
+                    tr.created_at,
+                    tr.updated_at
+             FROM interaction_transcripts tr
+             LEFT JOIN interactions i ON i.id = tr.interaction_id
+             WHERE tr.id = ?1
+               AND (i.id IS NULL OR i.archived_at IS NULL)",
+        ),
+        "ai_note" => Some(
+            "SELECT id,
+                    title,
+                    kind AS subtitle,
+                    kind,
+                    interaction_id,
+                    document_id,
+                    subject_type,
+                    subject_id,
+                    content,
+                    content_format,
+                    model,
+                    prompt_fingerprint,
+                    source_id,
+                    metadata_json,
+                    generated_at,
+                    created_at,
+                    updated_at
+             FROM ai_notes
+             WHERE id = ?1",
+        ),
+        "extracted_fact" => Some(
+            "SELECT id,
+                    key AS title,
+                    subject_type AS subtitle,
+                    subject_type,
+                    subject_id,
+                    key,
+                    value_text,
+                    value_json,
+                    confidence,
+                    source_record_type,
+                    source_record_id,
+                    source_excerpt,
+                    observed_at,
+                    model,
+                    prompt_fingerprint,
+                    metadata_json,
+                    created_at,
+                    updated_at
+             FROM extracted_facts
+             WHERE id = ?1 AND archived_at IS NULL",
+        ),
+        "memory" => Some(
+            "SELECT id,
+                    claim AS title,
+                    kind AS subtitle,
+                    kind,
+                    claim,
+                    confidence,
+                    valid_from,
+                    valid_to,
+                    promoted_from_fact_id,
+                    created_at,
+                    updated_at
+             FROM memories
+             WHERE id = ?1 AND archived_at IS NULL",
+        ),
+        "organization_profile" => Some(
+            "SELECT op.id,
+                    COALESCE(op.one_line_description, op.canonical_name, o.name) AS title,
+                    op.category AS subtitle,
+                    op.organization_id,
+                    o.name AS organization_title,
+                    op.model,
+                    op.prompt_fingerprint,
+                    op.canonical_name,
+                    op.website,
+                    op.one_line_description,
+                    op.category,
+                    op.why_it_matters,
+                    op.offerings_json,
+                    op.notable_people_json,
+                    op.suggested_tags_json,
+                    op.review_flags_json,
+                    op.source_urls_json,
+                    op.raw_enrichment_json,
+                    op.researched_at,
+                    op.created_at,
+                    op.updated_at
+             FROM organization_profiles op
+             LEFT JOIN organizations o ON o.id = op.organization_id
+             WHERE op.id = ?1",
+        ),
+        _ => None,
+    }
+}
+
+fn fetch_interaction(conn: &Connection, id: &str) -> Result<Option<Value>, CliError> {
+    let Some(mut record) = fetch_one(
+        conn,
+        "SELECT id,
+                title,
+                kind AS subtitle,
+                kind,
+                body_text,
+                summary,
+                occurred_at,
+                ended_at,
+                duration_seconds,
+                location,
+                external_id,
+                original_path,
+                original_url,
+                content_hash,
+                metadata_json,
+                created_at,
+                updated_at
+         FROM interactions
+         WHERE id = ?1 AND archived_at IS NULL",
+        id,
+    )?
+    else {
+        return Ok(None);
     };
 
-    if json {
-        print_json(&record)
-    } else {
-        println!("{}", serde_json::to_string_pretty(&record)?);
-        Ok(())
+    let participants = interaction_participants(conn, id)?;
+    if let Some(obj) = record.as_object_mut() {
+        obj.insert("participants".to_string(), Value::Array(participants));
     }
+    Ok(Some(record))
+}
+
+fn interaction_participants(
+    conn: &Connection,
+    interaction_id: &str,
+) -> Result<Vec<Value>, CliError> {
+    let mut stmt = conn.prepare(
+        "SELECT ip.person_id,
+                COALESCE(p.full_name, ip.display_name, ip.handle, 'Unknown participant') AS name,
+                ip.role,
+                ip.handle,
+                ip.normalized_handle,
+                ip.display_name,
+                s.slug AS source
+         FROM interaction_participants ip
+         LEFT JOIN people p ON p.id = ip.person_id AND p.archived_at IS NULL
+         LEFT JOIN sources s ON s.id = ip.source_id
+         WHERE ip.interaction_id = ?1
+         ORDER BY ip.created_at, ip.id",
+    )?;
+    let rows = stmt.query_map(params![interaction_id], |row| {
+        Ok(json!({
+            "personId": row.get::<_, Option<String>>(0)?,
+            "name": row.get::<_, String>(1)?,
+            "role": row.get::<_, Option<String>>(2)?,
+            "handle": row.get::<_, Option<String>>(3)?,
+            "normalizedHandle": row.get::<_, Option<String>>(4)?,
+            "displayName": row.get::<_, Option<String>>(5)?,
+            "source": row.get::<_, Option<String>>(6)?,
+        }))
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(CliError::from)
 }
 
 fn fetch_asset(conn: &Connection, id: &str) -> Result<Option<Value>, CliError> {
