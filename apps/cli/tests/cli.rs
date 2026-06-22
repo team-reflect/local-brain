@@ -224,6 +224,14 @@ fn contract_reports_agent_cli_contract() {
         .as_str()
         .unwrap()
         .contains("brain --json add project"));
+    assert!(contract["commands"]["today"]["returns"]
+        .as_str()
+        .unwrap()
+        .contains("activeProjects"));
+    assert!(contract["commands"]["reportDaily"]["returns"]
+        .as_str()
+        .unwrap()
+        .contains("outside Tauri"));
     assert!(contract["commands"]["addProject"]["purpose"]
         .as_str()
         .unwrap()
@@ -3679,6 +3687,34 @@ fn remember_can_cite_source_interaction_chunk() {
 fn today_and_changes_emit_valid_json() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
+    run_json(
+        &db,
+        &[
+            "--json",
+            "self",
+            "set",
+            "--full-name",
+            "Alex MacCaw",
+            "--preferred-name",
+            "Alex",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "project",
+            "--name",
+            "Picardo Launch",
+            "--kind",
+            "work",
+            "--summary",
+            "Launch readiness and credentialing.",
+            "--target-date",
+            "2026-07-01",
+        ],
+    );
     let task = run_json(&db, &["--json", "add", "task", "--title", "A task"]);
     let task_id = task["id"].as_str().unwrap();
     Connection::open(&db)
@@ -3733,6 +3769,21 @@ fn today_and_changes_emit_valid_json() {
     let email_id = email["id"].as_str().unwrap();
 
     let today = run_json(&db, &["--json", "today"]);
+    assert_eq!(today["userName"], "Alex");
+    assert!(today["generatedAt"].as_str().unwrap().ends_with('Z'));
+    let launch_project = today["activeProjects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|project| project["name"] == "Picardo Launch")
+        .expect("expected active project context");
+    assert_eq!(launch_project["status"], "active");
+    assert_eq!(launch_project["kind"], "work");
+    assert_eq!(
+        launch_project["summary"],
+        "Launch readiness and credentialing."
+    );
+    assert_eq!(launch_project["targetDate"], "2026-07-01");
     assert!(today["counts"]["openTasks"].as_i64().unwrap() >= 1);
     assert_eq!(today["counts"]["waitingItems"].as_i64().unwrap(), 1);
     assert!(today["waitingItems"]

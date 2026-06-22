@@ -2044,7 +2044,11 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
             },
             "today": {
                 "usage": "brain --json today",
-                "returns": "tasks, recentInteractions, and counts",
+                "returns": "AI-ready daily brief context: generatedAt, date, userName, task buckets, waitingItems, recentInteractions, recentChanges, relationshipContext, activeProjects, and counts",
+            },
+            "reportDaily": {
+                "usage": "brain --json report daily",
+                "returns": "Same AI-ready daily brief context as `brain --json today`; use this from external agents that want to generate the narrative brief outside Tauri.",
             },
             "tasksPlanDay": {
                 "usage": "brain --json tasks plan-day --limit 25",
