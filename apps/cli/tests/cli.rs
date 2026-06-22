@@ -3463,6 +3463,47 @@ fn today_json_includes_assignees() {
 }
 
 #[test]
+fn today_relationship_context_ignores_cancelled_tasks() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let person = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Casey Drift",
+            "--email",
+            "casey@example.com",
+        ],
+    );
+    let person_id = person["id"].as_str().unwrap();
+
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "task",
+            "--title",
+            "No longer relevant",
+            "--status",
+            "cancelled",
+            "--assignee",
+            person_id,
+        ],
+    );
+
+    let today = run_json(&db, &["--json", "today"]);
+    assert!(!today["relationshipContext"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|context| context["name"] == "Casey Drift"));
+}
+
+#[test]
 fn plan_day_buckets_overdue_first() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);

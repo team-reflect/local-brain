@@ -298,19 +298,76 @@ fn recent_interactions(conn: &Connection, limit: i64) -> Result<Vec<Value>, CliE
 
 fn relationship_context(conn: &Connection, limit: i64) -> Result<Vec<Value>, CliError> {
     let mut stmt = conn.prepare(
-        "SELECT p.id,
-                p.full_name,
-                p.headline,
-                rs.last_interaction_at,
-                rs.relationship_strength,
-                COALESCE(rs.recent_interactions, 0),
-                COALESCE(rs.open_tasks, 0)
-         FROM relationship_strengths rs
-         JOIN people p ON p.id = rs.person_id
-         WHERE p.archived_at IS NULL
-           AND p.is_self = 0
-           AND rs.relationship_strength IS NOT NULL
-         ORDER BY rs.relationship_strength DESC, rs.last_interaction_at DESC
+        "WITH signals AS (
+           SELECT p.id,
+                  p.full_name,
+                  p.headline,
+                  MAX(CASE
+                    WHEN i.archived_at IS NULL
+                     AND i.occurred_at IS NOT NULL
+                     AND i.occurred_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                    THEN i.occurred_at
+                  END) AS last_interaction_at,
+                  COUNT(DISTINCT CASE
+                    WHEN i.archived_at IS NULL
+                     AND i.occurred_at IS NOT NULL
+                     AND i.occurred_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                     AND i.occurred_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-365 days')
+                    THEN i.id
+                  END) AS recent_interactions,
+                  CAST(julianday('now') - julianday(MAX(CASE
+                    WHEN i.archived_at IS NULL
+                     AND i.occurred_at IS NOT NULL
+                     AND i.occurred_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                    THEN i.occurred_at
+                  END)) AS INTEGER) AS days_since_last,
+                  COUNT(DISTINCT CASE
+                    WHEN t.archived_at IS NULL
+                     AND t.status NOT IN ('done', 'cancelled', 'canceled')
+                    THEN t.id
+                  END) AS open_tasks
+           FROM people p
+           LEFT JOIN interaction_participants ip ON ip.person_id = p.id
+           LEFT JOIN interactions i ON i.id = ip.interaction_id
+           LEFT JOIN task_people tp ON tp.person_id = p.id
+           LEFT JOIN tasks t ON t.id = tp.task_id
+           WHERE p.archived_at IS NULL AND p.is_self = 0
+           GROUP BY p.id
+         ),
+         scores AS (
+           SELECT id,
+                  full_name,
+                  headline,
+                  last_interaction_at,
+                  recent_interactions,
+                  open_tasks,
+                  min(recent_interactions, 5)
+                    + CASE
+                        WHEN days_since_last IS NULL THEN 0
+                        WHEN days_since_last <= 30 THEN 3
+                        WHEN days_since_last <= 90 THEN 2
+                        WHEN days_since_last <= 180 THEN 1
+                        ELSE 0
+                      END
+                    + min(open_tasks, 2) AS score
+           FROM signals
+         )
+         SELECT id,
+                full_name,
+                headline,
+                last_interaction_at,
+                CASE
+                  WHEN score >= 8 THEN 5
+                  WHEN score >= 6 THEN 4
+                  WHEN score >= 4 THEN 3
+                  WHEN score >= 2 THEN 2
+                  ELSE 1
+                END AS relationship_strength,
+                recent_interactions,
+                open_tasks
+         FROM scores
+         WHERE recent_interactions > 0 OR open_tasks > 0
+         ORDER BY relationship_strength DESC, last_interaction_at DESC
          LIMIT ?1",
     )?;
     let rows = stmt.query_map(params![limit], |row| {
