@@ -244,9 +244,11 @@ brain --json repair participants relink --handle wrong@example.com \
 ```
 
 Always dry-run `merge person` before applying it in a large backfill. It moves
-handles, affiliations, participant rows, typed links, tags, provenance, source
-identities, and fact/memory references to the target, then archives the source.
-It refuses to merge away the self person; merge duplicates into self instead.
+handles, affiliations, participant rows, typed links, tags, source identities, and
+fact/memory references to the target, then archives the source. Source provenance
+stays attached to the archived source, and the target gets an explicit merge
+provenance event. It refuses to merge away the self person; merge duplicates into
+self instead.
 
 Archive bad shells after unlinking active relationships that should not survive.
 Organization archive blocks while active current affiliations remain; use

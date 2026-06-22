@@ -507,6 +507,10 @@ brain --brain "$BRAIN_ROOT" --json archive person <person-id> \
   --reason "mistaken person shell"
 ```
 
+Person merges move source identities to the canonical target but preserve source
+provenance on the archived duplicate; use the target merge provenance event for
+the cleanup audit trail.
+
 For source-derived low-level facts, use stable `--source` / `--external-id`
 keys and pass `--refresh` on reruns that should replace the same imported fact.
 Do not patch `interaction_participants`, handles, affiliations, or archive

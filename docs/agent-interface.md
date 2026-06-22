@@ -264,9 +264,11 @@ brain --json person phone add <person-id> --phone "+1 555 0100"
 ```
 
 `merge person` moves contact handles, affiliations, participant rows, typed links,
-tags, provenance, source identities, and fact/memory references onto the target,
-then archives the source. It refuses to merge away the self person; merge duplicate
-shells into self instead. Always dry-run large cleanup merges first.
+tags, source identities, and fact/memory references onto the target, then archives
+the source. Source provenance stays attached to the archived source, and the
+target gets an explicit merge provenance event. It refuses to merge away the self
+person; merge duplicate shells into self instead. Always dry-run large cleanup
+merges first.
 
 Facts remain append-only by default. For low-level import facts that should be
 stable across reruns, include a source identity and pass `--refresh` only when the

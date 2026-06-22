@@ -1608,6 +1608,243 @@ fn merge_person_dry_run_then_apply_moves_links_and_archives_source() {
 }
 
 #[test]
+fn merge_person_dedupes_conflicts_and_preserves_source_provenance() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    run_json(
+        &db,
+        &[
+            "--json",
+            "source",
+            "ensure",
+            "--slug",
+            "google_people",
+            "--name",
+            "Google People",
+        ],
+    );
+    let target = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Canonical Contact",
+            "--email",
+            "shared@example.com",
+            "--phone",
+            "+1 555 0100",
+            "--source",
+            "google_people",
+            "--external-id",
+            "target-contact",
+        ],
+    );
+    let source = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Duplicate Contact",
+            "--email",
+            "duplicate-only@example.com",
+            "--source",
+            "google_people",
+            "--external-id",
+            "source-contact",
+        ],
+    );
+    let target_id = target["id"].as_str().unwrap();
+    let source_id = source["id"].as_str().unwrap();
+    let org = run_json(
+        &db,
+        &["--json", "add", "organization", "--name", "Shared Org"],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "affiliate",
+            "--person",
+            target_id,
+            "--org",
+            org["id"].as_str().unwrap(),
+            "--title",
+            "Advisor",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "affiliate",
+            "--person",
+            source_id,
+            "--org",
+            org["id"].as_str().unwrap(),
+            "--title",
+            "Advisor",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "tag",
+            "ensure",
+            "--name",
+            "Friend CRM",
+            "--slug",
+            "friend-crm",
+        ],
+    );
+    let target_ref = format!("person:{target_id}");
+    let source_ref = format!("person:{source_id}");
+    run_json(
+        &db,
+        &[
+            "--json",
+            "tag",
+            "attach",
+            "--tag",
+            "friend-crm",
+            "--record",
+            &target_ref,
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "tag",
+            "attach",
+            "--tag",
+            "friend-crm",
+            "--record",
+            &source_ref,
+        ],
+    );
+
+    let conn = Connection::open(&db).unwrap();
+    conn.execute(
+        "INSERT INTO person_emails (id, person_id, email, normalized_email)
+         VALUES ('source-duplicate-email', ?1, 'Shared Alias <shared@example.com>', 'shared@example.com')",
+        [source_id],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO person_phones (id, person_id, phone, normalized_phone)
+         VALUES ('source-duplicate-phone', ?1, '+1 555 0100', '15550100')",
+        [source_id],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO interactions (id, kind, title)
+         VALUES ('merge-conflict-interaction', 'email', 'Merge conflict participant')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO interaction_participants
+           (id, interaction_id, person_id, role, handle, normalized_handle)
+         VALUES ('target-conflict-participant', 'merge-conflict-interaction', ?1, 'to', 'shared@example.com', 'shared@example.com')",
+        [target_id],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO interaction_participants
+           (id, interaction_id, person_id, role, handle, normalized_handle)
+         VALUES ('source-conflict-participant', 'merge-conflict-interaction', ?1, 'from', 'shared@example.com', 'shared@example.com')",
+        [source_id],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO record_provenance
+           (id, record_type, record_id, provenance_kind, metadata_json)
+         VALUES ('source-original-provenance', 'person', ?1, 'imported', '{\"source\":\"seed\"}')",
+        [source_id],
+    )
+    .unwrap();
+    drop(conn);
+
+    let merged = run_json(
+        &db,
+        &[
+            "--json",
+            "merge",
+            "person",
+            "--from",
+            source_id,
+            "--to",
+            target_id,
+            "--reason",
+            "duplicate import",
+        ],
+    );
+    assert_eq!(merged["emailsMerged"], 1);
+    assert_eq!(merged["phonesMerged"], 1);
+    assert_eq!(merged["affiliationsMerged"], 1);
+    assert_eq!(merged["participantsMerged"], 1);
+    assert_eq!(merged["taggingsMerged"], 1);
+    assert_eq!(merged["externalIdentitiesMoved"], 1);
+    assert_eq!(merged["externalIdentitiesMerged"], 0);
+    assert_eq!(merged["provenanceRowsMoved"], 0);
+    assert!(merged["sourceProvenanceRowsPreserved"].as_i64().unwrap() >= 1);
+
+    let conn = Connection::open(&db).unwrap();
+    let source_import_provenance: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM record_provenance
+             WHERE record_type = 'person'
+               AND record_id = ?1
+               AND provenance_kind = 'imported'",
+            [source_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(source_import_provenance, 1);
+    let merge_metadata: String = conn
+        .query_row(
+            "SELECT metadata_json
+             FROM record_provenance
+             WHERE record_type = 'person'
+               AND record_id = ?1
+               AND provenance_kind = 'merged'
+             ORDER BY created_at DESC
+             LIMIT 1",
+            [target_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(merge_metadata.contains(source_id));
+    assert!(merge_metadata.contains("duplicate import"));
+    let target_external_identity_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM external_identities
+             WHERE entity_type = 'person' AND entity_id = ?1",
+            [target_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(target_external_identity_count, 2);
+    let source_external_identity_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM external_identities
+             WHERE entity_type = 'person' AND entity_id = ?1",
+            [source_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(source_external_identity_count, 0);
+}
+
+#[test]
 fn merge_person_refuses_to_merge_away_self() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
@@ -1872,6 +2109,70 @@ fn person_contact_commands_and_phone_move_relink_participants() {
         )
         .unwrap();
     assert_eq!(participant_owner, right["id"].as_str().unwrap());
+}
+
+#[test]
+fn repair_person_phone_move_rejects_third_active_owner() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let wrong = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Wrong Phone Owner",
+            "--phone",
+            "+1 555 0100",
+        ],
+    );
+    let right = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Right Phone Owner",
+        ],
+    );
+    let third = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Third Phone Owner",
+        ],
+    );
+    let conn = Connection::open(&db).unwrap();
+    conn.execute(
+        "INSERT INTO person_phones (id, person_id, phone, normalized_phone)
+         VALUES ('third-owner-phone', ?1, '+1 555 0100', '15550100')",
+        [third["id"].as_str().unwrap()],
+    )
+    .unwrap();
+    drop(conn);
+
+    let out = run(
+        &db,
+        &[
+            "--json",
+            "repair",
+            "person-phone",
+            "move",
+            "--phone",
+            "+1 555 0100",
+            "--from",
+            wrong["id"].as_str().unwrap(),
+            "--to",
+            right["id"].as_str().unwrap(),
+        ],
+    );
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("also owned by active person"));
 }
 
 #[test]
