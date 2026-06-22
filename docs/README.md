@@ -23,6 +23,7 @@ including a graph view centered on the user.
 - [Design System](design-system.md)
 - [Frontend Architecture](frontend-architecture.md)
 - [MVP Plan](mvp-plan.md)
+- [macOS Distribution Builds](macos-distribution.md)
 - [Implementation Plans](plans/00-overview.md)
 - [Open Questions](open-questions.md)
 

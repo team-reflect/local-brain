@@ -1,0 +1,122 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: Create the GitHub release as a draft for review
+        type: boolean
+        default: false
+  push:
+    tags: [v*]
+
+# Never run two releases at once, and never cancel one mid-notarization.
+# Queue instead: a cancelled run can leave a half-published release behind.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+# `gh release create` pushes the v<version> tag and uploads the DMG.
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    name: Build / sign / notarize / publish (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Unlike CI, credentials stay: publish preflights run `git ls-remote`
+          # against origin. Full history makes tag checkouts branch-aware too.
+          persist-credentials: true
+          fetch-depth: 0
+
+      # The release is tagged v<version> from tauri.conf.json regardless of
+      # the pushed tag, so a mismatch would publish under the wrong name.
+      - name: Verify the pushed tag matches tauri.conf.json
+        if: github.ref_type == 'tag'
+        run: |
+          version="$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)"
+          if [ "$GITHUB_REF_NAME" != "v${version}" ]; then
+            echo "::error::pushed tag ${GITHUB_REF_NAME} but tauri.conf.json says ${version} - fix the tag, or bump the version (and src-tauri/Cargo.toml)"
+            exit 1
+          fi
+
+      # Without the certificate, signing only fails at codesign time after the
+      # whole Rust build. Check every required secret up front instead.
+      # docs/macos-distribution.md describes how to produce each one.
+      - name: Verify release secrets are configured
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+        run: |
+          missing=()
+          for name in APPLE_SIGNING_IDENTITY APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if { [ -z "$APPLE_API_KEY" ] || [ -z "$APPLE_API_ISSUER" ] || [ -z "$APPLE_API_KEY_CONTENT" ]; } &&
+            { [ -z "$APPLE_ID" ] || [ -z "$APPLE_PASSWORD" ]; }; then
+            missing+=("APPLE_API_KEY+APPLE_API_ISSUER+APPLE_API_KEY_CONTENT (or APPLE_ID+APPLE_PASSWORD)")
+          fi
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::missing release secret(s): ${missing[*]} - see docs/macos-distribution.md"
+            exit 1
+          fi
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - name: Install Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          cache-on-failure: true
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The release script takes APPLE_API_KEY_PATH (a .p8 file on disk), so
+      # materialize the key content outside the workspace.
+      - name: Stage the App Store Connect API key
+        env:
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
+        run: |
+          if [ -n "$APPLE_API_KEY_CONTENT" ]; then
+            printf '%s\n' "$APPLE_API_KEY_CONTENT" > "$RUNNER_TEMP/apple-api-key.p8"
+            echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/apple-api-key.p8" >> "$GITHUB_ENV"
+          fi
+
+      # Tauri imports APPLE_CERTIFICATE into a temporary keychain, signs and
+      # notarizes the .app; the script then notarizes + staples the DMG, runs
+      # Gatekeeper checks, and creates the GitHub release.
+      - name: Build, sign, notarize and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Pass the boolean flag through an env variable so the shell never
+          # interpolates ${{ }} expressions directly into the run command.
+          DRAFT_FLAG: ${{ inputs.draft && '--draft' || '' }}
+        run: pnpm release:macos publish $DRAFT_FLAG
