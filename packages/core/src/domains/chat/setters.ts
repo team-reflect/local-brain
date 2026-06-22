@@ -2,6 +2,7 @@ import { db } from '../../db/client'
 import { batch, execute } from '../../db/commands'
 import { newId } from '../../db/id'
 import { nowIso } from '../../db/time'
+import { squish } from '../../text/normalize'
 import type { ChatRole, ChatStatus } from './getters'
 
 export interface NewChatConversation {
@@ -42,6 +43,18 @@ export async function createConversation(input: NewChatConversation = {}): Promi
     }),
   )
   return id
+}
+
+export function updateConversationTitle(id: string, title: string): Promise<number> {
+  const normalized = squish(title)
+  if (!normalized) return Promise.resolve(0)
+  return execute(
+    db
+      .updateTable('chatConversations')
+      .set({ title: normalized })
+      .where('id', '=', id)
+      .where('archivedAt', 'is', null),
+  )
 }
 
 export async function appendChatMessage(input: NewChatMessage): Promise<string> {

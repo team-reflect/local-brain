@@ -3,9 +3,11 @@ import {
   appendChatMessage,
   archiveConversation,
   createConversation,
+  getConversation,
   listConversations,
   listMessages,
   updateChatMessageSnapshot,
+  updateConversationTitle,
 } from '../index'
 import { freshDatabase, installSqliteBridge } from './sqlite-harness.mjs'
 
@@ -229,5 +231,38 @@ describe('Chat persistence', () => {
       'chat-archived',
       'chat-open',
     ])
+  })
+
+  it('updates a conversation title without changing sidebar ordering timestamp', async () => {
+    await createConversation({ id: 'chat-1', title: 'What did Maya promise?' })
+    const before = await getConversation('chat-1')
+
+    const count = await updateConversationTitle('chat-1', '  Maya   Budget \n Promise.  ')
+    const after = await getConversation('chat-1')
+
+    expect(count).toBe(1)
+    expect(after?.title).toBe('Maya Budget Promise.')
+    expect(after?.updatedAt).toBe(before?.updatedAt)
+  })
+
+  it('does not update archived conversation titles', async () => {
+    await createConversation({ id: 'chat-1', title: 'Original' })
+    await archiveConversation('chat-1', '2026-06-19T00:00:00.000Z')
+
+    const count = await updateConversationTitle('chat-1', 'Generated')
+    const conversation = await getConversation('chat-1')
+
+    expect(count).toBe(0)
+    expect(conversation?.title).toBe('Original')
+  })
+
+  it('ignores blank conversation titles', async () => {
+    await createConversation({ id: 'chat-1', title: 'Original' })
+
+    const count = await updateConversationTitle('chat-1', '   \n ')
+    const conversation = await getConversation('chat-1')
+
+    expect(count).toBe(0)
+    expect(conversation?.title).toBe('Original')
   })
 })

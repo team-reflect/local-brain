@@ -87,7 +87,11 @@ export function ChatSurface({ conversationId }: { conversationId: string | undef
   const queryClient = useQueryClient()
   const deleteConversation = useDeleteConversation()
   const { navigate } = useRouter()
-  const transport = useMemo(() => createChatTransport(), [])
+  const transport = useMemo(() => createChatTransport({
+    onConversationTitleUpdated: () => {
+      void queryClient.invalidateQueries({ queryKey: ['chat-conversations'] })
+    },
+  }), [queryClient])
   const initialMessages = useMemo(() => persistedMessages(storedMessages.data), [storedMessages.data])
   const [draft, setDraft] = useState('')
   const [executingApprovalCount, setExecutingApprovalCount] = useState(0)

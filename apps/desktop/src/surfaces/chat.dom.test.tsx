@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import type { UIMessage } from 'ai'
+import { QueryClient } from '@tanstack/react-query'
 import { ChatSurface } from './chat'
 import { installFakeBridge, renderWithProviders } from '../test/utils'
 
@@ -12,6 +13,14 @@ const chatMocks = vi.hoisted(() => ({
   messages: [] as UIMessage[],
   status: 'ready' as string,
   useChatConfig: null as unknown,
+}))
+
+const transportMocks = vi.hoisted(() => ({
+  options: null as { onConversationTitleUpdated?: (conversationId: string) => void } | null,
+  transport: {
+    sendMessages: vi.fn(),
+    reconnectToStream: vi.fn(),
+  },
 }))
 
 vi.mock('@ai-sdk/react', () => ({
@@ -25,6 +34,13 @@ vi.mock('@ai-sdk/react', () => ({
       setMessages: chatMocks.setMessages,
       status: chatMocks.status,
     }
+  },
+}))
+
+vi.mock('../lib/ai/chat-transport', () => ({
+  createChatTransport: (options?: { onConversationTitleUpdated?: (conversationId: string) => void }) => {
+    transportMocks.options = options ?? null
+    return transportMocks.transport
   },
 }))
 
@@ -91,6 +107,7 @@ describe('ChatSurface', () => {
     chatMocks.status = 'ready'
     chatMocks.useChatConfig = null
     chatMocks.setMessages.mockImplementation(() => undefined)
+    transportMocks.options = null
     chatMocks.sendMessage.mockResolvedValue(undefined)
     installChatBridgeWithProvider()
   })
@@ -130,6 +147,16 @@ describe('ChatSurface', () => {
 
     const config = chatMocks.useChatConfig as Record<string, unknown>
     expect(config['sendAutomaticallyWhen']).toEqual(expect.any(Function))
+  })
+
+  it('invalidates the conversation rail when a generated title is saved', async () => {
+    await renderReadyChat()
+    const invalidateSpy = vi.spyOn(QueryClient.prototype, 'invalidateQueries')
+
+    transportMocks.options?.onConversationTitleUpdated?.('chat-1')
+
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['chat-conversations'] })
+    invalidateSpy.mockRestore()
   })
 
   it('renders settled assistant text as markdown (bold and list)', async () => {

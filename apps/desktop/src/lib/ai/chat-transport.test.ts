@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { UIMessage } from 'ai'
 import { createChatTransport } from './chat-transport'
 
@@ -14,10 +14,12 @@ const coreMocks = vi.hoisted(() => ({
   keychainGet: vi.fn(),
   listProjects: vi.fn(),
   localDateString: vi.fn(),
+  updateConversationTitle: vi.fn(),
 }))
 
 const aiMocks = vi.hoisted(() => ({
   convertToModelMessages: vi.fn(),
+  generateText: vi.fn(),
   streamText: vi.fn(),
 }))
 
@@ -34,6 +36,7 @@ vi.mock('@local-brain/core', () => ({
   keychainGet: coreMocks.keychainGet,
   listProjects: coreMocks.listProjects,
   localDateString: coreMocks.localDateString,
+  updateConversationTitle: coreMocks.updateConversationTitle,
 }))
 
 vi.mock('@ai-sdk/openai', () => ({
@@ -53,6 +56,7 @@ vi.mock('ai', async (importActual) => {
   return {
     ...actual,
     convertToModelMessages: aiMocks.convertToModelMessages,
+    generateText: aiMocks.generateText,
     streamText: aiMocks.streamText,
     stepCountIs: (n: number) => ({ type: 'stepCount', stepCount: n }),
   }
@@ -94,6 +98,28 @@ const pendingApprovalMessage = {
   ],
 } as unknown as UIMessage
 
+async function settleBackgroundWork(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  await Promise.resolve()
+}
+
+async function eventually(assertion: () => void): Promise<void> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      assertion()
+      return
+    } catch (error) {
+      lastError = error
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+  }
+  if (lastError instanceof Error) throw lastError
+  assertion()
+}
+
 describe('createChatTransport', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -107,6 +133,7 @@ describe('createChatTransport', () => {
     ])
     coreMocks.buildChatSystemPrompt.mockReturnValue('You are Local Brain. Active projects:\n- Atlas [active]')
     coreMocks.buildChatTools.mockReturnValue(stubTools)
+    coreMocks.updateConversationTitle.mockResolvedValue(1)
     coreMocks.getModelSettings.mockResolvedValue({
       providers: [{ id: 'provider-1', provider: 'openai', model: 'gpt-5.5', keyHint: '12345' }],
       defaultProviderId: 'provider-1',
@@ -121,6 +148,7 @@ describe('createChatTransport', () => {
     })
     coreMocks.keychainGet.mockResolvedValue('sk-test')
     aiMocks.convertToModelMessages.mockResolvedValue([{ role: 'user', content: 'What did Maya promise?' }])
+    aiMocks.generateText.mockResolvedValue({ output: { title: '"Maya Budget!"' } })
     aiMocks.streamText.mockReturnValue({
       toUIMessageStream: (options: {
         generateMessageId?: () => string
@@ -141,6 +169,10 @@ describe('createChatTransport', () => {
         return new ReadableStream({ start: (controller) => controller.close() })
       },
     })
+  })
+
+  afterEach(async () => {
+    await settleBackgroundWork()
   })
 
   it('persists the user turn, loads project context, streams with tools, and persists assistant turn', async () => {
@@ -188,6 +220,51 @@ describe('createChatTransport', () => {
         model: 'openai/gpt-5.5',
       }),
     )
+    await eventually(() => {
+      expect(aiMocks.generateText).toHaveBeenCalledTimes(1)
+      expect(coreMocks.updateConversationTitle).toHaveBeenCalledWith('chat-1', 'Maya Budget')
+    })
+  })
+
+  it('notifies callers after saving a generated title', async () => {
+    const onConversationTitleUpdated = vi.fn()
+    const transport = createChatTransport({ onConversationTitleUpdated })
+
+    await transport.sendMessages({
+      trigger: 'submit-message',
+      chatId: 'chat-1',
+      messageId: undefined,
+      messages: [userMessage],
+      abortSignal: undefined,
+    })
+
+    await eventually(() => {
+      expect(onConversationTitleUpdated).toHaveBeenCalledWith('chat-1')
+    })
+  })
+
+  it('skips generated titles for existing conversations', async () => {
+    coreMocks.getConversation.mockResolvedValue({
+      id: 'chat-1',
+      title: 'Existing',
+      createdAt: '2026-06-19T00:00:00.000Z',
+      updatedAt: '2026-06-19T00:00:00.000Z',
+      archivedAt: null,
+    })
+    const transport = createChatTransport()
+
+    await transport.sendMessages({
+      trigger: 'submit-message',
+      chatId: 'chat-1',
+      messageId: undefined,
+      messages: [userMessage],
+      abortSignal: undefined,
+    })
+    await settleBackgroundWork()
+
+    expect(coreMocks.createConversation).not.toHaveBeenCalled()
+    expect(aiMocks.generateText).not.toHaveBeenCalled()
+    expect(coreMocks.updateConversationTitle).not.toHaveBeenCalled()
   })
 
   it('persists an assistant error turn when no provider is configured', async () => {
@@ -210,6 +287,30 @@ describe('createChatTransport', () => {
         error: expect.stringContaining('No AI provider'),
       }),
     )
+    await settleBackgroundWork()
+    expect(aiMocks.generateText).not.toHaveBeenCalled()
+    expect(coreMocks.updateConversationTitle).not.toHaveBeenCalled()
+  })
+
+  it('swallows generated title failures', async () => {
+    aiMocks.generateText.mockRejectedValueOnce(new Error('title failed'))
+    const onConversationTitleUpdated = vi.fn()
+    const transport = createChatTransport({ onConversationTitleUpdated })
+
+    await transport.sendMessages({
+      trigger: 'submit-message',
+      chatId: 'chat-1',
+      messageId: undefined,
+      messages: [userMessage],
+      abortSignal: undefined,
+    })
+    await eventually(() => {
+      expect(aiMocks.generateText).toHaveBeenCalledTimes(1)
+    })
+    await settleBackgroundWork()
+
+    expect(coreMocks.updateConversationTitle).not.toHaveBeenCalled()
+    expect(onConversationTitleUpdated).not.toHaveBeenCalled()
   })
 
   it('keeps approval-paused assistant turns streaming when the model stream finishes', async () => {
@@ -247,6 +348,9 @@ describe('createChatTransport', () => {
         status: 'streaming',
       }),
     )
+    await eventually(() => {
+      expect(coreMocks.updateConversationTitle).toHaveBeenCalledWith('chat-1', 'Maya Budget')
+    })
   })
 
   it('continues after tool approval without persisting a duplicate user turn', async () => {
@@ -272,5 +376,7 @@ describe('createChatTransport', () => {
         contentText: 'Maya promised the revised budget.',
       }),
     )
+    await settleBackgroundWork()
+    expect(aiMocks.generateText).not.toHaveBeenCalled()
   })
 })
