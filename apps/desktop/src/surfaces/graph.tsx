@@ -1,13 +1,5 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
-  type ReactNode,
-} from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { Graph, GraphNodeKind } from '@local-brain/core'
 import { Checkbox } from '../components/ui/checkbox'
 import { EmptyState } from '../components/empty-state'
@@ -15,7 +7,8 @@ import { Loading } from '../components/loading'
 import { PageHead } from '../components/page-head'
 import { cn } from '../lib/utils'
 import { useGraph } from '../lib/queries'
-import { layoutGraph, type GraphLayout, type PositionedNode } from './graph-layout'
+import type { GraphLayout, PositionedNode } from './graph-layout'
+import { useAsyncGraphLayout } from './use-async-graph-layout'
 import type { Route } from '../routing/route'
 import { useRouter } from '../routing/router'
 
@@ -212,7 +205,8 @@ export function GraphSurface({
     }
   }, [graph.data, visibleKinds])
 
-  const layout = useMemo(() => (filteredGraph ? layoutGraph(filteredGraph) : null), [filteredGraph])
+  const layoutState = useAsyncGraphLayout(filteredGraph)
+  const layout = layoutState.layout
 
   const toggleKind = (kind: VisibleGraphFilterKind): void => {
     setVisibleKinds((current) => {
@@ -371,14 +365,18 @@ export function GraphSurface({
               </label>
             ))}
           </div>
-          {!layout || layout.nodes.length === 0 ? (
+          {layoutState.status === 'idle' ? (
             <div className="flex h-full min-h-[24rem] items-center justify-center pt-48 sm:pt-0 sm:pr-48">
               <EmptyState
                 title="All node types hidden"
                 hint="Turn on a node type to draw the graph."
               />
             </div>
-          ) : (
+          ) : layoutState.status === 'pending' ? (
+            <div className="flex h-full min-h-[24rem] items-center justify-center pt-48 sm:pt-0 sm:pr-48">
+              <Loading />
+            </div>
+          ) : layout ? (
             <svg
               ref={svgRef}
               viewBox={`0 0 ${layout.width} ${layout.height}`}
@@ -491,7 +489,7 @@ export function GraphSurface({
                 })}
               </g>
             </svg>
-          )}
+          ) : null}
         </div>
       )}
     </div>
