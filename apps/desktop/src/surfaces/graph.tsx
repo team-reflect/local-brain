@@ -1,14 +1,5 @@
-import {
-  startTransition,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
-  type ReactNode,
-} from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { Graph, GraphNodeKind } from '@local-brain/core'
 import { Checkbox } from '../components/ui/checkbox'
 import { EmptyState } from '../components/empty-state'
@@ -16,7 +7,8 @@ import { Loading } from '../components/loading'
 import { PageHead } from '../components/page-head'
 import { cn } from '../lib/utils'
 import { useGraph } from '../lib/queries'
-import { layoutGraph, type GraphLayout, type PositionedNode } from './graph-layout'
+import type { GraphLayout, PositionedNode } from './graph-layout'
+import { useAsyncGraphLayout } from './use-async-graph-layout'
 import type { Route } from '../routing/route'
 import { useRouter } from '../routing/router'
 
@@ -105,54 +97,6 @@ function interactionEdgeWidth(weight: number | undefined): number {
 
 function clampZoom(scale: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale))
-}
-
-function scheduleAfterPaint(callback: () => void): () => void {
-  let timeoutId: number | undefined
-  let frameId: number | undefined
-
-  const run = (): void => {
-    timeoutId = window.setTimeout(callback, 0)
-  }
-
-  if (typeof window.requestAnimationFrame === 'function') {
-    frameId = window.requestAnimationFrame(run)
-  } else {
-    run()
-  }
-
-  return () => {
-    if (frameId !== undefined) window.cancelAnimationFrame(frameId)
-    if (timeoutId !== undefined) window.clearTimeout(timeoutId)
-  }
-}
-
-function useAsyncGraphLayout(graph: Graph | null): GraphLayout | null {
-  const [layout, setLayout] = useState<GraphLayout | null>(null)
-
-  useEffect(() => {
-    if (!graph || graph.nodes.length === 0) {
-      setLayout(null)
-      return undefined
-    }
-
-    let active = true
-    setLayout(null)
-    const cancel = scheduleAfterPaint(() => {
-      const nextLayout = layoutGraph(graph)
-      if (!active) return
-      startTransition(() => {
-        if (active) setLayout(nextLayout)
-      })
-    })
-
-    return () => {
-      active = false
-      cancel()
-    }
-  }, [graph])
-
-  return layout
 }
 
 interface FitTransform {
@@ -261,8 +205,8 @@ export function GraphSurface({
     }
   }, [graph.data, visibleKinds])
 
-  const layout = useAsyncGraphLayout(filteredGraph)
-  const hasVisibleGraphNodes = (filteredGraph?.nodes.length ?? 0) > 0
+  const layoutState = useAsyncGraphLayout(filteredGraph)
+  const layout = layoutState.layout
 
   const toggleKind = (kind: VisibleGraphFilterKind): void => {
     setVisibleKinds((current) => {
@@ -421,18 +365,18 @@ export function GraphSurface({
               </label>
             ))}
           </div>
-          {!hasVisibleGraphNodes ? (
+          {layoutState.status === 'idle' ? (
             <div className="flex h-full min-h-[24rem] items-center justify-center pt-48 sm:pt-0 sm:pr-48">
               <EmptyState
                 title="All node types hidden"
                 hint="Turn on a node type to draw the graph."
               />
             </div>
-          ) : !layout ? (
+          ) : layoutState.status === 'pending' ? (
             <div className="flex h-full min-h-[24rem] items-center justify-center pt-48 sm:pt-0 sm:pr-48">
               <Loading />
             </div>
-          ) : (
+          ) : layout ? (
             <svg
               ref={svgRef}
               viewBox={`0 0 ${layout.width} ${layout.height}`}
@@ -545,7 +489,7 @@ export function GraphSurface({
                 })}
               </g>
             </svg>
-          )}
+          ) : null}
         </div>
       )}
     </div>
