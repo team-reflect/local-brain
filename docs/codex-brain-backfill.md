@@ -170,6 +170,45 @@ If Codex says an audit is not clean, that is not always failure. Sometimes the
 right result is a cleanly documented limitation, such as a source-native chat
 handle that cannot be safely mapped to a real person yet.
 
+## Cleanup And Enrichment Passes
+
+The first pass gives Local Brain coverage. Follow-up passes make that coverage
+more useful. Good cleanup passes are narrow, evidence-led, and safe to rerun.
+
+Ask Codex to use the CLI cleanup primitives instead of editing SQLite directly:
+
+```bash
+brain --json merge person --from <duplicate-person-id> --to <canonical-person-id> \
+  --dry-run
+brain --json merge person --from <duplicate-person-id> --to <canonical-person-id> \
+  --reason "duplicate shell from backfill"
+brain --json person email add <person-id> --email <email>
+brain --json person phone add <person-id> --phone <phone>
+brain --json unlink person:<id> organization:<id> --reason "mistaken affiliation"
+brain --json archive organization <org-id> --reason "mistaken organization import"
+```
+
+For user-provided corrections, ask Codex to store a small evidence document and
+source-keyed facts before updating profiles. For example, if you say "Charlotte
+is my mother", Codex should store that statement as manual evidence, add a
+source-keyed `relationship_to_alex` fact, update Charlotte's person profile, tag
+her if useful, and rerun `brain --json import audit`.
+
+For enrichment, use a prompt like:
+
+```text
+Do a people enrichment pass. Prioritize sparse profiles, recurring participants,
+Friend CRM contacts, family and household contacts, and high-signal public
+people. Use existing brain evidence first, then contacts, Gmail, Granola, or
+public web only where the match is safe. Add summaries, relationship facts, tags,
+contact handles, organization affiliations, and source-keyed public-profile
+facts. Ledger unresolved cases and finish with import audit.
+```
+
+Unresolved is a valid finished state when identity evidence is weak. Pair labels
+such as "Laura + Chris", ambiguous first names, shared mailboxes, and opaque chat
+handles should be ledgered as unresolved rather than split into invented people.
+
 ## Common Follow-Up Requests
 
 After a broad backfill, it is often useful to ask for a narrower cleanup pass:
