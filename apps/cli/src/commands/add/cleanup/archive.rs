@@ -10,6 +10,10 @@ use crate::commands::now_iso;
 use crate::error::CliError;
 use crate::output::print_json;
 
+/// Soft-archive a person or organization (set `archived_at`) and record archive
+/// provenance with the required reason. Refuses to archive the self person, and
+/// blocks organization archival while any active person still holds a current
+/// affiliation, so callers unlink first.
 pub fn archive_record(
     conn: &mut Connection,
     json_output: bool,

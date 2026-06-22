@@ -33,6 +33,127 @@ struct AffiliationMergeRow {
 
 type ExternalIdentityConflict = (String, String, String, String, String);
 
+/// Declarative description of a one-to-many relation a person merge can move from
+/// the source person onto the target. A single spec drives BOTH the dry-run
+/// estimate ([`count_relation`]) and the applied move ([`move_relation`]), so the
+/// two can never disagree about what counts as a duplicate.
+///
+/// Two relations need bespoke movers this generic shape can't express and so are
+/// applied by hand ([`move_affiliations`] enriches the surviving row;
+/// [`move_external_identities`] treats a third-party owner as a hard error). Their
+/// dry-run counts still flow through [`count_relation`] using the specs below, so
+/// plan and apply stay in step.
+struct RelationSpec {
+    /// Table holding the relation rows.
+    table: &'static str,
+    /// Column on `table` storing the person id being moved. Usually `person_id`;
+    /// the polymorphic link tables store it in `record_id` next to a constant
+    /// `record_type = 'person'` filter (see `filters`).
+    person_col: &'static str,
+    /// Constant equality filters applied to every query, e.g.
+    /// `record_type = 'person'` for the polymorphic link tables.
+    filters: &'static [(&'static str, &'static str)],
+    /// Columns that, together, identify a row the target already owns. Compared
+    /// with `COALESCE(col, '')` so nullable keys (e.g. `role`) keep matching the
+    /// historical behaviour.
+    dedup_cols: &'static [&'static str],
+    /// Whether moving a row should bump an `updated_at` column on it.
+    touch_updated_at: bool,
+}
+
+impl RelationSpec {
+    /// Render the constant `filters` as ` AND <alias>col = 'val'` clauses. `alias`
+    /// is `""` for an unaliased table or `"source."` / `"target."` inside a join.
+    fn filter_clause(&self, alias: &str) -> String {
+        self.filters
+            .iter()
+            .map(|(col, value)| format!(" AND {alias}{col} = '{value}'"))
+            .collect()
+    }
+}
+
+const EMAILS: RelationSpec = RelationSpec {
+    table: "person_emails",
+    person_col: "person_id",
+    filters: &[],
+    dedup_cols: &["normalized_email"],
+    touch_updated_at: true,
+};
+const PHONES: RelationSpec = RelationSpec {
+    table: "person_phones",
+    person_col: "person_id",
+    filters: &[],
+    dedup_cols: &["normalized_phone"],
+    touch_updated_at: true,
+};
+const PARTICIPANTS: RelationSpec = RelationSpec {
+    table: "interaction_participants",
+    person_col: "person_id",
+    filters: &[],
+    dedup_cols: &["interaction_id"],
+    touch_updated_at: false,
+};
+const DOCUMENT_LINKS: RelationSpec = RelationSpec {
+    table: "document_people",
+    person_col: "person_id",
+    filters: &[],
+    dedup_cols: &["document_id"],
+    touch_updated_at: false,
+};
+const PROJECT_LINKS: RelationSpec = RelationSpec {
+    table: "project_people",
+    person_col: "person_id",
+    filters: &[],
+    dedup_cols: &["project_id"],
+    touch_updated_at: false,
+};
+const TASK_LINKS: RelationSpec = RelationSpec {
+    table: "task_people",
+    person_col: "person_id",
+    filters: &[],
+    dedup_cols: &["task_id"],
+    touch_updated_at: false,
+};
+const ASSET_LINKS: RelationSpec = RelationSpec {
+    table: "asset_links",
+    person_col: "record_id",
+    filters: &[("record_type", "person")],
+    dedup_cols: &["asset_id", "role"],
+    touch_updated_at: false,
+};
+const MEMORY_LINKS: RelationSpec = RelationSpec {
+    table: "memory_links",
+    person_col: "record_id",
+    filters: &[("record_type", "person")],
+    dedup_cols: &["memory_id", "role"],
+    touch_updated_at: false,
+};
+const TAGGINGS: RelationSpec = RelationSpec {
+    table: "taggings",
+    person_col: "record_id",
+    filters: &[("record_type", "person")],
+    dedup_cols: &["tag_id"],
+    touch_updated_at: false,
+};
+/// Counted generically; applied by [`move_affiliations`] because of the
+/// is_current / is_primary single-row handoff and field enrichment.
+const AFFILIATIONS: RelationSpec = RelationSpec {
+    table: "affiliations",
+    person_col: "person_id",
+    filters: &[],
+    dedup_cols: &["organization_id", "title"],
+    touch_updated_at: false,
+};
+/// Counted generically; applied by [`move_external_identities`] because an
+/// identity already owned by a third entity is a hard error, not a duplicate.
+const EXTERNAL_IDENTITIES: RelationSpec = RelationSpec {
+    table: "external_identities",
+    person_col: "entity_id",
+    filters: &[("entity_type", "person")],
+    dedup_cols: &["source_id", "kind", "external_id"],
+    touch_updated_at: false,
+};
+
 #[derive(Debug, Default)]
 struct MergePlan {
     emails: MoveStats,
@@ -89,6 +210,8 @@ impl MergePlan {
             "factsMoved": self.facts,
             "aiNotesMoved": self.ai_notes,
             "sourceRecordRefsMoved": self.source_records,
+            // Always 0: provenance rows are deliberately left on the archived
+            // source as the record of where its data came from, never moved.
             "provenanceRowsMoved": 0,
             "sourceProvenanceRowsPreserved": self.source_provenance_rows_preserved,
             "profileFieldsFilled": self.profile_fields_filled,
@@ -108,34 +231,46 @@ fn is_self_person(conn: &Connection, person_id: &str) -> Result<bool, CliError> 
 }
 
 fn count(conn: &Connection, sql: &str, args: &[&str]) -> Result<usize, CliError> {
-    let mut stmt = conn.prepare(sql)?;
-    let value: i64 = match args {
-        [] => stmt.query_row([], |row| row.get(0))?,
-        [a] => stmt.query_row(params![a], |row| row.get(0))?,
-        [a, b] => stmt.query_row(params![a, b], |row| row.get(0))?,
-        _ => return Err(CliError::Runtime("unsupported count arity".into())),
-    };
+    let value: i64 = conn.query_row(sql, rusqlite::params_from_iter(args.iter()), |row| {
+        row.get(0)
+    })?;
     Ok(value as usize)
 }
 
-fn relation_plan(
+/// Dry-run estimate for one relation: how many rows would move versus collapse
+/// into an existing target row. Drives the merge plan from the same [`RelationSpec`]
+/// the apply step uses.
+fn count_relation(
     conn: &Connection,
-    table: &str,
-    owner_col: &str,
-    person_col: &str,
+    spec: &RelationSpec,
     from_person_id: &str,
     to_person_id: &str,
 ) -> Result<MoveStats, CliError> {
-    let total_sql = format!("SELECT COUNT(*) FROM {table} WHERE {person_col} = ?1");
+    let total_sql = format!(
+        "SELECT COUNT(*) FROM {table} WHERE {person_col} = ?1{filters}",
+        table = spec.table,
+        person_col = spec.person_col,
+        filters = spec.filter_clause(""),
+    );
+    let dedup_match = spec
+        .dedup_cols
+        .iter()
+        .map(|col| format!("COALESCE(target.{col}, '') = COALESCE(source.{col}, '')"))
+        .collect::<Vec<_>>()
+        .join(" AND ");
     let duplicate_sql = format!(
         "SELECT COUNT(*)
          FROM {table} source
-         WHERE source.{person_col} = ?1
+         WHERE source.{person_col} = ?1{source_filters}
            AND EXISTS (
              SELECT 1 FROM {table} target
-             WHERE target.{person_col} = ?2
-               AND target.{owner_col} = source.{owner_col}
-           )"
+             WHERE target.{person_col} = ?2{target_filters}
+               AND {dedup_match}
+           )",
+        table = spec.table,
+        person_col = spec.person_col,
+        source_filters = spec.filter_clause("source."),
+        target_filters = spec.filter_clause("target."),
     );
     let total = count(conn, &total_sql, &[from_person_id])?;
     let merged = count(conn, &duplicate_sql, &[from_person_id, to_person_id])?;
@@ -145,40 +280,87 @@ fn relation_plan(
     })
 }
 
-fn external_identity_plan(
+/// Apply one relation move: re-point each source row to the target, or delete it
+/// when the target already owns an equivalent row (per the spec's dedup columns).
+fn move_relation(
     conn: &Connection,
+    spec: &RelationSpec,
     from_person_id: &str,
     to_person_id: &str,
 ) -> Result<MoveStats, CliError> {
-    ensure_external_identities_mergeable(conn, from_person_id, to_person_id)?;
-    let total = count(
-        conn,
-        "SELECT COUNT(*) FROM external_identities
-         WHERE entity_type = 'person' AND entity_id = ?1",
-        &[from_person_id],
-    )?;
-    let merged = count(
-        conn,
-        "SELECT COUNT(*)
-         FROM external_identities source
-         WHERE source.entity_type = 'person'
-           AND source.entity_id = ?1
-           AND EXISTS (
-             SELECT 1 FROM external_identities target
-             WHERE target.entity_type = 'person'
-               AND target.entity_id = ?2
-               AND target.source_id = source.source_id
-               AND target.kind = source.kind
-               AND target.external_id = source.external_id
-           )",
-        &[from_person_id, to_person_id],
-    )?;
-    Ok(MoveStats {
-        moved: total.saturating_sub(merged),
-        merged,
-    })
+    let key_cols = spec.dedup_cols.join(", ");
+    let select_sql = format!(
+        "SELECT id, {key_cols} FROM {table} WHERE {person_col} = ?1{filters} ORDER BY {key_cols}, id",
+        table = spec.table,
+        person_col = spec.person_col,
+        filters = spec.filter_clause(""),
+    );
+    let rows = {
+        let mut stmt = conn.prepare(&select_sql)?;
+        let key_count = spec.dedup_cols.len();
+        let rows = stmt.query_map(params![from_person_id], |row| {
+            let id: String = row.get(0)?;
+            let mut keys = Vec::with_capacity(key_count);
+            for index in 0..key_count {
+                keys.push(row.get::<_, Option<String>>(index + 1)?);
+            }
+            Ok((id, keys))
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+
+    let dedup_match = spec
+        .dedup_cols
+        .iter()
+        .enumerate()
+        .map(|(index, col)| format!("COALESCE({col}, '') = COALESCE(?{}, '')", index + 2))
+        .collect::<Vec<_>>()
+        .join(" AND ");
+    let exists_sql = format!(
+        "SELECT EXISTS(SELECT 1 FROM {table} WHERE {person_col} = ?1{filters} AND {dedup_match})",
+        table = spec.table,
+        person_col = spec.person_col,
+        filters = spec.filter_clause(""),
+    );
+    let delete_sql = format!("DELETE FROM {} WHERE id = ?1", spec.table);
+    let update_sql = if spec.touch_updated_at {
+        format!(
+            "UPDATE {table} SET {person_col} = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+            table = spec.table,
+            person_col = spec.person_col,
+        )
+    } else {
+        format!(
+            "UPDATE {table} SET {person_col} = ?2 WHERE id = ?1",
+            table = spec.table,
+            person_col = spec.person_col,
+        )
+    };
+
+    let mut stats = MoveStats::default();
+    for (id, keys) in rows {
+        let mut exists_params: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(keys.len() + 1);
+        exists_params.push(&to_person_id);
+        for key in &keys {
+            exists_params.push(key);
+        }
+        let exists: bool = conn.query_row(
+            &exists_sql,
+            rusqlite::params_from_iter(exists_params),
+            |row| row.get(0),
+        )?;
+        if exists {
+            stats.merged += conn.execute(&delete_sql, params![id])?;
+        } else {
+            stats.moved += conn.execute(&update_sql, params![id, to_person_id])?;
+        }
+    }
+    Ok(stats)
 }
 
+/// Reject the merge (even on dry-run) when a source external identity is already
+/// claimed by some entity other than the target — that is an ownership conflict,
+/// not a duplicate to collapse.
 fn ensure_external_identities_mergeable(
     conn: &Connection,
     from_person_id: &str,
@@ -289,199 +471,40 @@ fn notes_would_append(
     Ok(source_notes != target_notes)
 }
 
+fn source_provenance_rows(conn: &Connection, from_person_id: &str) -> Result<usize, CliError> {
+    count(
+        conn,
+        "SELECT COUNT(*) FROM record_provenance WHERE record_type = 'person' AND record_id = ?1",
+        &[from_person_id],
+    )
+}
+
+/// Build the dry-run merge plan: per-relation move/merge estimates plus the
+/// profile/notes/provenance fields that describe the pre-merge state. Fails fast
+/// if external identities can't be merged (a third-party owner conflict).
 fn plan_person_merge(
     conn: &Connection,
     from_person_id: &str,
     to_person_id: &str,
 ) -> Result<MergePlan, CliError> {
-    let email_total = count(
-        conn,
-        "SELECT COUNT(*) FROM person_emails WHERE person_id = ?1",
-        &[from_person_id],
-    )?;
-    let email_merged = count(
-        conn,
-        "SELECT COUNT(*)
-         FROM person_emails source
-         WHERE source.person_id = ?1
-           AND EXISTS (
-             SELECT 1 FROM person_emails target
-             WHERE target.person_id = ?2
-               AND target.normalized_email = source.normalized_email
-           )",
-        &[from_person_id, to_person_id],
-    )?;
-    let phone_total = count(
-        conn,
-        "SELECT COUNT(*) FROM person_phones WHERE person_id = ?1",
-        &[from_person_id],
-    )?;
-    let phone_merged = count(
-        conn,
-        "SELECT COUNT(*)
-         FROM person_phones source
-         WHERE source.person_id = ?1
-           AND EXISTS (
-             SELECT 1 FROM person_phones target
-             WHERE target.person_id = ?2
-               AND target.normalized_phone = source.normalized_phone
-           )",
-        &[from_person_id, to_person_id],
-    )?;
-
-    let affiliation_total = count(
-        conn,
-        "SELECT COUNT(*) FROM affiliations WHERE person_id = ?1",
-        &[from_person_id],
-    )?;
-    let affiliation_merged = count(
-        conn,
-        "SELECT COUNT(*)
-         FROM affiliations source
-         WHERE source.person_id = ?1
-           AND EXISTS (
-             SELECT 1 FROM affiliations target
-             WHERE target.person_id = ?2
-               AND target.organization_id = source.organization_id
-               AND COALESCE(target.title, '') = COALESCE(source.title, '')
-           )",
-        &[from_person_id, to_person_id],
-    )?;
-
-    let participant_total = count(
-        conn,
-        "SELECT COUNT(*) FROM interaction_participants WHERE person_id = ?1",
-        &[from_person_id],
-    )?;
-    let participant_merged = count(
-        conn,
-        "SELECT COUNT(*)
-         FROM interaction_participants source
-         WHERE source.person_id = ?1
-           AND EXISTS (
-             SELECT 1 FROM interaction_participants target
-             WHERE target.person_id = ?2
-               AND target.interaction_id = source.interaction_id
-           )",
-        &[from_person_id, to_person_id],
-    )?;
-
-    let asset_total = count(
-        conn,
-        "SELECT COUNT(*) FROM asset_links WHERE record_type = 'person' AND record_id = ?1",
-        &[from_person_id],
-    )?;
-    let asset_merged = count(
-        conn,
-        "SELECT COUNT(*)
-         FROM asset_links source
-         WHERE source.record_type = 'person'
-           AND source.record_id = ?1
-           AND EXISTS (
-             SELECT 1 FROM asset_links target
-             WHERE target.asset_id = source.asset_id
-               AND target.record_type = 'person'
-               AND target.record_id = ?2
-               AND COALESCE(target.role, '') = COALESCE(source.role, '')
-           )",
-        &[from_person_id, to_person_id],
-    )?;
-
-    let memory_total = count(
-        conn,
-        "SELECT COUNT(*) FROM memory_links WHERE record_type = 'person' AND record_id = ?1",
-        &[from_person_id],
-    )?;
-    let memory_merged = count(
-        conn,
-        "SELECT COUNT(*)
-         FROM memory_links source
-         WHERE source.record_type = 'person'
-           AND source.record_id = ?1
-           AND EXISTS (
-             SELECT 1 FROM memory_links target
-             WHERE target.memory_id = source.memory_id
-               AND target.record_type = 'person'
-               AND target.record_id = ?2
-               AND COALESCE(target.role, '') = COALESCE(source.role, '')
-           )",
-        &[from_person_id, to_person_id],
-    )?;
-
-    let tagging_total = count(
-        conn,
-        "SELECT COUNT(*) FROM taggings WHERE record_type = 'person' AND record_id = ?1",
-        &[from_person_id],
-    )?;
-    let tagging_merged = count(
-        conn,
-        "SELECT COUNT(*)
-         FROM taggings source
-         WHERE source.record_type = 'person'
-           AND source.record_id = ?1
-           AND EXISTS (
-             SELECT 1 FROM taggings target
-             WHERE target.tag_id = source.tag_id
-               AND target.record_type = 'person'
-               AND target.record_id = ?2
-           )",
-        &[from_person_id, to_person_id],
-    )?;
-
+    ensure_external_identities_mergeable(conn, from_person_id, to_person_id)?;
     Ok(MergePlan {
-        emails: MoveStats {
-            moved: email_total.saturating_sub(email_merged),
-            merged: email_merged,
-        },
-        phones: MoveStats {
-            moved: phone_total.saturating_sub(phone_merged),
-            merged: phone_merged,
-        },
-        affiliations: MoveStats {
-            moved: affiliation_total.saturating_sub(affiliation_merged),
-            merged: affiliation_merged,
-        },
-        participants: MoveStats {
-            moved: participant_total.saturating_sub(participant_merged),
-            merged: participant_merged,
-        },
-        document_links: relation_plan(
+        emails: count_relation(conn, &EMAILS, from_person_id, to_person_id)?,
+        phones: count_relation(conn, &PHONES, from_person_id, to_person_id)?,
+        affiliations: count_relation(conn, &AFFILIATIONS, from_person_id, to_person_id)?,
+        participants: count_relation(conn, &PARTICIPANTS, from_person_id, to_person_id)?,
+        document_links: count_relation(conn, &DOCUMENT_LINKS, from_person_id, to_person_id)?,
+        project_links: count_relation(conn, &PROJECT_LINKS, from_person_id, to_person_id)?,
+        task_links: count_relation(conn, &TASK_LINKS, from_person_id, to_person_id)?,
+        asset_links: count_relation(conn, &ASSET_LINKS, from_person_id, to_person_id)?,
+        memory_links: count_relation(conn, &MEMORY_LINKS, from_person_id, to_person_id)?,
+        taggings: count_relation(conn, &TAGGINGS, from_person_id, to_person_id)?,
+        external_identities: count_relation(
             conn,
-            "document_people",
-            "document_id",
-            "person_id",
+            &EXTERNAL_IDENTITIES,
             from_person_id,
             to_person_id,
         )?,
-        project_links: relation_plan(
-            conn,
-            "project_people",
-            "project_id",
-            "person_id",
-            from_person_id,
-            to_person_id,
-        )?,
-        task_links: relation_plan(
-            conn,
-            "task_people",
-            "task_id",
-            "person_id",
-            from_person_id,
-            to_person_id,
-        )?,
-        asset_links: MoveStats {
-            moved: asset_total.saturating_sub(asset_merged),
-            merged: asset_merged,
-        },
-        memory_links: MoveStats {
-            moved: memory_total.saturating_sub(memory_merged),
-            merged: memory_merged,
-        },
-        taggings: MoveStats {
-            moved: tagging_total.saturating_sub(tagging_merged),
-            merged: tagging_merged,
-        },
-        external_identities: external_identity_plan(conn, from_person_id, to_person_id)?,
         evidence_refs: count(
             conn,
             "SELECT COUNT(*) FROM evidence_refs WHERE subject_type = 'person' AND subject_id = ?1",
@@ -505,120 +528,18 @@ fn plan_person_merge(
                (SELECT COUNT(*) FROM content_chunks WHERE source_record_type = 'person' AND source_record_id = ?1)",
             &[from_person_id],
         )?,
-        source_provenance_rows_preserved: count(
-            conn,
-            "SELECT COUNT(*) FROM record_provenance WHERE record_type = 'person' AND record_id = ?1",
-            &[from_person_id],
-        )?,
+        source_provenance_rows_preserved: source_provenance_rows(conn, from_person_id)?,
         profile_fields_filled: profile_fields_filled(conn, from_person_id, to_person_id)?,
         notes_appended: notes_would_append(conn, from_person_id, to_person_id)?,
         warnings: Vec::new(),
     })
 }
 
-fn move_contact_rows(
-    conn: &Connection,
-    table: &str,
-    normalized_col: &str,
-    from_person_id: &str,
-    to_person_id: &str,
-) -> Result<MoveStats, CliError> {
-    let sql = format!("SELECT id, {normalized_col} FROM {table} WHERE person_id = ?1");
-    let rows = {
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params![from_person_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()?
-    };
-    let mut stats = MoveStats::default();
-    for (id, normalized) in rows {
-        let exists_sql = format!(
-            "SELECT EXISTS(SELECT 1 FROM {table} WHERE person_id = ?1 AND {normalized_col} = ?2)"
-        );
-        let exists: bool =
-            conn.query_row(&exists_sql, params![to_person_id, normalized], |row| {
-                row.get(0)
-            })?;
-        if exists {
-            let delete_sql = format!("DELETE FROM {table} WHERE id = ?1");
-            stats.merged += conn.execute(&delete_sql, params![id])?;
-        } else {
-            let update_sql = format!(
-                "UPDATE {table}
-                 SET person_id = ?2,
-                     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-                 WHERE id = ?1"
-            );
-            stats.moved += conn.execute(&update_sql, params![id, to_person_id])?;
-        }
-    }
-    Ok(stats)
-}
-
-fn move_external_identities(
-    conn: &Connection,
-    from_person_id: &str,
-    to_person_id: &str,
-) -> Result<MoveStats, CliError> {
-    let rows = {
-        let mut stmt = conn.prepare(
-            "SELECT id, source_id, kind, external_id
-             FROM external_identities
-             WHERE entity_type = 'person' AND entity_id = ?1
-             ORDER BY source_id, kind, external_id, id",
-        )?;
-        let rows = stmt.query_map(params![from_person_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-            ))
-        })?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()?
-    };
-    let mut stats = MoveStats::default();
-    for (id, source_id, kind, external_id) in rows {
-        let owner: Option<(String, String)> = conn
-            .query_row(
-                "SELECT entity_type, entity_id
-                 FROM external_identities
-                 WHERE source_id = ?1
-                   AND kind = ?2
-                   AND external_id = ?3
-                   AND id <> ?4
-                 LIMIT 1",
-                params![source_id, kind, external_id, id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
-        match owner {
-            Some((entity_type, entity_id))
-                if entity_type == "person" && entity_id == to_person_id =>
-            {
-                stats.merged +=
-                    conn.execute("DELETE FROM external_identities WHERE id = ?1", params![id])?;
-            }
-            Some((entity_type, entity_id)) => {
-                return Err(CliError::Runtime(format!(
-                    "external identity {source_id}:{kind}:{external_id} is already owned by {entity_type}:{entity_id}"
-                )));
-            }
-            None => {
-                stats.moved += conn.execute(
-                    "UPDATE external_identities
-                     SET entity_id = ?2,
-                         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-                     WHERE id = ?1",
-                    params![id, to_person_id],
-                )?;
-            }
-        }
-    }
-    Ok(stats)
-}
-
+/// Move affiliations onto the target. Bespoke because at most one row may stay
+/// `is_current` / `is_primary` (the target keeps any it already has; the first
+/// eligible source row may claim a still-open slot), and because a duplicate
+/// (same org + title) is enriched — blank target fields are filled from the source
+/// — before the source row is dropped.
 fn move_affiliations(
     conn: &Connection,
     from_person_id: &str,
@@ -731,209 +652,68 @@ fn move_affiliations(
     Ok(stats)
 }
 
-fn move_relation_rows(
-    conn: &Connection,
-    table: &str,
-    owner_col: &str,
-    person_col: &str,
-    from_person_id: &str,
-    to_person_id: &str,
-) -> Result<MoveStats, CliError> {
-    let sql = format!("SELECT id, {owner_col} FROM {table} WHERE {person_col} = ?1");
-    let rows = {
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params![from_person_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()?
-    };
-    let mut stats = MoveStats::default();
-    for (id, owner_id) in rows {
-        let exists_sql = format!(
-            "SELECT EXISTS(SELECT 1 FROM {table} WHERE {owner_col} = ?1 AND {person_col} = ?2)"
-        );
-        let exists: bool = conn.query_row(&exists_sql, params![owner_id, to_person_id], |row| {
-            row.get(0)
-        })?;
-        if exists {
-            let delete_sql = format!("DELETE FROM {table} WHERE id = ?1");
-            stats.merged += conn.execute(&delete_sql, params![id])?;
-        } else {
-            let update_sql = format!("UPDATE {table} SET {person_col} = ?2 WHERE id = ?1");
-            stats.moved += conn.execute(&update_sql, params![id, to_person_id])?;
-        }
-    }
-    Ok(stats)
-}
-
-fn move_interaction_participants(
+/// Move external identities onto the target. Bespoke because an identity already
+/// claimed by some *other* entity is a hard error rather than a duplicate to
+/// collapse (the dry-run preflight in [`ensure_external_identities_mergeable`]
+/// catches the same conflict up front).
+fn move_external_identities(
     conn: &Connection,
     from_person_id: &str,
     to_person_id: &str,
 ) -> Result<MoveStats, CliError> {
     let rows = {
         let mut stmt = conn.prepare(
-            "SELECT id, interaction_id
-             FROM interaction_participants
-             WHERE person_id = ?1
-             ORDER BY interaction_id, created_at, id",
-        )?;
-        let rows = stmt.query_map(params![from_person_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()?
-    };
-    let mut stats = MoveStats::default();
-    for (id, interaction_id) in rows {
-        let exists: bool = conn.query_row(
-            "SELECT EXISTS(
-               SELECT 1 FROM interaction_participants
-               WHERE interaction_id = ?1 AND person_id = ?2
-             )",
-            params![interaction_id, to_person_id],
-            |row| row.get(0),
-        )?;
-        if exists {
-            stats.merged += conn.execute(
-                "DELETE FROM interaction_participants WHERE id = ?1",
-                params![id],
-            )?;
-        } else {
-            stats.moved += conn.execute(
-                "UPDATE interaction_participants SET person_id = ?2 WHERE id = ?1",
-                params![id, to_person_id],
-            )?;
-        }
-    }
-    Ok(stats)
-}
-
-fn move_asset_links(
-    conn: &Connection,
-    from_person_id: &str,
-    to_person_id: &str,
-) -> Result<MoveStats, CliError> {
-    let rows = {
-        let mut stmt = conn.prepare(
-            "SELECT id, asset_id, role
-             FROM asset_links
-             WHERE record_type = 'person' AND record_id = ?1
-             ORDER BY asset_id, created_at, id",
+            "SELECT id, source_id, kind, external_id
+             FROM external_identities
+             WHERE entity_type = 'person' AND entity_id = ?1
+             ORDER BY source_id, kind, external_id, id",
         )?;
         let rows = stmt.query_map(params![from_person_id], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
             ))
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()?
     };
     let mut stats = MoveStats::default();
-    for (id, asset_id, role) in rows {
-        let exists: bool = conn.query_row(
-            "SELECT EXISTS(
-               SELECT 1 FROM asset_links
-               WHERE asset_id = ?1
-                 AND record_type = 'person'
-                 AND record_id = ?2
-                 AND COALESCE(role, '') = COALESCE(?3, '')
-             )",
-            params![asset_id, to_person_id, role.as_deref()],
-            |row| row.get(0),
-        )?;
-        if exists {
-            stats.merged += conn.execute("DELETE FROM asset_links WHERE id = ?1", params![id])?;
-        } else {
-            stats.moved += conn.execute(
-                "UPDATE asset_links SET record_id = ?2 WHERE id = ?1",
-                params![id, to_person_id],
-            )?;
-        }
-    }
-    Ok(stats)
-}
-
-fn move_memory_links(
-    conn: &Connection,
-    from_person_id: &str,
-    to_person_id: &str,
-) -> Result<MoveStats, CliError> {
-    let rows = {
-        let mut stmt = conn.prepare(
-            "SELECT id, memory_id, role
-             FROM memory_links
-             WHERE record_type = 'person' AND record_id = ?1
-             ORDER BY memory_id, created_at, id",
-        )?;
-        let rows = stmt.query_map(params![from_person_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?,
-            ))
-        })?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()?
-    };
-    let mut stats = MoveStats::default();
-    for (id, memory_id, role) in rows {
-        let exists: bool = conn.query_row(
-            "SELECT EXISTS(
-               SELECT 1 FROM memory_links
-               WHERE memory_id = ?1
-                 AND record_type = 'person'
-                 AND record_id = ?2
-                 AND COALESCE(role, '') = COALESCE(?3, '')
-             )",
-            params![memory_id, to_person_id, role.as_deref()],
-            |row| row.get(0),
-        )?;
-        if exists {
-            stats.merged += conn.execute("DELETE FROM memory_links WHERE id = ?1", params![id])?;
-        } else {
-            stats.moved += conn.execute(
-                "UPDATE memory_links SET record_id = ?2 WHERE id = ?1",
-                params![id, to_person_id],
-            )?;
-        }
-    }
-    Ok(stats)
-}
-
-fn move_taggings(
-    conn: &Connection,
-    from_person_id: &str,
-    to_person_id: &str,
-) -> Result<MoveStats, CliError> {
-    let rows = {
-        let mut stmt = conn.prepare(
-            "SELECT id, tag_id
-             FROM taggings
-             WHERE record_type = 'person' AND record_id = ?1
-             ORDER BY tag_id, created_at, id",
-        )?;
-        let rows = stmt.query_map(params![from_person_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()?
-    };
-    let mut stats = MoveStats::default();
-    for (id, tag_id) in rows {
-        let exists: bool = conn.query_row(
-            "SELECT EXISTS(
-               SELECT 1 FROM taggings
-               WHERE tag_id = ?1 AND record_type = 'person' AND record_id = ?2
-             )",
-            params![tag_id, to_person_id],
-            |row| row.get(0),
-        )?;
-        if exists {
-            stats.merged += conn.execute("DELETE FROM taggings WHERE id = ?1", params![id])?;
-        } else {
-            stats.moved += conn.execute(
-                "UPDATE taggings SET record_id = ?2 WHERE id = ?1",
-                params![id, to_person_id],
-            )?;
+    for (id, source_id, kind, external_id) in rows {
+        let owner: Option<(String, String)> = conn
+            .query_row(
+                "SELECT entity_type, entity_id
+                 FROM external_identities
+                 WHERE source_id = ?1
+                   AND kind = ?2
+                   AND external_id = ?3
+                   AND id <> ?4
+                 LIMIT 1",
+                params![source_id, kind, external_id, id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        match owner {
+            Some((entity_type, entity_id))
+                if entity_type == "person" && entity_id == to_person_id =>
+            {
+                stats.merged +=
+                    conn.execute("DELETE FROM external_identities WHERE id = ?1", params![id])?;
+            }
+            Some((entity_type, entity_id)) => {
+                return Err(CliError::Runtime(format!(
+                    "external identity {source_id}:{kind}:{external_id} is already owned by {entity_type}:{entity_id}"
+                )));
+            }
+            None => {
+                stats.moved += conn.execute(
+                    "UPDATE external_identities
+                     SET entity_id = ?2,
+                         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                     WHERE id = ?1",
+                    params![id, to_person_id],
+                )?;
+            }
         }
     }
     Ok(stats)
@@ -1045,72 +825,50 @@ fn apply_person_merge(
     to_person_id: &str,
     reason: Option<&str>,
 ) -> Result<MergePlan, CliError> {
-    let mut plan = plan_person_merge(conn, from_person_id, to_person_id)?;
+    // Fail before mutating anything if an external identity can't be merged.
+    ensure_external_identities_mergeable(conn, from_person_id, to_person_id)?;
+
+    // Snapshot the fields that describe the pre-merge source/target before any
+    // mutation, since `fill_person_profile_from_source` and the moves below would
+    // otherwise change what these report.
+    let profile_fields_filled = profile_fields_filled(conn, from_person_id, to_person_id)?;
+    let notes_appended = notes_would_append(conn, from_person_id, to_person_id)?;
+    let source_provenance_rows_preserved = source_provenance_rows(conn, from_person_id)?;
+
     fill_person_profile_from_source(conn, from_person_id, to_person_id)?;
-    plan.emails = move_contact_rows(
-        conn,
-        "person_emails",
-        "normalized_email",
-        from_person_id,
-        to_person_id,
-    )?;
-    plan.phones = move_contact_rows(
-        conn,
-        "person_phones",
-        "normalized_phone",
-        from_person_id,
-        to_person_id,
-    )?;
+
+    let emails = move_relation(conn, &EMAILS, from_person_id, to_person_id)?;
+    let phones = move_relation(conn, &PHONES, from_person_id, to_person_id)?;
     normalize_primary_email(conn, to_person_id)?;
     normalize_primary_phone(conn, to_person_id)?;
-    plan.affiliations = move_affiliations(conn, from_person_id, to_person_id)?;
+    let affiliations = move_affiliations(conn, from_person_id, to_person_id)?;
     sync_person_current_affiliation(conn, to_person_id)?;
     sync_person_current_affiliation(conn, from_person_id)?;
-    plan.participants = move_interaction_participants(conn, from_person_id, to_person_id)?;
-    plan.document_links = move_relation_rows(
-        conn,
-        "document_people",
-        "document_id",
-        "person_id",
-        from_person_id,
-        to_person_id,
-    )?;
-    plan.project_links = move_relation_rows(
-        conn,
-        "project_people",
-        "project_id",
-        "person_id",
-        from_person_id,
-        to_person_id,
-    )?;
-    plan.task_links = move_relation_rows(
-        conn,
-        "task_people",
-        "task_id",
-        "person_id",
-        from_person_id,
-        to_person_id,
-    )?;
-    plan.asset_links = move_asset_links(conn, from_person_id, to_person_id)?;
-    plan.memory_links = move_memory_links(conn, from_person_id, to_person_id)?;
-    plan.taggings = move_taggings(conn, from_person_id, to_person_id)?;
+    let participants = move_relation(conn, &PARTICIPANTS, from_person_id, to_person_id)?;
+    let document_links = move_relation(conn, &DOCUMENT_LINKS, from_person_id, to_person_id)?;
+    let project_links = move_relation(conn, &PROJECT_LINKS, from_person_id, to_person_id)?;
+    let task_links = move_relation(conn, &TASK_LINKS, from_person_id, to_person_id)?;
+    let asset_links = move_relation(conn, &ASSET_LINKS, from_person_id, to_person_id)?;
+    let memory_links = move_relation(conn, &MEMORY_LINKS, from_person_id, to_person_id)?;
+    let taggings = move_relation(conn, &TAGGINGS, from_person_id, to_person_id)?;
+    let external_identities = move_external_identities(conn, from_person_id, to_person_id)?;
 
-    plan.external_identities = move_external_identities(conn, from_person_id, to_person_id)?;
     super::super::participants::recompute_relationship_intelligence(conn, to_person_id)?;
     super::super::participants::recompute_relationship_intelligence(conn, from_person_id)?;
-    plan.evidence_refs = conn.execute(
+
+    let evidence_refs = conn.execute(
         "UPDATE evidence_refs SET subject_id = ?2
          WHERE subject_type = 'person' AND subject_id = ?1",
         params![from_person_id, to_person_id],
     )?;
-    plan.facts = conn.execute(
+    let facts = conn.execute(
         "UPDATE extracted_facts
          SET subject_id = ?2,
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
          WHERE subject_type = 'person' AND subject_id = ?1",
         params![from_person_id, to_person_id],
     )?;
-    plan.ai_notes = conn.execute(
+    let ai_notes = conn.execute(
         "UPDATE ai_notes
          SET subject_id = ?2,
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -1137,7 +895,7 @@ fn apply_person_merge(
          WHERE source_record_type = 'person' AND source_record_id = ?1",
         params![from_person_id, to_person_id],
     )?;
-    plan.source_records = source_facts + source_tasks + source_chunks;
+    let source_records = source_facts + source_tasks + source_chunks;
     refresh_person_chunks(conn, to_person_id)?;
     let now = now_iso(conn)?;
     conn.execute(
@@ -1149,9 +907,34 @@ fn apply_person_merge(
     )?;
     insert_merge_provenance(conn, from_person_id, to_person_id, reason)?;
     insert_cleanup_provenance(conn, "person", from_person_id, "archived", reason)?;
-    Ok(plan)
+
+    Ok(MergePlan {
+        emails,
+        phones,
+        affiliations,
+        participants,
+        document_links,
+        project_links,
+        task_links,
+        asset_links,
+        memory_links,
+        taggings,
+        external_identities,
+        evidence_refs,
+        facts,
+        ai_notes,
+        source_records,
+        source_provenance_rows_preserved,
+        profile_fields_filled,
+        notes_appended,
+        warnings: Vec::new(),
+    })
 }
 
+/// Merge a duplicate person into a canonical target: move every handle, link,
+/// and reference onto the target, fill blank profile fields, then soft-archive
+/// the source. `--dry-run` reports the same plan without writing. Refuses to merge
+/// the self person away. Provenance rows stay on the archived source.
 pub fn merge_person(
     conn: &mut Connection,
     json_output: bool,
@@ -1169,8 +952,8 @@ pub fn merge_person(
             "cannot merge away the self person; merge duplicates into self instead".into(),
         ));
     }
-    let plan = plan_person_merge(conn, args.from_person_id, args.to_person_id)?;
     if args.dry_run {
+        let plan = plan_person_merge(conn, args.from_person_id, args.to_person_id)?;
         if json_output {
             return print_json(&plan.json(true, args.from_person_id, args.to_person_id));
         }
