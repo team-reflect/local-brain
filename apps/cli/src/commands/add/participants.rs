@@ -532,22 +532,52 @@ pub(super) fn relink_participants_for_handle(
     display_handle: Option<&str>,
     display_name: Option<&str>,
 ) -> Result<RelinkResult, CliError> {
+    let is_phone_handle = !normalized_handle.contains('@')
+        && normalize_phone(Some(normalized_handle)).as_deref() == Some(normalized_handle);
     let rows = {
         let mut stmt = conn.prepare(
-            "SELECT id, interaction_id
+            "SELECT id, interaction_id, normalized_handle
              FROM interaction_participants
-             WHERE normalized_handle = ?1
+             WHERE normalized_handle IS NOT NULL
+               AND (
+                 normalized_handle = ?1
+                 OR ?3 = 1
+               )
                AND (
                  person_id IS NULL
                  OR (?2 IS NOT NULL AND person_id = ?2)
                )
              ORDER BY interaction_id, created_at, id",
         )?;
-        let rows = stmt.query_map(params![normalized_handle, from_person_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()?
-    };
+        let rows = stmt.query_map(
+            params![
+                normalized_handle,
+                from_person_id,
+                i64::from(is_phone_handle)
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )?;
+        let mut matched = Vec::new();
+        for row in rows {
+            let (id, interaction_id, row_handle) = row?;
+            let exact_match = row_handle.as_deref() == Some(normalized_handle);
+            let legacy_phone_match = is_phone_handle
+                && !row_handle
+                    .as_deref()
+                    .is_some_and(|handle| handle.contains('@'))
+                && normalize_phone(row_handle.as_deref()).as_deref() == Some(normalized_handle);
+            if exact_match || legacy_phone_match {
+                matched.push((id, interaction_id));
+            }
+        }
+        Ok::<_, rusqlite::Error>(matched)
+    }?;
 
     let mut by_interaction: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (id, interaction_id) in rows {
@@ -587,9 +617,16 @@ pub(super) fn relink_participants_for_handle(
                    THEN ?3 ELSE handle END,
                  display_name = CASE
                    WHEN (display_name IS NULL OR trim(display_name) = '') AND ?4 IS NOT NULL
-                   THEN ?4 ELSE display_name END
+                   THEN ?4 ELSE display_name END,
+                 normalized_handle = ?5
              WHERE id = ?1",
-            params![keep, person_id, display_handle, display_name],
+            params![
+                keep,
+                person_id,
+                display_handle,
+                display_name,
+                normalized_handle
+            ],
         )?;
         for id in ids {
             merged_rows += conn.execute(

@@ -1700,6 +1700,14 @@ fn merge_person_dedupes_conflicts_and_preserves_source_provenance() {
             org["id"].as_str().unwrap(),
             "--title",
             "Advisor",
+            "--department",
+            "Board",
+            "--role",
+            "Strategic Advisor",
+            "--role-family",
+            "advisory",
+            "--seniority",
+            "senior",
             "--current",
         ],
     );
@@ -1856,15 +1864,54 @@ fn merge_person_dedupes_conflicts_and_preserves_source_provenance() {
         )
         .unwrap();
     assert_eq!(source_external_identity_count, 0);
-    let (current_org, current_title): (Option<String>, Option<String>) = conn
+    type PersonCurrentFields = (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    );
+    let (current_org, current_title, current_department, role_family, seniority): PersonCurrentFields = conn
         .query_row(
-            "SELECT current_organization_id, current_title FROM people WHERE id = ?1",
+            "SELECT current_organization_id, current_title, current_department,
+                    role_family, seniority
+             FROM people
+             WHERE id = ?1",
             [target_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
         )
         .unwrap();
     assert_eq!(current_org.as_deref(), org["id"].as_str());
     assert_eq!(current_title.as_deref(), Some("Advisor"));
+    assert_eq!(current_department.as_deref(), Some("Board"));
+    assert_eq!(role_family.as_deref(), Some("advisory"));
+    assert_eq!(seniority.as_deref(), Some("senior"));
+    let (department, role, affiliation_role_family, affiliation_seniority): (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = conn
+        .query_row(
+            "SELECT department, role, role_family, seniority
+             FROM affiliations
+             WHERE person_id = ?1 AND organization_id = ?2 AND title = 'Advisor'",
+            (target_id, org["id"].as_str().unwrap()),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(department.as_deref(), Some("Board"));
+    assert_eq!(role.as_deref(), Some("Strategic Advisor"));
+    assert_eq!(affiliation_role_family.as_deref(), Some("advisory"));
+    assert_eq!(affiliation_seniority.as_deref(), Some("senior"));
 }
 
 #[test]
@@ -2134,7 +2181,10 @@ fn person_contact_commands_and_phone_move_relink_participants() {
     );
     let conn = Connection::open(&db).unwrap();
     conn.execute(
-        "UPDATE interaction_participants SET person_id = ?1 WHERE normalized_handle = '15550100'",
+        "UPDATE interaction_participants
+         SET person_id = ?1,
+             normalized_handle = '+1 (555) 0100'
+         WHERE normalized_handle = '15550100'",
         [wrong["id"].as_str().unwrap()],
     )
     .unwrap();
@@ -2166,14 +2216,100 @@ fn person_contact_commands_and_phone_move_relink_participants() {
         )
         .unwrap();
     assert_eq!(phone_owner, right["id"].as_str().unwrap());
-    let participant_owner: String = conn
+    let (participant_owner, participant_handle): (String, String) = conn
         .query_row(
-            "SELECT person_id FROM interaction_participants WHERE normalized_handle = '15550100'",
+            "SELECT person_id, normalized_handle
+             FROM interaction_participants
+             WHERE handle = '+1 555 0100'",
             [],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
     assert_eq!(participant_owner, right["id"].as_str().unwrap());
+    assert_eq!(participant_handle, "15550100");
+}
+
+#[test]
+fn repair_participants_relink_matches_legacy_phone_handles() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let wrong = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Wrong Participant",
+            "--phone",
+            "+1 555 0100",
+        ],
+    );
+    let right = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Right Participant",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "message",
+            "--title",
+            "Legacy SMS import",
+            "--text",
+            "Readable source body.",
+            "--participant",
+            "from:Wrong Participant <+1 555 0100>",
+        ],
+    );
+    let conn = Connection::open(&db).unwrap();
+    conn.execute(
+        "UPDATE interaction_participants
+         SET person_id = ?1,
+             normalized_handle = '+1 (555) 0100'
+         WHERE normalized_handle = '15550100'",
+        [wrong["id"].as_str().unwrap()],
+    )
+    .unwrap();
+    drop(conn);
+
+    let relinked = run_json(
+        &db,
+        &[
+            "--json",
+            "repair",
+            "participants",
+            "relink",
+            "--handle",
+            "+1 555 0100",
+            "--person",
+            right["id"].as_str().unwrap(),
+            "--from-person",
+            wrong["id"].as_str().unwrap(),
+        ],
+    );
+    assert_eq!(relinked["participantsRelinked"], 1);
+    let conn = Connection::open(&db).unwrap();
+    let (participant_owner, participant_handle): (String, String) = conn
+        .query_row(
+            "SELECT person_id, normalized_handle
+             FROM interaction_participants
+             WHERE handle = '+1 555 0100'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(participant_owner, right["id"].as_str().unwrap());
+    assert_eq!(participant_handle, "15550100");
 }
 
 #[test]

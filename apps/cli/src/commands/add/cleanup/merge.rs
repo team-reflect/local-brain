@@ -18,6 +18,19 @@ struct MoveStats {
     merged: usize,
 }
 
+struct AffiliationMergeRow {
+    id: String,
+    organization_id: String,
+    title: Option<String>,
+    title_key: String,
+    department: Option<String>,
+    role: Option<String>,
+    role_family: Option<String>,
+    seniority: Option<String>,
+    is_current: i64,
+    is_primary: i64,
+}
+
 #[derive(Debug, Default)]
 struct MergePlan {
     emails: MoveStats,
@@ -581,26 +594,32 @@ fn move_affiliations(
     )?;
     let rows = {
         let mut stmt = conn.prepare(
-            "SELECT id, organization_id, COALESCE(title, ''), is_current, is_primary
+            "SELECT id, organization_id, title, COALESCE(title, ''), department, role,
+                    role_family, seniority, is_current, is_primary
              FROM affiliations
              WHERE person_id = ?1
              ORDER BY created_at, id",
         )?;
         let rows = stmt.query_map(params![from_person_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)?,
-                row.get::<_, i64>(4)?,
-            ))
+            Ok(AffiliationMergeRow {
+                id: row.get(0)?,
+                organization_id: row.get(1)?,
+                title: row.get(2)?,
+                title_key: row.get(3)?,
+                department: row.get(4)?,
+                role: row.get(5)?,
+                role_family: row.get(6)?,
+                seniority: row.get(7)?,
+                is_current: row.get(8)?,
+                is_primary: row.get(9)?,
+            })
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()?
     };
     let mut stats = MoveStats::default();
     let mut current_taken = target_has_current;
     let mut primary_taken = target_has_primary;
-    for (id, organization_id, title, is_current, is_primary) in rows {
+    for row in rows {
         let existing_target_id: Option<String> = conn
             .query_row(
                 "SELECT id FROM affiliations
@@ -608,33 +627,47 @@ fn move_affiliations(
                  AND organization_id = ?2
                  AND COALESCE(title, '') = ?3
                LIMIT 1",
-                params![to_person_id, organization_id, title],
+                params![to_person_id, row.organization_id, row.title_key],
                 |row| row.get(0),
             )
             .optional()?;
         if let Some(existing_target_id) = existing_target_id {
-            let promote_current = is_current == 1 && !current_taken;
-            let promote_primary = is_primary == 1 && !primary_taken;
-            if promote_current || promote_primary {
-                conn.execute(
-                    "UPDATE affiliations
-                     SET is_current = CASE WHEN ?2 = 1 THEN 1 ELSE is_current END,
-                         is_primary = CASE WHEN ?3 = 1 THEN 1 ELSE is_primary END,
-                         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-                     WHERE id = ?1",
-                    params![
-                        existing_target_id,
-                        i64::from(promote_current),
-                        i64::from(promote_primary)
-                    ],
-                )?;
-                current_taken |= promote_current;
-                primary_taken |= promote_primary;
-            }
-            stats.merged += conn.execute("DELETE FROM affiliations WHERE id = ?1", params![id])?;
+            let promote_current = row.is_current == 1 && !current_taken;
+            let promote_primary = row.is_primary == 1 && !primary_taken;
+            conn.execute(
+                "UPDATE affiliations
+                 SET title = CASE
+                       WHEN (title IS NULL OR trim(title) = '') AND ?2 IS NOT NULL THEN ?2 ELSE title END,
+                     department = CASE
+                       WHEN (department IS NULL OR trim(department) = '') AND ?3 IS NOT NULL THEN ?3 ELSE department END,
+                     role = CASE
+                       WHEN (role IS NULL OR trim(role) = '') AND ?4 IS NOT NULL THEN ?4 ELSE role END,
+                     role_family = CASE
+                       WHEN (role_family IS NULL OR trim(role_family) = '') AND ?5 IS NOT NULL THEN ?5 ELSE role_family END,
+                     seniority = CASE
+                       WHEN (seniority IS NULL OR trim(seniority) = '') AND ?6 IS NOT NULL THEN ?6 ELSE seniority END,
+                     is_current = CASE WHEN ?7 = 1 THEN 1 ELSE is_current END,
+                     is_primary = CASE WHEN ?8 = 1 THEN 1 ELSE is_primary END,
+                     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                 WHERE id = ?1",
+                params![
+                    existing_target_id,
+                    row.title.as_deref(),
+                    row.department.as_deref(),
+                    row.role.as_deref(),
+                    row.role_family.as_deref(),
+                    row.seniority.as_deref(),
+                    i64::from(promote_current),
+                    i64::from(promote_primary),
+                ],
+            )?;
+            current_taken |= promote_current;
+            primary_taken |= promote_primary;
+            stats.merged +=
+                conn.execute("DELETE FROM affiliations WHERE id = ?1", params![row.id])?;
         } else {
-            let keep_current = is_current == 1 && !current_taken;
-            let keep_primary = is_primary == 1 && !primary_taken;
+            let keep_current = row.is_current == 1 && !current_taken;
+            let keep_primary = row.is_primary == 1 && !primary_taken;
             stats.moved += conn.execute(
                 "UPDATE affiliations
                  SET person_id = ?2,
@@ -643,7 +676,7 @@ fn move_affiliations(
                      updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
                  WHERE id = ?1",
                 params![
-                    id,
+                    row.id,
                     to_person_id,
                     i64::from(keep_current),
                     i64::from(keep_primary)
