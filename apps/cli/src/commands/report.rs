@@ -388,6 +388,7 @@ fn relationship_context(conn: &Connection, limit: i64) -> Result<Vec<Value>, Cli
 fn recent_changes_since(
     conn: &Connection,
     since: &str,
+    until: Option<&str>,
     limit: usize,
 ) -> Result<Vec<Value>, CliError> {
     let mut out: Vec<Value> = Vec::new();
@@ -401,10 +402,12 @@ fn recent_changes_since(
     ] {
         let sql = format!(
             "SELECT id, {title_col}, updated_at FROM {table}
-             WHERE updated_at >= ?1 AND archived_at IS NULL"
+             WHERE updated_at >= ?1
+               AND (?2 IS NULL OR updated_at <= ?2)
+               AND archived_at IS NULL"
         );
         let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params![since], |row| {
+        let rows = stmt.query_map(params![since, until], |row| {
             Ok(json!({
                 "kind": kind,
                 "id": row.get::<_, String>(0)?,
@@ -430,10 +433,11 @@ fn recent_changes_since(
 fn daily_brief(conn: &Connection) -> Result<Value, CliError> {
     let today = today(conn)?;
     let cutoff = soon_cutoff(conn, 7)?;
-    let recent_change_since: String = conn.query_row(
-        "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?1)",
+    let (recent_change_since, recent_change_until): (String, String) = conn.query_row(
+        "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?1),
+                strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
         params![format!("-{RECENT_CHANGE_DAYS} days")],
-        |row| row.get(0),
+        |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
     let tasks = fetch_open_tasks(conn)?;
     let assignee_map = fetch_task_assignees(conn)?;
@@ -455,7 +459,8 @@ fn daily_brief(conn: &Connection) -> Result<Value, CliError> {
         }
     }
     let interactions = recent_interactions(conn, 5)?;
-    let recent_changes = recent_changes_since(conn, &recent_change_since, 12)?;
+    let recent_changes =
+        recent_changes_since(conn, &recent_change_since, Some(&recent_change_until), 12)?;
     let relationships = relationship_context(conn, 8)?;
     Ok(json!({
         "date": today,
@@ -522,7 +527,7 @@ pub fn plan_day(conn: &Connection, json: bool, limit: usize) -> Result<(), CliEr
 
 /// `brain changes --since <iso>` — records created/updated at or after a timestamp.
 pub fn changes(conn: &Connection, json: bool, since: &str, limit: usize) -> Result<(), CliError> {
-    let out = recent_changes_since(conn, since, limit)?;
+    let out = recent_changes_since(conn, since, None, limit)?;
     emit(json, &json!({ "since": since, "changes": out }))
 }
 

@@ -3679,7 +3679,15 @@ fn remember_can_cite_source_interaction_chunk() {
 fn today_and_changes_emit_valid_json() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
-    run_json(&db, &["--json", "add", "task", "--title", "A task"]);
+    let task = run_json(&db, &["--json", "add", "task", "--title", "A task"]);
+    let task_id = task["id"].as_str().unwrap();
+    Connection::open(&db)
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET updated_at = '2999-01-01T00:00:00.000Z' WHERE id = ?1",
+            [task_id],
+        )
+        .unwrap();
     run_json(
         &db,
         &[
@@ -3732,6 +3740,11 @@ fn today_and_changes_emit_valid_json() {
         .unwrap()
         .iter()
         .any(|task| task["title"] == "Waiting task"));
+    assert!(!today["recentChanges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|change| change["id"] == task_id));
     let email_context = today["recentInteractions"]
         .as_array()
         .unwrap()
