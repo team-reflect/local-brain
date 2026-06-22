@@ -131,6 +131,14 @@ Record-level finalize does not replace global normalization. Before a backfill
 final report, run `brain --json import participants audit --fail-on-promote-candidates`
 after promoting recurring real people or ledgering unresolved cases.
 
+For backfills, keep each bounded source pass auditable outside the brain DB.
+Use local pass artifacts such as `manifest.jsonl`, `review-queue.jsonl`,
+`decisions.jsonl`, `decisions.tsv`, `import-ledger.tsv`, raw provider JSON,
+readable text files, and `report.md`. Record provider estimates, explicit caps,
+fetched/imported/skipped/duplicate counts, and the unreviewed remainder. Dedupe
+new source records against all prior pass ledgers and source identities before
+writing.
+
 ## People And Organizations
 
 Create person/org records when evidence shows repeated meaningful contact, a
@@ -238,6 +246,14 @@ brain --json import interaction --kind email \
   --participant "from:Maya Chen <maya@example.com>" \
   --link project:<id>
 ```
+
+For historical Gmail backfills, prefer `from:me` as the first bounded pass. It
+usually surfaces high-signal relationship and project threads because it captures
+what the user replied to, approved, introduced, or coordinated. Follow with
+`is:important`, recurring correspondent/domain, attachment-heavy, and explicit
+project passes as needed. Skip commodity confirmations, self-authored daily
+digests, shared mailbox noise, and sensitive personal/family/medical material
+unless explicitly approved or clearly part of an accepted project.
 
 Calendar event:
 

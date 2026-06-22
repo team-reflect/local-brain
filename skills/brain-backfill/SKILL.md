@@ -114,6 +114,26 @@ Final reports must include considered/imported/refreshed/duplicate/skipped/
 needs-review/incomplete counts by source and notable gaps. Source workers must
 also report person/org records created and unresolved person/org candidates.
 
+For every bounded source pass, create a pass directory under `.codex-imports/`
+before importing. Keep the pass auditable and resumable:
+
+```text
+<pass-name>/
+  manifest.jsonl       every fetched source record and local raw/text paths
+  review-queue.jsonl   compact evidence for LLM/manual decisions
+  decisions.jsonl      import/skip/duplicate/needs_review with reason
+  decisions.tsv        human-readable decision ledger
+  import-ledger.tsv    attempted imports and finalize results
+  report.md            query/window/cap/counts/normalization caveats
+  raw/                 raw provider JSON
+  text/                readable source text used for imports
+```
+
+Before marking a source record as fresh, dedupe against every prior ledger shard
+and pass-specific `import-ledger.tsv`, not only the first backfill ledger.
+Report provider result estimates, explicit caps, fetched count, imported count,
+and the unreviewed remainder.
+
 ## Parallelization
 
 For large backfills, use subagents/workers when available. Split independent
@@ -203,15 +223,32 @@ represented elsewhere; record the reason.
 
 ### Gmail / GWS
 
-Do not rely only on project keywords. For each month:
+Default Gmail strategy: run `from:me` first. Sent threads are usually denser
+relationship signal than broad keyword search because they capture what the user
+chose to reply to, introduce, approve, explain, or coordinate. Treat it as a
+bounded source pass, not as the whole backfill:
+
+```text
+pass_name=from-me-gmail
+query=from:me after:<YYYY/MM/DD> before:<YYYY/MM/DD>
+cap=<explicit number, e.g. 500>
+```
+
+After `from:me`, add narrower passes as needed: `is:important`, recurring
+correspondents/domains, attachment-heavy project threads, and explicit user
+queries. Do not rely only on project keywords. For each Gmail pass:
 
 1. Page thread/message metadata.
-2. Cluster by correspondent domain, sender/recipient, subject stem, known
-   projects, and attachments.
-3. Read high-signal threads.
-4. Import full readable thread text as `interaction --kind email` when the
+2. Fetch full raw thread JSON and readable thread text into the pass directory.
+3. Build a compact review queue from subject, dates, participants, labels,
+   message count, attachments, snippets, and text excerpts.
+4. Dedupe against previous ledgers and source identities.
+5. Cluster by correspondent domain, sender/recipient, subject stem, known
+   projects, attachments, and thread depth.
+6. Review high-signal threads case by case.
+7. Import full readable thread text as `interaction --kind email` when the
    source record is worth storing.
-5. Preserve participants, source identity, project links, AI note, facts, tags,
+8. Preserve participants, source identity, project links, AI note, facts, tags,
    and evidence-backed tasks/memories.
 
 Example:
@@ -226,10 +263,14 @@ brain --brain "$BRAIN_ROOT" --json import interaction --kind email \
   --link project:<id>
 ```
 
-Skip credentials, codes, receipts, promos, alerts, long quoted chains, and
-legal/medical boilerplate unless they contain durable project intelligence worth
-storing as complete local evidence. Use `--refresh` for repeat passes over the
-same thread so unchanged bodies stay idempotent.
+Import sent threads that carry durable project, relationship, obligation,
+decision, strategy, introduction, approval, or vendor coordination signal. Skip
+credentials, codes, receipts, promos, alerts, commodity confirmations, calendar
+noise, self-authored daily digests, long quoted chains, and legal/medical/
+family/private material unless the user has explicitly approved it or it
+clearly belongs to an accepted project and is worth storing as complete local
+evidence. Use `--refresh` for repeat passes over the same thread so unchanged
+bodies stay idempotent.
 
 ### Reflect Notes
 
@@ -427,6 +468,19 @@ If the fail gate still reports promote candidates, the backfill is incomplete
 unless each remaining candidate is explicitly ledgered as unresolved with a
 reason.
 
+Promotion judgment:
+
+- Promote real people with repeated meaningful contact, known relationship, or
+  durable future relevance.
+- Use thread headers/signatures to recover names; do not invent names from
+  opaque handles.
+- Leave shared/vendor/service handles unresolved with reasons, such as
+  `shared mailbox`, `project mailbox`, `fund/admin mailbox`, `no-reply`, or
+  `ambiguous local evidence`.
+- If promotion creates the wrong duplicate person, use
+  `repair person-email move --relink-participants` to move the email back to
+  the canonical person and relink old participant rows.
+
 Run a no-surprise-project audit: compare final projects to the baseline plus
 explicitly user-approved creations. Any unapproved project created during the
 backfill blocks completion; convert it to an evidence-backed suggestion when the
@@ -483,4 +537,6 @@ Final report:
 - participant promotion/repair actions and affected row counts;
 - incomplete import audit results;
 - suggestions created;
+- provider result estimates, caps, and unreviewed remainder for bounded passes;
+- decision rules used for high-signal source passes such as `from:me`;
 - known gaps and recommended next pass.
