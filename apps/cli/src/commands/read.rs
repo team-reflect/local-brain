@@ -37,6 +37,10 @@ struct ParsedSearchQuery {
     tag_filters: Vec<String>,
 }
 
+// `brain search` is the Rust twin of core's `globalSearch`
+// (packages/core/src/retrieval). The tag grammar (`parse_search_query`), tag
+// SQL (`tag_filter_sql`/`tag_hits`), and merge (`dedupe_and_rank_hits`) below
+// mirror the sibling modules there — keep the two in sync.
 fn parse_search_query(query: &str) -> ParsedSearchQuery {
     let mut text = Vec::new();
     let mut tag_filters = Vec::new();
@@ -434,7 +438,16 @@ fn dedupe_and_rank_hits(hits: Vec<Value>, limit: usize) -> Vec<Value> {
     unique_hits.sort_by(|a, b| {
         let sb = b["score"].as_f64().unwrap_or(0.0);
         let sa = a["score"].as_f64().unwrap_or(0.0);
-        sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
+        // Tie-break equal scores by title so ordering is deterministic, mirroring
+        // core's `dedupeAndRank`. (This is byte ordering rather than JS
+        // `localeCompare`, so non-ASCII titles can differ slightly.)
+        sb.partial_cmp(&sa)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                let ta = a["title"].as_str().unwrap_or("");
+                let tb = b["title"].as_str().unwrap_or("");
+                ta.cmp(tb)
+            })
     });
     unique_hits.truncate(limit);
     unique_hits

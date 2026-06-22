@@ -294,9 +294,6 @@ export {
   type RelationshipSignals,
 } from './domains/relationships/strength'
 
-// Quick search (command palette)
-export { quickSearch } from './search/getters'
-
 // Retrieval (the one shared FTS5 retrieve() contract + global search)
 export {
   retrieve,

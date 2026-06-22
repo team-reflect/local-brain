@@ -37,7 +37,6 @@ import {
   listPeople,
   listTasks,
   newId,
-  quickSearch,
   seedDemoData,
   updateDocument,
   updateInteraction,
@@ -216,20 +215,6 @@ describe('03b read getters (real SQLite round-trip over the seed)', () => {
     }
     expect(graph.nodes.filter((node) => node.kind === 'person')).toHaveLength(77)
   })
-
-  it('quick-searches record names/titles across types', async () => {
-    const results = await quickSearch('Northwind')
-    const kinds = results.map((r) => r.kind)
-    // The seed has a Northwind org, project, task, document, and interaction.
-    expect(kinds).toContain('organization')
-    expect(kinds).toContain('project')
-    expect(kinds).toContain('task')
-    expect(kinds).toContain('document')
-    expect(kinds).toContain('interaction')
-    expect(await quickSearch('   ')).toEqual([])
-    expect(await quickSearch('no-such-record-xyz')).toEqual([])
-  })
-
 })
 
 describe('04a ingestion (real SQLite round-trip)', () => {

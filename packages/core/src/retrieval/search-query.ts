@@ -3,6 +3,9 @@
  *
  * `#slug` tokens are exact tag filters. Everything else remains ordinary free
  * text so tags with spaces are still discoverable through plain tag-name search.
+ *
+ * Mirrored in Rust by `parse_search_query` in apps/cli/src/commands/read.rs —
+ * keep the two grammars in sync.
  */
 export interface ParsedSearchQuery {
   /** Free text left for FTS, name/title LIKE, asset search, and tag-name search. */

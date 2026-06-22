@@ -2,6 +2,16 @@ import { sql, type RawBuilder } from 'kysely'
 import { db } from '../db/client'
 import type { RecordKind } from '../domains/relations/types'
 
+/**
+ * Tag-aware recall for global search: exact `#tag` filter clauses, a cheap
+ * "does any tag match this text" pre-check, and the tagged-record lookup over
+ * every navigable kind.
+ *
+ * Mirrored in Rust by `tag_filter_sql`, `should_search_tag_hits`, and
+ * `tag_hits` in apps/cli/src/commands/read.rs — the `records` CTE and tag-label
+ * subquery are duplicated verbatim, so keep the two in sync.
+ */
+
 export interface TagRecordRow {
   kind: RecordKind
   id: string

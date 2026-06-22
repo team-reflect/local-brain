@@ -52,6 +52,9 @@ export function CommandPalette({
 }): ReactNode {
   const [query, setQuery] = useState('')
   const [selectedValue, setSelectedValue] = useState('')
+  // Tracks the value the auto-select effect last chose. If the user moves the
+  // selection manually (see handleSelectedValueChange) this is cleared, so the
+  // effect leaves their choice alone instead of snapping back to the top hit.
   const autoSelectedValue = useRef('')
   const trimmed = query.trim()
   const commandsOnly = trimmed.startsWith('>')
@@ -115,10 +118,16 @@ export function CommandPalette({
     if (trimmed.length === 0) return commandItems
     return [...recordItems, ...commandItems]
   }, [commandsOnly, trimmed.length, recordItems, commandItems])
+  // Stable content key for the effect dependency: re-run when the set of items
+  // actually changes, not on every render that rebuilds the array identity.
   const itemKey = items.map((item) => item.key).join('\n')
   const waitingForRecords =
     !commandsOnly && trimmed.length > 0 && recordItems.length === 0 && search.isFetching
 
+  // Keep a valid selection as items change: default to the first item, and once
+  // record hits arrive (they load async, after commands are already showing)
+  // promote the first record over the auto-selected top command — but only if
+  // the user hasn't manually selected something in the meantime.
   useEffect(() => {
     setSelectedValue((value) => {
       if (!open || items.length === 0) {
@@ -216,6 +225,9 @@ function recordDetail(hit: SearchHit): string | null {
 }
 
 function Snippet({ text }: { text: string }): ReactNode {
+  // Highlights the matched terms that SQLite's `snippet()` wraps in `[` … `]`.
+  // The delimiters are defined in the core search FTS queries
+  // (packages/core/src/retrieval/search.ts) and CLI read.rs — keep them aligned.
   return (
     <span className="mt-0.5 block truncate text-xs text-muted-foreground">
       {text.split(/(\[[^\]]+\])/g).map((part, index) => {
