@@ -30,6 +30,9 @@ describe('buildChatSystemPrompt', () => {
     const prompt = buildChatSystemPrompt({ today: '2026-06-19', projects: [] })
     expect(prompt).toContain('search_records')
     expect(prompt).toContain('list_projects')
+    expect(prompt).toContain('filters')
+    expect(prompt).toContain('transcript presence')
+    expect(prompt).toContain('hybrid semantic search')
     expect(prompt.toLowerCase()).toContain('do not use outside knowledge or invent facts')
   })
 

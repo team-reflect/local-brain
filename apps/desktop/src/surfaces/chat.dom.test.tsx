@@ -259,6 +259,24 @@ describe('ChatSurface', () => {
     expect(screen.getByText(/3 projects/)).not.toBeNull()
   })
 
+  it('renders a filtered hybrid search_records tool chip', async () => {
+    chatMocks.messages = [
+      toolMessage(
+        'a1',
+        'search_records',
+        'output-available',
+        { interactionKinds: ['email'], has: { transcript: true } },
+        { hits: [], count: 2, mode: 'hybrid' },
+      ),
+    ]
+    await renderReadyChat()
+
+    expect(screen.getByText(/Searched records/)).not.toBeNull()
+    expect(screen.getByText(/hybrid/)).not.toBeNull()
+    expect(screen.getByText(/email/)).not.toBeNull()
+    expect(screen.getByText(/2 results/)).not.toBeNull()
+  })
+
   it('renders approval controls and sends approval responses', async () => {
     chatMocks.messages = [
       toolMessage(

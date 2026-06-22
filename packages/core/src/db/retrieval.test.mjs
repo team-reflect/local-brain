@@ -8,7 +8,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   createModelExtractor,
+  createDocument,
   createTask,
+  db,
+  filteredSearch,
   getChangesSince,
   getDailyBrief,
   getModelStatus,
@@ -16,6 +19,7 @@ import {
   ingestDocument,
   ingestInteraction,
   listPeople,
+  newId,
   planDay,
   retrieve,
   runExtraction,
@@ -47,6 +51,30 @@ async function seedCorpus() {
     bodyText: 'Discussed the website redesign timeline. No mention of partnerships here.',
     occurredAt: '2026-06-10T17:00:00Z',
   })
+}
+
+async function addSource(slug, name = slug) {
+  const id = newId()
+  await db.insertInto('sources').values({ id, slug, name }).execute()
+  return id
+}
+
+async function addTranscript(interactionId, rawText, sourceId = null) {
+  const id = newId()
+  await db.insertInto('interactionTranscripts').values({
+    id,
+    interactionId,
+    rawText,
+    ...(sourceId ? { sourceId } : {}),
+  }).execute()
+  await db.insertInto('contentChunks').values({
+    id: newId(),
+    recordType: 'interaction_transcript',
+    recordId: id,
+    chunkIndex: 0,
+    text: rawText,
+  }).execute()
+  return id
 }
 
 describe('Plan 06 retrieval + search', () => {
@@ -98,6 +126,117 @@ describe('Plan 06 retrieval + search', () => {
     const interaction = hits.find((h) => h.kind === 'interaction')
     expect(interaction?.title).toBe('Kickoff')
     expect(interaction?.snippet).toBeTruthy()
+  })
+
+  it('filtered search finds recent email interactions by metadata without body keyword matches', async () => {
+    await ingestInteraction({
+      kind: 'email',
+      title: 'Proposal thread',
+      bodyText: 'Please send the revised proposal tomorrow.',
+      occurredAt: '2026-06-18T10:00:00Z',
+    })
+    await ingestInteraction({
+      kind: 'meeting',
+      title: 'Older meeting',
+      bodyText: 'Discussed the same proposal.',
+      occurredAt: '2026-05-01T10:00:00Z',
+    })
+
+    const result = await filteredSearch({
+      recordTypes: ['interaction'],
+      interactionKinds: ['email'],
+      date: { from: '2026-06-01' },
+      sort: 'recent',
+    })
+
+    expect(result.semanticAvailable).toBe(false)
+    expect(result.hits.map((hit) => hit.title)).toEqual(['Proposal thread'])
+    expect(result.hits[0].excerpts[0]?.text).toContain('revised proposal')
+  })
+
+  it('filtered search returns transcript hits with parent interaction metadata', async () => {
+    const meeting = await ingestInteraction({
+      kind: 'meeting',
+      title: 'Granola kickoff',
+      bodyText: 'Short meeting stub.',
+      occurredAt: '2026-06-18T10:00:00Z',
+    })
+    const transcriptId = await addTranscript(meeting.id, 'Credential flow needs a follow-up with Maya.')
+
+    const result = await filteredSearch({
+      recordTypes: ['interaction_transcript'],
+      has: { transcript: true },
+      query: 'credential follow-up',
+    })
+
+    expect(result.hits[0]).toMatchObject({
+      recordType: 'interaction_transcript',
+      recordId: transcriptId,
+      parent: { recordType: 'interaction', recordId: meeting.id, title: 'Granola kickoff' },
+      hasTranscript: true,
+    })
+    expect(result.hits[0].excerpts[0]?.text).toContain('Credential flow')
+  })
+
+  it('filtered search applies source, external kind, linked, task status, and date filters', async () => {
+    const sourceId = await addSource('test_gmail', 'Test Gmail')
+    const personId = newId()
+    await db.insertInto('people').values({ id: personId, fullName: 'Maya Chen' }).execute()
+    const interaction = await ingestInteraction({
+      kind: 'email',
+      title: 'Maya follow-up',
+      bodyText: 'Maya asked for the revised budget.',
+      occurredAt: '2026-06-17T10:00:00Z',
+      links: { people: [personId] },
+    })
+    await db.insertInto('externalIdentities').values({
+      id: newId(),
+      entityType: 'interaction',
+      entityId: interaction.id,
+      sourceId,
+      kind: 'thread',
+      externalId: 'gmail-thread-1',
+    }).execute()
+    await createTask({
+      title: 'Send Maya budget',
+      status: 'waiting',
+      originInteractionId: interaction.id,
+    })
+
+    const interactionResult = await filteredSearch({
+      query: 'budget',
+      recordTypes: ['interaction'],
+      interactionKinds: ['email'],
+      sourceSlugs: ['test_gmail'],
+      externalKinds: ['thread'],
+      linked: { people: [personId] },
+      date: { from: '2026-06-01' },
+    })
+    expect(interactionResult.hits.map((hit) => hit.recordId)).toEqual([interaction.id])
+    expect(interactionResult.hits[0].sourceSlugs).toContain('test_gmail')
+    expect(interactionResult.hits[0].externalKinds).toContain('thread')
+
+    const taskResult = await filteredSearch({
+      query: 'Maya budget',
+      recordTypes: ['task'],
+      taskStatuses: ['waiting'],
+    })
+    expect(taskResult.hits.map((hit) => hit.title)).toEqual(['Send Maya budget'])
+  })
+
+  it('filtered search returns fallback excerpts for unchunked documents', async () => {
+    const id = await createDocument({
+      title: 'Unchunked note',
+      bodyText: 'Fallback excerpt content only lives in the document body.',
+    })
+
+    const result = await filteredSearch({ query: 'fallback excerpt', recordTypes: ['document'] })
+
+    expect(result.hits[0]).toMatchObject({ recordType: 'document', recordId: id })
+    expect(result.hits[0].excerpts[0]).toMatchObject({
+      chunkId: null,
+    })
+    expect(result.hits[0].excerpts[0]?.text).toContain('Fallback excerpt')
   })
 })
 

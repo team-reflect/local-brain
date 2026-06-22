@@ -106,6 +106,24 @@ describe('ChatToolChip — search_records', () => {
     })
     expect(screen.getByText(/0 results/)).not.toBeNull()
   })
+
+  it('shows filters and hybrid mode for structured search', () => {
+    renderChip({
+      type: 'tool-search_records',
+      toolCallId: 'tc-1',
+      state: 'output-available',
+      input: {
+        recordTypes: ['interaction_transcript'],
+        interactionKinds: ['email'],
+        has: { transcript: true },
+      },
+      output: { hits: [], count: 4, mode: 'hybrid' },
+    })
+    expect(screen.getByText(/Searched records/)).not.toBeNull()
+    expect(screen.getByText(/hybrid/)).not.toBeNull()
+    expect(screen.getByText(/email/)).not.toBeNull()
+    expect(screen.getByText(/4 results/)).not.toBeNull()
+  })
 })
 
 describe('ChatToolChip — list_projects', () => {

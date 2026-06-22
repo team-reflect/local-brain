@@ -108,6 +108,45 @@ function outputNumber(output: Record<string, unknown> | undefined, key: string):
   return typeof value === 'number' ? value : null
 }
 
+function inputStringList(input: Record<string, unknown> | undefined, key: string): string[] {
+  const value = input?.[key]
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []
+}
+
+function inputRecord(input: Record<string, unknown> | undefined, key: string): Record<string, unknown> | null {
+  const value = input?.[key]
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null
+}
+
+function searchFilterLabel(input: Record<string, unknown> | undefined): string | null {
+  const labels: string[] = []
+  const recordTypes = inputStringList(input, 'recordTypes')
+  const interactionKinds = inputStringList(input, 'interactionKinds')
+  const documentKinds = inputStringList(input, 'documentKinds')
+  const taskStatuses = inputStringList(input, 'taskStatuses')
+  const sourceSlugs = inputStringList(input, 'sourceSlugs')
+  const externalKinds = inputStringList(input, 'externalKinds')
+  const has = inputRecord(input, 'has')
+  const date = inputRecord(input, 'date')
+  const linked = inputRecord(input, 'linked')
+
+  if (interactionKinds.length > 0) labels.push(interactionKinds.join(', '))
+  if (documentKinds.length > 0) labels.push(documentKinds.join(', '))
+  if (recordTypes.length > 0) labels.push(recordTypes.map((entry) => entry.replace(/_/g, ' ')).join(', '))
+  if (taskStatuses.length > 0) labels.push(taskStatuses.join(', '))
+  if (sourceSlugs.length > 0) labels.push(sourceSlugs.join(', '))
+  if (externalKinds.length > 0) labels.push(externalKinds.join(', '))
+  if (has?.['transcript'] === true) labels.push('transcripts')
+  if (has?.['transcript'] === false) labels.push('no transcripts')
+  if (has?.['sourceIdentity'] === true) labels.push('sourced')
+  if (date !== null && (typeof date['from'] === 'string' || typeof date['to'] === 'string')) labels.push('dated')
+  if (linked !== null) {
+    const hasLinkedValues = Object.values(linked).some((value) => Array.isArray(value) && value.length > 0)
+    if (hasLinkedValues) labels.push('linked')
+  }
+  return labels.length > 0 ? labels.slice(0, 3).join(' · ') : null
+}
+
 function WriteToolChip({
   part,
   toolName,
@@ -199,10 +238,15 @@ function SearchRecordsChip({ part }: { part: ToolPart }): ReactNode {
   const pending = isToolPartPending(part)
   const query = String(part.input?.['query'] ?? '')
   const count = typeof part.output?.['count'] === 'number' ? part.output['count'] : null
+  const mode = typeof part.output?.['mode'] === 'string' ? part.output['mode'] : null
+  const filters = searchFilterLabel(part.input)
+  const details = [mode, filters].filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+  const label = query ? `Searched "${query}"` : 'Searched records'
 
   return (
     <ChipFrame pending={pending} icon={<Search aria-hidden className="size-3.5" />}>
-      Searched "{query}"
+      {label}
+      {details.length > 0 ? ` · ${details.join(' · ')}` : ''}
       {!pending && count !== null ? countSuffix(count, 'result') : ''}
       {!pending && part.state === 'output-error' ? ` — ${part.errorText ?? 'error'}` : ''}
     </ChipFrame>

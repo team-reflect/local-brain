@@ -10,8 +10,8 @@ const coreMocks = vi.hoisted(() => ({
   createPerson: vi.fn(),
   createProject: vi.fn(),
   createTask: vi.fn(),
+  filteredSearch: vi.fn(),
   listProjects: vi.fn(),
-  retrieve: vi.fn(),
   updateMemory: vi.fn(),
   updateOrganization: vi.fn(),
   updatePerson: vi.fn(),
@@ -23,8 +23,8 @@ vi.mock('ai', () => ({
   tool: (definition: unknown) => definition,
 }))
 
-vi.mock('../../retrieval/retrieve', () => ({
-  retrieve: coreMocks.retrieve,
+vi.mock('../../retrieval/filtered-search', () => ({
+  filteredSearch: coreMocks.filteredSearch,
 }))
 
 vi.mock('../../domains/projects/getters', () => ({
@@ -84,16 +84,27 @@ describe('buildChatTools', () => {
   })
 
   it('keeps read tools executable without approval', async () => {
-    coreMocks.retrieve.mockResolvedValue({
-      chunks: [
+    coreMocks.filteredSearch.mockResolvedValue({
+      hits: [
         {
           recordType: 'interaction',
           recordId: 'i1',
-          recordTitle: 'Sync',
-          snippet: 'budget',
-          text: 'budget changed',
+          title: 'Sync',
+          kind: 'meeting',
+          status: null,
+          date: '2026-06-19T00:00:00Z',
+          parent: null,
+          sourceSlugs: [],
+          externalKinds: [],
+          hasTranscript: false,
+          score: 1,
+          lexicalScore: 1,
+          semanticScore: null,
+          excerpts: [{ chunkId: 'c1', chunkIndex: 0, snippet: 'budget', text: 'budget changed', lexicalScore: 1, semanticScore: null }],
         },
       ],
+      count: 1,
+      mode: 'hybrid',
       semanticAvailable: true,
     })
     coreMocks.listProjects.mockResolvedValue([
@@ -110,6 +121,46 @@ describe('buildChatTools', () => {
     expect(listProjectsTool.needsApproval).toBeUndefined()
     expect(searchOutput).toMatchObject({ count: 1, semanticAvailable: true })
     expect(projectsOutput).toMatchObject({ count: 1 })
+    expect(coreMocks.filteredSearch).toHaveBeenCalledWith(
+      { query: 'budget', limit: 8, excerptsPerRecord: 1 },
+      { mode: 'hybrid', maxExcerptChars: 1200 },
+    )
+  })
+
+  it('accepts structured filtered search inputs', async () => {
+    coreMocks.filteredSearch.mockResolvedValue({
+      hits: [],
+      count: 0,
+      mode: 'hybrid',
+      semanticAvailable: false,
+    })
+    const tools = chatTools()
+    const searchRecords = toolByName(tools, 'search_records')
+
+    await expect(
+      searchRecords.execute(searchRecords.inputSchema.parse({
+        recordTypes: ['interaction', 'interaction_transcript'],
+        interactionKinds: ['email', 'meeting'],
+        has: { transcript: true },
+        sourceSlugs: ['gmail', 'granola'],
+        date: { from: '2026-06-01', field: 'effective' },
+        limit: 20,
+        excerptsPerRecord: 3,
+      })),
+    ).resolves.toMatchObject({ count: 0, semanticAvailable: false })
+
+    expect(coreMocks.filteredSearch).toHaveBeenCalledWith(
+      {
+        recordTypes: ['interaction', 'interaction_transcript'],
+        interactionKinds: ['email', 'meeting'],
+        has: { transcript: true },
+        sourceSlugs: ['gmail', 'granola'],
+        date: { from: '2026-06-01', field: 'effective' },
+        limit: 20,
+        excerptsPerRecord: 3,
+      },
+      { mode: 'hybrid', maxExcerptChars: 1200 },
+    )
   })
 
   it('requires approval for every write tool', () => {

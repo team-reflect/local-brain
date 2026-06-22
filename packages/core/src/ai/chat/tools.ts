@@ -1,6 +1,6 @@
 import { tool } from 'ai'
 import { z } from 'zod'
-import { retrieve } from '../../retrieval/retrieve'
+import { filteredSearch, type FilteredSearchInput } from '../../retrieval/filtered-search'
 import { listProjects } from '../../domains/projects/getters'
 import {
   createPerson,
@@ -51,6 +51,8 @@ import {
 
 const DEFAULT_SEARCH_LIMIT = 8
 const MAX_SEARCH_LIMIT = 20
+const DEFAULT_SEARCH_EXCERPTS = 1
+const MAX_SEARCH_EXCERPTS = 3
 const DEFAULT_PROJECTS_LIMIT = 30
 const MAX_CHUNK_CHARS = 1200
 const MEMORY_KINDS = ['fact', 'preference', 'decision', 'commitment', 'instruction', 'risk', 'idea'] as const
@@ -184,6 +186,29 @@ const memorySubjectSchema = z.object({
   role: nullableString,
 })
 
+const searchRecordType = z.enum(['document', 'interaction', 'interaction_transcript', 'task'])
+const searchSort = z.enum(['relevance', 'recent', 'oldest', 'updated'])
+const searchDateField = z.enum(['effective', 'created', 'updated'])
+
+const searchDateSchema = z.object({
+  from: optionalString.describe('Inclusive lower bound, usually ISO 8601 or YYYY-MM-DD'),
+  to: optionalString.describe('Inclusive upper bound, usually ISO 8601 or YYYY-MM-DD'),
+  field: searchDateField.optional().describe('Which date field to filter; default effective'),
+})
+
+const searchHasSchema = z.object({
+  transcript: z.boolean().optional().describe('Require or exclude transcript-backed records'),
+  text: z.boolean().optional().describe('Require or exclude records with readable text'),
+  sourceIdentity: z.boolean().optional().describe('Require or exclude source/provenance identity'),
+})
+
+const searchLinkedSchema = z.object({
+  people: z.array(z.string().min(1)).optional().describe('Local Brain person ids'),
+  organizations: z.array(z.string().min(1)).optional().describe('Local Brain organization ids'),
+  projects: z.array(z.string().min(1)).optional().describe('Local Brain project ids'),
+  tasks: z.array(z.string().min(1)).optional().describe('Local Brain task ids'),
+})
+
 function writeDescription(action: string): string {
   return `${action} Requires explicit user approval before it changes Local Brain.`
 }
@@ -192,11 +217,21 @@ export function buildChatTools() {
   return {
     search_records: tool({
       description:
-        'Search Local Brain records (documents and interactions) by keyword or topic. ' +
-        'Returns relevant text excerpts grounded in local data. ' +
-        'Use this to find specific facts, events, promises, or details from documents and meetings.',
+        'Search Local Brain records with optional semantic/hybrid text search and structured filters. ' +
+        'Use query for topics/facts, and filters for record type, source kind, date, transcript presence, task status, or linked record ids. ' +
+        'Returns grounded excerpts plus record metadata.',
       inputSchema: z.object({
-        query: z.string().min(1).describe('Search query — plain language or keywords'),
+        query: z.string().min(1).optional().describe('Search query — plain language or keywords. Omit for metadata-only recent/source searches.'),
+        recordTypes: z.array(searchRecordType).optional().describe('Restrict to record types; default documents, interactions, and transcripts'),
+        documentKinds: z.array(z.string().min(1)).optional().describe('Document kind filters, ORed together'),
+        interactionKinds: z.array(z.string().min(1)).optional().describe('Interaction kind filters, e.g. email, meeting, call'),
+        taskStatuses: z.array(z.string().min(1)).optional().describe('Task status filters, e.g. open, waiting, done'),
+        date: searchDateSchema.optional().describe('Date filter over effective, created, or updated date'),
+        has: searchHasSchema.optional().describe('Trait filters, e.g. transcript true'),
+        sourceSlugs: z.array(z.string().min(1)).optional().describe('Source slugs, e.g. gmail, granola'),
+        externalKinds: z.array(z.string().min(1)).optional().describe('External identity kinds, e.g. thread, transcript'),
+        linked: searchLinkedSchema.optional().describe('Restrict to records linked to these Local Brain ids'),
+        sort: searchSort.optional().describe('Sort order; default relevance with query, recent without query'),
         limit: z
           .number()
           .int()
@@ -204,18 +239,52 @@ export function buildChatTools() {
           .max(MAX_SEARCH_LIMIT)
           .optional()
           .describe(`Max results to return (default ${DEFAULT_SEARCH_LIMIT})`),
+        excerptsPerRecord: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_SEARCH_EXCERPTS)
+          .optional()
+          .describe(`Max excerpts per record (default ${DEFAULT_SEARCH_EXCERPTS})`),
       }),
-      execute: async ({ query, limit }) => {
-        const result = await retrieve(query, { mode: 'hybrid', limit: limit ?? DEFAULT_SEARCH_LIMIT })
+      execute: async (input) => {
+        const searchInput = compactObject({
+          ...input,
+          limit: input.limit ?? DEFAULT_SEARCH_LIMIT,
+          excerptsPerRecord: input.excerptsPerRecord ?? DEFAULT_SEARCH_EXCERPTS,
+        }) as FilteredSearchInput
+        const result = await filteredSearch(
+          searchInput,
+          { mode: 'hybrid', maxExcerptChars: MAX_CHUNK_CHARS },
+        )
         return {
-          hits: result.chunks.map((chunk) => ({
-            recordType: chunk.recordType,
-            recordId: chunk.recordId,
-            title: chunk.recordTitle ?? null,
-            snippet: chunk.snippet,
-            text: chunk.text.length > MAX_CHUNK_CHARS ? chunk.text.slice(0, MAX_CHUNK_CHARS) : chunk.text,
+          hits: result.hits.map((hit) => ({
+            recordType: hit.recordType,
+            recordId: hit.recordId,
+            title: hit.title,
+            kind: hit.kind,
+            status: hit.status,
+            date: hit.date,
+            parent: hit.parent,
+            sourceSlugs: hit.sourceSlugs,
+            externalKinds: hit.externalKinds,
+            hasTranscript: hit.hasTranscript,
+            score: hit.score,
+            lexicalScore: hit.lexicalScore,
+            semanticScore: hit.semanticScore,
+            snippet: hit.excerpts[0]?.snippet ?? null,
+            text: hit.excerpts[0]?.text ?? '',
+            excerpts: hit.excerpts.map((excerpt) => ({
+              chunkId: excerpt.chunkId,
+              chunkIndex: excerpt.chunkIndex,
+              snippet: excerpt.snippet,
+              text: excerpt.text,
+              lexicalScore: excerpt.lexicalScore,
+              semanticScore: excerpt.semanticScore,
+            })),
           })),
-          count: result.chunks.length,
+          count: result.count,
+          mode: result.mode,
           semanticAvailable: result.semanticAvailable,
         }
       },

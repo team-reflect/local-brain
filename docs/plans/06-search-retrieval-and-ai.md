@@ -22,6 +22,9 @@ Chat conversations, daily report/todo retrieval, and model boundary settings.
 - Retrieval ranks visible records and chunks from documents and interactions.
 - One `retrieve()` API serves daily reports, graph context, search enrichment, and CLI
   reads, plus grounded Chat in the desktop.
+- Chat search accepts structured filters over record type, source/date traits,
+  transcript presence, task status, and linked record ids; text queries use hybrid
+  lexical + semantic recall when semantic search is available.
 - Chat persists conversations and AI SDK message JSON in SQLite, but retrieved Chat
   sources are request-local and not stored as `evidence_refs`.
 - Chat can perform core CRM writes only through user-approved AI SDK write tools.
@@ -91,6 +94,9 @@ Chat conversations, daily report/todo retrieval, and model boundary settings.
    - linked records
    - mode: lexical, semantic, or hybrid
    - citations/evidence payload
+   - structured filtered search for Chat over documents, interactions, transcripts,
+     and tasks; metadata-only searches sort by recency, while text searches fuse
+     lexical and semantic chunk candidates before grouping by record
 8. Build Chat:
    - top-level route and sidebar item
    - durable chat conversations and messages in SQLite
