@@ -249,6 +249,35 @@ describe('createChatTransport', () => {
     })
   })
 
+  it('uses a chat-selected model instead of the settings default', async () => {
+    const transport = createChatTransport({
+      modelSelection: { configId: 'provider-1', modelId: 'gpt-5.4-mini' },
+    })
+
+    await transport.sendMessages({
+      trigger: 'submit-message',
+      chatId: 'chat-1',
+      messageId: undefined,
+      messages: [userMessage],
+      abortSignal: undefined,
+    })
+
+    expect(aiMocks.streamText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: { provider: 'openai', model: 'gpt-5.4-mini' },
+      }),
+    )
+    await eventually(() =>
+      expect(coreMocks.appendChatMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          conversationId: 'chat-1',
+          role: 'assistant',
+          model: 'openai/gpt-5.4-mini',
+        }),
+      ),
+    )
+  })
+
   it('skips generated titles for existing conversations', async () => {
     coreMocks.getConversation.mockResolvedValue({
       id: 'chat-1',
