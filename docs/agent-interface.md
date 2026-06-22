@@ -55,9 +55,9 @@ registered sources, existing projects and organizations, open suggestions, impor
 watermarks, and counts.
 
 `brain today` and `brain report daily` return task buckets plus richer operating
-context: waiting items, recent changes, relationship hints, and recent interactions
-with source, participant, summary, and readable excerpt fields when imported source
-text is available.
+context: waiting items, recent write-time changes, relationship hints, and recent
+interactions with source, participant, summary, and readable excerpt fields when
+imported source text is available.
 
 ## Write Phases
 

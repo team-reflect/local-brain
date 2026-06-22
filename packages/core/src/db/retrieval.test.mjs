@@ -244,6 +244,10 @@ describe('Plan 06 agent report endpoints', () => {
     expect(brief.waitingItems.map((task) => task.title)).toContain('Waiting on vendor reply')
     expect(brief.recentChanges.some((change) => change.kind === 'interaction')).toBe(true)
     expect(brief.relationshipContext.some((context) => context.name === 'Maya Chen')).toBe(true)
+
+    const futureBrief = await getDailyBrief({ now: new Date('2036-01-01T18:00:00Z') })
+    expect(futureBrief.date).toBe('2036-01-01')
+    expect(futureBrief.recentChanges.some((change) => change.id === interaction.id)).toBe(true)
   })
 
   it('reports records changed since a timestamp', async () => {

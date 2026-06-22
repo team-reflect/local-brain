@@ -446,23 +446,24 @@ async function relationshipContext(now: Date, limit: number): Promise<BriefRelat
 
 /** Assemble the daily brief: bucketed open tasks and recent interactions. */
 export async function getDailyBrief(options: DailyBriefOptions = {}): Promise<DailyBrief> {
-  const now = options.now ?? new Date()
+  const generatedAt = new Date()
+  const asOf = options.now ?? generatedAt
   const soonDays = options.soonDays ?? 7
   const recentLimit = options.recentLimit ?? 5
   const changeLimit = options.changeLimit ?? 12
   const relationshipLimit = options.relationshipLimit ?? 8
-  const recentChangeSince = new Date(now.getTime() - RECENT_CHANGE_DAYS * 86_400_000).toISOString()
+  const recentChangeSince = new Date(generatedAt.getTime() - RECENT_CHANGE_DAYS * 86_400_000).toISOString()
 
   const [tasks, interactions, recentChanges, relationships] = await Promise.all([
-    bucketedBriefTasks(now, soonDays),
+    bucketedBriefTasks(asOf, soonDays),
     recentInteractions(recentLimit),
     getChangesSince(recentChangeSince, changeLimit),
-    relationshipContext(now, relationshipLimit),
+    relationshipContext(asOf, relationshipLimit),
   ])
 
   return {
-    generatedAt: now.toISOString(),
-    date: dayKey(now),
+    generatedAt: generatedAt.toISOString(),
+    date: dayKey(asOf),
     tasks: {
       overdue: tasks.overdue,
       today: tasks.today,
