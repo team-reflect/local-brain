@@ -203,8 +203,8 @@ fn interaction_source(conn: &Connection, interaction_id: &str) -> Result<Option<
             },
         )
         .optional()?;
-    if identity.is_some() {
-        return Ok(source_value(identity));
+    if let Some(source) = source_value(identity) {
+        return Ok(Some(source));
     }
 
     let provenance = conn

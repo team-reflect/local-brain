@@ -238,6 +238,7 @@ async function interactionSourceMap(interactionIds: readonly string[]): Promise<
 
   for (const row of identityRows) {
     if (byInteraction.has(row.entityId)) continue
+    if (!row.sourceName && !row.sourceSlug && !row.externalKind) continue
     byInteraction.set(row.entityId, {
       name: row.sourceName,
       slug: row.sourceSlug,
