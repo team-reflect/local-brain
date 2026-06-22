@@ -80,6 +80,23 @@ enum Command {
         #[command(subcommand)]
         what: RepairCommand,
     },
+    /// Merge duplicate records after review.
+    Merge {
+        #[command(subcommand)]
+        what: MergeCommand,
+    },
+    /// Soft-archive a record after cleanup.
+    Archive {
+        #[command(subcommand)]
+        what: ArchiveCommand,
+    },
+    /// Remove a typed link between two records.
+    Unlink(UnlinkArgs),
+    /// Maintain an existing person record.
+    Person {
+        #[command(subcommand)]
+        what: PersonCommand,
+    },
     /// Enrich an existing person or organization profile.
     Enrich {
         #[command(subcommand)]
@@ -208,6 +225,12 @@ enum RepairCommand {
         #[command(subcommand)]
         what: RepairPersonEmailCommand,
     },
+    /// Move a phone handle between people.
+    #[command(name = "person-phone")]
+    PersonPhone {
+        #[command(subcommand)]
+        what: RepairPersonPhoneCommand,
+    },
     /// Relink unresolved participant rows.
     Participants {
         #[command(subcommand)]
@@ -222,9 +245,61 @@ enum RepairPersonEmailCommand {
 }
 
 #[derive(Subcommand)]
+enum RepairPersonPhoneCommand {
+    /// Move one phone from one person to another.
+    Move(RepairPersonPhoneMoveArgs),
+}
+
+#[derive(Subcommand)]
 enum RepairParticipantsCommand {
     /// Relink unresolved participants with a handle to a person.
     Relink(RepairParticipantsRelinkArgs),
+}
+
+#[derive(Subcommand)]
+enum MergeCommand {
+    /// Merge one duplicate person into another.
+    Person(MergePersonArgs),
+}
+
+#[derive(Subcommand)]
+enum ArchiveCommand {
+    /// Archive one person.
+    Person(ArchiveRecordArgs),
+    /// Archive one organization.
+    Organization(ArchiveRecordArgs),
+}
+
+#[derive(Subcommand)]
+enum PersonCommand {
+    /// Rename the canonical full name.
+    Rename(PersonRenameArgs),
+    /// Maintain email handles.
+    Email {
+        #[command(subcommand)]
+        what: PersonEmailCommand,
+    },
+    /// Maintain phone handles.
+    Phone {
+        #[command(subcommand)]
+        what: PersonPhoneCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum PersonEmailCommand {
+    /// Add an email handle to a person.
+    Add(PersonEmailArgs),
+    /// Remove an email handle from a person.
+    Remove(PersonEmailArgs),
+}
+
+#[derive(Subcommand)]
+enum PersonPhoneCommand {
+    /// Add a phone handle to a person.
+    Add(PersonPhoneArgs),
+    /// Remove a phone handle from a person.
+    Remove(PersonPhoneArgs),
 }
 
 #[derive(Subcommand)]
@@ -644,6 +719,14 @@ struct AddFactArgs {
     prompt_fingerprint: Option<String>,
     #[arg(long)]
     metadata_json: Option<String>,
+    #[arg(long)]
+    source: Option<String>,
+    #[arg(long, default_value = "record")]
+    external_kind: String,
+    #[arg(long)]
+    external_id: Option<String>,
+    #[arg(long)]
+    refresh: bool,
     #[arg(long = "evidence", value_name = "RECORD_TYPE:ID#CHUNK_OR_~QUOTE")]
     evidence: Vec<String>,
 }
@@ -816,11 +899,77 @@ struct RepairPersonEmailMoveArgs {
 }
 
 #[derive(Parser)]
+struct RepairPersonPhoneMoveArgs {
+    #[arg(long)]
+    phone: String,
+    #[arg(long = "from")]
+    from_person: String,
+    #[arg(long = "to")]
+    to_person: String,
+    #[arg(long)]
+    relink_participants: bool,
+}
+
+#[derive(Parser)]
 struct RepairParticipantsRelinkArgs {
     #[arg(long)]
     handle: String,
     #[arg(long)]
     person: String,
+    #[arg(long)]
+    from_person: Option<String>,
+    #[arg(long)]
+    force: bool,
+}
+
+#[derive(Parser)]
+struct MergePersonArgs {
+    #[arg(long = "from")]
+    from_person: String,
+    #[arg(long = "to")]
+    to_person: String,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    reason: Option<String>,
+}
+
+#[derive(Parser)]
+struct ArchiveRecordArgs {
+    id: String,
+    #[arg(long)]
+    reason: String,
+}
+
+#[derive(Parser)]
+struct UnlinkArgs {
+    #[arg(value_name = "KIND:ID")]
+    left: String,
+    #[arg(value_name = "KIND:ID")]
+    right: String,
+    #[arg(long)]
+    reason: String,
+}
+
+#[derive(Parser)]
+struct PersonRenameArgs {
+    id: String,
+    #[arg(long)]
+    full_name: String,
+}
+
+#[derive(Parser)]
+struct PersonEmailArgs {
+    id: String,
+    #[arg(long)]
+    email: String,
+}
+
+#[derive(Parser)]
+struct PersonPhoneArgs {
+    id: String,
+    #[arg(long)]
+    phone: String,
 }
 
 #[derive(Parser)]
@@ -1278,6 +1427,10 @@ impl AddFactArgs {
             model: self.model.as_deref(),
             prompt_fingerprint: self.prompt_fingerprint.as_deref(),
             metadata_json: self.metadata_json.as_deref(),
+            source_slug: self.source.as_deref(),
+            external_kind: &self.external_kind,
+            external_id: self.external_id.as_deref(),
+            refresh: self.refresh,
             evidence: parse_evidence_refs(&self.evidence)?,
         })
     }
@@ -1411,11 +1564,82 @@ impl RepairPersonEmailMoveArgs {
     }
 }
 
+impl RepairPersonPhoneMoveArgs {
+    fn to_command(&self) -> add::PersonPhoneMoveArgs<'_> {
+        add::PersonPhoneMoveArgs {
+            phone: &self.phone,
+            from_person_id: &self.from_person,
+            to_person_id: &self.to_person,
+            relink_participants: self.relink_participants,
+        }
+    }
+}
+
 impl RepairParticipantsRelinkArgs {
     fn to_command(&self) -> add::ParticipantRelinkArgs<'_> {
         add::ParticipantRelinkArgs {
             handle: &self.handle,
             person_id: &self.person,
+            from_person_id: self.from_person.as_deref(),
+            force: self.force,
+        }
+    }
+}
+
+impl MergePersonArgs {
+    fn to_command(&self) -> add::MergePersonArgs<'_> {
+        add::MergePersonArgs {
+            from_person_id: &self.from_person,
+            to_person_id: &self.to_person,
+            dry_run: self.dry_run,
+            reason: self.reason.as_deref(),
+        }
+    }
+}
+
+impl ArchiveRecordArgs {
+    fn to_command(&self, kind: add::ArchiveKind) -> add::ArchiveArgs<'_> {
+        add::ArchiveArgs {
+            kind,
+            id: &self.id,
+            reason: &self.reason,
+        }
+    }
+}
+
+impl UnlinkArgs {
+    fn to_command(&self) -> add::UnlinkArgs<'_> {
+        add::UnlinkArgs {
+            left: &self.left,
+            right: &self.right,
+            reason: &self.reason,
+        }
+    }
+}
+
+impl PersonRenameArgs {
+    fn to_command(&self) -> add::PersonRenameArgs<'_> {
+        add::PersonRenameArgs {
+            person_id: &self.id,
+            full_name: &self.full_name,
+        }
+    }
+}
+
+impl PersonEmailArgs {
+    fn to_command(&self) -> add::PersonContactArgs<'_> {
+        add::PersonContactArgs {
+            person_id: &self.id,
+            value: &self.email,
+        }
+    }
+}
+
+impl PersonPhoneArgs {
+    fn to_command(&self) -> add::PersonContactArgs<'_> {
+        add::PersonContactArgs {
+            person_id: &self.id,
+            value: &self.phone,
         }
     }
 }
@@ -1640,9 +1864,59 @@ fn run(cli: Cli) -> Result<(), CliError> {
                         add::repair_person_email_move(&mut conn, json, a.to_command())
                     }
                 },
+                RepairCommand::PersonPhone { what } => match what {
+                    RepairPersonPhoneCommand::Move(a) => {
+                        add::repair_person_phone_move(&mut conn, json, a.to_command())
+                    }
+                },
                 RepairCommand::Participants { what } => match what {
                     RepairParticipantsCommand::Relink(a) => {
                         add::repair_participants_relink(&mut conn, json, a.to_command())
+                    }
+                },
+            }
+        }
+        Command::Merge { what } => {
+            let mut conn = db::open(&db_path)?;
+            match what {
+                MergeCommand::Person(a) => add::merge_person(&mut conn, json, a.to_command()),
+            }
+        }
+        Command::Archive { what } => {
+            let mut conn = db::open(&db_path)?;
+            match what {
+                ArchiveCommand::Person(a) => {
+                    add::archive_record(&mut conn, json, a.to_command(add::ArchiveKind::Person))
+                }
+                ArchiveCommand::Organization(a) => add::archive_record(
+                    &mut conn,
+                    json,
+                    a.to_command(add::ArchiveKind::Organization),
+                ),
+            }
+        }
+        Command::Unlink(a) => {
+            let mut conn = db::open(&db_path)?;
+            add::unlink_records(&mut conn, json, a.to_command())
+        }
+        Command::Person { what } => {
+            let mut conn = db::open(&db_path)?;
+            match what {
+                PersonCommand::Rename(a) => add::rename_person(&mut conn, json, a.to_command()),
+                PersonCommand::Email { what } => match what {
+                    PersonEmailCommand::Add(a) => {
+                        add::person_email_add(&mut conn, json, a.to_command())
+                    }
+                    PersonEmailCommand::Remove(a) => {
+                        add::person_email_remove(&mut conn, json, a.to_command())
+                    }
+                },
+                PersonCommand::Phone { what } => match what {
+                    PersonPhoneCommand::Add(a) => {
+                        add::person_phone_add(&mut conn, json, a.to_command())
+                    }
+                    PersonPhoneCommand::Remove(a) => {
+                        add::person_phone_remove(&mut conn, json, a.to_command())
                     }
                 },
             }
@@ -1975,9 +2249,29 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
                 "usage": "brain --json repair person-email move --email <email> --from <person-id> --to <person-id> [--relink-participants]",
                 "purpose": "Move an email handle between existing people and optionally relink matching participant rows.",
             },
+            "repairPersonPhoneMove": {
+                "usage": "brain --json repair person-phone move --phone <phone> --from <person-id> --to <person-id> [--relink-participants]",
+                "purpose": "Move a phone handle between existing people and optionally relink matching phone-like participant rows.",
+            },
             "repairParticipantsRelink": {
-                "usage": "brain --json repair participants relink --handle <email> --person <person-id>",
-                "purpose": "Relink unresolved participant rows for one handle to an existing person.",
+                "usage": "brain --json repair participants relink --handle <email|phone> --person <person-id> [--from-person <person-id>|--force]",
+                "purpose": "Relink unresolved participant rows for one handle to an existing person. Use --from-person or --force to move already-linked bad participant rows.",
+            },
+            "mergePerson": {
+                "usage": "brain --json merge person --from <source-person-id> --to <target-person-id> [--dry-run] [--reason <text>]",
+                "purpose": "Move duplicate person links and handles onto the canonical target, then archive the source. --dry-run reports the merge plan without writes.",
+            },
+            "archive": {
+                "usage": "brain --json archive person <id> --reason <text> | brain --json archive organization <id> --reason <text>",
+                "purpose": "Soft-archive mistaken person or organization records and write archive provenance. Organization archive blocks while current active affiliations remain.",
+            },
+            "unlink": {
+                "usage": "brain --json unlink <kind:id> <kind:id> --reason <text>",
+                "purpose": "Remove a typed relationship, such as a mistaken person-organization affiliation or wrong person/document/task/project link.",
+            },
+            "personMaintenance": {
+                "usage": "brain --json person rename <id> --full-name <name> | brain --json person email add|remove <id> --email <email> | brain --json person phone add|remove <id> --phone <phone>",
+                "purpose": "Maintain an existing person after dedupe finds a canonical record.",
             },
             "addAsset": {
                 "usage": "brain --json add asset --file <path> --link <kind:id> [--role attachment|avatar|logo|screenshot|source_file]",
@@ -2022,8 +2316,8 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
                 "purpose": "Store narrative AI artifacts separately from raw evidence.",
             },
             "addFact": {
-                "usage": "brain --json add fact --subject <kind:id> --key <key> (--value-text <text>|--value-json <json>) [--source-record <kind:id>] [--confidence <0..1>] [--evidence record_type:id~\"quote\"]",
-                "purpose": "Append a structured claim without automatically promoting it to memory.",
+                "usage": "brain --json add fact --subject <kind:id> --key <key> (--value-text <text>|--value-json <json>) [--source-record <kind:id>] [--source <slug> --external-kind <kind> --external-id <id> [--refresh]] [--confidence <0..1>] [--evidence record_type:id~\"quote\"]",
+                "purpose": "Append a structured claim without automatically promoting it to memory. Source-keyed facts are idempotent; pass --refresh to update that same imported fact.",
             },
             "promoteFact": {
                 "usage": "brain --json promote fact <fact-id> --memory-kind <kind>",

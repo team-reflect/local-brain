@@ -1463,6 +1463,598 @@ fn repair_person_email_move_and_participant_relink() {
 }
 
 #[test]
+fn merge_person_dry_run_then_apply_moves_links_and_archives_source() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let target = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Canonical Person",
+            "--email",
+            "canonical@example.com",
+        ],
+    );
+    let source = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Duplicate Person",
+            "--email",
+            "duplicate@example.com",
+            "--phone",
+            "+1 555 0100",
+            "--notes",
+            "Imported duplicate shell.",
+        ],
+    );
+    let target_id = target["id"].as_str().unwrap();
+    let source_id = source["id"].as_str().unwrap();
+    let source_link = format!("person:{source_id}");
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "document",
+            "--title",
+            "Source-linked doc",
+            "--text",
+            "Readable source body.",
+            "--link",
+            &source_link,
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Source participant",
+            "--text",
+            "Readable source body.",
+            "--participant",
+            "from:Duplicate Person <duplicate@example.com>",
+        ],
+    );
+
+    let dry = run_json(
+        &db,
+        &[
+            "--json",
+            "merge",
+            "person",
+            "--from",
+            source_id,
+            "--to",
+            target_id,
+            "--dry-run",
+        ],
+    );
+    assert_eq!(dry["dryRun"], true);
+    assert_eq!(dry["sourceArchived"], false);
+    assert_eq!(dry["emailsMoved"], 1);
+    assert_eq!(dry["documentLinksMoved"], 1);
+    assert_eq!(dry["participantsRelinked"], 1);
+
+    let merged = run_json(
+        &db,
+        &[
+            "--json",
+            "merge",
+            "person",
+            "--from",
+            source_id,
+            "--to",
+            target_id,
+            "--reason",
+            "duplicate contact shell",
+        ],
+    );
+    assert_eq!(merged["sourceArchived"], true);
+    assert_eq!(merged["emailsMoved"], 1);
+    assert_eq!(merged["phonesMoved"], 1);
+
+    let conn = Connection::open(&db).unwrap();
+    let archived_at: Option<String> = conn
+        .query_row(
+            "SELECT archived_at FROM people WHERE id = ?1",
+            [source_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(archived_at.is_some());
+    let email_owner: String = conn
+        .query_row(
+            "SELECT person_id FROM person_emails WHERE normalized_email = 'duplicate@example.com'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(email_owner, target_id);
+    let document_owner: String = conn
+        .query_row("SELECT person_id FROM document_people LIMIT 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(document_owner, target_id);
+    let participant_owner: String = conn
+        .query_row(
+            "SELECT person_id FROM interaction_participants WHERE normalized_handle = 'duplicate@example.com'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(participant_owner, target_id);
+    let archived_provenance: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM record_provenance
+             WHERE record_type = 'person' AND record_id = ?1 AND provenance_kind = 'archived'",
+            [source_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(archived_provenance, 1);
+}
+
+#[test]
+fn merge_person_refuses_to_merge_away_self() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let self_person = run_json(
+        &db,
+        &[
+            "--json",
+            "self",
+            "set",
+            "--full-name",
+            "Alex MacCaw",
+            "--email",
+            "alex@example.com",
+        ],
+    );
+    let duplicate = run_json(
+        &db,
+        &["--json", "add", "person", "--full-name", "Alex Duplicate"],
+    );
+    let out = run(
+        &db,
+        &[
+            "--json",
+            "merge",
+            "person",
+            "--from",
+            self_person["id"].as_str().unwrap(),
+            "--to",
+            duplicate["id"].as_str().unwrap(),
+        ],
+    );
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("cannot merge away the self person"));
+}
+
+#[test]
+fn archive_person_soft_archives_and_records_provenance() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let person = run_json(
+        &db,
+        &["--json", "add", "person", "--full-name", "Duplicate Shell"],
+    );
+    let person_id = person["id"].as_str().unwrap();
+
+    let archived = run_json(
+        &db,
+        &[
+            "--json",
+            "archive",
+            "person",
+            person_id,
+            "--reason",
+            "duplicate shell",
+        ],
+    );
+    assert_eq!(archived["recordType"], "person");
+    assert_eq!(archived["id"], person_id);
+    assert_eq!(archived["archived"], true);
+
+    let conn = Connection::open(&db).unwrap();
+    let archived_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM people WHERE id = ?1 AND archived_at IS NOT NULL",
+            [person_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(archived_count, 1);
+    let provenance_metadata: String = conn
+        .query_row(
+            "SELECT metadata_json
+             FROM record_provenance
+             WHERE record_type = 'person'
+               AND record_id = ?1
+               AND provenance_kind = 'archived'",
+            [person_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(provenance_metadata.contains("duplicate shell"));
+}
+
+#[test]
+fn archive_organization_blocks_current_affiliations_until_unlinked() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let person = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Affiliated Person",
+        ],
+    );
+    let org = run_json(
+        &db,
+        &["--json", "add", "organization", "--name", "Mistaken Org"],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "affiliate",
+            "--person",
+            person["id"].as_str().unwrap(),
+            "--org",
+            org["id"].as_str().unwrap(),
+            "--current",
+        ],
+    );
+
+    let blocked = run(
+        &db,
+        &[
+            "--json",
+            "archive",
+            "organization",
+            org["id"].as_str().unwrap(),
+            "--reason",
+            "bad org import",
+        ],
+    );
+    assert!(!blocked.status.success());
+    assert!(String::from_utf8_lossy(&blocked.stderr).contains("current active affiliation"));
+
+    let person_ref = format!("person:{}", person["id"].as_str().unwrap());
+    let org_ref = format!("organization:{}", org["id"].as_str().unwrap());
+    let unlinked = run_json(
+        &db,
+        &[
+            "--json",
+            "unlink",
+            &person_ref,
+            &org_ref,
+            "--reason",
+            "bad affiliation",
+        ],
+    );
+    assert_eq!(unlinked["rowsRemoved"], 1);
+    let archived = run_json(
+        &db,
+        &[
+            "--json",
+            "archive",
+            "organization",
+            org["id"].as_str().unwrap(),
+            "--reason",
+            "bad org import",
+        ],
+    );
+    assert_eq!(archived["archived"], true);
+}
+
+#[test]
+fn person_contact_commands_and_phone_move_relink_participants() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let wrong = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Wrong Phone Owner",
+            "--phone",
+            "+1 555 0100",
+        ],
+    );
+    let right = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Right Phone Owner",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "person",
+            "email",
+            "add",
+            right["id"].as_str().unwrap(),
+            "--email",
+            "right@example.com",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "person",
+            "email",
+            "remove",
+            right["id"].as_str().unwrap(),
+            "--email",
+            "right@example.com",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "message",
+            "--title",
+            "SMS import",
+            "--text",
+            "Readable source body.",
+            "--participant",
+            "from:Wrong Phone Owner <+1 555 0100>",
+        ],
+    );
+    let conn = Connection::open(&db).unwrap();
+    conn.execute(
+        "UPDATE interaction_participants SET person_id = ?1 WHERE normalized_handle = '15550100'",
+        [wrong["id"].as_str().unwrap()],
+    )
+    .unwrap();
+    drop(conn);
+
+    let moved = run_json(
+        &db,
+        &[
+            "--json",
+            "repair",
+            "person-phone",
+            "move",
+            "--phone",
+            "+1 555 0100",
+            "--from",
+            wrong["id"].as_str().unwrap(),
+            "--to",
+            right["id"].as_str().unwrap(),
+            "--relink-participants",
+        ],
+    );
+    assert_eq!(moved["participantsRelinked"], 1);
+    let conn = Connection::open(&db).unwrap();
+    let phone_owner: String = conn
+        .query_row(
+            "SELECT person_id FROM person_phones WHERE normalized_phone = '15550100'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(phone_owner, right["id"].as_str().unwrap());
+    let participant_owner: String = conn
+        .query_row(
+            "SELECT person_id FROM interaction_participants WHERE normalized_handle = '15550100'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(participant_owner, right["id"].as_str().unwrap());
+}
+
+#[test]
+fn repair_participants_relink_can_move_already_linked_rows() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let wrong = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Wrong Participant",
+            "--email",
+            "move@example.com",
+        ],
+    );
+    let right = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "person",
+            "--full-name",
+            "Right Participant",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Already linked",
+            "--text",
+            "Readable source body.",
+            "--participant",
+            "from:Wrong Participant <move@example.com>",
+        ],
+    );
+
+    let relinked = run_json(
+        &db,
+        &[
+            "--json",
+            "repair",
+            "participants",
+            "relink",
+            "--handle",
+            "move@example.com",
+            "--person",
+            right["id"].as_str().unwrap(),
+            "--from-person",
+            wrong["id"].as_str().unwrap(),
+        ],
+    );
+    assert_eq!(relinked["participantsRelinked"], 1);
+    let conn = Connection::open(&db).unwrap();
+    let participant_owner: String = conn
+        .query_row(
+            "SELECT person_id FROM interaction_participants WHERE normalized_handle = 'move@example.com'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(participant_owner, right["id"].as_str().unwrap());
+}
+
+#[test]
+fn add_fact_source_identity_is_idempotent_and_refreshable() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    run_json(
+        &db,
+        &[
+            "--json",
+            "source",
+            "ensure",
+            "--slug",
+            "friend_crm",
+            "--name",
+            "Friend CRM",
+        ],
+    );
+    let person = run_json(
+        &db,
+        &["--json", "add", "person", "--full-name", "Fact Subject"],
+    );
+    let subject = format!("person:{}", person["id"].as_str().unwrap());
+    let first = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "fact",
+            "--subject",
+            &subject,
+            "--key",
+            "membership",
+            "--value-text",
+            "Original membership fact",
+            "--source",
+            "friend_crm",
+            "--external-kind",
+            "membership",
+            "--external-id",
+            "fact-subject:membership",
+        ],
+    );
+    assert_eq!(first["isDuplicate"], false);
+    let second = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "fact",
+            "--subject",
+            &subject,
+            "--key",
+            "membership",
+            "--value-text",
+            "Changed but not refreshed",
+            "--source",
+            "friend_crm",
+            "--external-kind",
+            "membership",
+            "--external-id",
+            "fact-subject:membership",
+        ],
+    );
+    assert_eq!(second["isDuplicate"], true);
+    assert_eq!(second["refreshed"], false);
+
+    let conn = Connection::open(&db).unwrap();
+    let before_refresh: String = conn
+        .query_row(
+            "SELECT value_text FROM extracted_facts WHERE id = ?1",
+            [first["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(before_refresh, "Original membership fact");
+    drop(conn);
+
+    let refreshed = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "fact",
+            "--subject",
+            &subject,
+            "--key",
+            "membership",
+            "--value-text",
+            "Refreshed membership fact",
+            "--source",
+            "friend_crm",
+            "--external-kind",
+            "membership",
+            "--external-id",
+            "fact-subject:membership",
+            "--refresh",
+        ],
+    );
+    assert_eq!(refreshed["isDuplicate"], true);
+    assert_eq!(refreshed["refreshed"], true);
+    let conn = Connection::open(&db).unwrap();
+    let after_refresh: String = conn
+        .query_row(
+            "SELECT value_text FROM extracted_facts WHERE id = ?1",
+            [first["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(after_refresh, "Refreshed membership fact");
+}
+
+#[test]
 fn add_interaction_replace_body_updates_source_backed_record_and_chunks() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
@@ -2280,38 +2872,46 @@ fn add_interaction_self_participant_links_self_and_dedupes_roles() {
     );
     let id = interaction["id"].as_str().unwrap();
 
+    struct ParticipantRow {
+        rows: i64,
+        role: Option<String>,
+        handle: Option<String>,
+        normalized_handle: Option<String>,
+        display_name: Option<String>,
+        source_id: Option<String>,
+    }
+
     let conn = Connection::open(&db).unwrap();
-    let (rows, role, handle, normalized_handle, display_name, source_id): (
-        i64,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-    ) = conn
+    let participant = conn
         .query_row(
             "SELECT COUNT(*), role, handle, normalized_handle, display_name, source_id
              FROM interaction_participants
              WHERE interaction_id = ?1 AND person_id = ?2",
             (id, "self-test"),
             |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                ))
+                Ok(ParticipantRow {
+                    rows: row.get(0)?,
+                    role: row.get(1)?,
+                    handle: row.get(2)?,
+                    normalized_handle: row.get(3)?,
+                    display_name: row.get(4)?,
+                    source_id: row.get(5)?,
+                })
             },
         )
         .unwrap();
-    assert_eq!(rows, 1);
-    assert_eq!(role.as_deref(), Some("organizer"));
-    assert_eq!(handle.as_deref(), Some("alex@maccaw.org"));
-    assert_eq!(normalized_handle.as_deref(), Some("alex@maccaw.org"));
-    assert_eq!(display_name.as_deref(), Some("You"));
-    assert_eq!(source_id.as_deref(), Some("source_google_calendar"));
+    assert_eq!(participant.rows, 1);
+    assert_eq!(participant.role.as_deref(), Some("organizer"));
+    assert_eq!(participant.handle.as_deref(), Some("alex@maccaw.org"));
+    assert_eq!(
+        participant.normalized_handle.as_deref(),
+        Some("alex@maccaw.org")
+    );
+    assert_eq!(participant.display_name.as_deref(), Some("You"));
+    assert_eq!(
+        participant.source_id.as_deref(),
+        Some("source_google_calendar")
+    );
 }
 
 #[test]

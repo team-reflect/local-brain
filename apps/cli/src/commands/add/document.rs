@@ -79,8 +79,7 @@ pub fn add_document(
     if let Some(existing) = existing {
         if !args.allow_duplicate {
             let tx = conn.transaction()?;
-            let chunk_count;
-            if matched_by_external && !body.is_empty() {
+            let chunk_count = if matched_by_external && !body.is_empty() {
                 tx.execute(
                     "UPDATE documents
                      SET body_text = ?2,
@@ -89,10 +88,10 @@ pub fn add_document(
                      WHERE id = ?1",
                     params![existing, body.as_str(), hash],
                 )?;
-                chunk_count = replace_chunks(&tx, "document", existing, &body)?;
+                replace_chunks(&tx, "document", existing, &body)?
             } else {
-                chunk_count = existing_chunk_count(&tx, "document", existing)?;
-            }
+                existing_chunk_count(&tx, "document", existing)?
+            };
             super::fill_blanks(
                 &tx,
                 "documents",

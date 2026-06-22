@@ -170,6 +170,8 @@ brain --json import participants promote --handle maya@example.com \
 brain --json repair participants relink --handle maya@example.com --person <person-id>
 brain --json repair person-email move --email maya@example.com \
   --from <wrong-person-id> --to <right-person-id> --relink-participants
+brain --json repair person-phone move --phone "+1 555 0100" \
+  --from <wrong-person-id> --to <right-person-id> --relink-participants
 ```
 
 Use read-only SQL only for audits and candidate discovery; all creates,
@@ -219,6 +221,36 @@ Use `brain suggest organization` when an org is weakly inferred from one email
 signature or ambiguous domain. Use `brain affiliate --person <id> --org <id>
 --title <title> --department <dept> --role-family <family> --seniority <level>
 --current --primary` for existing records.
+
+### Cleanup And Dedupe
+
+Use CLI cleanup primitives instead of direct SQLite updates:
+
+```bash
+brain --json merge person --from <duplicate-person-id> --to <canonical-person-id> --dry-run
+brain --json merge person --from <duplicate-person-id> --to <canonical-person-id> \
+  --reason "duplicate contact shell"
+
+brain --json unlink person:<person-id> organization:<org-id> \
+  --reason "org field was a location, not an employer"
+brain --json archive organization <org-id> --reason "mistaken organization import"
+
+brain --json person rename <person-id> --full-name "Correct Name"
+brain --json person email add <person-id> --email correct@example.com
+brain --json person phone add <person-id> --phone "+1 555 0100"
+
+brain --json repair participants relink --handle wrong@example.com \
+  --person <right-person-id> --from-person <wrong-person-id>
+```
+
+Always dry-run `merge person` before applying it in a large backfill. It moves
+handles, affiliations, participant rows, typed links, tags, provenance, source
+identities, and fact/memory references to the target, then archives the source.
+It refuses to merge away the self person; merge duplicates into self instead.
+
+Archive bad shells after unlinking active relationships that should not survive.
+Organization archive blocks while active current affiliations remain; use
+`unlink` first when the affiliation itself was wrong.
 
 ## Projects
 
@@ -310,6 +342,7 @@ brain --json add task --title "Send Maya the revised budget" \
 brain --json add fact --subject person:<id> --key preference \
   --value-text "Prefers async updates before Friday." \
   --source-record interaction:<id> \
+  --source gmail --external-kind extracted-fact --external-id thread-123:preference:async-updates \
   --evidence interaction:<id>~"async updates before Friday"
 
 brain --json add fact --subject interaction:<id> --key follow_up \
@@ -323,6 +356,11 @@ Evidence refs resolve against universal `content_chunks`; use
 `interaction_transcript`, `ai_note`, `extracted_fact`, profiles, tasks, projects,
 memories, and assets. Quote evidence is case-insensitive and literal against
 stored chunk text. Use a short distinctive phrase.
+
+For low-level import facts that should be stable across reruns, include
+`--source`, `--external-kind`, and `--external-id`. The same source-keyed fact is
+returned as a duplicate on rerun; pass `--refresh` only when the importer should
+replace that fact's fields, chunks, and evidence.
 
 ## Assets
 

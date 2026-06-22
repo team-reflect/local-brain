@@ -10,7 +10,8 @@ use serde_json::{json, Value};
 
 use super::identity::source_id;
 use super::text::{
-    normalize_email, normalize_name, normalize_optional, normalize_title, valid_email,
+    normalize_email, normalize_name, normalize_optional, normalize_phone, normalize_title,
+    valid_email,
 };
 use crate::error::CliError;
 use crate::id::new_id;
@@ -43,6 +44,8 @@ pub struct PersonEmailMoveArgs<'a> {
 pub struct ParticipantRelinkArgs<'a> {
     pub handle: &'a str,
     pub person_id: &'a str,
+    pub from_person_id: Option<&'a str>,
+    pub force: bool,
 }
 
 #[derive(Default)]
@@ -57,9 +60,10 @@ struct AuditGroup {
     sample_titles: Vec<String>,
 }
 
-struct RelinkResult {
-    updated_rows: usize,
-    merged_rows: usize,
+#[derive(Default)]
+pub(super) struct RelinkResult {
+    pub updated_rows: usize,
+    pub merged_rows: usize,
 }
 
 struct PromotedPerson {
@@ -78,6 +82,24 @@ fn normalized_email_handle(raw: &str, flag: &str) -> Result<(String, String), Cl
             "{flag} must be a valid email address"
         )));
     }
+    Ok((display, normalized))
+}
+
+fn normalized_repair_handle(raw: &str, flag: &str) -> Result<(String, String), CliError> {
+    let display = normalize_optional(Some(raw))
+        .ok_or_else(|| CliError::Runtime(format!("{flag} cannot be blank")))?;
+    if display.contains('@') {
+        let normalized = normalize_email(Some(&display))
+            .ok_or_else(|| CliError::Runtime(format!("{flag} must be an email or phone")))?;
+        if !valid_email(&normalized) {
+            return Err(CliError::Runtime(format!(
+                "{flag} must be a valid email address"
+            )));
+        }
+        return Ok((display, normalized));
+    }
+    let normalized = normalize_phone(Some(&display))
+        .ok_or_else(|| CliError::Runtime(format!("{flag} must be an email or phone")))?;
     Ok((display, normalized))
 }
 
@@ -456,7 +478,18 @@ fn apply_promotion_affiliation(
     };
     let org_id = super::organization::find_or_create_organization(conn, org, org_domain, None)?;
     super::affiliation::upsert_affiliation(
-        conn, person_id, &org_id, title, None, None, None, None, current, current,
+        conn,
+        super::affiliation::AffiliationUpsert {
+            person_id,
+            organization_id: &org_id,
+            title,
+            department: None,
+            role: None,
+            role_family: None,
+            seniority: None,
+            is_current: current,
+            is_primary: current,
+        },
     )?;
     Ok(())
 }
@@ -490,11 +523,12 @@ fn recompute_relationship_intelligence(
     Ok(last_interaction_at)
 }
 
-fn relink_participants_for_handle(
+pub(super) fn relink_participants_for_handle(
     conn: &Connection,
     normalized_handle: &str,
     person_id: &str,
     from_person_id: Option<&str>,
+    force: bool,
     display_handle: Option<&str>,
     display_name: Option<&str>,
 ) -> Result<RelinkResult, CliError> {
@@ -506,13 +540,20 @@ fn relink_participants_for_handle(
                AND (
                  person_id IS NULL
                  OR (?2 IS NOT NULL AND person_id = ?2)
+                 OR (?3 = 1 AND person_id <> ?4)
                )
              ORDER BY interaction_id, created_at, id",
         )?;
         let rows = stmt
-            .query_map(params![normalized_handle, from_person_id], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
+            .query_map(
+                params![
+                    normalized_handle,
+                    from_person_id,
+                    i64::from(force),
+                    person_id
+                ],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         rows
     };
@@ -607,6 +648,7 @@ pub fn promote_participant(
         &normalized_email,
         &person.id,
         None,
+        false,
         Some(&display_email),
         Some(&full_name),
     )?;
@@ -744,6 +786,7 @@ pub fn repair_person_email_move(
             &normalized_email,
             args.to_person_id,
             Some(args.from_person_id),
+            false,
             Some(&stored_email),
             None,
         )?
@@ -780,30 +823,41 @@ pub fn repair_participants_relink(
     json_output: bool,
     args: ParticipantRelinkArgs,
 ) -> Result<(), CliError> {
-    let (display_email, normalized_email) = normalized_email_handle(args.handle, "--handle")?;
+    let (display_handle, normalized_handle) = normalized_repair_handle(args.handle, "--handle")?;
     let tx = conn.transaction()?;
     require_active_person(&tx, args.person_id)?;
+    if args.from_person_id == Some(args.person_id) {
+        return Err(CliError::Runtime(
+            "--from-person must differ from --person".into(),
+        ));
+    }
+    if let Some(from_person_id) = args.from_person_id {
+        require_active_person(&tx, from_person_id)?;
+    }
     let relink = relink_participants_for_handle(
         &tx,
-        &normalized_email,
+        &normalized_handle,
         args.person_id,
-        None,
-        Some(&display_email),
+        args.from_person_id,
+        args.force,
+        Some(&display_handle),
         None,
     )?;
     tx.commit()?;
     if json_output {
         print_json(&json!({
             "kind": "participant_relink",
-            "handle": normalized_email,
+            "handle": normalized_handle,
             "personId": args.person_id,
+            "fromPersonId": args.from_person_id,
+            "force": args.force,
             "participantsRelinked": relink.updated_rows,
             "participantsMerged": relink.merged_rows,
         }))
     } else {
         println!(
             "participant {} -> person {} ({} relinked, {} merged)",
-            normalized_email, args.person_id, relink.updated_rows, relink.merged_rows
+            normalized_handle, args.person_id, relink.updated_rows, relink.merged_rows
         );
         Ok(())
     }

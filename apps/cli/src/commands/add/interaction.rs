@@ -13,7 +13,7 @@ use super::identity::{
     insert_record_provenance, source_id, ExternalIdentityWrite, RecordProvenanceWrite,
 };
 use super::links::{insert_chunks, insert_links, replace_chunks};
-use super::text::{normalize_optional, normalize_title};
+use super::text::{normalize_optional, normalize_phone, normalize_title};
 use crate::commands::LinkRef;
 use crate::error::CliError;
 use crate::id::new_id;
@@ -646,6 +646,8 @@ fn parse_raw_participant(raw: &str) -> Result<Option<RawParticipant>, CliError> 
     let normalized_handle = handle.as_deref().map(|handle| {
         if handle.contains('@') {
             handle.to_lowercase()
+        } else if let Some(phone) = normalize_phone(Some(handle)) {
+            phone
         } else {
             handle.to_string()
         }
