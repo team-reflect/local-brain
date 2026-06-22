@@ -70,6 +70,12 @@ const userMessage: UIMessage = {
   parts: [{ type: 'text', text: 'What did Maya promise?', state: 'done' }],
 }
 
+const retryUserMessage: UIMessage = {
+  id: 'user-2',
+  role: 'user',
+  parts: [{ type: 'text', text: 'Try again now', state: 'done' }],
+}
+
 const approvalResponseMessage = {
   id: 'assistant-approval',
   role: 'assistant',
@@ -265,6 +271,33 @@ describe('createChatTransport', () => {
     expect(coreMocks.createConversation).not.toHaveBeenCalled()
     expect(aiMocks.generateText).not.toHaveBeenCalled()
     expect(coreMocks.updateConversationTitle).not.toHaveBeenCalled()
+  })
+
+  it('generates a title for an existing conversation still using the first-prompt fallback', async () => {
+    coreMocks.getConversation.mockResolvedValue({
+      id: 'chat-1',
+      title: 'What did Maya promise?',
+      createdAt: '2026-06-19T00:00:00.000Z',
+      updatedAt: '2026-06-19T00:00:00.000Z',
+      archivedAt: null,
+    })
+    const transport = createChatTransport()
+
+    await transport.sendMessages({
+      trigger: 'submit-message',
+      chatId: 'chat-1',
+      messageId: undefined,
+      messages: [userMessage, retryUserMessage],
+      abortSignal: undefined,
+    })
+
+    await eventually(() => {
+      expect(aiMocks.generateText).toHaveBeenCalledTimes(1)
+      expect(coreMocks.updateConversationTitle).toHaveBeenCalledWith('chat-1', 'Maya Budget')
+    })
+    const [{ prompt }] = aiMocks.generateText.mock.calls[0] as [{ prompt: string }]
+    expect(prompt).toContain('What did Maya promise?')
+    expect(prompt).not.toContain('Try again now')
   })
 
   it('persists an assistant error turn when no provider is configured', async () => {

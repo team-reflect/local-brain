@@ -31,6 +31,12 @@ export interface ChatTransportOptions {
 interface TurnQuestion {
   question: string
   shouldGenerateTitle: boolean
+  titleUserText: string
+}
+
+interface ConversationState {
+  createdConversation: boolean
+  title: string | null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -55,11 +61,11 @@ function titleForQuestion(question: string): string {
   return compact.length > 60 ? `${compact.slice(0, 57)}...` : compact
 }
 
-async function ensureConversation(chatId: string, title: string): Promise<boolean> {
+async function ensureConversation(chatId: string, title: string): Promise<ConversationState> {
   const existing = await getConversation(chatId)
-  if (existing) return false
+  if (existing) return { createdConversation: false, title: existing.title }
   await createConversation({ id: chatId, title })
-  return true
+  return { createdConversation: true, title }
 }
 
 function assistantMessage(messageId: string, text: string): UIMessage {
@@ -151,11 +157,14 @@ function watchPendingApprovalPersistence({
 async function persistLatestUser(
   conversationId: string,
   messages: readonly UIMessage[],
-): Promise<{ createdConversation: boolean; text: string }> {
+): Promise<{ shouldGenerateTitle: boolean; text: string; titleUserText: string }> {
   const latest = messages[messages.length - 1]
   if (!latest || latest.role !== 'user') throw new Error('Chat needs a user message to send.')
   const text = uiMessageText(latest).trim()
-  const createdConversation = await ensureConversation(conversationId, titleForQuestion(text))
+  const titleUserText = uiMessageText(messages.find((message) => message.role === 'user') ?? latest).trim()
+  const conversation = await ensureConversation(conversationId, titleForQuestion(text))
+  const shouldGenerateTitle =
+    conversation.createdConversation || conversation.title === titleForQuestion(titleUserText)
   await appendChatMessage({
     id: latest.id,
     conversationId,
@@ -164,7 +173,7 @@ async function persistLatestUser(
     uiMessageJson: uiMessageJson(latest),
     status: 'done',
   })
-  return { createdConversation, text }
+  return { shouldGenerateTitle, text, titleUserText }
 }
 
 async function questionForTurn(
@@ -175,12 +184,12 @@ async function questionForTurn(
   const latest = messages[messages.length - 1]
   const latestUser = messages.filter((message) => message.role === 'user').at(-1)
   if (trigger === 'submit-message' && latest?.role === 'user') {
-    const { createdConversation, text } = await persistLatestUser(conversationId, messages)
-    return { question: text, shouldGenerateTitle: createdConversation }
+    const { shouldGenerateTitle, text, titleUserText } = await persistLatestUser(conversationId, messages)
+    return { question: text, shouldGenerateTitle, titleUserText }
   }
   const question = uiMessageText(latestUser ?? latest ?? assistantMessage(createChatId(), '')).trim()
   await ensureConversation(conversationId, titleForQuestion(question))
-  return { question, shouldGenerateTitle: false }
+  return { question, shouldGenerateTitle: false, titleUserText: question }
 }
 
 async function loadChatContext(): Promise<{ system: string }> {
@@ -194,7 +203,7 @@ async function loadChatContext(): Promise<{ system: string }> {
 export function createChatTransport(options: ChatTransportOptions = {}): ChatTransport<UIMessage> {
   return {
     async sendMessages({ trigger, chatId, messages, abortSignal }) {
-      const { question, shouldGenerateTitle } = await questionForTurn(trigger, chatId, messages)
+      const { question, shouldGenerateTitle, titleUserText } = await questionForTurn(trigger, chatId, messages)
 
       if (trigger === 'regenerate-message') {
         await ensureConversation(chatId, titleForQuestion(question))
@@ -235,7 +244,7 @@ export function createChatTransport(options: ChatTransportOptions = {}): ChatTra
                 conversationId: chatId,
                 model,
                 onUpdated: options.onConversationTitleUpdated,
-                userText: question,
+                userText: titleUserText,
               })
             }
           },
