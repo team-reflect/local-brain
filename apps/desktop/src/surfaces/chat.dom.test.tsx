@@ -272,8 +272,10 @@ describe('ChatSurface', () => {
     ]
     await renderReadyChat()
 
-    expect(screen.getByText('Create task needs approval')).not.toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: /Approve/ }))
+    expect(screen.getByText('Create task')).not.toBeNull()
+    expect(screen.getByText('Send budget')).not.toBeNull()
+    expect(screen.queryByText('Approve')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Approve create task/ }))
     expect(chatMocks.addToolApprovalResponse).toHaveBeenCalledWith({ id: 'approval-1', approved: true })
   })
 
