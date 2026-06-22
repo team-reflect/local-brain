@@ -1,48 +1,37 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
-import type { Graph, GraphNodeKind } from '@local-brain/core'
+import type { Graph } from '@local-brain/core'
 import { Checkbox } from '../components/ui/checkbox'
 import { EmptyState } from '../components/empty-state'
 import { Loading } from '../components/loading'
 import { PageHead } from '../components/page-head'
 import { cn } from '../lib/utils'
 import { useGraph } from '../lib/queries'
-import type { GraphLayout, PositionedNode } from './graph-layout'
+import type { PositionedNode } from './graph-layout'
 import { useAsyncGraphLayout } from './use-async-graph-layout'
+import {
+  clampZoom,
+  clientDeltaToGraphDelta,
+  clientPointToGraphPoint,
+} from './graph-geometry'
+import {
+  ALL_KINDS,
+  HIDDEN_NODE_KINDS,
+  KIND_COLOR,
+  KIND_LABEL,
+  NodeDetailsPanel,
+  clip,
+  countConnections,
+  interactionEdgeWidth,
+  routeForNode,
+  selectLabelForNode,
+  type VisibleGraphFilterKind,
+  type VisibleGraphNodeKind,
+} from './graph-nodes'
 import type { Route } from '../routing/route'
 import { useRouter } from '../routing/router'
 
-type GraphFilterKind = GraphNodeKind | 'interaction'
-type VisibleGraphNodeKind = Exclude<GraphNodeKind, 'memory'>
-type VisibleGraphFilterKind = VisibleGraphNodeKind | 'interaction'
-
-/** A calm, distinguishable color per kind (Reflect cool palette, indigo self). */
-const KIND_COLOR: Record<GraphFilterKind, string> = {
-  self: '#4f46e5',
-  person: '#2563eb',
-  organization: '#7c3aed',
-  project: '#059669',
-  task: '#0891b2',
-  document: '#64748b',
-  interaction: '#db2777',
-  memory: '#d97706',
-}
-
-const KIND_LABEL: Record<VisibleGraphFilterKind, string> = {
-  self: 'You',
-  person: 'People',
-  organization: 'Organizations',
-  project: 'Projects',
-  task: 'Tasks',
-  document: 'Documents',
-  interaction: 'Interactions',
-}
-
-const ALL_KINDS = Object.keys(KIND_LABEL) as VisibleGraphFilterKind[]
-const HIDDEN_NODE_KINDS = new Set<GraphNodeKind>(['memory'])
 const DEFAULT_VIEWPORT = { offsetX: 0, offsetY: 0, scale: 1 }
-const MIN_ZOOM = 0.45
-const MAX_ZOOM = 3
 const DRAG_CLICK_THRESHOLD = 3
 const MIN_NODE_HIT_RADIUS = 16
 
@@ -57,105 +46,8 @@ interface GraphDragState {
   clientX: number
   clientY: number
   totalDistance: number
-}
-
-interface GraphPoint {
-  x: number
-  y: number
-}
-
-function routeForNode(node: PositionedNode): Route | null {
-  switch (node.kind) {
-    case 'self':
-    case 'person':
-      return { kind: 'person', id: node.id }
-    case 'organization':
-      return { kind: 'organization', id: node.id }
-    case 'project':
-      return { kind: 'project', id: node.id }
-    case 'task':
-      return { kind: 'task', id: node.id }
-    case 'document':
-      return { kind: 'document', id: node.id }
-    case 'memory': return null
-  }
-}
-
-function actionLabelForNode(node: PositionedNode): string {
-  const kind = node.kind === 'self' ? 'person' : node.kind
-  return `Open ${kind} ${node.label}`
-}
-
-function clip(label: string): string {
-  return label.length > 22 ? `${label.slice(0, 21)}…` : label
-}
-
-/** Thicken an interaction edge by how many interactions connect the pair. */
-function interactionEdgeWidth(weight: number | undefined): number {
-  return Math.min(6, 1.25 + Math.log2((weight ?? 1) + 1) * 1.1)
-}
-
-function clampZoom(scale: number): number {
-  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale))
-}
-
-interface FitTransform {
-  /** Pixels per viewBox unit (uniform — the viewBox keeps its aspect ratio). */
-  scale: number
-  /** Letterbox padding on each axis, from `xMidYMid` centering. */
-  offsetX: number
-  offsetY: number
-}
-
-/**
- * How the viewBox lands inside the rendered SVG box under the default
- * `xMidYMid meet`: scaled uniformly to fit, then centered. Pointer math must go
- * through this — the box can be wider/taller than the viewBox, so mapping across
- * the full rect would drift on letterboxed (height-bounded) routes.
- */
-function fitTransform(
-  rect: { width: number; height: number },
-  layout: Pick<GraphLayout, 'width' | 'height'>,
-): FitTransform | null {
-  if (rect.width <= 0 || rect.height <= 0) return null
-  if (layout.width <= 0 || layout.height <= 0) return null
-  const scale = Math.min(rect.width / layout.width, rect.height / layout.height)
-  return {
-    scale,
-    offsetX: (rect.width - layout.width * scale) / 2,
-    offsetY: (rect.height - layout.height * scale) / 2,
-  }
-}
-
-function clientPointToGraphPoint(
-  svg: SVGSVGElement,
-  layout: Pick<GraphLayout, 'width' | 'height'>,
-  clientX: number,
-  clientY: number,
-): GraphPoint | null {
-  const rect = svg.getBoundingClientRect()
-  const fit = fitTransform(rect, layout)
-  if (!fit) return null
-  return {
-    x: (clientX - rect.left - fit.offsetX) / fit.scale,
-    y: (clientY - rect.top - fit.offsetY) / fit.scale,
-  }
-}
-
-function clientDeltaToGraphDelta(
-  svg: SVGSVGElement,
-  layout: Pick<GraphLayout, 'width' | 'height'>,
-  deltaX: number,
-  deltaY: number,
-): GraphPoint | null {
-  const rect = svg.getBoundingClientRect()
-  const fit = fitTransform(rect, layout)
-  if (!fit) return null
-  // Centering offsets cancel for a delta; only the uniform scale matters.
-  return {
-    x: deltaX / fit.scale,
-    y: deltaY / fit.scale,
-  }
+  /** Whether we've taken pointer capture yet (deferred until an actual drag). */
+  captured: boolean
 }
 
 export function GraphSurface({
@@ -171,6 +63,7 @@ export function GraphSurface({
     () => new Set(ALL_KINDS),
   )
   const [viewport, setViewport] = useState<GraphViewport>(DEFAULT_VIEWPORT)
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
   const dragRef = useRef<GraphDragState | null>(null)
   const suppressNextNodeClickRef = useRef(false)
@@ -207,6 +100,37 @@ export function GraphSurface({
 
   const layoutState = useAsyncGraphLayout(filteredGraph)
   const layout = layoutState.layout
+
+  const selectedNode = useMemo<PositionedNode | null>(() => {
+    if (!layout || !selectedNodeId) return null
+    return layout.nodes.find((node) => node.id === selectedNodeId) ?? null
+  }, [layout, selectedNodeId])
+
+  const selectedConnectionCount = useMemo(
+    () => (layout && selectedNode ? countConnections(layout, selectedNode.id) : 0),
+    [layout, selectedNode],
+  )
+
+  // Drop the selection if a filter (or refresh) removes the node from the graph.
+  // Keyed off the filtered graph, not the async layout: with every node type
+  // filtered off there is no layout object at all, but the selection must still
+  // clear (otherwise re-enabling a filter would resurrect the panel).
+  useEffect(() => {
+    if (!selectedNodeId || !filteredGraph) return
+    if (!filteredGraph.nodes.some((node) => node.id === selectedNodeId)) {
+      setSelectedNodeId(null)
+    }
+  }, [filteredGraph, selectedNodeId])
+
+  // Escape clears the current selection.
+  useEffect(() => {
+    if (!selectedNodeId) return undefined
+    const handleKey = (event: globalThis.KeyboardEvent): void => {
+      if (event.key === 'Escape') setSelectedNodeId(null)
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [selectedNodeId])
 
   const toggleKind = (kind: VisibleGraphFilterKind): void => {
     setVisibleKinds((current) => {
@@ -246,14 +170,16 @@ export function GraphSurface({
 
   const handlePointerDown = useCallback((event: ReactPointerEvent<SVGSVGElement>): void => {
     if (event.button > 0) return
+    // Capture is deferred to the first real drag move (handlePointerMove).
+    // Capturing on pointerdown retargets the follow-up `click` (and its compat
+    // mouseup) to the <svg>, so a node's onClick would never fire — clicks would
+    // silently do nothing. A plain click now stays uncaptured and lands cleanly.
     dragRef.current = {
       pointerId: event.pointerId,
       clientX: event.clientX,
       clientY: event.clientY,
       totalDistance: 0,
-    }
-    if (typeof event.currentTarget.setPointerCapture === 'function') {
-      event.currentTarget.setPointerCapture(event.pointerId)
+      captured: false,
     }
   }, [])
 
@@ -272,12 +198,24 @@ export function GraphSurface({
         clientDeltaY,
       )
       if (!graphDelta) return
+      const totalDistance =
+        drag.totalDistance + Math.hypot(Math.abs(clientDeltaX), Math.abs(clientDeltaY))
+      // Now that this is a genuine drag, take pointer capture so panning keeps
+      // tracking even if the pointer leaves the svg. (Deferred from pointerdown
+      // so plain clicks still deliver their `click` to the node — see above.)
+      let captured = drag.captured
+      if (!captured && totalDistance > DRAG_CLICK_THRESHOLD) {
+        if (typeof event.currentTarget.setPointerCapture === 'function') {
+          event.currentTarget.setPointerCapture(event.pointerId)
+        }
+        captured = true
+      }
       dragRef.current = {
         pointerId: drag.pointerId,
         clientX: event.clientX,
         clientY: event.clientY,
-        totalDistance:
-          drag.totalDistance + Math.hypot(Math.abs(clientDeltaX), Math.abs(clientDeltaY)),
+        totalDistance,
+        captured,
       }
       event.preventDefault()
       setViewport((current) => ({
@@ -298,31 +236,54 @@ export function GraphSurface({
         suppressNextNodeClickRef.current = false
       }, 0)
     }
-    if (typeof event.currentTarget.releasePointerCapture === 'function') {
+    if (drag.captured && typeof event.currentTarget.releasePointerCapture === 'function') {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
     dragRef.current = null
   }, [])
 
+  // A drag that ends on a node/edge fires a trailing click; this swallows it.
+  const consumeSuppressedClick = useCallback((): boolean => {
+    if (suppressNextNodeClickRef.current) {
+      suppressNextNodeClickRef.current = false
+      return true
+    }
+    return false
+  }, [])
+
   const handleNodeClick = useCallback(
-    (route: Route): void => {
-      if (suppressNextNodeClickRef.current) {
-        suppressNextNodeClickRef.current = false
-        return
-      }
-      navigate(route)
+    (event: ReactMouseEvent, nodeId: string): void => {
+      // Don't let the click bubble to the background (which clears selection).
+      event.stopPropagation()
+      if (consumeSuppressedClick()) return
+      setSelectedNodeId(nodeId)
     },
-    [navigate],
+    [consumeSuppressedClick],
   )
 
   const handleNodeKeyDown = useCallback(
-    (event: KeyboardEvent<SVGGElement>, route: Route): void => {
+    (event: KeyboardEvent<SVGGElement>, nodeId: string): void => {
       if (event.key !== 'Enter' && event.key !== ' ') return
       event.preventDefault()
+      setSelectedNodeId(nodeId)
+    },
+    [],
+  )
+
+  const handleEdgeClick = useCallback(
+    (event: ReactMouseEvent, route: Route): void => {
+      event.stopPropagation()
+      if (consumeSuppressedClick()) return
       navigate(route)
     },
-    [navigate],
+    [consumeSuppressedClick, navigate],
   )
+
+  // A click on empty canvas clears the selection (unless it was a drag).
+  const handleBackgroundClick = useCallback((): void => {
+    if (consumeSuppressedClick()) return
+    setSelectedNodeId(null)
+  }, [consumeSuppressedClick])
 
   return (
     <div className={cn('mx-auto flex h-full min-h-0 w-full max-w-5xl flex-col gap-4', className)}>
@@ -337,33 +298,46 @@ export function GraphSurface({
         />
       ) : (
         <div className="relative min-h-0 flex-1 overflow-hidden">
-          <div
-            className="absolute top-3 right-3 z-10 flex w-44 flex-col gap-1.5 rounded-md border border-border bg-background/95 p-2 shadow-[0_8px_28px_rgba(2,6,23,0.12)]"
-            role="group"
-            aria-label="Graph node filters"
-          >
-            {presentKinds.map((kind) => (
-              <label
-                key={kind}
-                className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
-              >
-                <Checkbox
-                  checked={visibleKinds.has(kind)}
-                  onCheckedChange={() => toggleKind(kind)}
-                  aria-label={KIND_LABEL[kind]}
-                />
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    'inline-block shrink-0 rounded-full',
-                    // Interactions are links, not nodes — show a bar, not a dot.
-                    kind === 'interaction' ? 'h-0.5 w-2.5' : 'size-2.5',
-                  )}
-                  style={{ backgroundColor: KIND_COLOR[kind] }}
-                />
-                <span className="min-w-0 truncate">{KIND_LABEL[kind]}</span>
-              </label>
-            ))}
+          <div className="absolute top-3 right-3 z-10 flex w-44 flex-col gap-2">
+            <div
+              className="flex flex-col gap-1.5 rounded-md border border-border bg-background/95 p-2 shadow-[0_8px_28px_rgba(2,6,23,0.12)]"
+              role="group"
+              aria-label="Graph node filters"
+            >
+              {presentKinds.map((kind) => (
+                <label
+                  key={kind}
+                  className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <Checkbox
+                    checked={visibleKinds.has(kind)}
+                    onCheckedChange={() => toggleKind(kind)}
+                    aria-label={KIND_LABEL[kind]}
+                  />
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      'inline-block shrink-0 rounded-full',
+                      // Interactions are links, not nodes — show a bar, not a dot.
+                      kind === 'interaction' ? 'h-0.5 w-2.5' : 'size-2.5',
+                    )}
+                    style={{ backgroundColor: KIND_COLOR[kind] }}
+                  />
+                  <span className="min-w-0 truncate">{KIND_LABEL[kind]}</span>
+                </label>
+              ))}
+            </div>
+            {selectedNode ? (
+              <NodeDetailsPanel
+                node={selectedNode}
+                connectionCount={selectedConnectionCount}
+                onOpen={() => {
+                  const route = routeForNode(selectedNode)
+                  if (route) navigate(route)
+                }}
+                onClose={() => setSelectedNodeId(null)}
+              />
+            ) : null}
           </div>
           {layoutState.status === 'idle' ? (
             <div className="flex h-full min-h-[24rem] items-center justify-center pt-48 sm:pt-0 sm:pr-48">
@@ -384,6 +358,7 @@ export function GraphSurface({
               className="h-full w-full cursor-grab touch-none select-none active:cursor-grabbing"
               role="img"
               aria-label="User-centered knowledge graph"
+              onClick={handleBackgroundClick}
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
               onPointerUp={finishDrag}
@@ -420,7 +395,7 @@ export function GraphSurface({
                         fill="transparent"
                         pointerEvents="all"
                         className="cursor-pointer"
-                        onClick={() => handleNodeClick(route)}
+                        onClick={(event) => handleNodeClick(event, node.id)}
                       />
                     )
                   })}
@@ -436,7 +411,7 @@ export function GraphSurface({
                         <g
                           key={`interaction-${edge.source.id}-${edge.target.id}-${index}`}
                           className={route ? 'cursor-pointer' : undefined}
-                          onClick={route ? () => handleNodeClick(route) : undefined}
+                          onClick={route ? (event) => handleEdgeClick(event, route) : undefined}
                         >
                           {/* Wide transparent hit area so thin links are easy to click. */}
                           <line
@@ -462,25 +437,41 @@ export function GraphSurface({
                     })}
                 </g>
                 {layout.nodes.map((node) => {
-                  const route = routeForNode(node)
+                  const interactive = routeForNode(node) !== null
+                  const isSelected = node.id === selectedNodeId
                   return (
                     <g
                       key={node.id}
                       transform={`translate(${node.x} ${node.y})`}
-                      className={route ? 'cursor-pointer' : undefined}
-                      onClick={route ? () => handleNodeClick(route) : undefined}
-                      onKeyDown={route ? (event) => handleNodeKeyDown(event, route) : undefined}
-                      role={route ? 'link' : undefined}
-                      tabIndex={route ? 0 : undefined}
-                      aria-label={route ? actionLabelForNode(node) : undefined}
+                      className={interactive ? 'cursor-pointer' : undefined}
+                      onClick={interactive ? (event) => handleNodeClick(event, node.id) : undefined}
+                      onKeyDown={interactive ? (event) => handleNodeKeyDown(event, node.id) : undefined}
+                      role={interactive ? 'button' : undefined}
+                      aria-pressed={interactive ? isSelected : undefined}
+                      tabIndex={interactive ? 0 : undefined}
+                      aria-label={interactive ? selectLabelForNode(node) : undefined}
                     >
-                      <circle r={node.radius} fill={KIND_COLOR[node.kind]} />
+                      {isSelected ? (
+                        <circle
+                          r={node.radius + 5}
+                          fill="none"
+                          stroke={KIND_COLOR[node.kind]}
+                          strokeWidth={2.5}
+                        />
+                      ) : null}
+                      <circle
+                        r={node.radius}
+                        fill={KIND_COLOR[node.kind]}
+                        stroke={isSelected ? 'hsl(var(--background))' : undefined}
+                        strokeWidth={isSelected ? 2 : undefined}
+                      />
                       <text
                         x={0}
                         y={node.radius + 12}
                         textAnchor="middle"
                         className="fill-foreground"
                         fontSize={11}
+                        fontWeight={isSelected ? 600 : undefined}
                       >
                         {clip(node.label)}
                       </text>
