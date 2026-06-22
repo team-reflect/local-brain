@@ -17,7 +17,6 @@ import {
   useGenerateDailyBrief,
   useInteractions,
   useModelSettings,
-  useProjects,
   useSelf,
   useTasks,
 } from '../lib/queries'
@@ -30,7 +29,6 @@ export function TodaySurface(): ReactNode {
   const self = useSelf()
   const openTasks = useTasks({ status: 'open', limit: 6 })
   const interactions = useInteractions(5)
-  const projects = useProjects()
   const modelSettings = useModelSettings()
   const dailyBrief = useDailyBriefNote(today)
   const generateBrief = useGenerateDailyBrief(today)
@@ -129,28 +127,6 @@ export function TodaySurface(): ReactNode {
         )}
       </Section>
 
-      <Section title="Active projects">
-        {projects.data && projects.data.length > 0 ? (
-          <ul className="flex flex-col gap-1">
-            {projects.data.map((project) => (
-              <li key={project.id}>
-                <button
-                  type="button"
-                  onClick={() => navigate({ kind: 'project', id: project.id })}
-                  className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-secondary/60"
-                >
-                  <span className="text-foreground">{project.name}</span>
-                  <span className="font-mono text-[11px] text-muted-foreground">
-                    {project.status}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <EmptyState title="No active projects" />
-        )}
-      </Section>
     </div>
   )
 }
