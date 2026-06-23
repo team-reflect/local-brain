@@ -42,6 +42,9 @@ brain path
 brain --json import-context --limit 200
 brain --json search "revised budget"
 brain --json search "#travel"
+brain --json retrieve "revised budget"
+brain --json retrieve --record-type interaction --kind email --sort recency --after 2026-06-01
+brain --json get-records interaction:<id> --chunk <chunk-id>
 brain --json show person <id>
 brain --json today
 brain --json report daily
@@ -63,11 +66,20 @@ excerpt fields when imported source text is available. External agents can use
 `brain --json report daily` as the complete context payload for generating a
 narrative daily brief outside Tauri.
 
-`brain search` mirrors the desktop palette's local lexical search. Ordinary text
-searches record names/titles, document and interaction FTS, assets, chunked
-content, and matching tag names or slugs. A `#tag-slug` token is an exact tag
-filter; multiple `#tag` tokens are ANDed. Tags with spaces remain searchable by
-plain text, while precise filters should use the tag slug.
+`brain search` mirrors the desktop palette's local lexical search for quick
+lookup/navigation. Ordinary text searches record names/titles, document and
+interaction FTS, assets, chunked content, and matching tag names or slugs. A
+`#tag-slug` token is an exact tag filter; multiple `#tag` tokens are ANDed. Tags
+with spaces remain searchable by plain text, while precise filters should use the
+tag slug.
+
+For grounded agent answers, use the two-step `retrieve` / `get-records` path.
+`brain retrieve` searches universal `content_chunks` and returns chunk-oriented
+hits with `recordType`, `recordId`, `recordRef`, `chunkId`, `chunkIndex`, title,
+date, snippet, and score. Then call `brain get-records <recordRef> --chunk
+<chunkId>` to load the title, date, and bounded chunk text. To browse recent
+records, omit the query and pass structural filters such as
+`--record-type interaction --kind email --sort recency --after 2026-06-01`.
 
 ## Write Phases
 
