@@ -868,10 +868,18 @@ fn retrieve_lexical(
     sort: &str,
     limit: usize,
 ) -> Result<Vec<RetrievedChunkRow>, CliError> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
     let order_by = if sort == "recency" {
         format!("{CHUNK_RECORD_DATE} DESC")
     } else {
         "bm25(content_chunks_fts)".to_string()
+    };
+    let query_limit = if sort == "recency" {
+        limit
+    } else {
+        limit.saturating_mul(4).min(1000).max(limit)
     };
     let sql = format!(
         "SELECT cc.id,
@@ -897,7 +905,7 @@ fn retrieve_lexical(
     let mut stmt = conn.prepare(&sql)?;
     let mut query_params = vec![SqlValue::from(match_query.to_string())];
     query_params.extend(filter.params.iter().cloned());
-    query_params.push(SqlValue::from(limit as i64));
+    query_params.push(SqlValue::from(query_limit as i64));
     let rows = stmt.query_map(params_from_iter(query_params), |row| {
         let bm25 = row.get::<_, f64>(8)?;
         let age_days = row.get::<_, Option<f64>>(9)?;
@@ -912,7 +920,16 @@ fn retrieve_lexical(
             score: combined_search_score(lexical_score(bm25), age_days),
         })
     })?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(CliError::from)
+    let mut hits = rows.collect::<Result<Vec<_>, _>>()?;
+    if sort == "relevance" {
+        hits.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+    hits.truncate(limit);
+    Ok(hits)
 }
 
 fn retrieve_browse(
@@ -921,6 +938,9 @@ fn retrieve_browse(
     filter: &RetrievalFilter,
     limit: usize,
 ) -> Result<Vec<RetrievedChunkRow>, CliError> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
     let sql = format!(
         "WITH first_chunks AS (
            SELECT *,

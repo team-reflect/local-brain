@@ -4804,6 +4804,24 @@ fn search_finds_added_records_by_full_text() {
 fn retrieve_and_get_records_load_bounded_agent_context() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Northwind kickoff archive",
+            "--occurred-at",
+            "2025-01-10T15:00:00Z",
+            "--summary",
+            "Archived partnership launch discussion.",
+            "--text",
+            "The Northwind launch plan remained in archive history.",
+        ],
+    );
     let interaction = run_json(
         &db,
         &[
@@ -4832,6 +4850,16 @@ fn retrieve_and_get_records_load_bounded_agent_context() {
     );
     assert_eq!(retrieve["mode"], "lexical");
     assert_eq!(retrieve["semanticAvailable"], false);
+    let scores = retrieve["hits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|hit| hit["score"].as_f64().unwrap())
+        .collect::<Vec<_>>();
+    assert!(
+        scores.windows(2).all(|pair| pair[0] >= pair[1]),
+        "default relevance results should be ordered by the reported score"
+    );
     let hit = retrieve["hits"]
         .as_array()
         .unwrap()
