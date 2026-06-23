@@ -22,6 +22,7 @@ including a graph view centered on the user.
 - [Using Codex To Backfill Local Brain](codex-brain-backfill.md)
 - [UI Direction](ui-direction.md)
 - [Design System](design-system.md)
+- [App Icon Generation](app-icon-generation.md)
 - [Frontend Architecture](frontend-architecture.md)
 - [MVP Plan](mvp-plan.md)
 - [macOS Distribution](macos-distribution.md)
