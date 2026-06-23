@@ -1,6 +1,6 @@
 import { relaunch } from '@tauri-apps/plugin-process'
 import { check, type Update } from '@tauri-apps/plugin-updater'
-import { checkPrivateGithubUpdate, privateGithubUpdateHeaders } from './private-update'
+import { checkPrivateGithubUpdate } from './private-update'
 
 /**
  * The auto-update lifecycle as plain-language phases the UI renders
@@ -39,11 +39,6 @@ export interface UpdateControllerOptions {
   autoCheckIntervalMs?: number
 }
 
-type PendingUpdate = {
-  update: Update
-  source: 'private' | 'public'
-}
-
 /** Six hours - frequent enough to catch releases, quiet enough to be free. */
 const DEFAULT_AUTO_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 
@@ -64,7 +59,7 @@ export function createUpdateController(options: UpdateControllerOptions): Update
   const intervalMs = options.autoCheckIntervalMs ?? DEFAULT_AUTO_CHECK_INTERVAL_MS
   const listeners = new Set<() => void>()
   let state: UpdateState = { phase: 'idle' }
-  let pendingUpdate: PendingUpdate | null = null
+  let pendingUpdate: Update | null = null
   let timer: ReturnType<typeof setInterval> | null = null
 
   function setState(next: UpdateState): void {
@@ -96,16 +91,12 @@ export function createUpdateController(options: UpdateControllerOptions): Update
     // an install of a previously-found update) transitioned while we awaited".
     const baseline = state
     try {
-      let source: PendingUpdate['source'] = 'private'
-      const update = await checkPrivateGithubUpdate().catch(() => {
-        source = 'public'
-        return check()
-      })
+      const update = await checkPrivateGithubUpdate().catch(() => check())
       if (currentState() !== baseline) {
         return // something raced us; its state wins
       }
       if (update) {
-        pendingUpdate = { update, source }
+        pendingUpdate = update
         setState({ phase: 'available', version: update.version })
       } else if (!silent) {
         pendingUpdate = null
@@ -124,11 +115,10 @@ export function createUpdateController(options: UpdateControllerOptions): Update
   }
 
   async function install(): Promise<void> {
-    const pending = pendingUpdate
-    if (!pending || state.phase === 'downloading' || state.phase === 'ready') {
+    const update = pendingUpdate
+    if (!update || state.phase === 'downloading' || state.phase === 'ready') {
       return
     }
-    const { update, source } = pending
     let contentLength: number | null = null
     let received = 0
     setState({ phase: 'downloading', version: update.version, percent: null })
@@ -152,7 +142,6 @@ export function createUpdateController(options: UpdateControllerOptions): Update
               break
           }
         },
-        source === 'private' ? { headers: privateGithubUpdateHeaders() } : undefined,
       )
       setState({ phase: 'ready', version: update.version })
     } catch (error) {

@@ -2,19 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { check } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
 import { createUpdateController, type UpdateController } from './update-controller'
-import { checkPrivateGithubUpdate, privateGithubUpdateHeaders } from './private-update'
+import { checkPrivateGithubUpdate } from './private-update'
 
 vi.mock('@tauri-apps/plugin-updater', () => ({ check: vi.fn() }))
 vi.mock('@tauri-apps/plugin-process', () => ({ relaunch: vi.fn() }))
 vi.mock('./private-update', () => ({
   checkPrivateGithubUpdate: vi.fn(),
-  privateGithubUpdateHeaders: vi.fn(() => ({ Authorization: 'Bearer test-token' })),
 }))
 
 const checkMock = vi.mocked(check)
 const relaunchMock = vi.mocked(relaunch)
 const privateCheckMock = vi.mocked(checkPrivateGithubUpdate)
-const privateHeadersMock = vi.mocked(privateGithubUpdateHeaders)
 
 type DownloadHandler = Parameters<
   NonNullable<Awaited<ReturnType<typeof check>>>['downloadAndInstall']
@@ -40,7 +38,6 @@ describe('createUpdateController', () => {
     checkMock.mockReset()
     privateCheckMock.mockReset()
     privateCheckMock.mockImplementation(() => checkMock())
-    privateHeadersMock.mockClear()
     relaunchMock.mockReset()
   })
 
@@ -110,8 +107,7 @@ describe('createUpdateController', () => {
     await controller.checkNow()
     expect(controller.getState()).toEqual({ phase: 'available', version: '0.3.0' })
     await controller.install()
-    expect(privateHeadersMock).not.toHaveBeenCalled()
-    expect(update.downloadAndInstall).toHaveBeenCalledWith(expect.any(Function), undefined)
+    expect(update.downloadAndInstall).toHaveBeenCalledWith(expect.any(Function))
   })
 
   it('install reports progress and lands on ready', async () => {
@@ -135,7 +131,6 @@ describe('createUpdateController', () => {
     })
     await controller.checkNow()
     await controller.install()
-    expect(privateHeadersMock).toHaveBeenCalled()
     expect(states).toContain('downloading:50')
     expect(states).toContain('downloading:100')
     expect(controller.getState()).toEqual({ phase: 'ready', version: '0.3.0' })
