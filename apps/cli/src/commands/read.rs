@@ -20,6 +20,22 @@ fn lexical_score(bm25: f64) -> f64 {
 const RECENCY_HALF_LIFE_DAYS: f64 = 90.0;
 const NAME_HIT_SCORE: f64 = 0.6;
 const TAG_HIT_SCORE: f64 = 0.58;
+const DEFAULT_RECORD_DETAIL_CHARS: usize = 4000;
+const MAX_RECORD_DETAIL_CHARS: usize = 12000;
+const RETRIEVABLE_RECORD_TYPES: &[&str] = &[
+    "person",
+    "organization",
+    "organization_profile",
+    "project",
+    "task",
+    "document",
+    "interaction",
+    "interaction_transcript",
+    "ai_note",
+    "extracted_fact",
+    "memory",
+    "asset",
+];
 
 fn recency_score(age_days: Option<f64>) -> f64 {
     match age_days {
@@ -30,6 +46,37 @@ fn recency_score(age_days: Option<f64>) -> f64 {
 
 fn combined_search_score(lexical: f64, age_days: Option<f64>) -> f64 {
     lexical * 0.7 + recency_score(age_days) * 0.3
+}
+
+fn preview_of(text: &str, max: usize) -> String {
+    let trimmed = text.trim();
+    if trimmed.len() <= max {
+        trimmed.to_string()
+    } else {
+        format!("{}...", truncate_to_boundary(trimmed, max).trim_end())
+    }
+}
+
+fn truncate_to_boundary(value: &str, max: usize) -> &str {
+    if value.len() <= max {
+        return value;
+    }
+    let mut end = 0;
+    for (index, _) in value.char_indices() {
+        if index > max {
+            break;
+        }
+        end = index;
+    }
+    &value[..end]
+}
+
+fn is_retrievable_record_type(record_type: &str) -> bool {
+    RETRIEVABLE_RECORD_TYPES.contains(&record_type)
+}
+
+fn record_ref(record_type: &str, record_id: &str) -> String {
+    format!("{record_type}:{record_id}")
 }
 
 struct ParsedSearchQuery {
@@ -578,6 +625,596 @@ fn emit_search(json: bool, query: &str, hits: &[Value]) -> Result<(), CliError> 
         );
     }
     Ok(())
+}
+
+#[derive(Default)]
+pub struct RetrieveArgs<'a> {
+    pub query: Option<&'a str>,
+    pub record_types: Vec<&'a str>,
+    pub kinds: Vec<&'a str>,
+    pub after: Option<&'a str>,
+    pub before: Option<&'a str>,
+    pub sort: &'a str,
+    pub limit: usize,
+}
+
+#[derive(Default)]
+pub struct GetRecordsArgs<'a> {
+    pub records: Vec<&'a str>,
+    pub chunk_ids: Vec<&'a str>,
+    pub max_chars_per_record: usize,
+}
+
+struct RetrievalFilter {
+    sql: String,
+    params: Vec<SqlValue>,
+}
+
+struct RetrievedChunkRow {
+    chunk_id: String,
+    snippet: String,
+    record_type: String,
+    record_id: String,
+    record_title: Option<String>,
+    record_date: Option<String>,
+    chunk_index: i64,
+    score: f64,
+}
+
+const CHUNK_RECORD_JOINS: &str = "
+  LEFT JOIN people p ON p.id = cc.record_id AND cc.record_type = 'person'
+  LEFT JOIN organizations o ON o.id = cc.record_id AND cc.record_type = 'organization'
+  LEFT JOIN organization_profiles op ON op.id = cc.record_id AND cc.record_type = 'organization_profile'
+  LEFT JOIN projects pr ON pr.id = cc.record_id AND cc.record_type = 'project'
+  LEFT JOIN tasks t ON t.id = cc.record_id AND cc.record_type = 'task'
+  LEFT JOIN documents d ON d.id = cc.record_id AND cc.record_type = 'document'
+  LEFT JOIN interactions i ON i.id = cc.record_id AND cc.record_type = 'interaction'
+  LEFT JOIN interaction_transcripts tr ON tr.id = cc.record_id AND cc.record_type = 'interaction_transcript'
+  LEFT JOIN interactions transcript_interaction ON transcript_interaction.id = tr.interaction_id
+  LEFT JOIN ai_notes an ON an.id = cc.record_id AND cc.record_type = 'ai_note'
+  LEFT JOIN extracted_facts ef ON ef.id = cc.record_id AND cc.record_type = 'extracted_fact'
+  LEFT JOIN memories m ON m.id = cc.record_id AND cc.record_type = 'memory'
+  LEFT JOIN assets a ON a.id = cc.record_id AND cc.record_type = 'asset'
+";
+
+const CHUNK_VISIBILITY_FILTER: &str = "(
+    (cc.record_type = 'person' AND p.archived_at IS NULL)
+    OR (cc.record_type = 'organization' AND o.archived_at IS NULL)
+    OR (cc.record_type = 'organization_profile' AND op.id IS NOT NULL)
+    OR (cc.record_type = 'project' AND pr.archived_at IS NULL)
+    OR (cc.record_type = 'task' AND t.archived_at IS NULL)
+    OR (cc.record_type = 'document' AND d.archived_at IS NULL)
+    OR (cc.record_type = 'interaction' AND i.archived_at IS NULL)
+    OR (cc.record_type = 'interaction_transcript' AND tr.id IS NOT NULL AND transcript_interaction.archived_at IS NULL)
+    OR (cc.record_type = 'ai_note' AND an.id IS NOT NULL)
+    OR (cc.record_type = 'extracted_fact' AND ef.archived_at IS NULL)
+    OR (cc.record_type = 'memory' AND m.archived_at IS NULL)
+    OR (cc.record_type = 'asset' AND a.archived_at IS NULL)
+)";
+
+const CHUNK_RECORD_TITLE: &str = "COALESCE(
+    p.full_name,
+    o.name,
+    op.one_line_description,
+    pr.name,
+    t.title,
+    d.title,
+    i.title,
+    transcript_interaction.title,
+    an.title,
+    ef.key,
+    m.claim,
+    a.original_filename,
+    a.storage_path
+)";
+
+const CHUNK_RECORD_DATE: &str = "COALESCE(
+    i.occurred_at,
+    transcript_interaction.occurred_at,
+    d.occurred_at,
+    d.authored_at,
+    t.due_at,
+    an.generated_at,
+    ef.observed_at,
+    m.valid_from,
+    p.last_interaction_at,
+    d.updated_at,
+    i.updated_at,
+    p.updated_at,
+    o.updated_at,
+    pr.updated_at,
+    t.updated_at,
+    an.updated_at,
+    ef.updated_at,
+    m.updated_at,
+    a.updated_at
+)";
+
+fn inclusive_upper_bound(value: &str) -> String {
+    if value.len() == 10
+        && value.as_bytes().get(4) == Some(&b'-')
+        && value.as_bytes().get(7) == Some(&b'-')
+    {
+        format!("{value}T23:59:59.999Z")
+    } else {
+        value.to_string()
+    }
+}
+
+fn retrieval_filter(args: &RetrieveArgs<'_>) -> Result<RetrievalFilter, CliError> {
+    let mut clauses = Vec::new();
+    let mut params = Vec::new();
+
+    if !args.record_types.is_empty() {
+        for record_type in &args.record_types {
+            if !is_retrievable_record_type(record_type) {
+                return Err(CliError::Runtime(format!(
+                    "unsupported --record-type '{record_type}'"
+                )));
+            }
+        }
+        let placeholders = std::iter::repeat_n("?", args.record_types.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        clauses.push(format!("cc.record_type IN ({placeholders})"));
+        params.extend(
+            args.record_types
+                .iter()
+                .map(|record_type| SqlValue::from((*record_type).to_string())),
+        );
+    }
+
+    if !args.kinds.is_empty() {
+        let placeholders = std::iter::repeat_n("?", args.kinds.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        clauses.push(format!(
+            "(i.kind IN ({placeholders}) OR transcript_interaction.kind IN ({placeholders}))"
+        ));
+        params.extend(
+            args.kinds
+                .iter()
+                .map(|kind| SqlValue::from((*kind).to_string())),
+        );
+        params.extend(
+            args.kinds
+                .iter()
+                .map(|kind| SqlValue::from((*kind).to_string())),
+        );
+    }
+
+    if let Some(after) = args.after {
+        clauses.push(format!("{CHUNK_RECORD_DATE} >= ?"));
+        params.push(SqlValue::from(after.to_string()));
+    }
+
+    if let Some(before) = args.before {
+        clauses.push(format!("{CHUNK_RECORD_DATE} <= ?"));
+        params.push(SqlValue::from(inclusive_upper_bound(before)));
+    }
+
+    let sql = if clauses.is_empty() {
+        String::new()
+    } else {
+        format!(" AND {}", clauses.join(" AND "))
+    };
+    Ok(RetrievalFilter { sql, params })
+}
+
+fn retrieve_hit_json(hit: &RetrievedChunkRow) -> Value {
+    json!({
+        "chunkId": hit.chunk_id,
+        "chunkIndex": hit.chunk_index,
+        "recordType": hit.record_type,
+        "recordId": hit.record_id,
+        "recordRef": record_ref(&hit.record_type, &hit.record_id),
+        "title": hit.record_title,
+        "date": hit.record_date,
+        "snippet": hit.snippet,
+        "score": hit.score,
+    })
+}
+
+/// `brain retrieve` — agent-oriented grounded recall over universal chunks.
+pub fn retrieve(conn: &Connection, json: bool, args: RetrieveArgs<'_>) -> Result<(), CliError> {
+    let query = args.query.unwrap_or("").trim();
+    let match_query = to_match_query(query, true);
+    let has_filter = !args.record_types.is_empty()
+        || !args.kinds.is_empty()
+        || args.after.is_some()
+        || args.before.is_some();
+    if match_query.is_none() && !has_filter {
+        return Err(CliError::Runtime(
+            "provide a query or at least one filter (--record-type, --kind, --after, --before)"
+                .into(),
+        ));
+    }
+
+    let sort = match args.sort {
+        "relevance" | "" => "relevance",
+        "recency" => "recency",
+        other => return Err(CliError::Runtime(format!("unsupported --sort '{other}'"))),
+    };
+
+    let filter = retrieval_filter(&args)?;
+    let hits = if let Some(match_query) = match_query {
+        retrieve_lexical(conn, query, &match_query, &filter, sort, args.limit)?
+    } else {
+        retrieve_browse(conn, query, &filter, args.limit)?
+    };
+
+    if json {
+        print_json(&json!({
+            "query": query,
+            "mode": "lexical",
+            "semanticAvailable": false,
+            "hits": hits.iter().map(retrieve_hit_json).collect::<Vec<_>>(),
+            "count": hits.len(),
+        }))
+    } else {
+        for hit in &hits {
+            println!(
+                "{:>22}  {}  {}",
+                record_ref(&hit.record_type, &hit.record_id),
+                hit.chunk_id,
+                hit.record_title.as_deref().unwrap_or("(untitled)")
+            );
+        }
+        Ok(())
+    }
+}
+
+fn retrieve_lexical(
+    conn: &Connection,
+    _query: &str,
+    match_query: &str,
+    filter: &RetrievalFilter,
+    sort: &str,
+    limit: usize,
+) -> Result<Vec<RetrievedChunkRow>, CliError> {
+    let order_by = if sort == "recency" {
+        format!("{CHUNK_RECORD_DATE} DESC")
+    } else {
+        "bm25(content_chunks_fts)".to_string()
+    };
+    let sql = format!(
+        "SELECT cc.id,
+                cc.text,
+                snippet(content_chunks_fts, 0, '[', ']', '…', 12),
+                cc.record_type,
+                cc.record_id,
+                cc.chunk_index,
+                {CHUNK_RECORD_TITLE} AS title,
+                {CHUNK_RECORD_DATE} AS record_date,
+                bm25(content_chunks_fts),
+                julianday('now') - julianday({CHUNK_RECORD_DATE})
+         FROM content_chunks_fts
+         JOIN content_chunks cc ON cc.rowid = content_chunks_fts.rowid
+         {CHUNK_RECORD_JOINS}
+         WHERE content_chunks_fts MATCH ?
+           AND {CHUNK_VISIBILITY_FILTER}
+           {}
+         ORDER BY {order_by}
+         LIMIT ?",
+        filter.sql
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let mut query_params = vec![SqlValue::from(match_query.to_string())];
+    query_params.extend(filter.params.iter().cloned());
+    query_params.push(SqlValue::from(limit as i64));
+    let rows = stmt.query_map(params_from_iter(query_params), |row| {
+        let bm25 = row.get::<_, f64>(8)?;
+        let age_days = row.get::<_, Option<f64>>(9)?;
+        Ok(RetrievedChunkRow {
+            chunk_id: row.get(0)?,
+            snippet: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+            record_type: row.get(3)?,
+            record_id: row.get(4)?,
+            chunk_index: row.get(5)?,
+            record_title: row.get(6)?,
+            record_date: row.get(7)?,
+            score: combined_search_score(lexical_score(bm25), age_days),
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(CliError::from)
+}
+
+fn retrieve_browse(
+    conn: &Connection,
+    _query: &str,
+    filter: &RetrievalFilter,
+    limit: usize,
+) -> Result<Vec<RetrievedChunkRow>, CliError> {
+    let sql = format!(
+        "WITH first_chunks AS (
+           SELECT *,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY record_type, record_id
+                    ORDER BY chunk_index ASC
+                  ) AS rn
+           FROM content_chunks
+         )
+         SELECT cc.id,
+                cc.text,
+                cc.record_type,
+                cc.record_id,
+                cc.chunk_index,
+                {CHUNK_RECORD_TITLE} AS title,
+                {CHUNK_RECORD_DATE} AS record_date,
+                julianday('now') - julianday({CHUNK_RECORD_DATE})
+         FROM first_chunks cc
+         {CHUNK_RECORD_JOINS}
+         WHERE cc.rn = 1
+           AND {CHUNK_VISIBILITY_FILTER}
+           {}
+         ORDER BY {CHUNK_RECORD_DATE} DESC
+         LIMIT ?",
+        filter.sql
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let mut query_params = filter.params.clone();
+    query_params.push(SqlValue::from(limit as i64));
+    let rows = stmt.query_map(params_from_iter(query_params), |row| {
+        let text = row.get::<_, String>(1)?;
+        let age_days = row.get::<_, Option<f64>>(7)?;
+        Ok(RetrievedChunkRow {
+            chunk_id: row.get(0)?,
+            snippet: preview_of(&text, 240),
+            record_type: row.get(2)?,
+            record_id: row.get(3)?,
+            chunk_index: row.get(4)?,
+            record_title: row.get(5)?,
+            record_date: row.get(6)?,
+            score: recency_score(age_days),
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(CliError::from)
+}
+
+/// `brain get-records` — bounded context for records found by `brain retrieve`.
+pub fn get_records(
+    conn: &Connection,
+    json: bool,
+    args: GetRecordsArgs<'_>,
+) -> Result<(), CliError> {
+    if args.records.is_empty() {
+        return Err(CliError::Runtime("provide at least one record ref".into()));
+    }
+    let max_chars = args
+        .max_chars_per_record
+        .clamp(1, MAX_RECORD_DETAIL_CHARS)
+        .max(DEFAULT_RECORD_DETAIL_CHARS.min(args.max_chars_per_record.max(1)));
+    let mut records = Vec::new();
+    for raw in args.records {
+        let (record_type, record_id) = parse_record_ref(raw)?;
+        records.push(record_context(
+            conn,
+            record_type,
+            record_id,
+            &args.chunk_ids,
+            max_chars,
+        )?);
+    }
+
+    if json {
+        print_json(&json!({
+            "records": records,
+            "count": records.len(),
+        }))
+    } else {
+        println!("{}", serde_json::to_string_pretty(&json!(records))?);
+        Ok(())
+    }
+}
+
+fn parse_record_ref(raw: &str) -> Result<(&str, &str), CliError> {
+    let Some((record_type, record_id)) = raw.split_once(':') else {
+        return Err(CliError::Runtime(format!(
+            "record ref '{raw}' must use kind:id syntax"
+        )));
+    };
+    if !is_retrievable_record_type(record_type) {
+        return Err(CliError::Runtime(format!(
+            "unsupported record type '{record_type}'"
+        )));
+    }
+    if record_id.trim().is_empty() {
+        return Err(CliError::Runtime(format!(
+            "record ref '{raw}' is missing an id"
+        )));
+    }
+    Ok((record_type, record_id))
+}
+
+fn record_context(
+    conn: &Connection,
+    record_type: &str,
+    record_id: &str,
+    chunk_ids: &[&str],
+    max_chars: usize,
+) -> Result<Value, CliError> {
+    let Some((title, date)) = record_header(conn, record_type, record_id)? else {
+        return Ok(json!({
+            "recordType": record_type,
+            "recordId": record_id,
+            "recordRef": record_ref(record_type, record_id),
+            "found": false,
+            "title": Value::Null,
+            "date": Value::Null,
+            "metadata": {},
+            "chunks": [],
+            "truncated": false,
+        }));
+    };
+    let (chunks, truncated) = record_chunks(conn, record_type, record_id, chunk_ids, max_chars)?;
+    Ok(json!({
+        "recordType": record_type,
+        "recordId": record_id,
+        "recordRef": record_ref(record_type, record_id),
+        "found": true,
+        "title": title,
+        "date": date,
+        "metadata": {},
+        "chunks": chunks,
+        "truncated": truncated,
+    }))
+}
+
+fn record_header(
+    conn: &Connection,
+    record_type: &str,
+    record_id: &str,
+) -> Result<Option<(Value, Value)>, CliError> {
+    let sql = format!(
+        "WITH selected_chunk AS (
+           SELECT *
+           FROM content_chunks
+           WHERE record_type = ?1 AND record_id = ?2
+           ORDER BY chunk_index ASC
+           LIMIT 1
+         )
+         SELECT {CHUNK_RECORD_TITLE} AS title,
+                {CHUNK_RECORD_DATE} AS record_date
+         FROM selected_chunk cc
+         {CHUNK_RECORD_JOINS}
+         WHERE {CHUNK_VISIBILITY_FILTER}
+         LIMIT 1"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let mut rows = stmt.query(params![record_type, record_id])?;
+    let Some(row) = rows.next()? else {
+        return Ok(None);
+    };
+    Ok(Some((value_at(row, 0)?, value_at(row, 1)?)))
+}
+
+fn record_chunks(
+    conn: &Connection,
+    record_type: &str,
+    record_id: &str,
+    chunk_ids: &[&str],
+    max_chars: usize,
+) -> Result<(Vec<Value>, bool), CliError> {
+    let total: usize = conn.query_row(
+        "SELECT COUNT(*) FROM content_chunks WHERE record_type = ?1 AND record_id = ?2",
+        params![record_type, record_id],
+        |row| row.get::<_, i64>(0),
+    )? as usize;
+    let rows = if chunk_ids.is_empty() {
+        chunks_by_record(conn, record_type, record_id)?
+    } else {
+        chunks_around_ids(conn, record_type, record_id, chunk_ids)?
+    };
+    let (chunks, truncated_by_budget) = fit_chunks(rows, max_chars);
+    let returned = chunks.len();
+    Ok((chunks, truncated_by_budget || total > returned))
+}
+
+fn chunks_by_record(
+    conn: &Connection,
+    record_type: &str,
+    record_id: &str,
+) -> Result<Vec<(String, i64, String)>, CliError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, chunk_index, text
+         FROM content_chunks
+         WHERE record_type = ?1 AND record_id = ?2
+         ORDER BY chunk_index ASC",
+    )?;
+    let rows = stmt.query_map(params![record_type, record_id], |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(CliError::from)
+}
+
+fn chunks_around_ids(
+    conn: &Connection,
+    record_type: &str,
+    record_id: &str,
+    chunk_ids: &[&str],
+) -> Result<Vec<(String, i64, String)>, CliError> {
+    let placeholders = std::iter::repeat_n("?", chunk_ids.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let index_sql = format!(
+        "SELECT chunk_index
+         FROM content_chunks
+         WHERE record_type = ?
+           AND record_id = ?
+           AND id IN ({placeholders})"
+    );
+    let mut params = vec![
+        SqlValue::from(record_type.to_string()),
+        SqlValue::from(record_id.to_string()),
+    ];
+    params.extend(chunk_ids.iter().map(|id| SqlValue::from((*id).to_string())));
+    let mut stmt = conn.prepare(&index_sql)?;
+    let rows = stmt.query_map(params_from_iter(params), |row| row.get::<_, i64>(0))?;
+    let mut indexes = Vec::new();
+    for row in rows {
+        let index = row?;
+        if index > 0 {
+            indexes.push(index - 1);
+        }
+        indexes.push(index);
+        indexes.push(index + 1);
+    }
+    indexes.sort_unstable();
+    indexes.dedup();
+    if indexes.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let index_placeholders = std::iter::repeat_n("?", indexes.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let chunk_sql = format!(
+        "SELECT id, chunk_index, text
+         FROM content_chunks
+         WHERE record_type = ?
+           AND record_id = ?
+           AND chunk_index IN ({index_placeholders})
+         ORDER BY chunk_index ASC"
+    );
+    let mut chunk_params = vec![
+        SqlValue::from(record_type.to_string()),
+        SqlValue::from(record_id.to_string()),
+    ];
+    chunk_params.extend(indexes.into_iter().map(SqlValue::from));
+    let mut chunk_stmt = conn.prepare(&chunk_sql)?;
+    let chunks = chunk_stmt.query_map(params_from_iter(chunk_params), |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    })?;
+    chunks
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(CliError::from)
+}
+
+fn fit_chunks(rows: Vec<(String, i64, String)>, max_chars: usize) -> (Vec<Value>, bool) {
+    let mut remaining = max_chars;
+    let mut chunks = Vec::new();
+    for (chunk_id, chunk_index, text) in rows {
+        if remaining == 0 {
+            return (chunks, true);
+        }
+        let truncated = text.len() > remaining;
+        let fitted = if truncated {
+            truncate_to_boundary(&text, remaining).to_string()
+        } else {
+            text
+        };
+        let used = fitted.len();
+        chunks.push(json!({
+            "chunkId": chunk_id,
+            "chunkIndex": chunk_index,
+            "text": fitted,
+        }));
+        if truncated {
+            return (chunks, true);
+        }
+        remaining = remaining.saturating_sub(used);
+    }
+    (chunks, false)
 }
 
 /// `brain show <kind> <id>` — a record's core fields plus its linked neighborhood.

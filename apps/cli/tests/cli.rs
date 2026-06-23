@@ -220,6 +220,14 @@ fn contract_reports_agent_cli_contract() {
         contract["commands"]["addInteraction"]["calendarMapping"]["rawProviderPayload"],
         "--metadata-json or --metadata-json-file"
     );
+    assert_eq!(
+        contract["commands"]["retrieve"]["usage"],
+        "brain --json retrieve [query] [--record-type <type>...] [--kind <interaction-kind>...] [--after <iso|date>] [--before <iso|date>] [--sort relevance|recency] [--limit 20]"
+    );
+    assert_eq!(
+        contract["commands"]["getRecords"]["usage"],
+        "brain --json get-records <recordType:id>... [--chunk <chunk-id>...] [--max-chars 4000]"
+    );
     assert!(contract["commands"]["addProject"]["usage"]
         .as_str()
         .unwrap()
@@ -4790,6 +4798,144 @@ fn search_finds_added_records_by_full_text() {
         .filter(|h| h["kind"] == "organization" && h["id"] == org_id)
         .count();
     assert_eq!(org_hits, 1);
+}
+
+#[test]
+fn retrieve_and_get_records_load_bounded_agent_context() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let interaction = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "Northwind kickoff",
+            "--occurred-at",
+            "2026-06-10T15:00:00Z",
+            "--summary",
+            "Partnership launch discussion.",
+            "--text",
+            "We discussed the Northwind launch plan and assigned follow-up owners.",
+            "--participant",
+            "attendee:Maya Chen <maya@example.com>",
+        ],
+    );
+    let interaction_id = interaction["id"].as_str().unwrap();
+
+    let retrieve = run_json(
+        &db,
+        &["--json", "retrieve", "Northwind launch", "--limit", "10"],
+    );
+    assert_eq!(retrieve["semanticAvailable"], false);
+    let hit = retrieve["hits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|hit| hit["recordType"] == "interaction" && hit["recordId"] == interaction_id)
+        .expect("retrieve should return the interaction chunk");
+    assert_eq!(hit["recordRef"], format!("interaction:{interaction_id}"));
+    let chunk_id = hit["chunkId"].as_str().unwrap();
+
+    let record_ref = format!("interaction:{interaction_id}");
+    let context = run_json(
+        &db,
+        &[
+            "--json",
+            "get-records",
+            &record_ref,
+            "--chunk",
+            chunk_id,
+            "--max-chars",
+            "80",
+        ],
+    );
+    let record = &context["records"][0];
+    assert_eq!(record["found"], true);
+    assert_eq!(record["recordRef"], record_ref);
+    assert_eq!(record["title"], "Northwind kickoff");
+    assert_eq!(record["metadata"], serde_json::json!({}));
+    assert!(record["chunks"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("Northwind launch plan"));
+}
+
+#[test]
+fn retrieve_browses_recent_filtered_records_without_query() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let old_email = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Old email",
+            "--occurred-at",
+            "2026-05-01T10:00:00Z",
+            "--text",
+            "Old filtered email body.",
+        ],
+    );
+    let new_email = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "New email",
+            "--occurred-at",
+            "2026-06-20T10:00:00Z",
+            "--text",
+            "New filtered email body.",
+        ],
+    );
+    run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "meeting",
+            "--title",
+            "New meeting",
+            "--occurred-at",
+            "2026-06-21T10:00:00Z",
+            "--text",
+            "Meeting body.",
+        ],
+    );
+
+    let retrieve = run_json(
+        &db,
+        &[
+            "--json",
+            "retrieve",
+            "--record-type",
+            "interaction",
+            "--kind",
+            "email",
+            "--after",
+            "2026-06-01",
+            "--sort",
+            "recency",
+        ],
+    );
+    let hits = retrieve["hits"].as_array().unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0]["recordId"], new_email["id"]);
+    assert_ne!(hits[0]["recordId"], old_email["id"]);
 }
 
 #[test]

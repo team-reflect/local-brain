@@ -80,6 +80,9 @@ brain path
 brain --json contract
 brain --json import-context --limit 200
 brain --json search "northwind kickoff"
+brain --json retrieve "northwind kickoff"
+brain --json retrieve --record-type interaction --kind email --sort recency --after 2026-06-01
+brain --json get-records interaction:<id> --chunk <chunk-id>
 brain --json show person <id>
 brain --json suggest list
 brain --json import audit --limit 100
@@ -89,8 +92,10 @@ brain --json tasks plan-day --limit 25
 brain --json graph --center self
 ```
 
-For answer generation, use `brain search`, `brain show`, tasks, memories, and
-evidence. The CLI does not synthesize answers for you.
+For answer generation, use `brain retrieve` to find grounded chunks, then
+`brain get-records <recordRef> --chunk <chunkId>` to load the record title, date,
+and bounded chunk text. Use `brain search` for quick lookup/navigation, not as the
+full grounding path. The CLI does not synthesize answers for you.
 
 For a daily brief, use `brain --json report daily` as the complete context
 payload. It includes the self display name, task buckets, waiting items, recent

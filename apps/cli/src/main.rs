@@ -139,6 +139,11 @@ enum Command {
     },
     /// Full-text search across your records.
     Search(SearchArgs),
+    /// Agent-oriented grounded recall over universal content chunks.
+    Retrieve(RetrieveArgs),
+    /// Load bounded context for records found by retrieve.
+    #[command(name = "get-records")]
+    GetRecords(GetRecordsArgs),
     /// Today's brief: tasks and recent interactions.
     Today,
     /// Generate a report.
@@ -1015,6 +1020,42 @@ struct SearchArgs {
 }
 
 #[derive(Parser)]
+struct RetrieveArgs {
+    /// Topic or keywords. Omit only when browsing with filters.
+    query: Option<String>,
+    /// Restrict to retrievable source record types, e.g. interaction or document.
+    #[arg(long = "record-type")]
+    record_types: Vec<String>,
+    /// Restrict interaction-backed chunks to these interaction kinds, e.g. email.
+    #[arg(long = "kind")]
+    kinds: Vec<String>,
+    /// Only records on/after this ISO timestamp or YYYY-MM-DD date.
+    #[arg(long)]
+    after: Option<String>,
+    /// Only records on/before this ISO timestamp or YYYY-MM-DD date.
+    #[arg(long)]
+    before: Option<String>,
+    /// relevance | recency
+    #[arg(long, default_value = "relevance")]
+    sort: String,
+    #[arg(long, default_value_t = 20)]
+    limit: usize,
+}
+
+#[derive(Parser)]
+struct GetRecordsArgs {
+    /// Record refs to load, e.g. interaction:01ABC or document:01XYZ.
+    #[arg(value_name = "KIND:ID", required = true)]
+    records: Vec<String>,
+    /// Focus context around matching chunk ids from `brain retrieve`.
+    #[arg(long = "chunk")]
+    chunk_ids: Vec<String>,
+    /// Max chunk text characters to return per record.
+    #[arg(long = "max-chars", default_value_t = 4000)]
+    max_chars_per_record: usize,
+}
+
+#[derive(Parser)]
 struct ChangesArgs {
     #[arg(long)]
     since: String,
@@ -1668,6 +1709,30 @@ impl RememberArgs {
     }
 }
 
+impl RetrieveArgs {
+    fn to_command(&self) -> read::RetrieveArgs<'_> {
+        read::RetrieveArgs {
+            query: self.query.as_deref(),
+            record_types: self.record_types.iter().map(String::as_str).collect(),
+            kinds: self.kinds.iter().map(String::as_str).collect(),
+            after: self.after.as_deref(),
+            before: self.before.as_deref(),
+            sort: &self.sort,
+            limit: self.limit,
+        }
+    }
+}
+
+impl GetRecordsArgs {
+    fn to_command(&self) -> read::GetRecordsArgs<'_> {
+        read::GetRecordsArgs {
+            records: self.records.iter().map(String::as_str).collect(),
+            chunk_ids: self.chunk_ids.iter().map(String::as_str).collect(),
+            max_chars_per_record: self.max_chars_per_record,
+        }
+    }
+}
+
 impl AffiliateArgs {
     fn to_command(&self) -> add::AffiliateArgs<'_> {
         add::AffiliateArgs {
@@ -2008,6 +2073,14 @@ fn run(cli: Cli) -> Result<(), CliError> {
             let conn = db::open_existing(&db_path)?;
             read::search(&conn, json, &a.query, a.limit)
         }
+        Command::Retrieve(a) => {
+            let conn = db::open_existing(&db_path)?;
+            read::retrieve(&conn, json, a.to_command())
+        }
+        Command::GetRecords(a) => {
+            let conn = db::open_existing(&db_path)?;
+            read::get_records(&conn, json, a.to_command())
+        }
         Command::Show { kind, id } => {
             let conn = db::open_existing(&db_path)?;
             read::show(&conn, json, &kind, &id)
@@ -2173,11 +2246,22 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
             },
             "search": {
                 "usage": "brain --json search <query> --limit 20",
-                "returns": "ranked records with kind, id, title, snippet, and score",
+                "returns": "ranked navigational records with kind, id, title, snippet, and score",
+                "use": "Use for quick lookup/navigation. Use retrieve + get-records for grounded agent answer context.",
+            },
+            "retrieve": {
+                "usage": "brain --json retrieve [query] [--record-type <type>...] [--kind <interaction-kind>...] [--after <iso|date>] [--before <iso|date>] [--sort relevance|recency] [--limit 20]",
+                "returns": "chunk-oriented hits with recordType, recordId, recordRef, chunkId, chunkIndex, title, date, snippet, score, and semanticAvailable:false for the standalone CLI",
+                "use": "Agent grounding path over universal content_chunks. To list recent records, omit query and pass filters such as --record-type interaction --kind email --sort recency --after YYYY-MM-DD.",
+            },
+            "getRecords": {
+                "usage": "brain --json get-records <recordType:id>... [--chunk <chunk-id>...] [--max-chars 4000]",
+                "returns": "bounded record context: found, title, date, metadata object, chunks with text, and truncated",
+                "use": "Call after retrieve. Pass chunk ids from retrieve to focus the returned context around matching chunks.",
             },
             "show": {
                 "usage": "brain --json show <person|organization|project|task> <id>",
-                "returns": "core typed fields for one visible record",
+                "returns": "core typed fields for one visible/top-level record. This is not the universal agent grounding path.",
             },
             "addPerson": {
                 "usage": "brain --json add person --full-name <name> [--email <email>...] [--phone <phone>...] [--source <slug> --external-id <id>]",
