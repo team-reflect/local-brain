@@ -5522,6 +5522,71 @@ fn tasks_complete_sets_done_completed_at_and_evidence() {
 }
 
 #[test]
+fn tasks_update_status_done_stamps_completed_at_and_non_done_clears_it() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let done_interaction = seeded_interaction(&db, "Janine confirmed the plan is done.");
+    let waiting_interaction = seeded_interaction(&db, "Janine reopened the quote wait.");
+    let done_evidence = format!(
+        "interaction:{}~\"plan is done\"",
+        done_interaction["id"].as_str().unwrap()
+    );
+    let waiting_evidence = format!(
+        "interaction:{}~\"quote wait\"",
+        waiting_interaction["id"].as_str().unwrap()
+    );
+    let task = run_json(&db, &["--json", "add", "task", "--title", "Confirm quote"]);
+    let task_id = task["id"].as_str().unwrap();
+
+    run_json(
+        &db,
+        &[
+            "--json",
+            "tasks",
+            "update",
+            task_id,
+            "--status",
+            "done",
+            "--evidence",
+            &done_evidence,
+        ],
+    );
+    let conn = Connection::open(&db).unwrap();
+    let completed_at: Option<String> = conn
+        .query_row(
+            "SELECT completed_at FROM tasks WHERE id = ?1",
+            [task_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(completed_at.is_some());
+    drop(conn);
+
+    run_json(
+        &db,
+        &[
+            "--json",
+            "tasks",
+            "update",
+            task_id,
+            "--status",
+            "waiting",
+            "--evidence",
+            &waiting_evidence,
+        ],
+    );
+    let conn = Connection::open(&db).unwrap();
+    let completed_at: Option<String> = conn
+        .query_row(
+            "SELECT completed_at FROM tasks WHERE id = ?1",
+            [task_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(completed_at.is_none());
+}
+
+#[test]
 fn tasks_update_rolls_back_when_quote_evidence_is_missing() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);

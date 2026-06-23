@@ -222,8 +222,15 @@ fn update_task_fields(
         params.push(description.map(SqlValue::from).unwrap_or(SqlValue::Null));
     }
     if let Some(status) = status {
+        let is_done = status == "done";
         set_clauses.push(format!("status = ?{}", params.len() + 1));
         params.push(SqlValue::from(status));
+        set_clauses.push(format!("completed_at = ?{}", params.len() + 1));
+        params.push(if is_done {
+            SqlValue::from(now_iso(conn)?)
+        } else {
+            SqlValue::Null
+        });
     }
     if let Some(due_at) = due_at {
         set_clauses.push(format!("due_at = ?{}", params.len() + 1));
