@@ -45,6 +45,8 @@ const DOCUMENTED: &[&[&str]] = &[
     &["today"],
     &["report", "daily"],
     &["tasks", "plan-day"],
+    &["tasks", "update"],
+    &["tasks", "complete"],
     &["changes"],
     &["import-context"],
     &["graph"],
@@ -115,5 +117,9 @@ fn skill_doc_exists_and_covers_the_nouns() {
     assert!(
         text.contains("brain suggest project"),
         "skill must keep project suggestions as the fallback"
+    );
+    assert!(
+        text.contains("brain --json tasks update"),
+        "skill must teach evidence-backed task updates"
     );
 }

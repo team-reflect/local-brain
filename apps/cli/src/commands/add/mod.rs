@@ -122,7 +122,9 @@ pub use project::{add_project, AddProjectArgs};
 pub use suggestion::{
     accept_suggestion, dismiss_suggestion, list_suggestions, suggest, SuggestArgs, SuggestionKind,
 };
-pub use task::{add_task, AddTaskArgs};
+pub use task::{
+    add_task, complete_task, update_task, AddTaskArgs, CompleteTaskArgs, UpdateTaskArgs,
+};
 
 /// Find the first active (non-archived) row in `table` whose `name_col`,
 /// normalized by `normalize`, equals the normalized `target`. Rows are scanned in

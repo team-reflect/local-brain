@@ -99,6 +99,29 @@ brain --json add project --name "House" \
   --summary "Renovation and property work for 701 W Elizabeth St and 700 Jewell St"
 ```
 
+For imported follow-ups, keep tasks evidence-backed and current:
+
+```bash
+brain --json add task --title "Reply to Scott Shreeve about his Picardo feedback" \
+  --link person:<id> --link interaction:<id> \
+  --evidence interaction:<id>~"Scott signed up for Founder Mode"
+
+brain --json tasks update <task-id> \
+  --title "Confirm Asset in Motion luggage quote and transfer plan with Janine" \
+  --description "Waiting for Janine to confirm the quote after Alex sent luggage details." \
+  --status waiting \
+  --link interaction:<id> \
+  --evidence interaction:<id>~"four metal RIMOWA cases"
+
+brain --json tasks complete <task-id> \
+  --evidence interaction:<id>~"transfer was handled"
+```
+
+Create a task when a source clearly introduces a missing follow-up. Use
+`brain --json tasks update` when a newer source clearly advances an existing
+task. Use suggestions or human review for uncertain edits, priority changes,
+splits, and completion without explicit source evidence.
+
 ## Identity And Provenance
 
 Source-backed imports should pass `--source`, `--external-kind`, and

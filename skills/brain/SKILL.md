@@ -118,6 +118,30 @@ brain --json import participants promote --handle maya@example.com --full-name "
 brain --json import finalize --record interaction:<id>
 ```
 
+Task maintenance during imports:
+
+```bash
+brain --json add task --title "Reply to Scott Shreeve about his Picardo feedback" \
+  --link person:<id> --link interaction:<id> \
+  --evidence interaction:<id>~"Scott signed up for Founder Mode"
+
+brain --json tasks update <task-id> \
+  --title "Confirm Asset in Motion luggage quote and transfer plan with Janine" \
+  --description "Waiting for Janine to confirm the quote after Alex sent luggage details." \
+  --status waiting \
+  --link interaction:<id> \
+  --evidence interaction:<id>~"four metal RIMOWA cases"
+
+brain --json tasks complete <task-id> \
+  --evidence interaction:<id>~"transfer was handled"
+```
+
+Create a new task when a human source clearly introduces a missing follow-up.
+Use `brain --json tasks update` when a newer source clearly advances an
+existing task, such as changing a logistics task to `waiting` after the user
+asked someone else to proceed. Use suggestions/prose review for uncertain edits,
+splits, priority changes, or completion without explicit evidence.
+
 Older direct writes still work:
 
 ```bash
