@@ -292,7 +292,7 @@ The generated `icon.json` currently looks like this:
 ```json
 {
   "fill": {
-    "automatic-gradient": "extended-srgb:0.00000,0.53333,1.00000,1.00000"
+    "automatic-gradient": "extended-srgb:0.00000,0.53333,1.00000,0.45"
   },
   "groups": [
     {
@@ -304,11 +304,11 @@ The generated `icon.json` currently looks like this:
       ],
       "shadow": {
         "kind": "neutral",
-        "opacity": 0.5
+        "opacity": 0.35
       },
       "translucency": {
         "enabled": true,
-        "value": 0.5
+        "value": 0.3
       }
     }
   ],
@@ -322,6 +322,12 @@ The generated `icon.json` currently looks like this:
 This is not a hand-authored design asset. It is a minimal generated document that
 lets Apple's renderer apply material, rim, shadow, and translucency to the source
 image.
+
+The fill alpha, shadow opacity, and translucency value are intentionally kept below
+their default full-strength values. They soften Apple's generated material treatment,
+but they do not fully control every visible rim highlight. If the source artwork has
+a bright full-bleed arc near the edge, that arc can still read as a harsh border after
+Icon Composer rounds and lights the icon.
 
 ### macOS Safe-Zone Sizes
 
@@ -652,6 +658,24 @@ Fix:
 - Explicitly say: no rounded-square container, no black border, no outer frame, no
   transparent padding.
 - Keep the full square filled edge to edge.
+
+### The Rendered Rim Looks Too Harsh
+
+Cause: the edge of the source artwork has a bright arc, crescent, or gradient line
+that survives Icon Composer's rounded mask and specular lighting. The
+`automatic-gradient` alpha, shadow opacity, and translucency value can soften Apple's
+material treatment, but they may not reduce a highlight that is already baked into
+the full-bleed source image.
+
+Fix:
+
+- First lower the generated material values in `apps/desktop/scripts/generate-icons.mjs`
+  if the harshness is coming from Icon Composer's fill, shadow, or translucency.
+- If the rim still looks harsh, soften the edge highlight in
+  `apps/desktop/assets/app-icon-source.png` while leaving the central mark unchanged.
+- Keep the background full-bleed; do not add transparent padding to the source.
+- Regenerate with `pnpm --filter @local-brain/desktop icons` and inspect
+  `apps/desktop/assets/app-icon-processed.png`.
 
 ### Tauri Panics With An Invalid Icon Error
 
