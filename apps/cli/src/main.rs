@@ -146,7 +146,7 @@ enum Command {
         #[command(subcommand)]
         what: ReportCommand,
     },
-    /// Task planning helpers.
+    /// Task planning and evidence-backed task maintenance.
     Tasks {
         #[command(subcommand)]
         what: TasksCommand,
@@ -634,6 +634,36 @@ struct AddTaskArgs {
 }
 
 #[derive(Parser)]
+struct UpdateTaskArgs {
+    id: String,
+    #[arg(long)]
+    title: Option<String>,
+    #[arg(long)]
+    description: Option<String>,
+    #[arg(long)]
+    status: Option<String>,
+    #[arg(long)]
+    due_at: Option<String>,
+    #[arg(long)]
+    scheduled_for: Option<String>,
+    #[arg(long = "link", value_name = "KIND:ID")]
+    links: Vec<String>,
+    /// Required evidence by index `interaction:01ABC#0` or by quote
+    /// `interaction:01ABC~"a phrase from the chunk"`.
+    #[arg(long = "evidence", value_name = "RECORD_TYPE:ID#CHUNK_OR_~QUOTE")]
+    evidence: Vec<String>,
+}
+
+#[derive(Parser)]
+struct CompleteTaskArgs {
+    id: String,
+    /// Required evidence by index `interaction:01ABC#0` or by quote
+    /// `interaction:01ABC~"a phrase from the chunk"`.
+    #[arg(long = "evidence", value_name = "RECORD_TYPE:ID#CHUNK_OR_~QUOTE")]
+    evidence: Vec<String>,
+}
+
+#[derive(Parser)]
 struct AddTranscriptArgs {
     #[arg(long)]
     interaction: String,
@@ -1049,6 +1079,10 @@ enum TasksCommand {
         #[arg(long, default_value_t = 25)]
         limit: usize,
     },
+    /// Evidence-backed update to an existing task.
+    Update(UpdateTaskArgs),
+    /// Mark an existing task complete with evidence.
+    Complete(CompleteTaskArgs),
 }
 
 #[derive(Subcommand)]
@@ -1370,6 +1404,30 @@ impl AddTaskArgs {
             links: parse_links(&self.links)?,
             evidence: parse_evidence_refs(&self.evidence)?,
             assignee_ids: self.assignee.clone(),
+        })
+    }
+}
+
+impl UpdateTaskArgs {
+    fn to_command(&self) -> Result<add::UpdateTaskArgs<'_>, CliError> {
+        Ok(add::UpdateTaskArgs {
+            id: &self.id,
+            title: self.title.as_deref(),
+            description: self.description.as_deref(),
+            status: self.status.as_deref(),
+            due_at: self.due_at.as_deref(),
+            scheduled_for: self.scheduled_for.as_deref(),
+            links: parse_links(&self.links)?,
+            evidence: parse_evidence_refs(&self.evidence)?,
+        })
+    }
+}
+
+impl CompleteTaskArgs {
+    fn to_command(&self) -> Result<add::CompleteTaskArgs<'_>, CliError> {
+        Ok(add::CompleteTaskArgs {
+            id: &self.id,
+            evidence: parse_evidence_refs(&self.evidence)?,
         })
     }
 }
@@ -2023,12 +2081,20 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 ReportCommand::Daily => report::report_daily(&conn, json),
             }
         }
-        Command::Tasks { what } => {
-            let conn = db::open_existing(&db_path)?;
-            match what {
-                TasksCommand::PlanDay { limit } => report::plan_day(&conn, json, limit),
+        Command::Tasks { what } => match what {
+            TasksCommand::PlanDay { limit } => {
+                let conn = db::open_existing(&db_path)?;
+                report::plan_day(&conn, json, limit)
             }
-        }
+            TasksCommand::Update(a) => {
+                let mut conn = db::open(&db_path)?;
+                add::update_task(&mut conn, json, a.to_command()?)
+            }
+            TasksCommand::Complete(a) => {
+                let mut conn = db::open(&db_path)?;
+                add::complete_task(&mut conn, json, a.to_command()?)
+            }
+        },
         Command::Changes(a) => {
             let conn = db::open_existing(&db_path)?;
             report::changes(&conn, json, &a.since, a.limit)
@@ -2161,6 +2227,7 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
             "Use --text-file or --text-file - for large source bodies. Imported source records must store complete local readable evidence; do not redact imported body text.",
             "If a source record is too sensitive or not worth storing, skip the whole record and ledger it instead of importing a partial redaction.",
             "Concise summaries belong in summary or ai-note records, not as replacements for source body text.",
+            "When a newer source clearly advances an existing task, use `tasks update` with evidence instead of leaving stale task wording. Create a new task for clear missing follow-ups; keep suggestions for uncertain task edits.",
         ],
         "commands": {
             "status": {
@@ -2311,6 +2378,16 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
                 "usage": "brain --json add task --title <title> [--due-at <iso>] [--link kind:id...] [--evidence record_type:id#0] [--assignee <person-id>...]",
                 "assigneeFlag": "Use --assignee <person-id> (repeatable) to mark someone as responsible for the task. Creates a task_people row with role='assignee'. Distinct from generic --link person:<id> which creates a generic person link.",
             },
+            "tasksUpdate": {
+                "usage": "brain --json tasks update <task-id> [--title <title>] [--description <text>] [--status open|waiting|done|cancelled] [--due-at <iso>] [--scheduled-for <date>] [--link kind:id...] --evidence record_type:id#0",
+                "purpose": "Evidence-backed maintenance for existing tasks when an imported source clearly advances the task state. Interaction links also fill origin_interaction_id when blank.",
+                "requiresEvidence": true,
+            },
+            "tasksComplete": {
+                "usage": "brain --json tasks complete <task-id> --evidence record_type:id#0",
+                "purpose": "Mark an existing task done with source evidence and a completed_at timestamp.",
+                "requiresEvidence": true,
+            },
             "addAiNote": {
                 "usage": "brain --json add ai-note --kind <summary|action_items|decisions|risks|highlights|coaching|other> (--interaction <id>|--document <id>|--subject <kind:id>) (--text <text>|--text-file <path|->) [--evidence record_type:id#0]",
                 "purpose": "Store narrative AI artifacts separately from raw evidence.",
@@ -2330,7 +2407,7 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
             "remember": {
                 "usage": "brain --json remember --kind <fact|preference|decision|commitment|instruction|risk|idea> --claim <atomic claim> --link kind:id... [--evidence record_type:<id>#<chunk>|record_type:<id>~\"quote\"]",
                 "rule": "Memories should be atomic and linked to visible evidence records.",
-                "evidence": "Cite a universal content chunk by index (#0) or by a quote substring (~\"a phrase\") resolved against the record's chunks at write time, so you need not know chunk boundaries. Works for `remember`, `add task`, `add ai-note`, and `add fact`.",
+                "evidence": "Cite a universal content chunk by index (#0) or by a quote substring (~\"a phrase\") resolved against the record's chunks at write time, so you need not know chunk boundaries. Works for `remember`, `add task`, `tasks update`, `tasks complete`, `add ai-note`, and `add fact`.",
             },
             "self": {
                 "usage": "brain --json self show | brain --json self set --full-name <name> [--email <email>...] [--phone <phone>...]",

@@ -113,6 +113,23 @@ fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+fn seeded_interaction(db: &Path, text: &str) -> Value {
+    run_json(
+        db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "email",
+            "--title",
+            "Source email",
+            "--text",
+            text,
+        ],
+    )
+}
+
 #[test]
 fn status_reports_schema_version() {
     let dir = TempDir::new().unwrap();
@@ -240,6 +257,22 @@ fn contract_reports_agent_cli_contract() {
         .as_str()
         .unwrap()
         .contains("not-yet-approved"));
+    assert!(contract["commands"]["tasksUpdate"]["usage"]
+        .as_str()
+        .unwrap()
+        .contains("brain --json tasks update"));
+    assert_eq!(
+        contract["commands"]["tasksUpdate"]["requiresEvidence"],
+        true
+    );
+    assert!(contract["commands"]["tasksComplete"]["usage"]
+        .as_str()
+        .unwrap()
+        .contains("brain --json tasks complete"));
+    assert_eq!(
+        contract["commands"]["tasksComplete"]["requiresEvidence"],
+        true
+    );
     assert!(contract["writeRules"]
         .as_array()
         .unwrap()
@@ -261,6 +294,11 @@ fn contract_reports_agent_cli_contract() {
             .as_str()
             .unwrap()
             .contains("do not redact imported body text")));
+    assert!(contract["writeRules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|rule| rule.as_str().unwrap().contains("tasks update")));
 }
 
 #[test]
@@ -5298,6 +5336,293 @@ fn add_task_links_to_origin_interaction_and_project() {
         )
         .unwrap();
     assert_eq!(evidence_refs, 1);
+}
+
+#[test]
+fn tasks_update_changes_fields_and_bumps_updated_at() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let interaction = seeded_interaction(
+        &db,
+        "Janine can get an Asset in Motion quote after receiving luggage details.",
+    );
+    let interaction_id = interaction["id"].as_str().unwrap();
+    let task = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "task",
+            "--title",
+            "Coordinate luggage plan",
+        ],
+    );
+    let task_id = task["id"].as_str().unwrap();
+    let conn = Connection::open(&db).unwrap();
+    conn.execute(
+        "UPDATE tasks SET updated_at = '2000-01-01T00:00:00.000Z' WHERE id = ?1",
+        [task_id],
+    )
+    .unwrap();
+    drop(conn);
+
+    let evidence = format!("interaction:{interaction_id}#0");
+    let updated = run_json(
+        &db,
+        &[
+            "--json",
+            "tasks",
+            "update",
+            task_id,
+            "--title",
+            "Confirm Asset in Motion luggage quote and transfer plan with Janine",
+            "--description",
+            "Waiting for Janine to confirm the quote after Alex sent luggage details.",
+            "--status",
+            "waiting",
+            "--evidence",
+            &evidence,
+        ],
+    );
+    assert_eq!(updated["kind"], "task");
+    assert_eq!(updated["id"], task_id);
+    assert_eq!(updated["evidence"], 1);
+
+    let conn = Connection::open(&db).unwrap();
+    let (title, description, status, updated_at): (String, String, String, String) = conn
+        .query_row(
+            "SELECT title, description, status, updated_at FROM tasks WHERE id = ?1",
+            [task_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        title,
+        "Confirm Asset in Motion luggage quote and transfer plan with Janine"
+    );
+    assert_eq!(
+        description,
+        "Waiting for Janine to confirm the quote after Alex sent luggage details."
+    );
+    assert_eq!(status, "waiting");
+    assert_ne!(updated_at, "2000-01-01T00:00:00.000Z");
+}
+
+#[test]
+fn tasks_update_links_interaction_project_and_evidence() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let interaction = seeded_interaction(&db, "Alex sent the four suitcase details to Janine.");
+    let interaction_id = interaction["id"].as_str().unwrap();
+    let project = run_json(&db, &["--json", "add", "project", "--name", "SA Travel"]);
+    let project_id = project["id"].as_str().unwrap();
+    let task = run_json(&db, &["--json", "add", "task", "--title", "Plan luggage"]);
+    let task_id = task["id"].as_str().unwrap();
+    let interaction_link = format!("interaction:{interaction_id}");
+    let project_link = format!("project:{project_id}");
+    let evidence = format!("{interaction_link}~\"four suitcase details\"");
+
+    let updated = run_json(
+        &db,
+        &[
+            "--json",
+            "tasks",
+            "update",
+            task_id,
+            "--link",
+            &interaction_link,
+            "--link",
+            &project_link,
+            "--evidence",
+            &evidence,
+        ],
+    );
+    assert_eq!(updated["links"], 2);
+    assert_eq!(updated["evidence"], 1);
+
+    let conn = Connection::open(&db).unwrap();
+    let (stored_project_id, origin_interaction_id): (String, String) = conn
+        .query_row(
+            "SELECT project_id, origin_interaction_id FROM tasks WHERE id = ?1",
+            [task_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(stored_project_id, project_id);
+    assert_eq!(origin_interaction_id, interaction_id);
+    let task_interactions: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM task_interactions WHERE task_id = ?1 AND interaction_id = ?2",
+            (task_id, interaction_id),
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(task_interactions, 1);
+    let evidence_refs: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM evidence_refs er
+             JOIN content_chunks cc ON cc.id = er.chunk_id
+             WHERE er.subject_type = 'task'
+               AND er.subject_id = ?1
+               AND cc.record_type = 'interaction'
+               AND cc.record_id = ?2",
+            (task_id, interaction_id),
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(evidence_refs, 1);
+}
+
+#[test]
+fn tasks_complete_sets_done_completed_at_and_evidence() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let interaction = seeded_interaction(&db, "Janine confirmed that the transfer was handled.");
+    let interaction_id = interaction["id"].as_str().unwrap();
+    let task = run_json(
+        &db,
+        &["--json", "add", "task", "--title", "Confirm transfer"],
+    );
+    let task_id = task["id"].as_str().unwrap();
+    let evidence = format!("interaction:{interaction_id}~\"transfer was handled\"");
+
+    let completed = run_json(
+        &db,
+        &[
+            "--json",
+            "tasks",
+            "complete",
+            task_id,
+            "--evidence",
+            &evidence,
+        ],
+    );
+    assert_eq!(completed["status"], "done");
+    assert_eq!(completed["evidence"], 1);
+
+    let conn = Connection::open(&db).unwrap();
+    let (status, completed_at): (String, Option<String>) = conn
+        .query_row(
+            "SELECT status, completed_at FROM tasks WHERE id = ?1",
+            [task_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(status, "done");
+    assert!(completed_at.is_some());
+    let evidence_refs: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM evidence_refs WHERE subject_type = 'task' AND subject_id = ?1",
+            [task_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(evidence_refs, 1);
+}
+
+#[test]
+fn tasks_update_status_done_stamps_completed_at_and_non_done_clears_it() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let done_interaction = seeded_interaction(&db, "Janine confirmed the plan is done.");
+    let waiting_interaction = seeded_interaction(&db, "Janine reopened the quote wait.");
+    let done_evidence = format!(
+        "interaction:{}~\"plan is done\"",
+        done_interaction["id"].as_str().unwrap()
+    );
+    let waiting_evidence = format!(
+        "interaction:{}~\"quote wait\"",
+        waiting_interaction["id"].as_str().unwrap()
+    );
+    let task = run_json(&db, &["--json", "add", "task", "--title", "Confirm quote"]);
+    let task_id = task["id"].as_str().unwrap();
+
+    run_json(
+        &db,
+        &[
+            "--json",
+            "tasks",
+            "update",
+            task_id,
+            "--status",
+            "done",
+            "--evidence",
+            &done_evidence,
+        ],
+    );
+    let conn = Connection::open(&db).unwrap();
+    let completed_at: Option<String> = conn
+        .query_row(
+            "SELECT completed_at FROM tasks WHERE id = ?1",
+            [task_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(completed_at.is_some());
+    drop(conn);
+
+    run_json(
+        &db,
+        &[
+            "--json",
+            "tasks",
+            "update",
+            task_id,
+            "--status",
+            "waiting",
+            "--evidence",
+            &waiting_evidence,
+        ],
+    );
+    let conn = Connection::open(&db).unwrap();
+    let completed_at: Option<String> = conn
+        .query_row(
+            "SELECT completed_at FROM tasks WHERE id = ?1",
+            [task_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(completed_at.is_none());
+}
+
+#[test]
+fn tasks_update_rolls_back_when_quote_evidence_is_missing() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let interaction = seeded_interaction(&db, "The source contains only an available quote.");
+    let interaction_id = interaction["id"].as_str().unwrap();
+    let task = run_json(&db, &["--json", "add", "task", "--title", "Check quote"]);
+    let task_id = task["id"].as_str().unwrap();
+    let evidence = format!("interaction:{interaction_id}~\"missing phrase\"");
+
+    let out = run(
+        &db,
+        &[
+            "--json",
+            "tasks",
+            "update",
+            task_id,
+            "--status",
+            "waiting",
+            "--evidence",
+            &evidence,
+        ],
+    );
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("could not find a interaction"),
+        "stderr should mention missing quote evidence: {stderr}"
+    );
+
+    let conn = Connection::open(&db).unwrap();
+    let status: String = conn
+        .query_row("SELECT status FROM tasks WHERE id = ?1", [task_id], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(status, "open");
 }
 
 #[test]
