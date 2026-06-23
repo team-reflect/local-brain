@@ -41,6 +41,12 @@ describe('SettingsSurface (Plan 08)', () => {
     await waitFor(() => expect(screen.getByText('v0.1.0')).toBeDefined())
   })
 
+  it('shows update controls when the native bridge is available', () => {
+    renderWithProviders(<SettingsSurface section="about" />)
+
+    expect(screen.getByRole('button', { name: 'Check for updates' })).toBeDefined()
+  })
+
   it('renders AI providers as a Reflect-style row card with an add dialog', async () => {
     renderWithProviders(<SettingsSurface section="ai-providers" />)
     await waitFor(() => expect(screen.getByRole('button', { name: 'Add provider' })).toBeDefined())

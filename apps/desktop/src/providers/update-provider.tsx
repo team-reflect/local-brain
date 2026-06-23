@@ -22,13 +22,8 @@ interface UpdateContextValue {
   restart: () => Promise<void>
 }
 
-const DESKTOP_PLATFORMS = new Set(['darwin', 'windows', 'linux'])
 const IDLE: UpdateState = { phase: 'idle' }
 const UpdateContext = createContext<UpdateContextValue | null>(null)
-
-function isDesktopBuild(): boolean {
-  return DESKTOP_PLATFORMS.has(import.meta.env.TAURI_ENV_PLATFORM ?? '')
-}
 
 export function UpdateProvider({
   children,
@@ -37,7 +32,7 @@ export function UpdateProvider({
   children: ReactNode
   autoCheck?: boolean
 }): ReactNode {
-  const supported = hasBridge() && isDesktopBuild()
+  const supported = hasBridge()
   const resolvedAutoCheck = autoCheck ?? (supported && !import.meta.env.DEV)
   const [controller, setController] = useState<UpdateController | null>(null)
 
