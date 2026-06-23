@@ -16,7 +16,7 @@ export default defineConfig({
   },
 
   // Expose the Tauri CLI's build-time TAURI_ENV_* vars (e.g. the target platform).
-  envPrefix: ['VITE_', 'TAURI_ENV_*'],
+  envPrefix: ['VITE_', 'TAURI_ENV_'],
 
   // 1. prevent Vite from obscuring Rust errors
   clearScreen: false,
