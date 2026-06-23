@@ -4830,6 +4830,7 @@ fn retrieve_and_get_records_load_bounded_agent_context() {
         &db,
         &["--json", "retrieve", "Northwind launch", "--limit", "10"],
     );
+    assert_eq!(retrieve["mode"], "lexical");
     assert_eq!(retrieve["semanticAvailable"], false);
     let hit = retrieve["hits"]
         .as_array()
@@ -4862,6 +4863,30 @@ fn retrieve_and_get_records_load_bounded_agent_context() {
         .as_str()
         .unwrap()
         .contains("Northwind launch plan"));
+
+    let unicode = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "interaction",
+            "--kind",
+            "note",
+            "--title",
+            "Unicode note",
+            "--text",
+            "éééééééé",
+        ],
+    );
+    let unicode_ref = format!("interaction:{}", unicode["id"].as_str().unwrap());
+    let unicode_context = run_json(
+        &db,
+        &["--json", "get-records", &unicode_ref, "--max-chars", "5"],
+    );
+    let unicode_text = unicode_context["records"][0]["chunks"][0]["text"]
+        .as_str()
+        .unwrap();
+    assert_eq!(unicode_text.chars().count(), 5);
 }
 
 #[test]
@@ -4932,6 +4957,7 @@ fn retrieve_browses_recent_filtered_records_without_query() {
             "recency",
         ],
     );
+    assert_eq!(retrieve["mode"], "browse");
     let hits = retrieve["hits"].as_array().unwrap();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0]["recordId"], new_email["id"]);

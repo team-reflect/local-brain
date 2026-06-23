@@ -50,7 +50,7 @@ fn combined_search_score(lexical: f64, age_days: Option<f64>) -> f64 {
 
 fn preview_of(text: &str, max: usize) -> String {
     let trimmed = text.trim();
-    if trimmed.len() <= max {
+    if trimmed.chars().count() <= max {
         trimmed.to_string()
     } else {
         format!("{}...", truncate_to_boundary(trimmed, max).trim_end())
@@ -58,17 +58,10 @@ fn preview_of(text: &str, max: usize) -> String {
 }
 
 fn truncate_to_boundary(value: &str, max: usize) -> &str {
-    if value.len() <= max {
-        return value;
-    }
-    let mut end = 0;
-    for (index, _) in value.char_indices() {
-        if index > max {
-            break;
-        }
-        end = index;
-    }
-    &value[..end]
+    value
+        .char_indices()
+        .nth(max)
+        .map_or(value, |(index, _)| &value[..index])
 }
 
 fn is_retrievable_record_type(record_type: &str) -> bool {
@@ -837,16 +830,19 @@ pub fn retrieve(conn: &Connection, json: bool, args: RetrieveArgs<'_>) -> Result
     };
 
     let filter = retrieval_filter(&args)?;
-    let hits = if let Some(match_query) = match_query {
-        retrieve_lexical(conn, query, &match_query, &filter, sort, args.limit)?
+    let (mode, hits) = if let Some(match_query) = match_query {
+        (
+            "lexical",
+            retrieve_lexical(conn, query, &match_query, &filter, sort, args.limit)?,
+        )
     } else {
-        retrieve_browse(conn, query, &filter, args.limit)?
+        ("browse", retrieve_browse(conn, query, &filter, args.limit)?)
     };
 
     if json {
         print_json(&json!({
             "query": query,
-            "mode": "lexical",
+            "mode": mode,
             "semanticAvailable": false,
             "hits": hits.iter().map(retrieve_hit_json).collect::<Vec<_>>(),
             "count": hits.len(),
@@ -1197,13 +1193,14 @@ fn fit_chunks(rows: Vec<(String, i64, String)>, max_chars: usize) -> (Vec<Value>
         if remaining == 0 {
             return (chunks, true);
         }
-        let truncated = text.len() > remaining;
+        let text_chars = text.chars().count();
+        let truncated = text_chars > remaining;
         let fitted = if truncated {
             truncate_to_boundary(&text, remaining).to_string()
         } else {
             text
         };
-        let used = fitted.len();
+        let used = fitted.chars().count();
         chunks.push(json!({
             "chunkId": chunk_id,
             "chunkIndex": chunk_index,
