@@ -90,6 +90,7 @@ pub fn run() {
             keychain::keychain_get,
             keychain::keychain_has,
             keychain::keychain_delete,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             private_updates::github_private_update_check
         ])
         .run(tauri::generate_context!())

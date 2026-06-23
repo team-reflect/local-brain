@@ -19,8 +19,13 @@ const privateHeadersMock = vi.mocked(privateGithubUpdateHeaders)
 type DownloadHandler = Parameters<
   NonNullable<Awaited<ReturnType<typeof check>>>['downloadAndInstall']
 >[0]
+type DownloadOptions = Parameters<
+  NonNullable<Awaited<ReturnType<typeof check>>>['downloadAndInstall']
+>[1]
 
-function fakeUpdate(overrides: { version?: string; install?: (onEvent?: DownloadHandler) => Promise<void> } = {}) {
+function fakeUpdate(
+  overrides: { version?: string; install?: (onEvent?: DownloadHandler, options?: DownloadOptions) => Promise<void> } = {},
+) {
   return {
     version: overrides.version ?? '0.2.0',
     downloadAndInstall: vi.fn(overrides.install ?? (() => Promise.resolve())),
@@ -99,10 +104,14 @@ describe('createUpdateController', () => {
 
   it('falls back to the public updater endpoint when private GitHub checking fails', async () => {
     privateCheckMock.mockRejectedValue(new Error('private endpoint unavailable'))
-    checkMock.mockResolvedValue(fakeUpdate({ version: '0.3.0' }))
+    const update = fakeUpdate({ version: '0.3.0' })
+    checkMock.mockResolvedValue(update)
     controller = createUpdateController({ autoCheck: false })
     await controller.checkNow()
     expect(controller.getState()).toEqual({ phase: 'available', version: '0.3.0' })
+    await controller.install()
+    expect(privateHeadersMock).not.toHaveBeenCalled()
+    expect(update.downloadAndInstall).toHaveBeenCalledWith(expect.any(Function), undefined)
   })
 
   it('install reports progress and lands on ready', async () => {

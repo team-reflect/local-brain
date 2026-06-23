@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, ResourceId, Runtime, Webview};
 use tauri_plugin_updater::UpdaterExt;
@@ -54,7 +56,12 @@ fn updater_error(err: impl std::fmt::Display) -> AppError {
 
 async fn latest_release_manifest_asset() -> AppResult<GitHubAsset> {
     let url = format!("https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest");
-    let release = reqwest::Client::new()
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(github_error)?;
+
+    let release = client
         .get(url)
         .header("Accept", "application/vnd.github+json")
         .header("Authorization", github_auth_header())

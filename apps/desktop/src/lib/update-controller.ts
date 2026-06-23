@@ -39,6 +39,11 @@ export interface UpdateControllerOptions {
   autoCheckIntervalMs?: number
 }
 
+type PendingUpdate = {
+  update: Update
+  source: 'private' | 'public'
+}
+
 /** Six hours - frequent enough to catch releases, quiet enough to be free. */
 const DEFAULT_AUTO_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 
@@ -59,7 +64,7 @@ export function createUpdateController(options: UpdateControllerOptions): Update
   const intervalMs = options.autoCheckIntervalMs ?? DEFAULT_AUTO_CHECK_INTERVAL_MS
   const listeners = new Set<() => void>()
   let state: UpdateState = { phase: 'idle' }
-  let pendingUpdate: Update | null = null
+  let pendingUpdate: PendingUpdate | null = null
   let timer: ReturnType<typeof setInterval> | null = null
 
   function setState(next: UpdateState): void {
@@ -91,12 +96,16 @@ export function createUpdateController(options: UpdateControllerOptions): Update
     // an install of a previously-found update) transitioned while we awaited".
     const baseline = state
     try {
-      const update = await checkPrivateGithubUpdate().catch(() => check())
+      let source: PendingUpdate['source'] = 'private'
+      const update = await checkPrivateGithubUpdate().catch(() => {
+        source = 'public'
+        return check()
+      })
       if (currentState() !== baseline) {
         return // something raced us; its state wins
       }
       if (update) {
-        pendingUpdate = update
+        pendingUpdate = { update, source }
         setState({ phase: 'available', version: update.version })
       } else if (!silent) {
         pendingUpdate = null
@@ -115,10 +124,11 @@ export function createUpdateController(options: UpdateControllerOptions): Update
   }
 
   async function install(): Promise<void> {
-    const update = pendingUpdate
-    if (!update || state.phase === 'downloading' || state.phase === 'ready') {
+    const pending = pendingUpdate
+    if (!pending || state.phase === 'downloading' || state.phase === 'ready') {
       return
     }
+    const { update, source } = pending
     let contentLength: number | null = null
     let received = 0
     setState({ phase: 'downloading', version: update.version, percent: null })
@@ -142,7 +152,7 @@ export function createUpdateController(options: UpdateControllerOptions): Update
               break
           }
         },
-        { headers: privateGithubUpdateHeaders() },
+        source === 'private' ? { headers: privateGithubUpdateHeaders() } : undefined,
       )
       setState({ phase: 'ready', version: update.version })
     } catch (error) {
