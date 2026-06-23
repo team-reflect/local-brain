@@ -204,19 +204,65 @@ function bundlePaths() {
 function writeUpdaterManifest({ version, tag }) {
   const { updaterArchive, updaterSignature } = bundlePaths()
   const slug = capture('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner']).trim()
-  const manifest = {
+  const manifest = updaterManifest({
     version,
-    pub_date: new Date().toISOString(),
-    platforms: {
-      [`darwin-${hostArch()}`]: {
-        signature: readFileSync(updaterSignature, 'utf8').trim(),
-        url: `https://github.com/${slug}/releases/download/${tag}/${basename(updaterArchive)}`,
-      },
-    },
-  }
+    signature: readFileSync(updaterSignature, 'utf8').trim(),
+    url: `https://github.com/${slug}/releases/download/${tag}/${basename(updaterArchive)}`,
+  })
   const manifestPath = join(dirname(updaterArchive), 'latest.json')
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
   return manifestPath
+}
+
+export function updaterManifest({ version, signature, url, pubDate = new Date().toISOString(), arch = hostArch() }) {
+  return {
+    version,
+    pub_date: pubDate,
+    platforms: {
+      [`darwin-${arch}`]: {
+        signature,
+        url,
+      },
+    },
+  }
+}
+
+function releaseAssets(tag) {
+  return JSON.parse(capture('gh', ['release', 'view', tag, '--json', 'assets', '-q', '.assets']))
+}
+
+function findReleaseAsset(assets, predicate, description) {
+  const asset = assets.find(predicate)
+  if (!asset) {
+    fail(`could not find ${description} in the GitHub release assets`)
+  }
+  return asset
+}
+
+/**
+ * Private GitHub repositories cannot serve `github.com/.../releases/download/...`
+ * URLs to the updater with bearer auth. After upload, rewrite latest.json to
+ * point at GitHub's API asset URL, which accepts the embedded updater token.
+ */
+function rewriteUpdaterManifestForPrivateGitHub({ manifestPath, tag, version }) {
+  const { updaterSignature } = bundlePaths()
+  const assets = releaseAssets(tag)
+  const archiveAsset = findReleaseAsset(
+    assets,
+    (asset) => asset.name.endsWith('.app.tar.gz') && !asset.name.endsWith('.sig'),
+    'the updater archive',
+  )
+  const manifest = updaterManifest({
+    version,
+    signature: readFileSync(updaterSignature, 'utf8').trim(),
+    url: archiveAsset.apiUrl,
+  })
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+  const upload = run('gh', ['release', 'upload', tag, manifestPath, '--clobber'])
+  if (upload.status !== 0) {
+    fail(`could not replace latest.json with the private GitHub updater manifest:\n${upload.output.trim()}`)
+  }
+  log('rewrote latest.json to use GitHub API asset URLs for private-repo updates')
 }
 
 /**
@@ -491,6 +537,7 @@ function publish({ draft }) {
   const result = spawnSync('gh', releaseArgs, { encoding: 'utf8', stdio: ['inherit', 'pipe', 'inherit'] })
   if (result.status !== 0) fail(`creating the GitHub release failed${result.stdout ? `\n${result.stdout.trim()}` : ''}`)
   log(`${draft ? 'draft release created' : 'release published'}: ${result.stdout.trim()}`)
+  rewriteUpdaterManifestForPrivateGitHub({ manifestPath, tag, version })
 }
 
 async function setup() {

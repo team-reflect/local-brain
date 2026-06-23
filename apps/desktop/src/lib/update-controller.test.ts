@@ -2,12 +2,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { check } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
 import { createUpdateController, type UpdateController } from './update-controller'
+import { checkPrivateGithubUpdate, privateGithubUpdateHeaders } from './private-update'
 
 vi.mock('@tauri-apps/plugin-updater', () => ({ check: vi.fn() }))
 vi.mock('@tauri-apps/plugin-process', () => ({ relaunch: vi.fn() }))
+vi.mock('./private-update', () => ({
+  checkPrivateGithubUpdate: vi.fn(),
+  privateGithubUpdateHeaders: vi.fn(() => ({ Authorization: 'Bearer test-token' })),
+}))
 
 const checkMock = vi.mocked(check)
 const relaunchMock = vi.mocked(relaunch)
+const privateCheckMock = vi.mocked(checkPrivateGithubUpdate)
+const privateHeadersMock = vi.mocked(privateGithubUpdateHeaders)
 
 type DownloadHandler = Parameters<
   NonNullable<Awaited<ReturnType<typeof check>>>['downloadAndInstall']
@@ -26,6 +33,9 @@ describe('createUpdateController', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     checkMock.mockReset()
+    privateCheckMock.mockReset()
+    privateCheckMock.mockImplementation(() => checkMock())
+    privateHeadersMock.mockClear()
     relaunchMock.mockReset()
   })
 
@@ -57,9 +67,9 @@ describe('createUpdateController', () => {
     controller = createUpdateController({ autoCheck: true })
     controller.start()
     await vi.waitFor(() => {
-      expect(controller?.getState()).toEqual({ phase: 'idle' })
+      expect(warn).toHaveBeenCalled()
     })
-    expect(warn).toHaveBeenCalled()
+    expect(controller.getState()).toEqual({ phase: 'idle' })
     warn.mockRestore()
   })
 
@@ -87,6 +97,14 @@ describe('createUpdateController', () => {
     })
   })
 
+  it('falls back to the public updater endpoint when private GitHub checking fails', async () => {
+    privateCheckMock.mockRejectedValue(new Error('private endpoint unavailable'))
+    checkMock.mockResolvedValue(fakeUpdate({ version: '0.3.0' }))
+    controller = createUpdateController({ autoCheck: false })
+    await controller.checkNow()
+    expect(controller.getState()).toEqual({ phase: 'available', version: '0.3.0' })
+  })
+
   it('install reports progress and lands on ready', async () => {
     const states: string[] = []
     checkMock.mockResolvedValue(
@@ -108,6 +126,7 @@ describe('createUpdateController', () => {
     })
     await controller.checkNow()
     await controller.install()
+    expect(privateHeadersMock).toHaveBeenCalled()
     expect(states).toContain('downloading:50')
     expect(states).toContain('downloading:100')
     expect(controller.getState()).toEqual({ phase: 'ready', version: '0.3.0' })

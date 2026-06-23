@@ -1,5 +1,6 @@
 import { relaunch } from '@tauri-apps/plugin-process'
 import { check, type Update } from '@tauri-apps/plugin-updater'
+import { checkPrivateGithubUpdate, privateGithubUpdateHeaders } from './private-update'
 
 /**
  * The auto-update lifecycle as plain-language phases the UI renders
@@ -90,7 +91,7 @@ export function createUpdateController(options: UpdateControllerOptions): Update
     // an install of a previously-found update) transitioned while we awaited".
     const baseline = state
     try {
-      const update = await check()
+      const update = await checkPrivateGithubUpdate().catch(() => check())
       if (currentState() !== baseline) {
         return // something raced us; its state wins
       }
@@ -122,24 +123,27 @@ export function createUpdateController(options: UpdateControllerOptions): Update
     let received = 0
     setState({ phase: 'downloading', version: update.version, percent: null })
     try {
-      await update.downloadAndInstall((event) => {
-        switch (event.event) {
-          case 'Started':
-            contentLength = event.data.contentLength ?? null
-            received = 0
-            break
-          case 'Progress':
-            received += event.data.chunkLength
-            if (contentLength !== null && contentLength > 0) {
-              const percent = Math.min(100, Math.round((received / contentLength) * 100))
-              setState({ phase: 'downloading', version: update.version, percent })
-            }
-            break
-          case 'Finished':
-            setState({ phase: 'downloading', version: update.version, percent: 100 })
-            break
-        }
-      })
+      await update.downloadAndInstall(
+        (event) => {
+          switch (event.event) {
+            case 'Started':
+              contentLength = event.data.contentLength ?? null
+              received = 0
+              break
+            case 'Progress':
+              received += event.data.chunkLength
+              if (contentLength !== null && contentLength > 0) {
+                const percent = Math.min(100, Math.round((received / contentLength) * 100))
+                setState({ phase: 'downloading', version: update.version, percent })
+              }
+              break
+            case 'Finished':
+              setState({ phase: 'downloading', version: update.version, percent: 100 })
+              break
+          }
+        },
+        { headers: privateGithubUpdateHeaders() },
+      )
       setState({ phase: 'ready', version: update.version })
     } catch (error) {
       setState({ phase: 'error', message: errorMessage(error), during: 'install' })
