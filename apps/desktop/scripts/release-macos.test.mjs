@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 
-import { createReleaseArgs } from './release-macos.mjs'
+import { createReleaseArgs, updaterManifest } from './release-macos.mjs'
 
 const baseInput = {
   assets: ['Local Brain.dmg', 'Local Brain.app.tar.gz', 'Local Brain.app.tar.gz.sig', 'latest.json'],
@@ -58,4 +58,25 @@ test('draft publish keeps the draft flag last', () => {
   })
 
   expect(args.at(-1)).toBe('--draft')
+})
+
+test('updater manifest can target a GitHub API asset URL for private releases', () => {
+  expect(
+    updaterManifest({
+      version: '0.2.0',
+      signature: 'minisign-signature',
+      url: 'https://api.github.com/repos/team-reflect/local-brain/releases/assets/123',
+      pubDate: '2026-06-23T21:00:00.000Z',
+      arch: 'aarch64',
+    }),
+  ).toEqual({
+    version: '0.2.0',
+    pub_date: '2026-06-23T21:00:00.000Z',
+    platforms: {
+      'darwin-aarch64': {
+        signature: 'minisign-signature',
+        url: 'https://api.github.com/repos/team-reflect/local-brain/releases/assets/123',
+      },
+    },
+  })
 })

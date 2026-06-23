@@ -13,6 +13,8 @@ mod embed;
 mod error;
 mod fs;
 mod keychain;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod private_updates;
 mod skill;
 
 pub use error::{AppError, AppResult};
@@ -87,7 +89,9 @@ pub fn run() {
             keychain::keychain_set,
             keychain::keychain_get,
             keychain::keychain_has,
-            keychain::keychain_delete
+            keychain::keychain_delete,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            private_updates::github_private_update_check
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Local Brain application");

@@ -2,18 +2,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { check } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
 import { createUpdateController, type UpdateController } from './update-controller'
+import { checkPrivateGithubUpdate } from './private-update'
 
 vi.mock('@tauri-apps/plugin-updater', () => ({ check: vi.fn() }))
 vi.mock('@tauri-apps/plugin-process', () => ({ relaunch: vi.fn() }))
+vi.mock('./private-update', () => ({
+  checkPrivateGithubUpdate: vi.fn(),
+}))
 
 const checkMock = vi.mocked(check)
 const relaunchMock = vi.mocked(relaunch)
+const privateCheckMock = vi.mocked(checkPrivateGithubUpdate)
 
 type DownloadHandler = Parameters<
   NonNullable<Awaited<ReturnType<typeof check>>>['downloadAndInstall']
 >[0]
+type DownloadOptions = Parameters<
+  NonNullable<Awaited<ReturnType<typeof check>>>['downloadAndInstall']
+>[1]
 
-function fakeUpdate(overrides: { version?: string; install?: (onEvent?: DownloadHandler) => Promise<void> } = {}) {
+function fakeUpdate(
+  overrides: { version?: string; install?: (onEvent?: DownloadHandler, options?: DownloadOptions) => Promise<void> } = {},
+) {
   return {
     version: overrides.version ?? '0.2.0',
     downloadAndInstall: vi.fn(overrides.install ?? (() => Promise.resolve())),
@@ -26,6 +36,8 @@ describe('createUpdateController', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     checkMock.mockReset()
+    privateCheckMock.mockReset()
+    privateCheckMock.mockImplementation(() => checkMock())
     relaunchMock.mockReset()
   })
 
@@ -57,9 +69,9 @@ describe('createUpdateController', () => {
     controller = createUpdateController({ autoCheck: true })
     controller.start()
     await vi.waitFor(() => {
-      expect(controller?.getState()).toEqual({ phase: 'idle' })
+      expect(warn).toHaveBeenCalled()
     })
-    expect(warn).toHaveBeenCalled()
+    expect(controller.getState()).toEqual({ phase: 'idle' })
     warn.mockRestore()
   })
 
@@ -85,6 +97,17 @@ describe('createUpdateController', () => {
       message: 'release endpoint unreachable',
       during: 'check',
     })
+  })
+
+  it('falls back to the public updater endpoint when private GitHub checking fails', async () => {
+    privateCheckMock.mockRejectedValue(new Error('private endpoint unavailable'))
+    const update = fakeUpdate({ version: '0.3.0' })
+    checkMock.mockResolvedValue(update)
+    controller = createUpdateController({ autoCheck: false })
+    await controller.checkNow()
+    expect(controller.getState()).toEqual({ phase: 'available', version: '0.3.0' })
+    await controller.install()
+    expect(update.downloadAndInstall).toHaveBeenCalledWith(expect.any(Function))
   })
 
   it('install reports progress and lands on ready', async () => {
