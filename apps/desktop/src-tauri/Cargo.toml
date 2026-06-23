@@ -1,6 +1,6 @@
 [package]
 name = "local-brain-desktop"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 description = "Local Brain desktop app (Tauri 2 shell)"
 
