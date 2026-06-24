@@ -21,9 +21,9 @@ const iconutilPath = "/usr/bin/iconutil";
 const sipsPath = "/usr/bin/sips";
 const isMac = process.platform === "darwin";
 const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-const macFillGradient = "extended-srgb:0.00000,0.53333,1.00000,0.45";
-const macShadowOpacity = 0.35;
-const macTranslucencyValue = 0.3;
+const macFillGradient = "extended-srgb:0.00000,0.53333,1.00000,0";
+const macShadowOpacity = 0;
+const macTranslucencyValue = 0;
 
 const macFinalSizes = [
   { finalSize: 16, renderSize: 14, names: ["icon_16x16.png"] },
