@@ -91,7 +91,14 @@ export function createUpdateController(options: UpdateControllerOptions): Update
     // an install of a previously-found update) transitioned while we awaited".
     const baseline = state
     try {
-      const update = await checkPrivateGithubUpdate().catch(() => check())
+      // The private GitHub feed is the only path that works while the repo is
+      // private; the public `check()` endpoint 404s and only ever yields a
+      // generic "could not fetch release JSON" error. Log the real private
+      // failure before falling back so it is never silently masked again.
+      const update = await checkPrivateGithubUpdate().catch((error) => {
+        console.warn('private update check failed, falling back to public endpoint:', error)
+        return check()
+      })
       if (currentState() !== baseline) {
         return // something raced us; its state wins
       }
