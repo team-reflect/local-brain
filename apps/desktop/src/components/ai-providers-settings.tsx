@@ -9,7 +9,7 @@ import {
 import { AddAiProviderDialog } from './add-ai-provider-dialog'
 import { AiProviderRow } from './ai-provider-row'
 import { Button } from './button'
-import { Section } from './section'
+import { SettingsSection } from './settings/section'
 
 /**
  * Reflect-style Settings → AI providers: configured BYOK providers as simple
@@ -29,8 +29,8 @@ export function AiProvidersSettings(): ReactNode {
   )
 
   return (
-    <Section title="AI providers">
-      <div className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+    <>
+      <SettingsSection id="ai-providers">
         {configured.length === 0 ? (
           <p className="px-4 py-3.5 text-xs text-muted-foreground">
             No AI providers configured. Add a provider API key to use AI features — keys are stored
@@ -60,8 +60,7 @@ export function AiProvidersSettings(): ReactNode {
             Add provider
           </Button>
         </div>
-
-      </div>
+      </SettingsSection>
 
       {adding ? (
         <AddAiProviderDialog
@@ -69,6 +68,6 @@ export function AiProvidersSettings(): ReactNode {
           onClose={() => setAdding(false)}
         />
       ) : null}
-    </Section>
+    </>
   )
 }
