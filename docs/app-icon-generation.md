@@ -127,6 +127,7 @@ For the current Local Brain direction, the strongest prompt theme has been:
 - A small number of luminous nodes embedded in the folds.
 - One clear cyan bridge across the central fissure.
 - Magenta and cyan highlights.
+- A dark, consistent full-bleed background with no large outer swirl or crescent.
 - Abstract memory/network semantics without becoming anatomical or medical.
 
 ## What Not To Generate
@@ -192,12 +193,14 @@ Each hemisphere has elegant cortical fold arcs that also behave like a small gra
 and one bright cyan bridge across the center fissure. It should suggest a brain
 without becoming anatomical or medical.
 
-Composition/framing: Full square filled edge to edge with deep violet/indigo luminous
-background. No black border, no outer frame, no transparent padding, no baked
-rounded-square container. Main brain-glyph centered and comfortably inset, occupying
-about 50-58% of the canvas. Keep all important lobes, folds, nodes, graph edges,
-bridge strokes, and glow edges inside the central 65-70% safe zone, with calm
-luminous background margin on all sides. Readable at Dock size.
+Composition/framing: Full square filled edge to edge with a dark, consistent
+violet-black background. Use `#0e0342` as the plain background color when editing or
+post-processing the selected source. No large outer swirl, no bright edge crescent, no
+black border, no outer frame, no transparent padding, no baked rounded-square
+container. Main brain-glyph centered and comfortably inset, occupying about 50-58% of
+the canvas. Keep all important lobes, folds, nodes, graph edges, bridge strokes, and
+glow edges inside the central 65-70% safe zone, with calm background margin on all
+sides. Readable at Dock size.
 
 Style/medium: Premium macOS Sonoma-quality product icon source art, glossy glass,
 rich violet/indigo gradients, electric amethyst glow, cyan and magenta node
@@ -208,12 +211,16 @@ hemispheres, visible graph nodes, one clean cyan bridge, full-bleed source art.
 
 Avoid: text, letters, watermark, literal anatomical brain, medical illustration, skull,
 robot face, document/page symbol, busy dense mesh, finished rounded-square tile, black
-border, harsh edge crescent.
+border, harsh edge crescent, visible background ring.
 ```
 
 ## Current Generation Pipeline
 
 The script is `apps/desktop/scripts/generate-icons.mjs`.
+
+The current production source uses `#0e0342` for the plain full-bleed background. Keep
+the Icon Composer `automatic-gradient` fill in the script aligned with that color so
+the rounded macOS treatment does not introduce a mismatched backing color.
 
 At a high level:
 
@@ -295,7 +302,7 @@ The generated `icon.json` currently looks like this:
 ```json
 {
   "fill": {
-    "automatic-gradient": "extended-srgb:0.00000,0.53333,1.00000,0.45"
+    "automatic-gradient": "extended-srgb:0.00000,0.53333,1.00000,0"
   },
   "groups": [
     {
@@ -307,11 +314,11 @@ The generated `icon.json` currently looks like this:
       ],
       "shadow": {
         "kind": "neutral",
-        "opacity": 0.35
+        "opacity": 0
       },
       "translucency": {
         "enabled": true,
-        "value": 0.3
+        "value": 0
       }
     }
   ],
@@ -323,14 +330,13 @@ The generated `icon.json` currently looks like this:
 ```
 
 This is not a hand-authored design asset. It is a minimal generated document that
-lets Apple's renderer apply material, rim, shadow, and translucency to the source
-image.
+lets Apple's renderer apply the macOS rounded mask and specular rim while avoiding
+extra fill, shadow, or translucency on top of the source image.
 
-The fill alpha, shadow opacity, and translucency value are intentionally kept below
-their default full-strength values. They soften Apple's generated material treatment,
-but they do not fully control every visible rim highlight. If the source artwork has
-a bright full-bleed arc near the edge, that arc can still read as a harsh border after
-Icon Composer rounds and lights the icon.
+The fill alpha, shadow opacity, and translucency value are intentionally set to zero
+for the current icon because the source artwork already carries the desired glass
+lighting. These values remove the extra blue material cast and reduce generated
+heaviness, but they do not fully control Icon Composer's visible rounded rim highlight.
 
 ### macOS Safe-Zone Sizes
 
@@ -664,18 +670,21 @@ Fix:
 
 ### The Rendered Rim Looks Too Harsh
 
-Cause: the edge of the source artwork has a bright arc, crescent, or gradient line
-that survives Icon Composer's rounded mask and specular lighting. The
-`automatic-gradient` alpha, shadow opacity, and translucency value can soften Apple's
-material treatment, but they may not reduce a highlight that is already baked into
-the full-bleed source image.
+Cause: the source artwork has a bright arc, crescent, or gradient line near the edge,
+or Icon Composer's rounded mask and specular lighting are visually too strong. The
+`automatic-gradient` alpha, shadow opacity, and translucency value can remove extra
+material cast, but they do not fully control the white rounded rim that Icon Composer
+adds.
 
 Fix:
 
-- First lower the generated material values in `apps/desktop/scripts/generate-icons.mjs`
-  if the harshness is coming from Icon Composer's fill, shadow, or translucency.
-- If the rim still looks harsh, soften the edge highlight in
+- Keep the generated material values in `apps/desktop/scripts/generate-icons.mjs`
+  at zero unless there is a specific reason to reintroduce Icon Composer's fill,
+  shadow, or translucency.
+- If a source-art edge reads as a border, soften the edge highlight in
   `apps/desktop/assets/app-icon-source.png` while leaving the central mark unchanged.
+- If the rounded white rim itself still looks too strong, test a separate deterministic
+  post-render rim softening pass for the macOS icon outputs.
 - Keep the background full-bleed; do not add transparent padding to the source.
 - Regenerate with `pnpm --filter @local-brain/desktop icons` and inspect
   `apps/desktop/assets/app-icon-processed.png`.
