@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { appVersion } from '@local-brain/core'
-import { Section } from '../../components/section'
+import { SettingsSection } from '../../components/settings/section'
 import { useUpdate } from '../../providers/update-provider'
 import { UpdateField } from './update-field'
 
@@ -10,19 +10,19 @@ export function AboutSettings(): ReactNode {
   const { supported } = useUpdate()
 
   return (
-    <Section title="About">
-      <div className="space-y-3 text-sm">
-        <p className="text-muted-foreground">
-          Local Brain is a private, local-first, personal knowledge graph.
-        </p>
-        <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1.5">
-          <div className="contents">
-            <dt className="text-muted-foreground">Version</dt>
-            <dd className="text-foreground">{info.data ? `v${info.data.version}` : '...'}</dd>
-          </div>
-        </dl>
-        {supported ? <UpdateField /> : null}
+    <SettingsSection id="about">
+      <div className="flex items-start justify-between gap-4 px-4 py-3.5">
+        <div className="min-w-0">
+          <div className="text-sm font-medium text-foreground">Local Brain</div>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Local Brain is a private, local-first, personal knowledge graph.
+          </p>
+        </div>
+        <span className="shrink-0 text-sm text-muted-foreground">
+          {info.data ? `v${info.data.version}` : '—'}
+        </span>
       </div>
-    </Section>
+      {supported ? <UpdateField /> : null}
+    </SettingsSection>
   )
 }

@@ -1,8 +1,14 @@
 import type { ReactNode } from 'react'
 import { ArrowDownToLine, RefreshCw, RotateCw } from 'lucide-react'
 import { Button } from '../../components/button'
+import { SettingsField } from '../../components/settings/field'
 import { useUpdate } from '../../providers/update-provider'
 
+/**
+ * The manual path to the same updater the app checks on launch: one button
+ * whose label tracks the update lifecycle, with the outcome reported inline.
+ * (Layout adapted from Reflect Open's `UpdateField`.)
+ */
 export function UpdateField(): ReactNode {
   const { state, checkNow, install, restart } = useUpdate()
 
@@ -35,8 +41,11 @@ export function UpdateField(): ReactNode {
 
   const run = action.run
   return (
-    <div className="border-t border-border pt-3">
-      <div className="flex items-center gap-3">
+    <SettingsField
+      legend="Updates"
+      description="Local Brain checks for new versions on launch and installs them only when you say so."
+    >
+      <div className="mt-3 flex items-center gap-3">
         <Button
           type="button"
           variant="outline"
@@ -44,7 +53,11 @@ export function UpdateField(): ReactNode {
           disabled={run === undefined}
           onClick={run ? () => void run() : undefined}
         >
-          <action.icon className={action.spinning ? 'size-3.5 animate-spin' : 'size-3.5'} />
+          <action.icon
+            aria-hidden
+            strokeWidth={1.75}
+            className={action.spinning ? 'size-3.5 animate-spin' : 'size-3.5'}
+          />
           {action.label}
         </Button>
         {state.phase === 'upToDate' ? (
@@ -58,6 +71,6 @@ export function UpdateField(): ReactNode {
           </span>
         ) : null}
       </div>
-    </div>
+    </SettingsField>
   )
 }

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { AlertTriangle, Check, Terminal } from 'lucide-react'
 import { isAppError } from '@local-brain/core'
 import { Button } from '../../components/button'
-import { Section } from '../../components/section'
+import { SettingsSection } from '../../components/settings/section'
 import {
   useCliStatus,
   useInstallCli,
@@ -30,23 +30,23 @@ export function CliAgentsSettings(): ReactNode {
     skillStatus.error
 
   return (
-    <Section title="CLI & agents">
-      <div className="flex flex-col gap-3 text-sm">
-        <p className="text-muted-foreground">
-          The bundled brain CLI and agent skill are the supported local interface for agents and
-          terminal workflows.
-        </p>
+    <SettingsSection id="cli-agents">
+      <p className="px-4 py-3.5 text-sm text-muted-foreground">
+        The bundled brain CLI and agent skill are the supported local interface for agents and
+        terminal workflows.
+      </p>
 
-        <CliInstallCard status={cliStatus} install={cliInstall} uninstall={cliUninstall} />
-        <SkillInstallCard status={skillStatus} install={skillInstall} uninstall={skillUninstall} />
+      <CliInstallCard status={cliStatus} install={cliInstall} uninstall={cliUninstall} />
+      <SkillInstallCard status={skillStatus} install={skillInstall} uninstall={skillUninstall} />
 
-        {error ? (
+      {error ? (
+        <div className="px-4 py-3.5">
           <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
             {errorMessage(error)}
           </div>
-        ) : null}
-      </div>
-    </Section>
+        </div>
+      ) : null}
+    </SettingsSection>
   )
 }
 
@@ -68,9 +68,9 @@ function CliInstallCard({
   const busy = install.isPending || uninstall.isPending
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
+    <div className="px-4 py-3.5">
       {data ? (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 text-sm">
           <div className="flex items-center gap-2">
             <Terminal className="size-4 text-primary" aria-hidden />
             <span className="font-semibold text-foreground">{cliStatusTitle(data.installState)}</span>
@@ -161,9 +161,9 @@ function SkillInstallCard({
     data.skills.some((skill) => skill.installState === 'current' || skill.installState === 'stale')
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
+    <div className="px-4 py-3.5">
       {data ? (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 text-sm">
           <div className="flex items-center gap-2">
             <Terminal className="size-4 text-primary" aria-hidden />
             <span className="font-semibold text-foreground">{skillStatusTitle(data.installState)}</span>

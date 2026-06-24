@@ -6,6 +6,7 @@ import { registerAppCommands } from './lib/commands/app-commands'
 import { installModel } from './lib/ai/install-model'
 import { installTauriBridge } from './lib/ipc/tauri-bridge'
 import { queryClient } from './lib/query-client'
+import { ThemeProvider } from './providers/theme-provider'
 import { UpdateProvider } from './providers/update-provider'
 import './app/globals.css'
 
@@ -20,10 +21,12 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <UpdateProvider>
-        <App />
-      </UpdateProvider>
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <UpdateProvider>
+          <App />
+        </UpdateProvider>
+      </QueryClientProvider>
+    </ThemeProvider>
   </StrictMode>,
 )
