@@ -122,11 +122,12 @@ For the current Local Brain direction, the strongest prompt theme has been:
 
 - Purple, indigo, and electric amethyst color system.
 - Glossy but restrained glass material.
-- A bilateral "twin cluster" graph.
-- A small number of luminous nodes.
-- One clear cyan bridge between clusters.
+- A centered abstract brain made from two glass hemispheres.
+- Cortical fold arcs that still read as a simple graph.
+- A small number of luminous nodes embedded in the folds.
+- One clear cyan bridge across the central fissure.
 - Magenta and cyan highlights.
-- Abstract memory/network semantics without becoming a literal brain.
+- Abstract memory/network semantics without becoming anatomical or medical.
 
 ## What Not To Generate
 
@@ -173,39 +174,41 @@ Avoid: literal anatomical brain, skull, robot face, document/page symbol, busy d
 mesh, finished rounded-square tile, black border.
 ```
 
-### Current Twin-Cluster Prompt
+### Current Brain-Style Prompt
 
 The current selected direction came from this style of prompt:
 
 ```text
 Use case: logo-brand
 Asset type: full-bleed square source artwork for a macOS/Tauri app icon, 1:1, no text.
-Primary request: Create a variation on the Local Brain twin-cluster graph icon theme.
-This is raw source artwork for the existing icon pipeline, not a finished rounded
-macOS icon.
+Primary request: Create a new Local Brain app icon concept that keeps the current
+purple glass graph style, but makes the central mark read more like an abstract
+brain. This is raw source artwork for the existing icon pipeline, not a finished
+rounded macOS icon.
 
-Subject: Two soft translucent violet glass lobes, left and right, each containing
-4 to 5 luminous graph nodes with short clean connecting edges. A single bright cyan
-bridge connects the two clusters across the center, suggesting a local memory link.
-The two lobes are closer together than the first draft and should read as one
-centered combined symbol, not as two shapes pushed toward the canvas edges.
+Subject: A centered abstract brain made from two translucent violet glass hemispheres.
+Each hemisphere has elegant cortical fold arcs that also behave like a small graph:
+4 to 5 luminous magenta nodes embedded along the folds, short clean connecting edges,
+and one bright cyan bridge across the center fissure. It should suggest a brain
+without becoming anatomical or medical.
 
 Composition/framing: Full square filled edge to edge with deep violet/indigo luminous
 background. No black border, no outer frame, no transparent padding, no baked
-rounded-square container. Central twin-cluster mark centered, about 50-58% of canvas,
-with generous calm negative space. Keep all important lobes, nodes, graph edges,
-bridge strokes, and glow edges inside the central 65-70% safe zone so Icon Composer
-does not crop or crowd them when generating the `.icns`. Strong Dock-size silhouette.
+rounded-square container. Main brain-glyph centered and comfortably inset, occupying
+about 50-58% of the canvas. Keep all important lobes, folds, nodes, graph edges,
+bridge strokes, and glow edges inside the central 65-70% safe zone, with calm
+luminous background margin on all sides. Readable at Dock size.
 
 Style/medium: Premium macOS Sonoma-quality product icon source art, glossy glass,
 rich violet/indigo gradients, electric amethyst glow, cyan and magenta node
 highlights, crisp edges, elegant and simple.
 
-Constraints: Keep it close to the twin-cluster graph concept: bilateral lobes, visible
-graph nodes, one clean bridge, full-bleed source art.
+Constraints: Keep it close to the Local Brain visual family: bilateral brain
+hemispheres, visible graph nodes, one clean cyan bridge, full-bleed source art.
 
-Avoid: text, letters, watermark, literal anatomical brain, skull, robot face,
-document/page symbol, busy dense mesh, finished rounded-square tile, black border.
+Avoid: text, letters, watermark, literal anatomical brain, medical illustration, skull,
+robot face, document/page symbol, busy dense mesh, finished rounded-square tile, black
+border, harsh edge crescent.
 ```
 
 ## Current Generation Pipeline
