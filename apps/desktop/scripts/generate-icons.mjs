@@ -21,7 +21,7 @@ const iconutilPath = "/usr/bin/iconutil";
 const sipsPath = "/usr/bin/sips";
 const isMac = process.platform === "darwin";
 const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-const macFillGradient = "extended-srgb:0.00000,0.53333,1.00000,0";
+const macFillGradient = "extended-srgb:0.05490,0.01176,0.25882,1.00000";
 const macShadowOpacity = 0;
 const macTranslucencyValue = 0;
 

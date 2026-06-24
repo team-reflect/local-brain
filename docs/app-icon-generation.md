@@ -194,12 +194,13 @@ and one bright cyan bridge across the center fissure. It should suggest a brain
 without becoming anatomical or medical.
 
 Composition/framing: Full square filled edge to edge with a dark, consistent
-violet-black background. No large outer swirl, no bright edge crescent, no black
-border, no outer frame, no transparent padding, no baked rounded-square container.
-Main brain-glyph centered and comfortably inset, occupying about 50-58% of the canvas.
-Keep all important lobes, folds, nodes, graph edges, bridge strokes, and glow edges
-inside the central 65-70% safe zone, with calm background margin on all sides.
-Readable at Dock size.
+violet-black background. Use `#0e0342` as the plain background color when editing or
+post-processing the selected source. No large outer swirl, no bright edge crescent, no
+black border, no outer frame, no transparent padding, no baked rounded-square
+container. Main brain-glyph centered and comfortably inset, occupying about 50-58% of
+the canvas. Keep all important lobes, folds, nodes, graph edges, bridge strokes, and
+glow edges inside the central 65-70% safe zone, with calm background margin on all
+sides. Readable at Dock size.
 
 Style/medium: Premium macOS Sonoma-quality product icon source art, glossy glass,
 rich violet/indigo gradients, electric amethyst glow, cyan and magenta node
@@ -216,6 +217,10 @@ border, harsh edge crescent, visible background ring.
 ## Current Generation Pipeline
 
 The script is `apps/desktop/scripts/generate-icons.mjs`.
+
+The current production source uses `#0e0342` for the plain full-bleed background. Keep
+the Icon Composer `automatic-gradient` fill in the script aligned with that color so
+the rounded macOS treatment does not introduce a mismatched backing color.
 
 At a high level:
 
