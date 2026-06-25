@@ -3,7 +3,7 @@ import { Search } from 'lucide-react'
 import { VisuallyHidden } from 'radix-ui'
 import { listCommands } from '../lib/commands/registry'
 import type { CommandContext } from '../lib/commands/types'
-import { useGlobalSearch } from '../lib/queries'
+import { usePaletteSearch } from '../lib/queries'
 import { routeForRecord } from '../routing/route'
 import { cn } from '../lib/utils'
 import type { SearchHit } from '@local-brain/core'
@@ -58,7 +58,7 @@ export function CommandPalette({
   const autoSelectedValue = useRef('')
   const trimmed = query.trim()
   const commandsOnly = trimmed.startsWith('>')
-  const search = useGlobalSearch(open && !commandsOnly ? query : '')
+  const search = usePaletteSearch(open && !commandsOnly ? query : '')
 
   useEffect(() => {
     if (open) {

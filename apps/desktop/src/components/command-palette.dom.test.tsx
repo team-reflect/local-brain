@@ -78,7 +78,7 @@ describe('CommandPalette', () => {
     expect(ctx.navigate).toHaveBeenCalledWith({ kind: 'person', id: 'p1' })
   })
 
-  it('uses global search snippets and lists records before commands', async () => {
+  it('uses search snippets and lists records before commands', async () => {
     installFakeBridge({
       query: (sql) =>
         sql.includes('documents_fts')
@@ -108,7 +108,50 @@ describe('CommandPalette', () => {
     expect(Boolean(records.compareDocumentPosition(commands) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
   })
 
-  it('waits for global search before showing no matches', async () => {
+  it('opens a semantic-only palette result', async () => {
+    const ctx = context()
+    installFakeBridge({
+      respond: (command) => {
+        if (command === 'embed_status') return { status: 'ready', model: 'all-MiniLM-L6-v2' }
+        if (command === 'embed_texts') return [[0.1, 0.2, 0.3]]
+        return undefined
+      },
+      query: (sql, params) => {
+        if (sql.includes('settings')) {
+          const key = params[0]
+          if (key === 'embeddings.enabled') return [{ valueJson: 'true' }]
+          return []
+        }
+        if (sql.includes('chunk_vectors')) {
+          return [
+            {
+              chunkId: 'c1',
+              text: 'semantic strategy context',
+              recordType: 'document',
+              recordId: 'd1',
+              recordTitle: 'Strategy memo',
+              recordDate: '2026-06-01T00:00:00.000Z',
+              chunkIndex: 0,
+              distance: 0.2,
+            },
+          ]
+        }
+        return []
+      },
+    })
+
+    renderWithProviders(<CommandPalette open onClose={() => {}} context={ctx} />)
+    const input = screen.getByPlaceholderText(/Search records or run a command/)
+    fireEvent.change(input, { target: { value: 'competitive moat' } })
+
+    await waitFor(() => expect(screen.getByText('Strategy memo')).toBeDefined())
+    expect(screen.getByText('semantic strategy context')).toBeDefined()
+
+    fireEvent.click(screen.getByText('Strategy memo'))
+    expect(ctx.navigate).toHaveBeenCalledWith({ kind: 'document', id: 'd1' })
+  })
+
+  it('waits for palette search before showing no matches', async () => {
     let resolveQuery: (rows: unknown[]) => void = () => {}
     const pendingQuery = new Promise<unknown[]>((resolve) => {
       resolveQuery = resolve

@@ -17,3 +17,4 @@ export {
   type SourceRecordType,
 } from './retrieve'
 export { globalSearch, type SearchHit, type SearchOptions } from './search'
+export { paletteSearch } from './palette-search'

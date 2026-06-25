@@ -61,9 +61,14 @@ describe('SettingsSurface (Plan 08)', () => {
   })
 
   it('shows manual semantic backfill as the primary action and keeps rebuild available', async () => {
+    const commands: string[] = []
     installFakeBridge({
       respond: (command) => {
+        commands.push(command)
         if (command === 'embed_status') {
+          return { status: 'ready', model: 'all-MiniLM-L6-v2' }
+        }
+        if (command === 'embed_ensure') {
           return { status: 'ready', model: 'all-MiniLM-L6-v2' }
         }
         return undefined
@@ -82,8 +87,13 @@ describe('SettingsSurface (Plan 08)', () => {
 
     renderWithProviders(<SettingsSurface section="search" />)
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Backfill now' })).toBeDefined())
+    const update = await screen.findByRole('button', { name: 'Update index' })
     expect(screen.getByRole('button', { name: 'Rebuild index' })).toBeDefined()
+    expect(screen.getByText('Disabling stops semantic results without deleting the local index.')).toBeDefined()
+
+    fireEvent.click(update)
+
+    await waitFor(() => expect(commands).toContain('embed_ensure'))
   })
 
   it('shows CLI install status and installs the command', async () => {
@@ -427,7 +437,10 @@ describe('SettingsSurface (Plan 08)', () => {
       name: 'Semantic search model download',
     })
     expect(bar.getAttribute('aria-valuenow')).toBe('50')
-    expect(screen.getByText('Downloading the model — 45 MB of 90 MB')).toBeDefined()
+    expect(bar.getAttribute('aria-valuetext')).toBe('Downloading model, 50%, 45 MB of 90 MB')
+    expect(screen.getByText('Downloading model')).toBeDefined()
+    expect(screen.getByText('50%')).toBeDefined()
+    expect(screen.getByText('45 MB of 90 MB')).toBeDefined()
   })
 
   it('shows an indeterminate semantic model preparation state before byte counts arrive', async () => {
@@ -456,6 +469,73 @@ describe('SettingsSurface (Plan 08)', () => {
       name: 'Semantic search model download',
     })
     expect(bar.getAttribute('aria-valuenow')).toBeNull()
-    expect(screen.getByText('Preparing the model...')).toBeDefined()
+    expect(bar.getAttribute('aria-valuetext')).toBe('Preparing download')
+    expect(screen.getByText('Preparing download...')).toBeDefined()
+    expect(screen.getByText('Waiting for model download details')).toBeDefined()
+  })
+
+  it('shows semantic model loading after the download completes', async () => {
+    installFakeBridge({
+      respond: (command) => {
+        if (command === 'embed_status') {
+          return { status: 'loading', progress: { downloaded: 90_000_000, total: 90_000_000 } }
+        }
+        return undefined
+      },
+      query: (sql, params) => {
+        if (sql.includes('settings')) {
+          const key = params[0]
+          if (key === 'embeddings.enabled') return [{ valueJson: 'true' }]
+          return []
+        }
+        if (sql.includes('chunk_embeddings')) return [{ count: 0 }]
+        if (/count/i.test(sql)) return [{ count: 3 }]
+        return []
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="search" />)
+
+    const bar = await screen.findByRole('progressbar', {
+      name: 'Semantic search model download',
+    })
+    expect(bar.getAttribute('aria-valuenow')).toBe('100')
+    expect(bar.getAttribute('aria-valuetext')).toBe('Loading model, 100%, 90 MB downloaded')
+    expect(screen.getByText('Loading model...')).toBeDefined()
+    expect(screen.getByText('100%')).toBeDefined()
+    expect(screen.getByText('90 MB downloaded')).toBeDefined()
+  })
+
+  it('offers a retry action when the semantic model fails to load', async () => {
+    const commands: string[] = []
+    installFakeBridge({
+      respond: (command) => {
+        commands.push(command)
+        if (command === 'embed_status') {
+          return { status: 'failed', message: 'download failed' }
+        }
+        if (command === 'embed_ensure') {
+          return { status: 'ready', model: 'all-MiniLM-L6-v2' }
+        }
+        return undefined
+      },
+      query: (sql, params) => {
+        if (sql.includes('settings')) {
+          const key = params[0]
+          if (key === 'embeddings.enabled') return [{ valueJson: 'true' }]
+          return []
+        }
+        if (sql.includes('chunk_embeddings')) return [{ count: 0 }]
+        if (/count/i.test(sql)) return [{ count: 3 }]
+        return []
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="search" />)
+
+    expect(await screen.findByText(/Couldn’t load the embedding model/)).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+
+    await waitFor(() => expect(commands).toContain('embed_ensure'))
   })
 })

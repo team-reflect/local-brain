@@ -28,7 +28,7 @@ export function SemanticSearchSettings(): ReactNode {
     <SettingsSection id="search">
       <SettingsField
         legend="Semantic search"
-        description="Find documents and interactions by meaning, not just keywords. Vectors are computed on this machine with a local model."
+        description="Find records by meaning in command-palette search and Chat. Vectors are computed on this machine with a local model."
       >
         <div className="mt-3 flex flex-col gap-3 text-sm">
           {status && !status.enabled ? (
@@ -49,7 +49,15 @@ export function SemanticSearchSettings(): ReactNode {
 
           {status?.enabled && runtime?.status === 'failed' ? (
             <div className="rounded-md border border-destructive/40 bg-destructive/5 px-4 py-3 text-xs text-destructive">
-              Couldn’t load the embedding model: {runtime.message}
+              <p>Couldn’t load the embedding model: {runtime.message}</p>
+              <div className="mt-3 flex items-center gap-2">
+                <Button variant="outline" disabled={busy} onClick={() => setEnabled.mutate(true)}>
+                  Try again
+                </Button>
+                <Button variant="ghost" disabled={busy} onClick={() => setEnabled.mutate(false)}>
+                  Disable
+                </Button>
+              </div>
             </div>
           ) : null}
 
@@ -102,10 +110,10 @@ export function SemanticSearchSettings(): ReactNode {
             </div>
           ) : null}
 
-          {status?.enabled ? (
+          {status?.enabled && runtime?.status !== 'failed' ? (
             <div className="flex items-center gap-2">
               <Button variant="primary" disabled={busy} onClick={() => backfill.mutate()}>
-                {backfill.isPending ? 'Backfilling…' : 'Backfill now'}
+                {backfill.isPending ? 'Updating…' : 'Update index'}
               </Button>
               <Button variant="outline" disabled={busy} onClick={() => rebuild.mutate()}>
                 {rebuild.isPending ? 'Rebuilding…' : 'Rebuild index'}
@@ -113,6 +121,9 @@ export function SemanticSearchSettings(): ReactNode {
               <Button variant="ghost" disabled={busy} onClick={() => setEnabled.mutate(false)}>
                 Disable
               </Button>
+              <span className="text-xs text-muted-foreground">
+                Disabling stops semantic results without deleting the local index.
+              </span>
             </div>
           ) : null}
         </div>
