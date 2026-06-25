@@ -28,8 +28,11 @@ function progressState(progress: ByteProgress | undefined): {
     }
   }
 
-  const value = Math.min(Math.round((progress.downloaded / progress.total) * 100), 100)
-  if (value >= 100) {
+  const isComplete = progress.downloaded >= progress.total
+  const value = isComplete
+    ? 100
+    : Math.max(0, Math.min(Math.floor((progress.downloaded / progress.total) * 100), 99))
+  if (isComplete) {
     return {
       value,
       title: 'Loading model...',

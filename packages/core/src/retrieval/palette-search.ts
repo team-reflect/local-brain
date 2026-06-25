@@ -3,8 +3,8 @@ import { parseSearchQuery } from './search-query'
 import { globalSearch } from './search'
 import type { SearchHit } from './search-types'
 import { retrieve, type RetrievedChunk, type SourceRecordType } from './retrieve'
+import { RRF_K } from '../embeddings/semantic'
 
-const RRF_K = 60
 const DEFAULT_LIMIT = 20
 
 const NAVIGABLE_RETRIEVAL_TYPES = [
@@ -80,18 +80,19 @@ function fusePaletteHits(lexical: readonly SearchHit[], semantic: readonly Searc
 export async function paletteSearch(query: string, options: { limit?: number } = {}): Promise<SearchHit[]> {
   const limit = options.limit ?? DEFAULT_LIMIT
   const parsed = parseSearchQuery(query)
-  const lexical = await globalSearch(query, { limit })
+  const wantsSemantic = parsed.tagFilters.length === 0 && parsed.text.trim().length > 0
+  const [lexical, semantic] = await Promise.all([
+    globalSearch(query, { limit }),
+    wantsSemantic
+      ? retrieve(parsed.text, {
+          mode: 'semantic',
+          limit,
+          recordTypes: NAVIGABLE_RETRIEVAL_TYPES,
+        })
+      : Promise.resolve(null),
+  ])
 
-  if (parsed.tagFilters.length > 0 || parsed.text.trim().length === 0) {
-    return lexical
-  }
-
-  const semantic = await retrieve(parsed.text, {
-    mode: 'semantic',
-    limit,
-    recordTypes: NAVIGABLE_RETRIEVAL_TYPES,
-  })
-  if (!semantic.semanticAvailable) {
+  if (!semantic?.semanticAvailable) {
     return lexical
   }
 

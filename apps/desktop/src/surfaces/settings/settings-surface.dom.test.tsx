@@ -91,9 +91,15 @@ describe('SettingsSurface (Plan 08)', () => {
     expect(screen.getByRole('button', { name: 'Rebuild index' })).toBeDefined()
     expect(screen.getByText('Disabling stops semantic results without deleting the local index.')).toBeDefined()
 
+    const ensureCountBefore = commands.filter((command) => command === 'embed_ensure').length
+
     fireEvent.click(update)
 
-    await waitFor(() => expect(commands).toContain('embed_ensure'))
+    await waitFor(() =>
+      expect(commands.filter((command) => command === 'embed_ensure')).toHaveLength(
+        ensureCountBefore + 1,
+      ),
+    )
   })
 
   it('shows CLI install status and installs the command', async () => {
@@ -506,6 +512,36 @@ describe('SettingsSurface (Plan 08)', () => {
     expect(screen.getByText('90 MB downloaded')).toBeDefined()
   })
 
+  it('does not show loading-model state before the final model bytes arrive', async () => {
+    installFakeBridge({
+      respond: (command) => {
+        if (command === 'embed_status') {
+          return { status: 'loading', progress: { downloaded: 89_600_000, total: 90_000_000 } }
+        }
+        return undefined
+      },
+      query: (sql, params) => {
+        if (sql.includes('settings')) {
+          const key = params[0]
+          if (key === 'embeddings.enabled') return [{ valueJson: 'true' }]
+          return []
+        }
+        if (sql.includes('chunk_embeddings')) return [{ count: 0 }]
+        if (/count/i.test(sql)) return [{ count: 3 }]
+        return []
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="search" />)
+
+    const bar = await screen.findByRole('progressbar', {
+      name: 'Semantic search model download',
+    })
+    expect(bar.getAttribute('aria-valuenow')).toBe('99')
+    expect(screen.getByText('Downloading model')).toBeDefined()
+    expect(screen.queryByText('Loading model...')).toBeNull()
+  })
+
   it('offers a retry action when the semantic model fails to load', async () => {
     const commands: string[] = []
     installFakeBridge({
@@ -534,8 +570,14 @@ describe('SettingsSurface (Plan 08)', () => {
     renderWithProviders(<SettingsSurface section="search" />)
 
     expect(await screen.findByText(/Couldn’t load the embedding model/)).toBeDefined()
+    const ensureCountBefore = commands.filter((command) => command === 'embed_ensure').length
+
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
 
-    await waitFor(() => expect(commands).toContain('embed_ensure'))
+    await waitFor(() =>
+      expect(commands.filter((command) => command === 'embed_ensure')).toHaveLength(
+        ensureCountBefore + 1,
+      ),
+    )
   })
 })

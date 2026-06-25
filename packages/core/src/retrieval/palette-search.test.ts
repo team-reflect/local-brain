@@ -173,4 +173,23 @@ describe('paletteSearch', () => {
 
     expect(hits.map((hit) => `${hit.kind}:${hit.id}`)).toEqual(['document:d1'])
   })
+
+  it('falls back to lexical hits when semantic contributes only non-navigable rows', async () => {
+    installPaletteBridge({
+      lexicalRows: [lexicalDocumentRow('d1', 'Lexical document', '[market] note')],
+      semanticRows: [
+        semanticRow({
+          chunkId: 'profile',
+          recordType: 'organization_profile',
+          recordId: 'op1',
+          recordTitle: 'Profile',
+        }),
+      ],
+    })
+
+    const hits = await paletteSearch('market profile')
+
+    expect(hits.map((hit) => `${hit.kind}:${hit.id}`)).toEqual(['document:d1'])
+    expect(hits[0]?.snippet).toBe('[market] note')
+  })
 })
