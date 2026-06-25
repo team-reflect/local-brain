@@ -2,17 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { check } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
 import { createUpdateController, type UpdateController } from './update-controller'
-import { checkPrivateGithubUpdate } from './private-update'
 
 vi.mock('@tauri-apps/plugin-updater', () => ({ check: vi.fn() }))
 vi.mock('@tauri-apps/plugin-process', () => ({ relaunch: vi.fn() }))
-vi.mock('./private-update', () => ({
-  checkPrivateGithubUpdate: vi.fn(),
-}))
 
 const checkMock = vi.mocked(check)
 const relaunchMock = vi.mocked(relaunch)
-const privateCheckMock = vi.mocked(checkPrivateGithubUpdate)
 
 type DownloadHandler = Parameters<
   NonNullable<Awaited<ReturnType<typeof check>>>['downloadAndInstall']
@@ -36,8 +31,6 @@ describe('createUpdateController', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     checkMock.mockReset()
-    privateCheckMock.mockReset()
-    privateCheckMock.mockImplementation(() => checkMock())
     relaunchMock.mockReset()
   })
 
@@ -97,17 +90,6 @@ describe('createUpdateController', () => {
       message: 'release endpoint unreachable',
       during: 'check',
     })
-  })
-
-  it('falls back to the public updater endpoint when private GitHub checking fails', async () => {
-    privateCheckMock.mockRejectedValue(new Error('private endpoint unavailable'))
-    const update = fakeUpdate({ version: '0.3.0' })
-    checkMock.mockResolvedValue(update)
-    controller = createUpdateController({ autoCheck: false })
-    await controller.checkNow()
-    expect(controller.getState()).toEqual({ phase: 'available', version: '0.3.0' })
-    await controller.install()
-    expect(update.downloadAndInstall).toHaveBeenCalledWith(expect.any(Function))
   })
 
   it('install reports progress and lands on ready', async () => {
