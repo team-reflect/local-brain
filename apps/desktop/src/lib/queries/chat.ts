@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
 import { archiveConversation, listConversations, listMessages } from '@local-brain/core'
+import { PALETTE_SEARCH_QUERY_KEY } from './search'
 
 export function invalidateChatTurnQueries(queryClient: QueryClient, chatId: string): void {
   for (const queryKey of [
@@ -20,7 +21,7 @@ export function invalidateChatTurnQueries(queryClient: QueryClient, chatId: stri
     ['interaction'],
     ['memories'],
     ['quick-search'],
-    ['global-search'],
+    PALETTE_SEARCH_QUERY_KEY,
     ['graph'],
     ['daily-brief-note'],
   ]) {

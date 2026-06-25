@@ -298,6 +298,7 @@ export {
 export {
   retrieve,
   globalSearch,
+  paletteSearch,
   parseSearchQuery,
   toMatchQuery,
   toLikePattern,

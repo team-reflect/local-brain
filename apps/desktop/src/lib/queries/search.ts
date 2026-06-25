@@ -1,14 +1,16 @@
-import { useQuery } from '@tanstack/react-query'
-import { globalSearch } from '@local-brain/core'
+import { useQuery, type UseQueryResult } from '@tanstack/react-query'
+import { paletteSearch, type SearchHit } from '@local-brain/core'
 
-/** Search hooks: full-text global search for the command palette. */
+/** Search hooks for the command palette. */
 
-/** Full-text global search across record types (Plan 06). */
-export function useGlobalSearch(query: string) {
+export const PALETTE_SEARCH_QUERY_KEY = ['palette-search'] as const
+
+/** Command-palette search across record types, semantically supplemented when available. */
+export function usePaletteSearch(query: string): UseQueryResult<SearchHit[]> {
   const trimmed = query.trim()
   return useQuery({
-    queryKey: ['global-search', trimmed],
-    queryFn: () => globalSearch(trimmed),
+    queryKey: [...PALETTE_SEARCH_QUERY_KEY, trimmed],
+    queryFn: () => paletteSearch(trimmed),
     enabled: trimmed.length > 0,
   })
 }
