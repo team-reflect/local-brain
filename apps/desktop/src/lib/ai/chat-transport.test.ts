@@ -203,7 +203,8 @@ describe('createChatTransport', () => {
       expect.objectContaining({
         system: expect.stringContaining('Local Brain'),
         tools: stubTools,
-        stopWhen: expect.anything(),
+        stopWhen: { type: 'stepCount', stepCount: 20 },
+        maxOutputTokens: 8192,
       }),
     )
 

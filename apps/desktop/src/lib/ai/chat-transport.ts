@@ -21,7 +21,8 @@ import {
 import { generateAndPersistConversationTitle } from './conversation-title'
 import { resolveLanguageModel, type LanguageModelSelection } from './provider'
 
-const TOOL_STEPS = 5
+const TOOL_STEPS = 20
+const MAX_OUTPUT_TOKENS = 8192
 type PersistedChatStatus = 'submitted' | 'streaming' | 'done' | 'error'
 
 export interface ChatTransportOptions {
@@ -221,7 +222,7 @@ export function createChatTransport(options: ChatTransportOptions = {}): ChatTra
           messages: await convertToModelMessages(messages),
           tools: buildChatTools(),
           stopWhen: stepCountIs(TOOL_STEPS),
-          maxOutputTokens: 2048,
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
           temperature: 0,
           ...(abortSignal ? { abortSignal } : {}),
         })
