@@ -25,7 +25,7 @@ System prompt lists active projects and gives grounding rules.
 
 - Load projects at start of each turn via `listProjects`.
 - Build system prompt with `buildChatSystemPrompt`.
-- Pass `tools: buildChatTools()` and `maxSteps: 5` to `streamText`.
+- Pass `tools: buildChatTools()` and `maxSteps: 20` to `streamText`.
 - Remove static pre-retrieval (model now searches via tool).
 
 ### apps/desktop/src/components/chat/

@@ -28,7 +28,7 @@ Five distinct improvements shipped in one commit:
 - **`search_records`**: calls `retrieve(query, { mode: 'hybrid' })` — FTS5 + semantic
 - **`list_projects`**: calls `listProjects({ status?, limit })` — all active projects
 
-The transport passes `stopWhen: stepCountIs(5)` for up to five tool round-trips (AI SDK v6 removed `maxSteps` in favour of `stopWhen`).
+The transport passes `stopWhen: stepCountIs(20)` for up to twenty tool round-trips (AI SDK v6 removed `maxSteps` in favour of `stopWhen`).
 
 `chat-tool-chip.tsx` renders compact chips: inline spinner while the state is `input-streaming` or `input-available`, then icon + label + count once `output-available`. Tool call/result parts are stored in `uiMessageJson` and survive conversation reload.
 
