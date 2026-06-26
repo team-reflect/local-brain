@@ -1,6 +1,5 @@
 import { relaunch } from '@tauri-apps/plugin-process'
 import { check, type Update } from '@tauri-apps/plugin-updater'
-import { checkPrivateGithubUpdate } from './private-update'
 
 /**
  * The auto-update lifecycle as plain-language phases the UI renders
@@ -91,14 +90,9 @@ export function createUpdateController(options: UpdateControllerOptions): Update
     // an install of a previously-found update) transitioned while we awaited".
     const baseline = state
     try {
-      // The private GitHub feed is the only path that works while the repo is
-      // private; the public `check()` endpoint 404s and only ever yields a
-      // generic "could not fetch release JSON" error. Log the real private
-      // failure before falling back so it is never silently masked again.
-      const update = await checkPrivateGithubUpdate().catch((error) => {
-        console.warn('private update check failed, falling back to public endpoint:', error)
-        return check()
-      })
+      // `check()` fetches the public `latest.json` from the GitHub Releases
+      // endpoint in tauri.conf.json and verifies its minisign signature.
+      const update = await check()
       if (currentState() !== baseline) {
         return // something raced us; its state wins
       }
@@ -130,26 +124,24 @@ export function createUpdateController(options: UpdateControllerOptions): Update
     let received = 0
     setState({ phase: 'downloading', version: update.version, percent: null })
     try {
-      await update.downloadAndInstall(
-        (event) => {
-          switch (event.event) {
-            case 'Started':
-              contentLength = event.data.contentLength ?? null
-              received = 0
-              break
-            case 'Progress':
-              received += event.data.chunkLength
-              if (contentLength !== null && contentLength > 0) {
-                const percent = Math.min(100, Math.round((received / contentLength) * 100))
-                setState({ phase: 'downloading', version: update.version, percent })
-              }
-              break
-            case 'Finished':
-              setState({ phase: 'downloading', version: update.version, percent: 100 })
-              break
-          }
-        },
-      )
+      await update.downloadAndInstall((event) => {
+        switch (event.event) {
+          case 'Started':
+            contentLength = event.data.contentLength ?? null
+            received = 0
+            break
+          case 'Progress':
+            received += event.data.chunkLength
+            if (contentLength !== null && contentLength > 0) {
+              const percent = Math.min(100, Math.round((received / contentLength) * 100))
+              setState({ phase: 'downloading', version: update.version, percent })
+            }
+            break
+          case 'Finished':
+            setState({ phase: 'downloading', version: update.version, percent: 100 })
+            break
+        }
+      })
       setState({ phase: 'ready', version: update.version })
     } catch (error) {
       setState({ phase: 'error', message: errorMessage(error), during: 'install' })

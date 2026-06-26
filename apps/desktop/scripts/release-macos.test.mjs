@@ -60,12 +60,13 @@ test('draft publish keeps the draft flag last', () => {
   expect(args.at(-1)).toBe('--draft')
 })
 
-test('updater manifest can target a GitHub API asset URL for private releases', () => {
+test('updater manifest targets the public GitHub release download URL', () => {
+  const url = 'https://github.com/team-reflect/local-brain/releases/download/v0.2.0/Local%20Brain.app.tar.gz'
   expect(
     updaterManifest({
       version: '0.2.0',
       signature: 'minisign-signature',
-      url: 'https://api.github.com/repos/team-reflect/local-brain/releases/assets/123',
+      url,
       pubDate: '2026-06-23T21:00:00.000Z',
       arch: 'aarch64',
     }),
@@ -75,7 +76,7 @@ test('updater manifest can target a GitHub API asset URL for private releases', 
     platforms: {
       'darwin-aarch64': {
         signature: 'minisign-signature',
-        url: 'https://api.github.com/repos/team-reflect/local-brain/releases/assets/123',
+        url,
       },
     },
   })

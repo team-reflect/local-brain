@@ -208,44 +208,26 @@ export function updaterManifest({ version, signature, url, pubDate = new Date().
   }
 }
 
-function releaseAssets(tag) {
-  return JSON.parse(capture('gh', ['release', 'view', tag, '--json', 'assets', '-q', '.assets']))
-}
-
-function findReleaseAsset(assets, predicate, description) {
-  const asset = assets.find(predicate)
-  if (!asset) {
-    fail(`could not find ${description} in the GitHub release assets`)
-  }
-  return asset
-}
-
 /**
- * Private GitHub repositories cannot serve `github.com/.../releases/download/...`
- * URLs to the updater with bearer auth. Generate latest.json only after the
- * archive asset exists, so a failed upload leaves no visible updater manifest
- * instead of a manifest that points installed apps at an unusable URL.
+ * Write the updater manifest next to the bundle and return its path. The
+ * committed updater endpoint resolves `releases/latest/download/latest.json`,
+ * so every published release must carry this file - it is how installed apps
+ * discover the new version and verify its minisign-signed payload. The asset
+ * is served from the public `releases/download/<tag>/<archive>` URL, which the
+ * Tauri updater fetches directly now that the repo is public (no auth headers
+ * or GitHub API asset proxying required).
  */
-function uploadUpdaterManifestForPrivateGitHub({ tag, version }) {
+function writeUpdaterManifest({ version, tag }) {
   const { updaterArchive, updaterSignature } = bundlePaths()
-  const assets = releaseAssets(tag)
-  const archiveAsset = findReleaseAsset(
-    assets,
-    (asset) => asset.name.endsWith('.app.tar.gz') && !asset.name.endsWith('.sig'),
-    'the updater archive',
-  )
+  const slug = capture('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner']).trim()
   const manifest = updaterManifest({
     version,
     signature: readFileSync(updaterSignature, 'utf8').trim(),
-    url: archiveAsset.apiUrl,
+    url: `https://github.com/${slug}/releases/download/${tag}/${basename(updaterArchive)}`,
   })
   const manifestPath = join(dirname(updaterArchive), 'latest.json')
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
-  const upload = run('gh', ['release', 'upload', tag, manifestPath, '--clobber'])
-  if (upload.status !== 0) {
-    fail(`could not upload latest.json with the private GitHub updater manifest:\n${upload.output.trim()}`)
-  }
-  log('uploaded latest.json with GitHub API asset URLs for private-repo updates')
+  return manifestPath
 }
 
 /**
@@ -503,12 +485,13 @@ function publish({ draft }) {
   build({ notarize: true, requireUpdater: true })
 
   const { dmg, updaterArchive, updaterSignature } = bundlePaths()
+  const manifestPath = writeUpdaterManifest({ version, tag })
   // Pre-releases are invisible to `releases/latest` - the committed updater
   // endpoint - so installed stable apps never see a beta.
   const prerelease = version.includes('-')
   log(`creating GitHub ${prerelease ? 'pre-release' : 'release'} ${tag} from commit ${commit.slice(0, 7)}...`)
   const releaseArgs = createReleaseArgs({
-    assets: [dmg, updaterArchive, updaterSignature],
+    assets: [dmg, updaterArchive, updaterSignature, manifestPath],
     commit,
     draft,
     prerelease,
@@ -519,7 +502,6 @@ function publish({ draft }) {
   const result = spawnSync('gh', releaseArgs, { encoding: 'utf8', stdio: ['inherit', 'pipe', 'inherit'] })
   if (result.status !== 0) fail(`creating the GitHub release failed${result.stdout ? `\n${result.stdout.trim()}` : ''}`)
   log(`${draft ? 'draft release created' : 'release published'}: ${result.stdout.trim()}`)
-  uploadUpdaterManifestForPrivateGitHub({ tag, version })
 }
 
 async function setup() {
