@@ -260,7 +260,8 @@ describe('ChatSurface', () => {
     const thinkingText = thinking.querySelector('[data-slot="marker-content"]')
 
     expect(thinking).not.toBeNull()
-    expect(thinkingText?.classList.contains('shimmer')).toBe(true)
+    expect(thinkingText?.textContent).toBe('Thinking…')
+    expect(thinkingText?.classList.contains('animate-pulse')).toBe(true)
   })
 
   it('shows Thinking indicator when submitted (before streaming starts)', async () => {

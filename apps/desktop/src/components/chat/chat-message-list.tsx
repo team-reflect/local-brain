@@ -58,7 +58,7 @@ export function ChatMessageList({
             {showThinking ? (
               <MessageScrollerItem messageId="thinking">
                 <Marker aria-label="Thinking">
-                  <MarkerContent className="shimmer">Thinking...</MarkerContent>
+                  <MarkerContent className="animate-pulse">Thinking…</MarkerContent>
                 </Marker>
               </MessageScrollerItem>
             ) : null}

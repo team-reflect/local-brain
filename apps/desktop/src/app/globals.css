@@ -36,20 +36,6 @@
     linear-gradient(to right, transparent, black 1rem, black calc(100% - 1rem), transparent);
 }
 
-@utility shimmer {
-  animation: shimmer 1.8s linear infinite;
-  background:
-    linear-gradient(
-      110deg,
-      currentColor 0%,
-      color-mix(in hsl, currentColor 30%, transparent) 40%,
-      currentColor 80%
-    );
-  background-clip: text;
-  background-size: 200% 100%;
-  color: transparent;
-}
-
 /*
  * Reflect design-system tokens (see docs/design-system.md). Adapted from the
  * Reflect Open / Reflect Local design system: cool-grey neutrals, a single
@@ -182,16 +168,6 @@
 }
 
 @layer base {
-  @keyframes shimmer {
-    from {
-      background-position: 200% 0;
-    }
-
-    to {
-      background-position: -200% 0;
-    }
-  }
-
   * {
     border-color: hsl(var(--border));
   }
