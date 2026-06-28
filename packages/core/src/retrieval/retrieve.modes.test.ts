@@ -177,7 +177,11 @@ describe('retrieve modes', () => {
     const resultPromise = retrieve('quarterly planning', { mode: 'hybrid' })
     await embeddingStarted
 
-    expect(events.indexOf('lexical')).toBeLessThan(events.indexOf('embed-start'))
+    const lexicalIndex = events.indexOf('lexical')
+    const embedStartIndex = events.indexOf('embed-start')
+    expect(lexicalIndex).toBeGreaterThanOrEqual(0)
+    expect(embedStartIndex).toBeGreaterThanOrEqual(0)
+    expect(lexicalIndex).toBeLessThan(embedStartIndex)
 
     resolveLexical?.([lexicalRow('l1', -4)])
     resolveEmbedding?.([[0.1, 0.2, 0.3]])
