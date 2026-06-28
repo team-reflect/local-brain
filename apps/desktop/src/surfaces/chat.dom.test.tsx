@@ -254,7 +254,11 @@ describe('ChatSurface', () => {
     ]
     await renderReadyChat()
 
-    expect(screen.getByLabelText('Thinking')).not.toBeNull()
+    const thinking = screen.getByLabelText('Thinking')
+    const thinkingText = thinking.querySelector('[data-slot="marker-content"]')
+
+    expect(thinking).not.toBeNull()
+    expect(thinkingText?.classList.contains('shimmer')).toBe(true)
   })
 
   it('shows Thinking indicator when submitted (before streaming starts)', async () => {
