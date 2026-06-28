@@ -367,7 +367,10 @@ export async function retrieve(query: string, options: RetrieveOptions = {}): Pr
       // Runtime unavailable (no bridge, non-desktop host, embed error): degrade.
     }
 
-    const chunks = (await awaitLexical()).slice(0, limit)
+    // Preserve lexical fallback semantics exactly: the concurrent lexical query
+    // intentionally over-fetches for fusion, but fallback should match an
+    // explicit lexical search with the requested limit.
+    const chunks = await lexicalHits(match, { limit, filters, sort, boost, now })
     return { query, mode, semanticAvailable: false, chunks }
   }
 

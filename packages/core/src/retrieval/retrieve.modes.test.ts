@@ -118,6 +118,33 @@ describe('retrieve modes', () => {
     expect(result.chunks.every((c) => c.chunkId.startsWith('l') || c.chunkId === 'shared')).toBe(true)
   })
 
+  it('hybrid fallback uses the requested lexical limit instead of the fusion candidate window', async () => {
+    setBridge({
+      invoke: (command, args) => {
+        if (command === 'embed_status') return Promise.resolve({ status: 'uninitialized' })
+        if (command === 'db_query') {
+          const query = String((args as { sql: string }).sql)
+          if (query.includes('settings')) return Promise.resolve([{ valueJson: 'true' }])
+          if (query.includes('chunk_vectors')) return Promise.resolve([])
+
+          const params = (args as { params: unknown[] }).params
+          const sqlLimit = Number(params.at(-1))
+          return Promise.resolve(
+            sqlLimit === 3
+              ? [lexicalRow('requested-limit', -4)]
+              : [lexicalRow('candidate-window', -4)],
+          )
+        }
+        return Promise.resolve(null)
+      },
+    })
+
+    const result = await retrieve('quarterly planning', { mode: 'hybrid', limit: 3 })
+
+    expect(result.semanticAvailable).toBe(false)
+    expect(result.chunks.map((chunk) => chunk.chunkId)).toEqual(['requested-limit'])
+  })
+
   it('hybrid degrades to lexical when the runtime errors', async () => {
     installBridge({ status: 'throw' })
     const result = await retrieve('quarterly planning', { mode: 'hybrid' })
