@@ -32,7 +32,7 @@ function Marker({
     <Comp
       data-slot="marker"
       data-variant={variant}
-      className={cn(markerVariants({ variant, className }))}
+      className={cn(markerVariants({ variant }), className)}
       {...props}
     />
   )

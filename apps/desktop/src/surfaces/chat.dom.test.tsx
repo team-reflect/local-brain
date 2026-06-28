@@ -243,7 +243,9 @@ describe('ChatSurface', () => {
     ]
     await renderReadyChat()
 
-    expect(screen.getByText('Checking local context…')).not.toBeNull()
+    const reasoning = screen.getByText('Checking local context…').closest('[data-slot="marker"]')
+
+    expect(reasoning?.classList.contains('text-xs')).toBe(true)
     expect(screen.queryByLabelText('Thinking')).toBeNull()
   })
 
