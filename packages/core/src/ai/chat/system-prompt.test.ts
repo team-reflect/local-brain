@@ -31,6 +31,8 @@ describe('buildChatSystemPrompt', () => {
     expect(prompt).toContain('search_records')
     expect(prompt).toContain('get_records')
     expect(prompt).toContain('load structured details and bounded grounding chunks')
+    expect(prompt).toContain('semantic vector recall')
+    expect(prompt).toContain('mode:"semantic"')
     expect(prompt).toContain('list_projects')
     expect(prompt.toLowerCase()).toContain('do not use outside knowledge or invent facts')
   })

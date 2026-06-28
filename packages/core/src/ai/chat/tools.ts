@@ -46,7 +46,7 @@ const MAX_GET_RECORDS = 10
 const MAX_RECORD_CHUNK_IDS = 5
 const DEFAULT_PROJECTS_LIMIT = 30
 const recordTypeEnum = z.enum([...RETRIEVABLE_SOURCE_KINDS] as [string, ...string[]])
-const searchModeEnum = z.enum(['lexical', 'hybrid'])
+const searchModeEnum = z.enum(['lexical', 'semantic', 'hybrid'])
 const optionalString = z.string().optional()
 const recordLookupSchema = z.object({
   recordType: recordTypeEnum,
@@ -69,7 +69,7 @@ export function buildChatTools() {
       description:
         'Search and browse Local Brain records — documents, interactions, transcripts, emails, tasks, people, and more. ' +
         'Pass `query` to search by topic or keyword. Searches are hybrid by default, combining lexical and semantic recall. ' +
-        'Set `mode: "lexical"` only when exact keywords, IDs, or quoted text should stay strictly lexical. Add filters to narrow by record type (`recordTypes`), ' +
+        'Set `mode: "semantic"` for semantic-only recall, or `mode: "lexical"` when exact keywords, IDs, or quoted text should stay strictly lexical. Add filters to narrow by record type (`recordTypes`), ' +
         'interaction kind (`kinds`, e.g. ["email"]), or date window (`after`/`before`), and `sort` to order by relevance or recency. ' +
         'To list RECENT items (e.g. "recent transcripts / emails"), OMIT `query` and instead set `recordTypes` ' +
         '(and `kinds` like ["email"]) with `sort: "recency"` and an `after` date — do not put "recent" in the query text. ' +
@@ -101,7 +101,7 @@ export function buildChatTools() {
         mode: searchModeEnum
           .optional()
           .describe(
-            'Search mode. Omit for hybrid search. Use "lexical" for exact keyword, ID, or quoted-text lookup.',
+            'Search mode. Omit for hybrid search. Use "semantic" for semantic-only recall, or "lexical" for exact keyword, ID, or quoted-text lookup.',
           ),
         limit: z
           .number()
