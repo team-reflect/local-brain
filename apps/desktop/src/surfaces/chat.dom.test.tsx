@@ -115,6 +115,15 @@ function triggerChatRender(value: string): void {
   fireEvent.change(screen.getByLabelText('Chat message'), { target: { value } })
 }
 
+function expectThinkingIndicator(): void {
+  const thinking = screen.getByLabelText('Thinking')
+  const thinkingText = thinking.querySelector('[data-slot="marker-content"]')
+
+  expect(thinking).not.toBeNull()
+  expect(thinkingText?.textContent).toBe('Thinking…')
+  expect(thinkingText?.classList.contains('animate-pulse')).toBe(true)
+}
+
 describe('ChatSurface', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -256,12 +265,7 @@ describe('ChatSurface', () => {
     ]
     await renderReadyChat()
 
-    const thinking = screen.getByLabelText('Thinking')
-    const thinkingText = thinking.querySelector('[data-slot="marker-content"]')
-
-    expect(thinking).not.toBeNull()
-    expect(thinkingText?.textContent).toBe('Thinking…')
-    expect(thinkingText?.classList.contains('animate-pulse')).toBe(true)
+    expectThinkingIndicator()
   })
 
   it('shows Thinking indicator when submitted (before streaming starts)', async () => {
@@ -269,7 +273,7 @@ describe('ChatSurface', () => {
     chatMocks.messages = []
     await renderReadyChat()
 
-    expect(screen.getByLabelText('Thinking')).not.toBeNull()
+    expectThinkingIndicator()
   })
 
   it('renders messages inside the shadcn message scroller', async () => {
