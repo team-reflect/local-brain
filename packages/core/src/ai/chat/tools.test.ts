@@ -147,6 +147,7 @@ describe('buildChatTools', () => {
     expect(getRecords.needsApproval).toBeUndefined()
     expect(listProjectsTool.needsApproval).toBeUndefined()
     expect(searchOutput).toMatchObject({ count: 1, semanticAvailable: true })
+    expect(coreMocks.retrieve).toHaveBeenCalledWith('budget', expect.objectContaining({ mode: 'hybrid' }))
     expect(recordsOutput).toMatchObject({ count: 1 })
     expect(projectsOutput).toMatchObject({ count: 1 })
   })
@@ -205,8 +206,29 @@ describe('buildChatTools', () => {
 
     await searchRecords.execute(searchRecords.inputSchema.parse({ query: 'budget', limit: 50 }))
 
-    expect(coreMocks.retrieve).toHaveBeenCalledWith('budget', expect.objectContaining({ limit: 50 }))
+    expect(coreMocks.retrieve).toHaveBeenCalledWith('budget', expect.objectContaining({ limit: 50, mode: 'hybrid' }))
     expect(() => searchRecords.inputSchema.parse({ query: 'budget', limit: 51 })).toThrow()
+  })
+
+  it('allows lexical search when exact keyword lookup is explicitly requested', async () => {
+    coreMocks.retrieve.mockResolvedValue({ chunks: [], semanticAvailable: false })
+    const searchRecords = toolByName(chatTools(), 'search_records')
+
+    await searchRecords.execute(searchRecords.inputSchema.parse({ query: '01ABC exact phrase', mode: 'lexical' }))
+
+    expect(coreMocks.retrieve).toHaveBeenCalledWith('01ABC exact phrase', expect.objectContaining({ mode: 'lexical' }))
+  })
+
+  it('allows semantic search when semantic-only recall is explicitly requested', async () => {
+    coreMocks.retrieve.mockResolvedValue({ chunks: [], semanticAvailable: true })
+    const searchRecords = toolByName(chatTools(), 'search_records')
+
+    await searchRecords.execute(searchRecords.inputSchema.parse({ query: 'meaning without exact terms', mode: 'semantic' }))
+
+    expect(coreMocks.retrieve).toHaveBeenCalledWith(
+      'meaning without exact terms',
+      expect.objectContaining({ mode: 'semantic' }),
+    )
   })
 
   it('passes searchable kinds through get_records with chunk focus and char budget', async () => {

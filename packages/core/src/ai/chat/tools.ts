@@ -46,6 +46,7 @@ const MAX_GET_RECORDS = 10
 const MAX_RECORD_CHUNK_IDS = 5
 const DEFAULT_PROJECTS_LIMIT = 30
 const recordTypeEnum = z.enum([...RETRIEVABLE_SOURCE_KINDS] as [string, ...string[]])
+const searchModeEnum = z.enum(['lexical', 'semantic', 'hybrid'])
 const optionalString = z.string().optional()
 const recordLookupSchema = z.object({
   recordType: recordTypeEnum,
@@ -67,7 +68,8 @@ export function buildChatTools() {
     search_records: tool({
       description:
         'Search and browse Local Brain records — documents, interactions, transcripts, emails, tasks, people, and more. ' +
-        'Pass `query` to search by topic or keyword. Add filters to narrow by record type (`recordTypes`), ' +
+        'Pass `query` to search by topic or keyword. Searches are hybrid by default, combining lexical and semantic recall. ' +
+        'Set `mode: "semantic"` for semantic-only recall, or `mode: "lexical"` when exact keywords, IDs, or quoted text should stay strictly lexical. Add filters to narrow by record type (`recordTypes`), ' +
         'interaction kind (`kinds`, e.g. ["email"]), or date window (`after`/`before`), and `sort` to order by relevance or recency. ' +
         'To list RECENT items (e.g. "recent transcripts / emails"), OMIT `query` and instead set `recordTypes` ' +
         '(and `kinds` like ["email"]) with `sort: "recency"` and an `after` date — do not put "recent" in the query text. ' +
@@ -96,6 +98,11 @@ export function buildChatTools() {
           .enum(['relevance', 'recency'])
           .optional()
           .describe('relevance (default with a query) or recency (newest first; default when browsing without a query).'),
+        mode: searchModeEnum
+          .optional()
+          .describe(
+            'Search mode. Omit for hybrid search. Use "semantic" for semantic-only recall, or "lexical" for exact keyword, ID, or quoted-text lookup.',
+          ),
         limit: z
           .number()
           .int()
@@ -104,7 +111,7 @@ export function buildChatTools() {
           .optional()
           .describe(`Max results to return (default ${DEFAULT_SEARCH_LIMIT})`),
       }),
-      execute: async ({ query, recordTypes, kinds, after, before, sort, limit }) => {
+      execute: async ({ query, recordTypes, kinds, after, before, sort, mode, limit }) => {
         const trimmedQuery = optionalNonBlank(query)
         const hasFilter =
           (recordTypes?.length ?? 0) > 0 || (kinds?.length ?? 0) > 0 || Boolean(after) || Boolean(before)
@@ -115,7 +122,7 @@ export function buildChatTools() {
           )
         }
         const result = await retrieve(trimmedQuery ?? '', {
-          mode: 'hybrid',
+          mode: mode ?? 'hybrid',
           limit: limit ?? DEFAULT_SEARCH_LIMIT,
           ...(recordTypes && recordTypes.length > 0
             ? { recordTypes: recordTypes as SourceRecordType[] }

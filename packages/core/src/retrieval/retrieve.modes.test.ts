@@ -118,6 +118,33 @@ describe('retrieve modes', () => {
     expect(result.chunks.every((c) => c.chunkId.startsWith('l') || c.chunkId === 'shared')).toBe(true)
   })
 
+  it('hybrid fallback uses the requested lexical limit instead of the fusion candidate window', async () => {
+    setBridge({
+      invoke: (command, args) => {
+        if (command === 'embed_status') return Promise.resolve({ status: 'uninitialized' })
+        if (command === 'db_query') {
+          const query = String((args as { sql: string }).sql)
+          if (query.includes('settings')) return Promise.resolve([{ valueJson: 'true' }])
+          if (query.includes('chunk_vectors')) return Promise.resolve([])
+
+          const params = (args as { params: unknown[] }).params
+          const sqlLimit = Number(params.at(-1))
+          return Promise.resolve(
+            sqlLimit === 3
+              ? [lexicalRow('requested-limit', -4)]
+              : [lexicalRow('candidate-window', -4)],
+          )
+        }
+        return Promise.resolve(null)
+      },
+    })
+
+    const result = await retrieve('quarterly planning', { mode: 'hybrid', limit: 3 })
+
+    expect(result.semanticAvailable).toBe(false)
+    expect(result.chunks.map((chunk) => chunk.chunkId)).toEqual(['requested-limit'])
+  })
+
   it('hybrid degrades to lexical when the runtime errors', async () => {
     installBridge({ status: 'throw' })
     const result = await retrieve('quarterly planning', { mode: 'hybrid' })
@@ -134,6 +161,61 @@ describe('retrieve modes', () => {
     expect(ids).toContain('l1') // lexical-only hit
     // The chunk that appears in both lists should rank first under RRF.
     expect(ids[0]).toBe('shared')
+  })
+
+  it('hybrid starts lexical FTS before waiting for semantic embedding', async () => {
+    const events: string[] = []
+    let resolveLexical: ((rows: unknown[]) => void) | undefined
+    let resolveEmbedding: ((vectors: number[][]) => void) | undefined
+    const embeddingStarted = new Promise<void>((resolve) => {
+      setBridge({
+        invoke: (command, args) => {
+          if (command === 'embed_status') {
+            events.push('status')
+            return Promise.resolve({ status: 'ready', model: 'all-MiniLM-L6-v2' })
+          }
+          if (command === 'embed_texts') {
+            events.push('embed-start')
+            resolve()
+            return new Promise<number[][]>((resolveVectors) => {
+              resolveEmbedding = resolveVectors
+            })
+          }
+          if (command === 'db_query') {
+            const query = String((args as { sql: string }).sql)
+            if (query.includes('settings')) {
+              events.push('settings')
+              return Promise.resolve([{ valueJson: 'true' }])
+            }
+            if (query.includes('chunk_vectors')) {
+              events.push('knn')
+              return Promise.resolve([semanticRow('s1', 0.2)])
+            }
+            events.push('lexical')
+            return new Promise<unknown[]>((resolveRows) => {
+              resolveLexical = resolveRows
+            })
+          }
+          return Promise.resolve(null)
+        },
+      })
+    })
+
+    const resultPromise = retrieve('quarterly planning', { mode: 'hybrid' })
+    await embeddingStarted
+
+    const lexicalIndex = events.indexOf('lexical')
+    const embedStartIndex = events.indexOf('embed-start')
+    expect(lexicalIndex).toBeGreaterThanOrEqual(0)
+    expect(embedStartIndex).toBeGreaterThanOrEqual(0)
+    expect(lexicalIndex).toBeLessThan(embedStartIndex)
+
+    resolveLexical?.([lexicalRow('l1', -4)])
+    resolveEmbedding?.([[0.1, 0.2, 0.3]])
+    const result = await resultPromise
+
+    expect(result.semanticAvailable).toBe(true)
+    expect(result.chunks.map((chunk) => chunk.chunkId)).toContain('s1')
   })
 
   it('applies the explicit-link boost to semantic hits before hybrid fusion', async () => {
