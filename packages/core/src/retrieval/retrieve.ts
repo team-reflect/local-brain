@@ -320,48 +320,73 @@ export async function retrieve(query: string, options: RetrieveOptions = {}): Pr
     return { query, mode, semanticAvailable: false, chunks }
   }
 
-  // Semantic / hybrid: try the embedding runtime, degrade to lexical on anything
+  async function trySemanticHits(searchLimit: number): Promise<RetrievedChunk[] | null> {
+    const status = (await isEmbeddingsEnabled()) ? await embedStatus() : null
+    if (!status || !isEmbedReady(status)) return null
+
+    const [vector] = await embedTexts([query])
+    if (!vector || vector.length === 0) return null
+
+    const semantic = await semanticHits(vector, { limit: searchLimit, filters })
+    return semantic.length > 0 ? semantic : null
+  }
+
+  if (mode === 'hybrid') {
+    // Hybrid needs lexical hits either way, so start the fast FTS leg while the
+    // embedding runtime computes the query vector and KNN neighbours.
+    const lexicalPromise = lexicalHits(match, { limit: candidateLimit, filters, sort, boost, now }).then(
+      (chunks) => ({ ok: true as const, chunks }),
+      (error: unknown) => ({ ok: false as const, error }),
+    )
+    const awaitLexical = async (): Promise<RetrievedChunk[]> => {
+      const result = await lexicalPromise
+      if (!result.ok) throw result.error
+      return result.chunks
+    }
+
+    try {
+      const semantic = await trySemanticHits(candidateLimit)
+      // A `ready` runtime can still contribute nothing: KNN may find no neighbour
+      // within the distance cutoff (sparse/empty vector index, or a query whose
+      // nearest vectors are all too far). `semanticAvailable` means "a semantic
+      // backend actually contributed", so an empty KNN result must NOT claim it.
+      if (semantic) {
+        const lexical = await awaitLexical()
+        // Lexical hits already carry the explicit-link boost (via `combineScore`),
+        // but the raw vector hits don't — apply the same boost so an in-context
+        // semantic-only record ranks up *before* RRF fuses the two lists.
+        const boostedSemantic = boostSemantic(semantic, boost)
+        return {
+          query,
+          mode,
+          semanticAvailable: true,
+          chunks: fuseRanked([lexical, boostedSemantic], limit),
+        }
+      }
+    } catch {
+      // Runtime unavailable (no bridge, non-desktop host, embed error): degrade.
+    }
+
+    const chunks = (await awaitLexical()).slice(0, limit)
+    return { query, mode, semanticAvailable: false, chunks }
+  }
+
+  // Semantic mode: try the embedding runtime, degrade to lexical on anything
   // that isn't a clean `ready` + successful embed. Lexical never gets skipped on
   // failure, so retrieval can't return empty just because vectors are missing.
   // Respect the user's kill-switch first: if semantic search is disabled we must
   // not embed the query or use vectors, even while the model stays loaded.
   try {
-    const status = (await isEmbeddingsEnabled()) ? await embedStatus() : null
-    if (status && isEmbedReady(status)) {
-      const [vector] = await embedTexts([query])
-      if (vector && vector.length > 0) {
-        const semantic = await semanticHits(vector, {
-          limit: mode === 'hybrid' ? candidateLimit : limit,
-          filters,
-        })
-        // A `ready` runtime can still contribute nothing: KNN may find no neighbour
-        // within the distance cutoff (sparse/empty vector index, or a query whose
-        // nearest vectors are all too far). `semanticAvailable` means "a semantic
-        // backend actually contributed", so an empty KNN result must NOT claim it.
-        // Fall through to the lexical-only path below (same as an unavailable
-        // runtime) so `semantic` mode never returns empty while lexical hits exist,
-        // and `hybrid` reports availability that matches the fused contribution.
-        if (semantic.length > 0) {
-          if (mode === 'semantic') {
-            return {
-              query,
-              mode,
-              semanticAvailable: true,
-              chunks: boostSemantic(semantic, boost).slice(0, limit),
-            }
-          }
-          const lexical = await lexicalHits(match, { limit: candidateLimit, filters, sort, boost, now })
-          // Lexical hits already carry the explicit-link boost (via `combineScore`),
-          // but the raw vector hits don't — apply the same boost so an in-context
-          // semantic-only record ranks up *before* RRF fuses the two lists.
-          const boostedSemantic = boostSemantic(semantic, boost)
-          return {
-            query,
-            mode,
-            semanticAvailable: true,
-            chunks: fuseRanked([lexical, boostedSemantic], limit),
-          }
-        }
+    const semantic = await trySemanticHits(limit)
+    // Fall through to the lexical-only path below when a ready runtime
+    // contributes nothing, so `semantic` mode never returns empty while lexical
+    // hits exist.
+    if (semantic) {
+      return {
+        query,
+        mode,
+        semanticAvailable: true,
+        chunks: boostSemantic(semantic, boost).slice(0, limit),
       }
     }
   } catch {

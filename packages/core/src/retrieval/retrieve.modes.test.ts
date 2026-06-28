@@ -136,6 +136,57 @@ describe('retrieve modes', () => {
     expect(ids[0]).toBe('shared')
   })
 
+  it('hybrid starts lexical FTS before waiting for semantic embedding', async () => {
+    const events: string[] = []
+    let resolveLexical: ((rows: unknown[]) => void) | undefined
+    let resolveEmbedding: ((vectors: number[][]) => void) | undefined
+    const embeddingStarted = new Promise<void>((resolve) => {
+      setBridge({
+        invoke: (command, args) => {
+          if (command === 'embed_status') {
+            events.push('status')
+            return Promise.resolve({ status: 'ready', model: 'all-MiniLM-L6-v2' })
+          }
+          if (command === 'embed_texts') {
+            events.push('embed-start')
+            resolve()
+            return new Promise<number[][]>((resolveVectors) => {
+              resolveEmbedding = resolveVectors
+            })
+          }
+          if (command === 'db_query') {
+            const query = String((args as { sql: string }).sql)
+            if (query.includes('settings')) {
+              events.push('settings')
+              return Promise.resolve([{ valueJson: 'true' }])
+            }
+            if (query.includes('chunk_vectors')) {
+              events.push('knn')
+              return Promise.resolve([semanticRow('s1', 0.2)])
+            }
+            events.push('lexical')
+            return new Promise<unknown[]>((resolveRows) => {
+              resolveLexical = resolveRows
+            })
+          }
+          return Promise.resolve(null)
+        },
+      })
+    })
+
+    const resultPromise = retrieve('quarterly planning', { mode: 'hybrid' })
+    await embeddingStarted
+
+    expect(events.indexOf('lexical')).toBeLessThan(events.indexOf('embed-start'))
+
+    resolveLexical?.([lexicalRow('l1', -4)])
+    resolveEmbedding?.([[0.1, 0.2, 0.3]])
+    const result = await resultPromise
+
+    expect(result.semanticAvailable).toBe(true)
+    expect(result.chunks.map((chunk) => chunk.chunkId)).toContain('s1')
+  })
+
   it('applies the explicit-link boost to semantic hits before hybrid fusion', async () => {
     // A bridge with no lexical matches and two semantic-only neighbours: 'a' is
     // the closer vector, 'b' is farther but lives in the active context.
