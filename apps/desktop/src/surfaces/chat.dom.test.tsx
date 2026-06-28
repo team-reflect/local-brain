@@ -111,23 +111,6 @@ async function renderReadyChat(): Promise<void> {
   await screen.findByLabelText('Chat message')
 }
 
-function setScrollMetrics(
-  element: HTMLElement,
-  {
-    scrollHeight,
-    clientHeight,
-    scrollTop,
-  }: {
-    scrollHeight: number
-    clientHeight: number
-    scrollTop: number
-  },
-): void {
-  Object.defineProperty(element, 'scrollHeight', { configurable: true, value: scrollHeight })
-  Object.defineProperty(element, 'clientHeight', { configurable: true, value: clientHeight })
-  Object.defineProperty(element, 'scrollTop', { configurable: true, value: scrollTop, writable: true })
-}
-
 function triggerChatRender(value: string): void {
   fireEvent.change(screen.getByLabelText('Chat message'), { target: { value } })
 }
@@ -282,51 +265,41 @@ describe('ChatSurface', () => {
     expect(screen.getByLabelText('Thinking')).not.toBeNull()
   })
 
-  it('keeps streaming content pinned when the user is near the latest message', async () => {
+  it('renders messages inside the shadcn message scroller', async () => {
     chatMocks.messages = [assistantMessage('a1', 'Initial answer')]
     await renderReadyChat()
 
     const scroller = screen.getByLabelText('Chat messages')
-    setScrollMetrics(scroller, { scrollHeight: 1000, clientHeight: 400, scrollTop: 520 })
-    fireEvent.scroll(scroller)
+    const scrollButton = screen.getByRole('button', { name: 'Scroll to end' })
+
+    expect(scroller.getAttribute('data-slot')).toBe('message-scroller-viewport')
+    expect(scrollButton.getAttribute('data-slot')).toBe('message-scroller-button')
+    expect(screen.getByText('Initial answer')).not.toBeNull()
+  })
+
+  it('updates streaming content inside the shadcn message scroller', async () => {
+    chatMocks.messages = [assistantMessage('a1', 'Initial answer')]
+    await renderReadyChat()
 
     chatMocks.status = 'streaming'
     chatMocks.messages = [assistantMessage('a1', 'Initial answer with more streamed content', 'streaming')]
-    setScrollMetrics(scroller, { scrollHeight: 1200, clientHeight: 400, scrollTop: 520 })
     triggerChatRender('tick')
 
-    expect(scroller.scrollTop).toBe(800)
+    expect(screen.getByText('Initial answer with more streamed content')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Scroll to end' })).not.toBeNull()
   })
 
-  it('does not pull the user back to the bottom while they are reading older messages', async () => {
+  it('renders a newly submitted user message as a scroller item', async () => {
     chatMocks.messages = [assistantMessage('a1', 'Initial answer')]
     await renderReadyChat()
 
-    const scroller = screen.getByLabelText('Chat messages')
-    setScrollMetrics(scroller, { scrollHeight: 1000, clientHeight: 400, scrollTop: 200 })
-    fireEvent.scroll(scroller)
-
-    chatMocks.status = 'streaming'
-    chatMocks.messages = [assistantMessage('a1', 'Initial answer with more streamed content', 'streaming')]
-    setScrollMetrics(scroller, { scrollHeight: 1200, clientHeight: 400, scrollTop: 200 })
-    triggerChatRender('reading')
-
-    expect(scroller.scrollTop).toBe(200)
-  })
-
-  it('scrolls a newly submitted user message into view even after reading older messages', async () => {
-    chatMocks.messages = [assistantMessage('a1', 'Earlier answer')]
-    await renderReadyChat()
-
-    const scroller = screen.getByLabelText('Chat messages')
-    setScrollMetrics(scroller, { scrollHeight: 1000, clientHeight: 400, scrollTop: 200 })
-    fireEvent.scroll(scroller)
-
-    chatMocks.messages = [assistantMessage('a1', 'Earlier answer'), userMessage('u1', 'Follow up')]
-    setScrollMetrics(scroller, { scrollHeight: 1200, clientHeight: 400, scrollTop: 200 })
+    chatMocks.messages = [assistantMessage('a1', 'Initial answer'), userMessage('u1', 'Follow up')]
     triggerChatRender('follow up')
 
-    expect(scroller.scrollTop).toBe(800)
+    const scrollerItems = document.querySelectorAll('[data-slot="message-scroller-item"]')
+
+    expect(screen.getByText('Follow up')).not.toBeNull()
+    expect(scrollerItems.length).toBe(2)
   })
 
   it('renders earlier text parts as plain text when a tool part follows during streaming', async () => {

@@ -8,3 +8,22 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
     disconnect() {}
   }
 }
+
+// jsdom exposes scrollTop but not HTMLElement.scrollTo. shadcn's message
+// scroller uses scrollTo for its tested browser behavior, so component tests
+// need a tiny DOM-compatible implementation.
+if (typeof HTMLElement !== 'undefined' && typeof HTMLElement.prototype.scrollTo === 'undefined') {
+  HTMLElement.prototype.scrollTo = function scrollTo(
+    optionsOrX?: ScrollToOptions | number,
+    maybeY?: number,
+  ): void {
+    if (typeof optionsOrX === 'number') {
+      this.scrollLeft = optionsOrX
+      this.scrollTop = maybeY ?? 0
+      return
+    }
+
+    this.scrollLeft = optionsOrX?.left ?? this.scrollLeft
+    this.scrollTop = optionsOrX?.top ?? this.scrollTop
+  }
+}

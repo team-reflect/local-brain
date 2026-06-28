@@ -11,6 +11,45 @@
   z-index: 40;
 }
 
+@utility scrollbar-none {
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+}
+
+@utility scrollbar-gutter-stable {
+  scrollbar-gutter: stable;
+}
+
+@utility scroll-fade-b {
+  mask-image: linear-gradient(to bottom, black calc(100% - 1.5rem), transparent);
+}
+
+@utility scroll-fade-x {
+  mask-image:
+    linear-gradient(to right, transparent, black 1rem, black calc(100% - 1rem), transparent);
+}
+
+@utility shimmer {
+  animation: shimmer 1.8s linear infinite;
+  background:
+    linear-gradient(
+      110deg,
+      currentColor 0%,
+      color-mix(in hsl, currentColor 30%, transparent) 40%,
+      currentColor 80%
+    );
+  background-clip: text;
+  background-size: 200% 100%;
+  color: transparent;
+}
+
 /*
  * Reflect design-system tokens (see docs/design-system.md). Adapted from the
  * Reflect Open / Reflect Local design system: cool-grey neutrals, a single
@@ -143,6 +182,16 @@
 }
 
 @layer base {
+  @keyframes shimmer {
+    from {
+      background-position: 200% 0;
+    }
+
+    to {
+      background-position: -200% 0;
+    }
+  }
+
   * {
     border-color: hsl(var(--border));
   }

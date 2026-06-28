@@ -23,7 +23,7 @@ const SIZE: Record<ButtonSize, string> = {
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant
   size?: ButtonSize
-  children: ReactNode
+  children?: ReactNode
 }
 
 /** The Reflect button: a single indigo solid action plus calm grey/outline/ghost siblings. */
