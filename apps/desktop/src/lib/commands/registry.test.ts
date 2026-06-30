@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { setBridge } from '@local-brain/core'
 import { APP_COMMANDS, registerAppCommands } from './app-commands'
 import { eventMatchesBinding, parseBinding } from './keys'
 import { getCommand, listCommands, registerCommands, resetCommands, runCommand } from './registry'
@@ -43,6 +44,25 @@ describe('keybindings', () => {
       command.keybinding ? [command.keybinding] : [],
     )
     expect(new Set(bindings).size).toBe(bindings.length)
+  })
+
+  it('binds Developer tools to the Web Inspector shortcut', () => {
+    const command = APP_COMMANDS.find((candidate) => candidate.id === 'dev.toggleDevtools')
+    expect(command?.keybinding).toBe('Mod-Shift-i')
+  })
+
+  it('runs the Developer tools command through native IPC when available', async () => {
+    const calls: string[] = []
+    setBridge({
+      invoke: (command) => {
+        calls.push(command)
+        return Promise.resolve(null)
+      },
+    })
+
+    const command = APP_COMMANDS.find((candidate) => candidate.id === 'dev.toggleDevtools')
+    await command?.run(context())
+    expect(calls).toEqual(['toggle_devtools'])
   })
 
   it('matches a Mod accelerator against a keyboard event', () => {

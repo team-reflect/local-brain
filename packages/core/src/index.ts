@@ -13,6 +13,7 @@ export {
 export { type IpcBridge, setBridge, getBridge, hasBridge } from './ipc/bridge'
 export { call } from './ipc/invoke'
 export { appVersion, type AppInfo } from './ipc/commands'
+export { toggleDevtools } from './ipc/devtools'
 export {
   cliInstall,
   cliStatus,

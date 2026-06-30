@@ -9,6 +9,7 @@ mod brains;
 mod cli;
 mod commands;
 mod db;
+mod devtools;
 mod embed;
 mod error;
 mod fs;
@@ -59,6 +60,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::app_version,
             commands::database_path,
+            devtools::toggle_devtools,
             cli::cli_status,
             cli::cli_install,
             cli::cli_uninstall,

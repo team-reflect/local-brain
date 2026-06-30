@@ -1,3 +1,4 @@
+import { hasBridge, toggleDevtools } from '@local-brain/core'
 import { registerCommands } from './registry'
 import type { AppCommand } from './types'
 
@@ -19,6 +20,20 @@ export const APP_COMMANDS: readonly AppCommand[] = [
   { id: 'history.back', title: 'Back', keybinding: 'Mod-[', run: (c) => c.back() },
   { id: 'history.forward', title: 'Forward', keybinding: 'Mod-]', run: (c) => c.forward() },
   { id: 'report.daily', title: 'Run daily report', keybinding: 'Mod-Shift-R', run: (c) => c.navigate({ kind: 'today' }) },
+  {
+    id: 'dev.toggleDevtools',
+    title: 'Developer tools',
+    keywords: ['devtools', 'inspector', 'debug', 'console', 'web inspector'],
+    keybinding: 'Mod-Shift-i',
+    run: async () => {
+      if (!hasBridge()) return
+      try {
+        await toggleDevtools()
+      } catch {
+        // Best effort: a debug affordance should never interrupt the app.
+      }
+    },
+  },
 ]
 
 /** Register the launch command set. Called once from `main.tsx`. */

@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { eventMatchesBinding } from './keys'
 import { blockingModalOpen } from './modal-guard'
 import { listCommands } from './registry'
+import { runCommandAndLog, setMenuCommandDispatch } from '../native-menu/dispatch'
 import type { CommandContext } from './types'
 
 /**
@@ -12,6 +13,12 @@ import type { CommandContext } from './types'
  */
 export function useAppShortcuts(context: CommandContext): void {
   useEffect(() => {
+    function triggerCommand(commandId: string): boolean {
+      if (blockingModalOpen()) return false
+      runCommandAndLog(commandId, context)
+      return true
+    }
+
     const onKeyDown = (event: KeyboardEvent): void => {
       // A blocking modal (e.g. first-run onboarding) owns the screen: suppress
       // every global shortcut, including ⌘K, while it is open.
@@ -27,13 +34,18 @@ export function useAppShortcuts(context: CommandContext): void {
         if (command.keybinding === undefined) continue
         if (!eventMatchesBinding(event, command.keybinding)) continue
         if (typing && command.id !== 'palette.open') return
-        event.preventDefault()
-        void command.run(context)
+        if (triggerCommand(command.id)) {
+          event.preventDefault()
+        }
         return
       }
     }
 
+    setMenuCommandDispatch(triggerCommand)
     window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
+    return () => {
+      setMenuCommandDispatch(null)
+      window.removeEventListener('keydown', onKeyDown)
+    }
   }, [context])
 }

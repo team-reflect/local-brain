@@ -5,6 +5,7 @@ import { App } from './App'
 import { registerAppCommands } from './lib/commands/app-commands'
 import { installModel } from './lib/ai/install-model'
 import { installTauriBridge } from './lib/ipc/tauri-bridge'
+import { installNativeMenu } from './lib/native-menu/menu'
 import { queryClient } from './lib/query-client'
 import { ThemeProvider } from './providers/theme-provider'
 import { UpdateProvider } from './providers/update-provider'
@@ -12,6 +13,9 @@ import './app/globals.css'
 
 installTauriBridge()
 registerAppCommands()
+installNativeMenu().catch((cause: unknown) => {
+  console.error('failed to install native menu', cause)
+})
 void installModel()
 
 const rootElement = document.getElementById('root')
