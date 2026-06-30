@@ -1,8 +1,8 @@
 import { useEffect } from 'react'
 import { eventMatchesBinding } from './keys'
 import { blockingModalOpen } from './modal-guard'
-import { listCommands, runCommand } from './registry'
-import { setMenuCommandDispatch } from '../native-menu/dispatch'
+import { listCommands } from './registry'
+import { runCommandAndLog, setMenuCommandDispatch } from '../native-menu/dispatch'
 import type { CommandContext } from './types'
 
 /**
@@ -15,7 +15,7 @@ export function useAppShortcuts(context: CommandContext): void {
   useEffect(() => {
     function triggerCommand(commandId: string): boolean {
       if (blockingModalOpen()) return false
-      void runCommand(commandId, context)
+      runCommandAndLog(commandId, context)
       return true
     }
 
