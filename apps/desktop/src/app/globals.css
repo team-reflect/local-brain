@@ -11,6 +11,31 @@
   z-index: 40;
 }
 
+@utility scrollbar-none {
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+}
+
+@utility scrollbar-gutter-stable {
+  scrollbar-gutter: stable;
+}
+
+@utility scroll-fade-b {
+  mask-image: linear-gradient(to bottom, black calc(100% - 1.5rem), transparent);
+}
+
+@utility scroll-fade-x {
+  mask-image:
+    linear-gradient(to right, transparent, black 1rem, black calc(100% - 1rem), transparent);
+}
+
 /*
  * Reflect design-system tokens (see docs/design-system.md). Adapted from the
  * Reflect Open / Reflect Local design system: cool-grey neutrals, a single

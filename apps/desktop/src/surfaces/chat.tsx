@@ -15,7 +15,6 @@ import { lastAssistantMessageIsCompleteWithApprovalResponses, type UIMessage } f
 import { useQueryClient } from '@tanstack/react-query'
 import { Alert } from '../components/alert'
 import { Button } from '../components/button'
-import { EmptyState } from '../components/empty-state'
 import { Loading } from '../components/loading'
 import {
   buildChatModelOptions,
@@ -23,14 +22,11 @@ import {
   defaultModelValue,
   modelSelectionForValue,
 } from '../components/chat/chat-composer'
-import { ChatMarkdown } from '../components/chat/chat-markdown'
+import { ChatMessageList } from '../components/chat/chat-message-list'
 import {
-  ChatToolChip,
   messageHasAwaitingToolApproval,
   type ToolApprovalResponse,
-  type ToolPart,
 } from '../components/chat/chat-tool-chip'
-import { useChatScroll } from '../components/chat/use-chat-scroll'
 import { ConversationRail } from '../components/chat/conversation-rail'
 import { handleChatToolApprovalResponse } from '../lib/ai/chat-approval'
 import { createChatTransport } from '../lib/ai/chat-transport'
@@ -287,7 +283,7 @@ export function ChatSurface({ conversationId }: { conversationId: string | undef
             <Loading />
           </div>
         ) : (
-          <MessageList
+          <ChatMessageList
             key={chatId}
             messages={displayedMessages}
             streamingMessageId={streamingMessageId}
@@ -353,134 +349,6 @@ function ConfigureProviderPrompt({ onConfigure }: { onConfigure: () => void }): 
           Add an AI provider
         </Button>
       </div>
-    </div>
-  )
-}
-
-function MessageList({
-  messages,
-  streamingMessageId,
-  showThinking,
-  onToolApprovalResponse,
-}: {
-  messages: UIMessage[]
-  streamingMessageId: string | null
-  showThinking: boolean
-  onToolApprovalResponse: (response: ToolApprovalResponse) => void | PromiseLike<void>
-}): ReactNode {
-  const { scrollRef, contentRef, bottomRef, onScroll } = useChatScroll(messages, showThinking)
-
-  if (messages.length === 0 && !showThinking) {
-    return (
-      <div className="flex min-h-0 flex-1 items-center justify-center">
-        <EmptyState
-          title="Chat with your local brain"
-          hint="Questions are answered from local records, and approved changes are saved in this brain."
-        />
-      </div>
-    )
-  }
-
-  return (
-    <div
-      ref={scrollRef}
-      aria-label="Chat messages"
-      onScroll={onScroll}
-      className="min-h-0 flex-1 overflow-y-auto"
-    >
-      <ol ref={contentRef} className="mx-auto flex w-full max-w-2xl flex-col gap-5 py-2">
-        {messages.map((message) => (
-          <li key={message.id}>
-            <MessageRow
-              message={message}
-              streamingMessageId={streamingMessageId}
-              onToolApprovalResponse={onToolApprovalResponse}
-            />
-          </li>
-        ))}
-        {showThinking ? (
-          <li className="animate-pulse text-sm text-muted-foreground" aria-label="Thinking">
-            Thinking…
-          </li>
-        ) : null}
-      </ol>
-      <div ref={bottomRef} aria-hidden className="h-px" />
-    </div>
-  )
-}
-
-function MessageRow({
-  message,
-  streamingMessageId,
-  onToolApprovalResponse,
-}: {
-  message: UIMessage
-  streamingMessageId: string | null
-  onToolApprovalResponse: (response: ToolApprovalResponse) => void | PromiseLike<void>
-}): ReactNode {
-  const isStreaming = message.id === streamingMessageId
-
-  if (message.role === 'user') {
-    return (
-      <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-lg bg-secondary px-3 py-2 text-sm leading-6 text-foreground">
-          {message.parts.map((part, index) => {
-            if (part.type === 'text') {
-              return (
-                <span key={`${message.id}-${index}`} className="whitespace-pre-wrap">
-                  {part.text}
-                </span>
-              )
-            }
-            return null
-          })}
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex flex-col gap-2">
-      {message.parts.map((part, index) => {
-        const partRecord = part as Record<string, unknown>
-        const partType = String(partRecord['type'] ?? '')
-
-        if (partType === 'text') {
-          const text = String(partRecord['text'] ?? '')
-          const renderAsPlain = isStreaming
-          if (renderAsPlain) {
-            return (
-              <div
-                key={`${message.id}-${index}`}
-                className="whitespace-pre-wrap text-sm leading-6 text-foreground"
-              >
-                {text}
-              </div>
-            )
-          }
-          return text ? <ChatMarkdown key={`${message.id}-${index}`} text={text} /> : null
-        }
-
-        if (partType === 'reasoning') {
-          return (
-            <span key={`${message.id}-${index}`} className="block text-xs text-muted-foreground">
-              {String(partRecord['text'] ?? '')}
-            </span>
-          )
-        }
-
-        if (partType.startsWith('tool-')) {
-          return (
-            <ChatToolChip
-              key={`${message.id}-${index}`}
-              part={partRecord as unknown as ToolPart}
-              onApprovalResponse={onToolApprovalResponse}
-            />
-          )
-        }
-
-        return null
-      })}
     </div>
   )
 }
