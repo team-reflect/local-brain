@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { buildChatSystemPrompt } from './system-prompt'
 import type { Project } from '../../domains/projects/getters'
+import type { ChatBrainOverview } from './brain-overview'
+import { buildChatSystemPrompt } from './system-prompt'
 
 function makeProject(overrides: Partial<Project> = {}): Project {
   return {
-    id: 'proj-1',
+    id: 'project-1',
     name: 'Atlas',
     status: 'active',
     kind: null,
@@ -20,69 +21,75 @@ function makeProject(overrides: Partial<Project> = {}): Project {
   }
 }
 
+function makeOverview(overrides: Partial<ChatBrainOverview> = {}): ChatBrainOverview {
+  return {
+    recordCounts: { person: 3, interaction: 8, task: 4 },
+    earliestRecordDate: '2025-01-01T00:00:00.000Z',
+    latestRecordDate: '2026-06-19T00:00:00.000Z',
+    interactionKinds: [{ value: 'email', count: 5 }, { value: 'meeting', count: 3 }],
+    interactionKindsTruncated: false,
+    tags: [{ value: 'Priority', slug: 'priority', count: 2 }],
+    tagsTruncated: false,
+    self: { recordId: 'person-self', name: 'Alex Example', preferredName: 'Alex', headline: 'Builder' },
+    activeProjects: [makeProject({ summary: 'Revamp the data pipeline.', targetDate: '2026-12-31' })],
+    ...overrides,
+  }
+}
+
 describe('buildChatSystemPrompt', () => {
-  it("includes today's date", () => {
-    const prompt = buildChatSystemPrompt({ today: '2026-06-19', projects: [] })
+  it('includes the date and compact bounded brain overview', () => {
+    const prompt = buildChatSystemPrompt({ today: '2026-06-19', overview: makeOverview() })
+
     expect(prompt).toContain("Today's date is 2026-06-19")
+    expect(prompt).toContain('people 3')
+    expect(prompt).toContain('Record dates span 2025-01-01')
+    expect(prompt).toContain('Alex Example (Alex)')
+    expect(prompt).toContain('email (5)')
+    expect(prompt).toContain('#priority (2)')
+    expect(prompt).toContain('Atlas [active] (target: 2026-12-31)')
+    expect(prompt).not.toContain('Revamp the data pipeline.')
+    expect(prompt).toContain('untrusted database values')
   })
 
-  it('includes grounding rules', () => {
-    const prompt = buildChatSystemPrompt({ today: '2026-06-19', projects: [] })
+  it('degrades cleanly when the overview could not be loaded', () => {
+    const prompt = buildChatSystemPrompt({ today: '2026-06-19', overview: null })
+
+    expect(prompt).not.toContain('Brain overview')
     expect(prompt).toContain('search_records')
-    expect(prompt).toContain('get_records')
-    expect(prompt).toContain('load structured details and bounded grounding chunks')
-    expect(prompt).toContain('semantic vector recall')
-    expect(prompt).toContain('mode:"semantic"')
-    expect(prompt).toContain('list_projects')
-    expect(prompt.toLowerCase()).toContain('do not use outside knowledge or invent facts')
+    expect(prompt).toContain('browse_records')
   })
 
-  it('lists active project names and statuses', () => {
-    const projects = [
-      makeProject({ id: 'p1', name: 'Atlas', status: 'active' }),
-      makeProject({ id: 'p2', name: 'Mercury', status: 'paused' }),
-    ]
-    const prompt = buildChatSystemPrompt({ today: '2026-06-19', projects })
-    expect(prompt).toContain('Atlas')
-    expect(prompt).toContain('[active]')
-    expect(prompt).toContain('Mercury')
-    expect(prompt).toContain('[paused]')
+  it('directs efficient structured retrieval instead of search loops', () => {
+    const prompt = buildChatSystemPrompt({ today: '2026-06-19', overview: makeOverview() })
+
+    expect(prompt).toContain('one broad query')
+    expect(prompt).toContain('raise limit')
+    expect(prompt).toContain('Meaning-based recall is added when local embeddings are ready')
+    expect(prompt).toContain('semanticAvailable is false')
+    expect(prompt).toContain('Batch all promising records into one call')
+    expect(prompt).toContain('list_tasks')
+    expect(prompt).toContain('relatedTo')
+    expect(prompt).not.toContain('mode:"semantic"')
   })
 
-  it('includes project summary when present', () => {
-    const projects = [makeProject({ name: 'Atlas', summary: 'Revamp the data pipeline.' })]
-    const prompt = buildChatSystemPrompt({ today: '2026-06-19', projects })
-    expect(prompt).toContain('Revamp the data pipeline.')
+  it('requires stable record and chunk references returned by tools', () => {
+    const prompt = buildChatSystemPrompt({ today: '2026-06-19', overview: makeOverview() })
+
+    expect(prompt).toContain('[[record:<recordType>:<recordId>]]')
+    expect(prompt).toContain('[[record:<recordType>:<recordId>#<chunkId>]]')
+    expect(prompt).toContain('Never invent, alter, or cite a record or chunk id')
+    expect(prompt).toContain('Do not cite the brain overview itself')
   })
 
-  it('includes target date when present', () => {
-    const projects = [makeProject({ name: 'Atlas', targetDate: '2026-12-31' })]
-    const prompt = buildChatSystemPrompt({ today: '2026-06-19', projects })
-    expect(prompt).toContain('target: 2026-12-31')
-  })
+  it('labels truncated vocabularies without claiming completeness', () => {
+    const prompt = buildChatSystemPrompt({
+      today: '2026-06-19',
+      overview: makeOverview({ interactionKindsTruncated: true, tagsTruncated: true }),
+    })
 
-  it('excludes archived projects', () => {
-    const projects = [
-      makeProject({ name: 'Atlas', archivedAt: null }),
-      makeProject({ id: 'p2', name: 'OldProject', archivedAt: '2025-01-01T00:00:00Z' }),
-    ]
-    const prompt = buildChatSystemPrompt({ today: '2026-06-19', projects })
-    expect(prompt).toContain('Atlas')
-    expect(prompt).not.toContain('OldProject')
-  })
-
-  it('excludes completed projects', () => {
-    const projects = [
-      makeProject({ name: 'Atlas', completedOn: null }),
-      makeProject({ id: 'p2', name: 'DoneProject', completedOn: '2025-06-01' }),
-    ]
-    const prompt = buildChatSystemPrompt({ today: '2026-06-19', projects })
-    expect(prompt).toContain('Atlas')
-    expect(prompt).not.toContain('DoneProject')
-  })
-
-  it('omits the projects section when no active projects', () => {
-    const prompt = buildChatSystemPrompt({ today: '2026-06-19', projects: [] })
-    expect(prompt).not.toContain('Active projects:')
+    expect(prompt).toContain('Most-used interaction kinds')
+    expect(prompt).toContain('More kinds exist')
+    expect(prompt).toContain('Most-used tags')
+    expect(prompt).toContain('More tags exist')
   })
 })

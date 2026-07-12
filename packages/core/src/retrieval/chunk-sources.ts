@@ -11,7 +11,8 @@ import { sql, type RawBuilder } from 'kysely'
  * Every fragment assumes the outer query exposes the `content_chunks` row as
  * `cc` (e.g. `JOIN content_chunks cc ON …`) and binds the per-record aliases
  * used below (`p`, `o`, `op`, `pr`, `t`, `d`, `i`, `tr`, `transcript_interaction`,
- * `an`, `ef`, `m`, `a`).
+ * `profile_organization`, `an`, the `ai_note_*` subject aliases, `ef`, `m`,
+ * `a`).
  */
 
 /**
@@ -23,6 +24,7 @@ export const chunkRecordJoins = sql`
   LEFT JOIN people p ON p.id = cc.record_id AND cc.record_type = 'person'
   LEFT JOIN organizations o ON o.id = cc.record_id AND cc.record_type = 'organization'
   LEFT JOIN organization_profiles op ON op.id = cc.record_id AND cc.record_type = 'organization_profile'
+  LEFT JOIN organizations profile_organization ON profile_organization.id = op.organization_id
   LEFT JOIN projects pr ON pr.id = cc.record_id AND cc.record_type = 'project'
   LEFT JOIN tasks t ON t.id = cc.record_id AND cc.record_type = 'task'
   LEFT JOIN documents d ON d.id = cc.record_id AND cc.record_type = 'document'
@@ -30,6 +32,13 @@ export const chunkRecordJoins = sql`
   LEFT JOIN interaction_transcripts tr ON tr.id = cc.record_id AND cc.record_type = 'interaction_transcript'
   LEFT JOIN interactions transcript_interaction ON transcript_interaction.id = tr.interaction_id
   LEFT JOIN ai_notes an ON an.id = cc.record_id AND cc.record_type = 'ai_note'
+  LEFT JOIN people ai_note_person ON ai_note_person.id = an.subject_id AND an.subject_type = 'person'
+  LEFT JOIN organizations ai_note_organization ON ai_note_organization.id = an.subject_id AND an.subject_type = 'organization'
+  LEFT JOIN projects ai_note_project ON ai_note_project.id = an.subject_id AND an.subject_type = 'project'
+  LEFT JOIN tasks ai_note_task ON ai_note_task.id = an.subject_id AND an.subject_type = 'task'
+  LEFT JOIN documents ai_note_document ON ai_note_document.id = COALESCE(an.document_id, CASE WHEN an.subject_type = 'document' THEN an.subject_id END)
+  LEFT JOIN interactions ai_note_interaction ON ai_note_interaction.id = COALESCE(an.interaction_id, CASE WHEN an.subject_type = 'interaction' THEN an.subject_id END)
+  LEFT JOIN assets ai_note_asset ON ai_note_asset.id = an.subject_id AND an.subject_type = 'asset'
   LEFT JOIN extracted_facts ef ON ef.id = cc.record_id AND cc.record_type = 'extracted_fact'
   LEFT JOIN memories m ON m.id = cc.record_id AND cc.record_type = 'memory'
   LEFT JOIN assets a ON a.id = cc.record_id AND cc.record_type = 'asset'
@@ -41,18 +50,40 @@ export const chunkRecordJoins = sql`
  * is the single source of truth for which chunk-backed kinds are retrievable.
  */
 export const chunkVisibilityFilter = sql`(
-    (cc.record_type = 'person' AND p.archived_at IS NULL)
-    OR (cc.record_type = 'organization' AND o.archived_at IS NULL)
-    OR (cc.record_type = 'organization_profile' AND op.id IS NOT NULL)
-    OR (cc.record_type = 'project' AND pr.archived_at IS NULL)
-    OR (cc.record_type = 'task' AND t.archived_at IS NULL)
-    OR (cc.record_type = 'document' AND d.archived_at IS NULL)
-    OR (cc.record_type = 'interaction' AND i.archived_at IS NULL)
-    OR (cc.record_type = 'interaction_transcript' AND tr.id IS NOT NULL AND transcript_interaction.archived_at IS NULL)
-    OR (cc.record_type = 'ai_note' AND an.id IS NOT NULL)
-    OR (cc.record_type = 'extracted_fact' AND ef.archived_at IS NULL)
-    OR (cc.record_type = 'memory' AND m.archived_at IS NULL)
-    OR (cc.record_type = 'asset' AND a.archived_at IS NULL)
+    (cc.record_type = 'person' AND p.id IS NOT NULL AND p.archived_at IS NULL)
+    OR (cc.record_type = 'organization' AND o.id IS NOT NULL AND o.archived_at IS NULL)
+    OR (cc.record_type = 'organization_profile' AND op.id IS NOT NULL
+        AND profile_organization.id IS NOT NULL AND profile_organization.archived_at IS NULL)
+    OR (cc.record_type = 'project' AND pr.id IS NOT NULL AND pr.archived_at IS NULL)
+    OR (cc.record_type = 'task' AND t.id IS NOT NULL AND t.archived_at IS NULL)
+    OR (cc.record_type = 'document' AND d.id IS NOT NULL AND d.archived_at IS NULL)
+    OR (cc.record_type = 'interaction' AND i.id IS NOT NULL AND i.archived_at IS NULL)
+    OR (cc.record_type = 'interaction_transcript' AND tr.id IS NOT NULL
+        AND transcript_interaction.id IS NOT NULL AND transcript_interaction.archived_at IS NULL)
+    OR (cc.record_type = 'ai_note' AND an.id IS NOT NULL AND (
+        (an.interaction_id IS NOT NULL
+          AND ai_note_interaction.id IS NOT NULL AND ai_note_interaction.archived_at IS NULL)
+        OR (an.document_id IS NOT NULL
+          AND ai_note_document.id IS NOT NULL AND ai_note_document.archived_at IS NULL)
+        OR (an.subject_type = 'person'
+          AND ai_note_person.id IS NOT NULL AND ai_note_person.archived_at IS NULL)
+        OR (an.subject_type = 'organization'
+          AND ai_note_organization.id IS NOT NULL AND ai_note_organization.archived_at IS NULL)
+        OR (an.subject_type = 'project'
+          AND ai_note_project.id IS NOT NULL AND ai_note_project.archived_at IS NULL)
+        OR (an.subject_type = 'task'
+          AND ai_note_task.id IS NOT NULL AND ai_note_task.archived_at IS NULL)
+        OR (an.subject_type = 'document'
+          AND ai_note_document.id IS NOT NULL AND ai_note_document.archived_at IS NULL)
+        OR (an.subject_type = 'interaction'
+          AND ai_note_interaction.id IS NOT NULL AND ai_note_interaction.archived_at IS NULL)
+        OR (an.subject_type = 'asset'
+          AND ai_note_asset.id IS NOT NULL AND ai_note_asset.archived_at IS NULL)
+        OR (an.subject_type NOT IN ('person', 'organization', 'project', 'task', 'document', 'interaction', 'asset'))
+      ))
+    OR (cc.record_type = 'extracted_fact' AND ef.id IS NOT NULL AND ef.archived_at IS NULL)
+    OR (cc.record_type = 'memory' AND m.id IS NOT NULL AND m.archived_at IS NULL)
+    OR (cc.record_type = 'asset' AND a.id IS NOT NULL AND a.archived_at IS NULL)
   )`
 
 /** A human-readable title for a chunk's owning record, by record type. */
@@ -72,6 +103,50 @@ export const chunkRecordTitle = sql`COALESCE(
     a.storage_path
   )`
 
+/** Existing detail surface that should open for a chunk-backed source. */
+export const chunkNavigationRecordType = sql`CASE
+    WHEN cc.record_type IN ('person', 'organization', 'project', 'task', 'document', 'interaction', 'asset')
+      THEN cc.record_type
+    WHEN cc.record_type = 'organization_profile' THEN 'organization'
+    WHEN cc.record_type = 'interaction_transcript' THEN 'interaction'
+    WHEN cc.record_type = 'ai_note' AND an.interaction_id IS NOT NULL AND an.document_id IS NULL
+      THEN 'interaction'
+    WHEN cc.record_type = 'ai_note' AND an.document_id IS NOT NULL AND an.interaction_id IS NULL
+      THEN 'document'
+    WHEN cc.record_type = 'ai_note'
+      AND an.subject_type IN ('person', 'organization', 'project', 'task', 'document', 'interaction', 'asset')
+      THEN an.subject_type
+    WHEN cc.record_type = 'extracted_fact'
+      AND ef.source_record_type IN ('person', 'organization', 'project', 'task', 'document', 'interaction', 'asset')
+      THEN ef.source_record_type
+    WHEN cc.record_type = 'extracted_fact'
+      AND ef.subject_type IN ('person', 'organization', 'project', 'task', 'document', 'interaction', 'asset')
+      THEN ef.subject_type
+    ELSE NULL
+  END`
+
+/** Record id paired with {@link chunkNavigationRecordType}. */
+export const chunkNavigationRecordId = sql`CASE
+    WHEN cc.record_type IN ('person', 'organization', 'project', 'task', 'document', 'interaction', 'asset')
+      THEN cc.record_id
+    WHEN cc.record_type = 'organization_profile' THEN op.organization_id
+    WHEN cc.record_type = 'interaction_transcript' THEN tr.interaction_id
+    WHEN cc.record_type = 'ai_note' AND an.interaction_id IS NOT NULL AND an.document_id IS NULL
+      THEN an.interaction_id
+    WHEN cc.record_type = 'ai_note' AND an.document_id IS NOT NULL AND an.interaction_id IS NULL
+      THEN an.document_id
+    WHEN cc.record_type = 'ai_note'
+      AND an.subject_type IN ('person', 'organization', 'project', 'task', 'document', 'interaction', 'asset')
+      THEN an.subject_id
+    WHEN cc.record_type = 'extracted_fact'
+      AND ef.source_record_type IN ('person', 'organization', 'project', 'task', 'document', 'interaction', 'asset')
+      THEN ef.source_record_id
+    WHEN cc.record_type = 'extracted_fact'
+      AND ef.subject_type IN ('person', 'organization', 'project', 'task', 'document', 'interaction', 'asset')
+      THEN ef.subject_id
+    ELSE NULL
+  END`
+
 /**
  * The single "when did this happen" date for a chunk's owning record, resolved
  * by record type. Prefers the meaningful event date (occurred/authored/due/…)
@@ -83,17 +158,25 @@ export const chunkRecordTitle = sql`COALESCE(
 export const chunkRecordDate = sql`COALESCE(
     i.occurred_at,
     transcript_interaction.occurred_at,
+    tr.transcribed_at,
     d.occurred_at,
     d.authored_at,
     t.due_at,
+    t.scheduled_for,
+    pr.completed_on,
+    pr.target_date,
+    op.researched_at,
     an.generated_at,
     ef.observed_at,
     m.valid_from,
     p.last_interaction_at,
     d.updated_at,
     i.updated_at,
+    tr.updated_at,
+    transcript_interaction.updated_at,
     p.updated_at,
     o.updated_at,
+    op.updated_at,
     pr.updated_at,
     t.updated_at,
     an.updated_at,
@@ -121,6 +204,12 @@ export interface ChunkFilters {
    * {@link inclusiveUpperBound}.
    */
   before?: string
+  /**
+   * Optional exact record-key allow-list (`recordType:recordId`). An empty list
+   * intentionally matches nothing. Record-level retrieval resolves typed
+   * relationship filters into this list before any candidate LIMIT is applied.
+   */
+  recordKeys?: readonly string[]
 }
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/
@@ -154,6 +243,29 @@ export function chunkFilterClauses(filters: ChunkFilters = {}): RawBuilder<unkno
   }
   if (filters.after) clauses.push(sql`${chunkRecordDate} >= ${filters.after}`)
   if (filters.before) clauses.push(sql`${chunkRecordDate} <= ${inclusiveUpperBound(filters.before)}`)
+  if (filters.recordKeys !== undefined) {
+    if (filters.recordKeys.length === 0) {
+      clauses.push(sql`0`)
+    } else {
+      const recordsByType = new Map<string, string[]>()
+      for (const key of filters.recordKeys) {
+        const separator = key.indexOf(':')
+        const recordType = key.slice(0, separator)
+        const ids = recordsByType.get(recordType) ?? []
+        ids.push(key.slice(separator + 1))
+        recordsByType.set(recordType, ids)
+      }
+      clauses.push(
+        sql`(${sql.join(
+          [...recordsByType].map(
+            ([recordType, ids]) =>
+              sql`(cc.record_type = ${recordType} AND cc.record_id IN (${sql.join(ids.map((id) => sql`${id}`))}))`,
+          ),
+          sql` OR `,
+        )})`,
+      )
+    }
+  }
   if (clauses.length === 0) return sql``
   return sql`AND ${sql.join(clauses, sql` AND `)}`
 }

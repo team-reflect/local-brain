@@ -10,7 +10,7 @@ import {
 import { useChat } from '@ai-sdk/react'
 import { MessageSquare } from 'lucide-react'
 import { z } from 'zod'
-import { createChatId, type ChatMessage } from '@local-brain/core'
+import { createChatId, type BrainInfo, type ChatMessage } from '@local-brain/core'
 import { lastAssistantMessageIsCompleteWithApprovalResponses, type UIMessage } from 'ai'
 import { useQueryClient } from '@tanstack/react-query'
 import { Alert } from '../components/alert'
@@ -32,6 +32,7 @@ import { handleChatToolApprovalResponse } from '../lib/ai/chat-approval'
 import { createChatTransport } from '../lib/ai/chat-transport'
 import {
   invalidateChatTurnQueries,
+  ACTIVE_BRAIN_KEY,
   useConversations,
   useDeleteConversation,
   useMessages,
@@ -98,12 +99,14 @@ export function ChatSurface({ conversationId }: { conversationId: string | undef
     () => modelSelectionForValue(chatModelOptions, selectedModelValue),
     [chatModelOptions, selectedModelValue],
   )
+  const expectedDatabasePath = queryClient.getQueryData<BrainInfo>(ACTIVE_BRAIN_KEY)?.databasePath
   const transport = useMemo(() => createChatTransport({
     modelSelection,
+    ...(expectedDatabasePath ? { expectedDatabasePath } : {}),
     onConversationTitleUpdated: () => {
       void queryClient.invalidateQueries({ queryKey: ['chat-conversations'] })
     },
-  }), [modelSelection, queryClient])
+  }), [expectedDatabasePath, modelSelection, queryClient])
   const initialMessages = useMemo(() => persistedMessages(storedMessages.data), [storedMessages.data])
   const [draft, setDraft] = useState('')
   const [executingApprovalCount, setExecutingApprovalCount] = useState(0)
@@ -132,31 +135,42 @@ export function ChatSurface({ conversationId }: { conversationId: string | undef
       invalidateChatTurnQueries(queryClient, chatId)
     },
   })
-  const { addToolApprovalResponse, error, messages, sendMessage, setMessages, status } = chat
+  const { addToolApprovalResponse, error, messages, sendMessage, setMessages, status, stop } = chat
   const messagesRef = useRef<UIMessage[]>(messages)
 
   useEffect(() => {
     messagesRef.current = messages
   }, [messages])
 
+  useEffect(() => {
+    // `useChat` does not abort on unmount. A brain switch remounts this surface,
+    // so explicitly stop the old turn before any later tool call can read the
+    // newly active brain.
+    return () => {
+      void stop?.()
+    }
+  }, [stop])
+
   const setChatMessages = useCallback((nextMessages: UIMessage[]) => {
     messagesRef.current = nextMessages
     setMessages(nextMessages)
   }, [setMessages])
 
-  function incrementExecutingApprovalCount(): void {
+  const incrementExecutingApprovalCount = useCallback((): void => {
     const nextCount = executingApprovalCountRef.current + 1
     executingApprovalCountRef.current = nextCount
     setExecutingApprovalCount(nextCount)
-  }
+  }, [])
 
-  function decrementExecutingApprovalCount(): void {
+  const decrementExecutingApprovalCount = useCallback((): void => {
     const nextCount = Math.max(0, executingApprovalCountRef.current - 1)
     executingApprovalCountRef.current = nextCount
     setExecutingApprovalCount(nextCount)
-  }
+  }, [])
 
-  async function handleToolApprovalResponse(response: ToolApprovalResponse): Promise<void> {
+  const handleToolApprovalResponse = useCallback(async (
+    response: ToolApprovalResponse,
+  ): Promise<void> => {
     if (response.approved) incrementExecutingApprovalCount()
     try {
       await handleChatToolApprovalResponse(response, {
@@ -165,11 +179,23 @@ export function ChatSurface({ conversationId }: { conversationId: string | undef
         queryClient,
         setMessages: setChatMessages,
         addToolApprovalResponse,
+        ...(expectedDatabasePath ? { expectedDatabasePath } : {}),
       })
+    } catch {
+      // The handler keeps stale approvals visible and retryable. Any remaining
+      // storage failure must not escape the event callback as an unhandled promise.
     } finally {
       if (response.approved) decrementExecutingApprovalCount()
     }
-  }
+  }, [
+    addToolApprovalResponse,
+    chatId,
+    decrementExecutingApprovalCount,
+    expectedDatabasePath,
+    incrementExecutingApprovalCount,
+    queryClient,
+    setChatMessages,
+  ])
 
   useEffect(() => {
     if (!conversationId) setHydratedConversationId(null)

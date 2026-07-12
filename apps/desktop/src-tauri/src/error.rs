@@ -22,6 +22,8 @@ pub enum AppError {
     Auth { message: String },
     /// A remote is unreachable (offline, DNS, timeout) — retryable.
     Network { message: String },
+    /// Work was prepared against state that changed before it could be applied.
+    Stale { message: String },
     /// Anything not covered above.
     Unknown { message: String },
 }
@@ -50,6 +52,12 @@ impl AppError {
             message: message.into(),
         }
     }
+    /// Work was prepared against an active brain or source row that changed.
+    pub fn stale(message: impl Into<String>) -> Self {
+        Self::Stale {
+            message: message.into(),
+        }
+    }
     pub fn unknown(message: impl Into<String>) -> Self {
         Self::Unknown {
             message: message.into(),
@@ -67,6 +75,7 @@ impl std::fmt::Display for AppError {
             | AppError::Parse { message }
             | AppError::Auth { message }
             | AppError::Network { message }
+            | AppError::Stale { message }
             | AppError::Unknown { message } => message,
         };
         write!(f, "{message}")

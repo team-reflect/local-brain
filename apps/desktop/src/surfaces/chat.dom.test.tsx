@@ -5,11 +5,13 @@ import type { UIMessage } from 'ai'
 import { QueryClient } from '@tanstack/react-query'
 import { ChatSurface } from './chat'
 import { installFakeBridge, renderWithProviders } from '../test/utils'
+import { rememberChatApprovalDatabaseIdentity } from '../lib/ai/chat-approval'
 
 const chatMocks = vi.hoisted(() => ({
   addToolApprovalResponse: vi.fn(),
   sendMessage: vi.fn(),
   setMessages: vi.fn(),
+  stop: vi.fn(),
   messages: [] as UIMessage[],
   status: 'ready' as string,
   useChatConfig: null as unknown,
@@ -36,6 +38,7 @@ vi.mock('@ai-sdk/react', () => ({
       sendMessage: chatMocks.sendMessage,
       setMessages: chatMocks.setMessages,
       status: chatMocks.status,
+      stop: chatMocks.stop,
     }
   },
 }))
@@ -135,6 +138,15 @@ describe('ChatSurface', () => {
     transportMocks.options = null
     chatMocks.sendMessage.mockResolvedValue(undefined)
     installChatBridgeWithProvider()
+  })
+
+  it('stops an in-flight Chat when the brain workspace unmounts', async () => {
+    const rendered = renderWithProviders(<ChatSurface conversationId={undefined} />)
+    await screen.findByLabelText('Chat message')
+
+    rendered.unmount()
+
+    expect(chatMocks.stop).toHaveBeenCalledTimes(1)
   })
 
   it('prompts users to add an AI provider before chatting', async () => {
@@ -300,6 +312,24 @@ describe('ChatSurface', () => {
     expect(screen.getByRole('button', { name: 'Scroll to end' })).not.toBeNull()
   })
 
+  it('keeps settled markdown mounted while a later message streams', async () => {
+    const settled = assistantMessage('a1', '[Reference](https://example.com)')
+    chatMocks.status = 'streaming'
+    chatMocks.messages = [settled, assistantMessage('a2', 'Working', 'streaming')]
+    await renderReadyChat()
+
+    const reference = screen.getByRole('link', { name: 'Reference' })
+    reference.focus()
+    expect(document.activeElement).toBe(reference)
+
+    chatMocks.messages = [settled, assistantMessage('a2', 'Working… still', 'streaming')]
+    triggerChatRender('preserve focus')
+
+    expect(screen.getByRole('link', { name: 'Reference' })).toBe(reference)
+    expect(document.activeElement).toBe(reference)
+    expect(screen.getByText('Working… still')).not.toBeNull()
+  })
+
   it('renders a newly submitted user message as a scroller item', async () => {
     chatMocks.messages = [assistantMessage('a1', 'Initial answer')]
     await renderReadyChat()
@@ -353,13 +383,55 @@ describe('ChatSurface', () => {
         'search_records',
         'output-available',
         { query: 'Maya budget' },
-        { hits: [{ recordType: 'interaction', recordId: 'i1', title: 'Call with Maya', snippet: 'budget' }], count: 1 },
+        {
+          records: [
+            {
+              recordType: 'interaction',
+              recordId: 'i1',
+              recordRef: 'interaction:i1',
+              title: 'Call with Maya',
+              date: '2026-06-18T00:00:00.000Z',
+              evidence: [{ chunkId: 'chunk-1', snippet: 'budget' }],
+            },
+          ],
+          count: 1,
+        },
       ),
     ]
     await renderReadyChat()
 
     expect(screen.getByText(/Searched "Maya budget"/)).not.toBeNull()
     expect(screen.getByText(/1 result/)).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Call with Maya/ }))
+    await waitFor(() => expect(window.location.pathname).toBe('/interactions/i1'))
+  })
+
+  it('does not validate a citation from a different assistant message', async () => {
+    chatMocks.messages = [
+      toolMessage(
+        'a1',
+        'search_records',
+        'output-available',
+        { query: 'Maya budget' },
+        {
+          records: [{
+            recordType: 'interaction',
+            recordId: 'i1',
+            recordRef: 'interaction:i1',
+            title: 'Call with Maya',
+            evidence: [{ chunkId: 'chunk-1', snippet: 'budget' }],
+          }],
+          count: 1,
+        },
+      ),
+      assistantMessage(
+        'a2',
+        'Cross-turn [[record:interaction:i1#chunk-1]] must remain inert.',
+      ),
+    ]
+    await renderReadyChat()
+
+    expect(screen.getByText(/\[\[record:interaction:i1#chunk-1\]\]/)).not.toBeNull()
   })
 
   it('renders a list_projects tool chip', async () => {
@@ -407,6 +479,10 @@ describe('ChatSurface', () => {
       ),
     ]
     await renderReadyChat()
+    rememberChatApprovalDatabaseIdentity('approval-1', {
+      databasePath: '/test/brain.sqlite',
+      generation: 1,
+    })
 
     expect(screen.getByText('Create task')).not.toBeNull()
     expect(screen.getByText('Send budget')).not.toBeNull()
@@ -487,6 +563,134 @@ describe('ChatSurface', () => {
     expect(chatMocks.sendMessage).not.toHaveBeenCalled()
   })
 
+  it('settles a restored stale approval with retry guidance and unlocks the composer', async () => {
+    const calls: Array<{ command: string; args: Record<string, unknown> }> = []
+    installFakeBridge({
+      respond: (command, args) => {
+        calls.push({ command, args })
+        return undefined
+      },
+      query: (_sql, params) => {
+        const key = params[0]
+        if (key === 'model.aiProviders') {
+          return [{
+            valueJson: JSON.stringify([
+              { id: 'provider-1', provider: 'openai', model: 'gpt-5.1', keyHint: '12345' },
+            ]),
+          }]
+        }
+        if (key === 'model.defaultAiProviderId') {
+          return [{ valueJson: JSON.stringify('provider-1') }]
+        }
+        return []
+      },
+    })
+    chatMocks.setMessages.mockImplementation((messages: UIMessage[]) => {
+      chatMocks.messages = messages
+    })
+    chatMocks.messages = [
+      toolMessage(
+        'a1',
+        'create_task',
+        'approval-requested',
+        { title: 'Send budget', description: 'Contains private forecast details.' },
+        undefined,
+        { id: 'approval-restored' },
+      ),
+    ]
+    await renderReadyChat()
+
+    expect(screen.getByText('description')).not.toBeNull()
+    expect(screen.getByText('Contains private forecast details.')).not.toBeNull()
+    const textarea = screen.getByLabelText('Chat message')
+    fireEvent.change(textarea, { target: { value: 'Try that again' } })
+    fireEvent.click(screen.getByRole('button', { name: /Approve create task/ }))
+
+    expect(await screen.findByText(/This approval is no longer valid\. Retry the request\./)).not.toBeNull()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Send/ })).toHaveProperty('disabled', false)
+    })
+    expect(textarea).toHaveProperty('value', 'Try that again')
+    expect(
+      calls.some(
+        (call) =>
+          call.command === 'db_execute' &&
+          String(call.args['sql']).includes('insert into "tasks"'),
+      ),
+    ).toBe(false)
+    expect(chatMocks.addToolApprovalResponse).not.toHaveBeenCalled()
+  })
+
+  it('unlocks the composer without executing when approval persistence fails', async () => {
+    const calls: Array<{ command: string; args: Record<string, unknown> }> = []
+    installFakeBridge({
+      respond: (command, args) => {
+        calls.push({ command, args })
+        const statements = args['statements']
+        if (
+          command === 'db_batch' &&
+          Array.isArray(statements) &&
+          statements.some((statement) =>
+            typeof statement === 'object' &&
+            statement !== null &&
+            String((statement as Record<string, unknown>)['sql']).includes('update "chat_messages"'),
+          )
+        ) {
+          return Promise.reject(new Error('disk full'))
+        }
+        return undefined
+      },
+      query: (_sql, params) => {
+        const key = params[0]
+        if (key === 'model.aiProviders') {
+          return [{
+            valueJson: JSON.stringify([
+              { id: 'provider-1', provider: 'openai', model: 'gpt-5.1', keyHint: '12345' },
+            ]),
+          }]
+        }
+        if (key === 'model.defaultAiProviderId') {
+          return [{ valueJson: JSON.stringify('provider-1') }]
+        }
+        return []
+      },
+    })
+    chatMocks.setMessages.mockImplementation((messages: UIMessage[]) => {
+      chatMocks.messages = messages
+    })
+    chatMocks.messages = [
+      toolMessage(
+        'a1',
+        'create_task',
+        'approval-requested',
+        { title: 'Send budget' },
+        undefined,
+        { id: 'approval-persist-failure' },
+      ),
+    ]
+    await renderReadyChat()
+    rememberChatApprovalDatabaseIdentity('approval-persist-failure', {
+      databasePath: '/test/brain.sqlite',
+      generation: 1,
+    })
+
+    const textarea = screen.getByLabelText('Chat message')
+    fireEvent.change(textarea, { target: { value: 'Try that again' } })
+    fireEvent.click(screen.getByRole('button', { name: /Approve create task/ }))
+
+    expect(await screen.findByText(/Could not save this approval\. Retry the request\./)).not.toBeNull()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Send/ })).toHaveProperty('disabled', false)
+    })
+    expect(
+      calls.some(
+        (call) =>
+          call.command === 'db_execute' &&
+          String(call.args['sql']).includes('insert into "tasks"'),
+      ),
+    ).toBe(false)
+  })
+
   it('keeps the input editable but blocks submit while an approved write tool is executing', async () => {
     let insertStarted = false
     let resolveInsert: () => void = () => {
@@ -533,6 +737,10 @@ describe('ChatSurface', () => {
       ),
     ]
     await renderReadyChat()
+    rememberChatApprovalDatabaseIdentity('approval-1', {
+      databasePath: '/test/brain.sqlite',
+      generation: 1,
+    })
 
     fireEvent.click(screen.getByRole('button', { name: /Approve create task/ }))
     await waitFor(() => expect(insertStarted).toBe(true))

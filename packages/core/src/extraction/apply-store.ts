@@ -1,4 +1,5 @@
-import { db } from '../db/client'
+import { db, dbForDatabase } from '../db/client'
+import type { DatabaseIdentity } from '../db/identity'
 import { squish } from '../text/normalize'
 import type { LinkEntityType, LinkSource } from './source-links'
 
@@ -29,8 +30,11 @@ export interface Resolved {
 }
 
 /** Map a source record's chunk indexes to chunk ids, for resolving evidence refs. */
-export async function loadChunkMap(source: ApplySource): Promise<Map<number, string>> {
-  const rows = await db
+export async function loadChunkMap(
+  source: ApplySource,
+  databaseIdentity?: DatabaseIdentity,
+): Promise<Map<number, string>> {
+  const rows = await (databaseIdentity ? dbForDatabase(databaseIdentity) : db)
     .selectFrom('contentChunks')
     .select(['chunkIndex', 'id'])
     .where('recordType', '=', source.recordType)
@@ -40,9 +44,12 @@ export async function loadChunkMap(source: ApplySource): Promise<Map<number, str
 }
 
 /** Existing `person:organization` affiliation pairs for the given people. */
-export async function loadAffiliationPairs(personIds: readonly string[]): Promise<Set<string>> {
+export async function loadAffiliationPairs(
+  personIds: readonly string[],
+  databaseIdentity?: DatabaseIdentity,
+): Promise<Set<string>> {
   if (personIds.length === 0) return new Set()
-  const rows = await db
+  const rows = await (databaseIdentity ? dbForDatabase(databaseIdentity) : db)
     .selectFrom('affiliations')
     .select(['personId', 'organizationId'])
     .where('personId', 'in', personIds)
@@ -51,12 +58,22 @@ export async function loadAffiliationPairs(personIds: readonly string[]): Promis
 }
 
 /** Non-archived tasks as `{id, title}` candidates for duplicate-title avoidance. */
-export function loadTaskCandidates(): Promise<{ id: string; title: string }[]> {
-  return db.selectFrom('tasks').where('archivedAt', 'is', null).select(['id', 'title']).execute()
+export function loadTaskCandidates(
+  databaseIdentity?: DatabaseIdentity,
+): Promise<{ id: string; title: string }[]> {
+  return (databaseIdentity ? dbForDatabase(databaseIdentity) : db)
+    .selectFrom('tasks')
+    .where('archivedAt', 'is', null)
+    .select(['id', 'title'])
+    .execute()
 }
 
 /** Normalized claim text of every non-archived memory, for duplicate avoidance. */
-export async function loadMemoryClaims(): Promise<Set<string>> {
-  const rows = await db.selectFrom('memories').where('archivedAt', 'is', null).select('claim').execute()
+export async function loadMemoryClaims(databaseIdentity?: DatabaseIdentity): Promise<Set<string>> {
+  const rows = await (databaseIdentity ? dbForDatabase(databaseIdentity) : db)
+    .selectFrom('memories')
+    .where('archivedAt', 'is', null)
+    .select('claim')
+    .execute()
   return new Set(rows.map((row) => squish(row.claim).toLowerCase()))
 }

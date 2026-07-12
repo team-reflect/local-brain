@@ -1,5 +1,11 @@
 /* eslint-disable max-lines -- the public API barrel; grows one block per domain */
 export { type AppError, type AppErrorKind, isAppError, toAppError } from './errors'
+export {
+  activeDatabaseIdentity,
+  assertActiveDatabaseIdentity,
+  databaseIdentitiesEqual,
+  type DatabaseIdentity,
+} from './db/identity'
 export { ValidationError, requireText } from './validation'
 // Field normalization shared by the write boundary, extraction matching, and the
 // CLI's Rust twin.
@@ -298,6 +304,7 @@ export {
 // Retrieval (the one shared FTS5 retrieve() contract + global search)
 export {
   retrieve,
+  searchRecordCandidates,
   globalSearch,
   paletteSearch,
   parseSearchQuery,
@@ -312,6 +319,12 @@ export {
   type RetrievalResult,
   type RetrievedChunk,
   type RetrieveOptions,
+  type RecordCandidate,
+  type RecordCandidateEvidence,
+  type RecordCandidateSearchOptions,
+  type RecordCandidateSearchResult,
+  type RelatedRecordRef,
+  type NavigableRecordType,
   type SourceRecordType as RetrievalSourceType,
   type SearchHit,
   type SearchOptions,
@@ -346,6 +359,9 @@ export {
   byteProgressSchema,
   isEmbedReady,
   embedStatus,
+  embedDatabaseIdentity,
+  embeddingDatabaseIdentitiesEqual,
+  isEmbeddingDatabaseIdentityCurrent,
   embedEnsure,
   embedTexts,
   embedApply,
@@ -373,6 +389,8 @@ export {
   type EmbedStatus,
   type ByteProgress,
   type EmbeddedChunkInput,
+  type EmbeddingDatabaseIdentity,
+  type SemanticHitOptions,
   type BackfillOptions,
   type BackfillProgress,
   type BackfillResult,
@@ -578,3 +596,16 @@ export { seedDemoData, type SeedResult } from './seed/seed'
 // Chat AI: read-only tools and system prompt builder
 export { buildChatTools, type ChatTools } from './ai/chat/tools'
 export { buildChatSystemPrompt, type ChatSystemPromptInput } from './ai/chat/system-prompt'
+export {
+  loadChatBrainOverview,
+  type ChatBrainOverview,
+  type ChatBrainFacet,
+  type ChatBrainTag,
+  type ChatBrainSelf,
+} from './ai/chat/brain-overview'
+export {
+  fitChatMessagesToContextWindow,
+  estimateChatMessageTokens,
+  ELIDED_CHAT_TOOL_RESULT,
+  type ChatContextWindowOptions,
+} from './ai/chat/context-window'

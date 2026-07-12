@@ -1,7 +1,8 @@
 import type { Insertable, Updateable } from 'kysely'
 import type { Database } from '@local-brain/db'
-import { db } from './client'
+import { db, dbForDatabase } from './client'
 import { execute } from './commands'
+import type { DatabaseIdentity } from './identity'
 import { newId } from './id'
 import { nowIso } from './time'
 import { ValidationError } from '../validation'
@@ -52,9 +53,13 @@ type AnyRecordTable = 'people'
 export async function insertRecord<T extends RecordTable>(
   table: T,
   values: NewRecord<Database[T]>,
+  expectedIdentity?: DatabaseIdentity,
 ): Promise<string> {
   const id = newId()
-  await execute(db.insertInto(table as AnyRecordTable).values({ ...values, id } as never))
+  await execute(
+    db.insertInto(table as AnyRecordTable).values({ ...values, id } as never),
+    expectedIdentity,
+  )
   return id
 }
 
@@ -63,12 +68,14 @@ export function updateRecord<T extends RecordTable>(
   table: T,
   id: string,
   patch: RecordPatch<Database[T]>,
+  expectedIdentity?: DatabaseIdentity,
 ): Promise<number> {
   return execute(
     db
       .updateTable(table as AnyRecordTable)
       .set({ ...patch, updatedAt: nowIso() } as never)
       .where('id', '=', id),
+    expectedIdentity,
   )
 }
 
@@ -97,6 +104,7 @@ export async function assertTitleOrBody(
   id: string,
   patch: ContentPatch,
   label: string,
+  expectedIdentity?: DatabaseIdentity,
 ): Promise<void> {
   const titleProvided = patch.title !== undefined
   const bodyProvided = patch.bodyText !== undefined
@@ -105,7 +113,8 @@ export async function assertTitleOrBody(
 
   // `documents` is a representative member: both content tables share the
   // `title`/`body_text` columns, so the concrete builder reads the real table.
-  const existing = await db
+  const readDb = expectedIdentity ? dbForDatabase(expectedIdentity) : db
+  const existing = await readDb
     .selectFrom(table as 'documents')
     .select(['title', 'bodyText'])
     .where('id', '=', id)

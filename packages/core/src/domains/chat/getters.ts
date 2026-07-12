@@ -1,5 +1,6 @@
 import { z } from 'zod'
-import { db } from '../../db/client'
+import { db, dbForDatabase } from '../../db/client'
+import type { DatabaseIdentity } from '../../db/identity'
 
 /**
  * Durable Chat conversations. The UI stores the full AI SDK UIMessage JSON so
@@ -67,8 +68,12 @@ export function listConversations(options: { includeArchived?: boolean } = {}): 
   return query.execute()
 }
 
-export function getConversation(id: string): Promise<ChatConversation | undefined> {
-  return db.selectFrom('chatConversations').selectAll().where('id', '=', id).executeTakeFirst()
+export function getConversation(
+  id: string,
+  expectedIdentity?: DatabaseIdentity,
+): Promise<ChatConversation | undefined> {
+  const readDb = expectedIdentity ? dbForDatabase(expectedIdentity) : db
+  return readDb.selectFrom('chatConversations').selectAll().where('id', '=', id).executeTakeFirst()
 }
 
 export async function listMessages(conversationId: string): Promise<ChatMessage[]> {

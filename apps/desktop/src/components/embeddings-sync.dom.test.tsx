@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { type EmbedStatus, setBridge } from '@local-brain/core'
+import { type BrainInfo, type EmbedStatus, setBridge } from '@local-brain/core'
 import { act, render, waitFor } from '@testing-library/react'
 import { EmbeddingsSync } from './embeddings-sync'
 import { EMBEDDINGS_STATUS_KEY, todayLocalDayKey } from '../lib/queries'
+import { ACTIVE_BRAIN_KEY } from '../lib/queries/brains'
 
 /**
  * Auto-load policy (Bugbot #27 follow-up): `EmbeddingsSync` brings the runtime up
@@ -19,15 +20,23 @@ import { EMBEDDINGS_STATUS_KEY, todayLocalDayKey } from '../lib/queries'
  */
 
 /** A bridge that reports `runtime` for the embedding commands, enabled + empty. */
-function installStatusBridge(runtime: EmbedStatus): string[] {
+function installStatusBridge(
+  runtime: EmbedStatus,
+  options: { failEnsure?: boolean } = {},
+): string[] {
   const commands: string[] = []
   setBridge({
     invoke: (command, args) => {
       commands.push(command)
       switch (command) {
+        case 'embed_database_identity':
+          return Promise.resolve({ databasePath: '/test/brain.sqlite', generation: 1 })
         case 'embed_status':
-        case 'embed_ensure':
           return Promise.resolve(runtime)
+        case 'embed_ensure':
+          return options.failEnsure
+            ? Promise.reject(new Error('runtime load failed'))
+            : Promise.resolve(runtime)
         case 'db_query': {
           const sql = String((args as { sql?: unknown }).sql ?? '')
           const params = ((args as { params?: unknown[] }).params ?? []) as unknown[]
@@ -61,6 +70,8 @@ function installFailingBackfillBridge() {
       commands.push(command)
       const params = ((args as { params?: unknown[] }).params ?? []) as unknown[]
       switch (command) {
+        case 'embed_database_identity':
+          return Promise.resolve({ databasePath: '/test/brain.sqlite', generation: 1 })
         case 'embed_status':
         case 'embed_ensure':
           return Promise.resolve({ status: 'ready', model: 'all-MiniLM-L6-v2' })
@@ -87,6 +98,12 @@ function installFailingBackfillBridge() {
         }
         case 'db_execute': {
           const sql = String((args as { sql?: unknown }).sql ?? '')
+          if (sql.includes('settings')) {
+            expect(args).toMatchObject({
+              expectedDatabasePath: '/test/brain.sqlite',
+              expectedGeneration: 1,
+            })
+          }
           // setSetting compiles to INSERT ... settings (key, value_json, updated_at).
           if (sql.includes('settings') && params[0] === 'embeddings.backfillError') {
             persistedError = JSON.parse(String(params[1])) as string | null
@@ -110,24 +127,45 @@ function installFailingBackfillBridge() {
   }
 }
 
-function installPendingBackfillBridge(options: { lastDay?: string | null; failEmbed?: boolean } = {}) {
+function installPendingBackfillBridge(
+  options: {
+    lastDay?: string | null
+    failEmbed?: boolean
+    failIdentity?: boolean
+    failSettingsWrite?: boolean
+    pendingInitially?: boolean
+    keepPendingAfterApply?: boolean
+    embedTexts?: (texts: string[]) => Promise<number[][]>
+  } = {},
+) {
   const commands: string[] = []
   const events: string[] = []
   let persistedError: string | null = null
   let persistedDay: string | null = options.lastDay ?? null
+  let pending = options.pendingInitially ?? true
   setBridge({
     invoke: (command, args) => {
       commands.push(command)
       const params = ((args as { params?: unknown[] }).params ?? []) as unknown[]
       switch (command) {
+        case 'embed_database_identity':
+          return options.failIdentity
+            ? Promise.reject(new Error('identity unavailable'))
+            : Promise.resolve({ databasePath: '/test/brain.sqlite', generation: 1 })
         case 'embed_status':
         case 'embed_ensure':
           return Promise.resolve({ status: 'ready', model: 'all-MiniLM-L6-v2' })
         case 'embed_texts':
           events.push('embed_texts')
+          if (options.embedTexts) {
+            return options.embedTexts((args as { texts: string[] }).texts ?? [])
+          }
           return options.failEmbed
             ? Promise.reject(new Error('onnx blew up'))
             : Promise.resolve(((args as { texts: string[] }).texts ?? []).map(() => [0.1, 0.2, 0.3]))
+        case 'embed_apply':
+          if (!options.keepPendingAfterApply) pending = false
+          return Promise.resolve(1)
         case 'db_query': {
           const sql = String((args as { sql?: unknown }).sql ?? '')
           if (sql.includes('settings')) {
@@ -145,12 +183,26 @@ function installPendingBackfillBridge(options: { lastDay?: string | null; failEm
             }
             return Promise.resolve([])
           }
-          if (/count/i.test(sql)) return Promise.resolve([{ count: 1 }])
+          if (/count/i.test(sql)) {
+            const isPendingCount = sql.includes('chunk_embeddings')
+            return Promise.resolve([{ count: isPendingCount && !pending ? 0 : 1 }])
+          }
           if (sql.includes('from "chunk_embeddings"')) return Promise.resolve([])
-          return Promise.resolve([{ chunkId: 'c1', text: 'hello', storedHash: null }])
+          return Promise.resolve(
+            pending ? [{ chunkId: 'c1', text: 'hello', storedHash: null }] : [],
+          )
         }
         case 'db_execute': {
           const sql = String((args as { sql?: unknown }).sql ?? '')
+          if (sql.includes('settings')) {
+            expect(args).toMatchObject({
+              expectedDatabasePath: '/test/brain.sqlite',
+              expectedGeneration: 1,
+            })
+            if (options.failSettingsWrite) {
+              return Promise.reject(new Error('settings are read-only'))
+            }
+          }
           if (sql.includes('settings') && params[0] === 'embeddings.backfillError') {
             persistedError = JSON.parse(String(params[1])) as string | null
           }
@@ -172,16 +224,34 @@ function installPendingBackfillBridge(options: { lastDay?: string | null; failEm
     events,
     persistedError: () => persistedError,
     persistedDay: () => persistedDay,
+    setPending: (value: boolean) => {
+      pending = value
+    },
   }
 }
 
-function renderSync() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+function renderSync(
+  client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }),
+) {
   return render(
     <QueryClientProvider client={client}>
       <EmbeddingsSync />
     </QueryClientProvider>,
   )
+}
+
+function brain(databasePath: string): BrainInfo {
+  return {
+    rootPath: databasePath.replace(/\/brain\.sqlite$/, ''),
+    databasePath,
+    assetsPath: `${databasePath}.assets`,
+    name: 'Test brain',
+    color: 'blue',
+    createdMs: 0,
+    lastOpenedMs: 0,
+    isActive: true,
+    schemaVersion: 1,
+  }
 }
 
 describe('EmbeddingsSync', () => {
@@ -191,6 +261,15 @@ describe('EmbeddingsSync', () => {
     const commands = installStatusBridge({ status: 'uninitialized' })
     renderSync()
     await waitFor(() => expect(commands).toContain('embed_ensure'))
+  })
+
+  it('handles a rejected automatic ensure once without an unhandled retry loop', async () => {
+    const commands = installStatusBridge({ status: 'uninitialized' }, { failEnsure: true })
+    renderSync()
+
+    await waitFor(() => expect(commands.filter((command) => command === 'embed_ensure')).toHaveLength(1))
+    await act(() => new Promise((resolve) => setTimeout(resolve, 100)))
+    expect(commands.filter((command) => command === 'embed_ensure')).toHaveLength(1)
   })
 
   it('does not auto-retry ensure when the runtime has failed', async () => {
@@ -221,26 +300,127 @@ describe('EmbeddingsSync', () => {
     expect(bridge.commands.filter((c) => c === 'embed_texts').length).toBe(attempts)
   })
 
-  it('runs automatic backfill when pending and no backfill has run today', async () => {
+  it('runs automatic backfill when pending', async () => {
     const bridge = installPendingBackfillBridge()
     renderSync()
     await waitFor(() => expect(bridge.commands).toContain('embed_texts'))
     expect(bridge.persistedDay()).toBe(todayLocalDayKey())
   })
 
-  it('does not run automatic backfill when the daily cap was already used', async () => {
-    const bridge = installPendingBackfillBridge({ lastDay: todayLocalDayKey() })
+  it('treats a rejected identity capture as a terminal automatic backfill attempt', async () => {
+    const bridge = installPendingBackfillBridge({ failIdentity: true })
     renderSync()
-    await waitFor(() => expect(bridge.commands).toContain('embed_status'))
-    await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
+
+    await waitFor(() => {
+      expect(bridge.commands.filter((command) => command === 'embed_database_identity')).toHaveLength(1)
+    })
+    await act(() => new Promise((resolve) => setTimeout(resolve, 1_100)))
+    expect(bridge.commands.filter((command) => command === 'embed_database_identity')).toHaveLength(1)
     expect(bridge.commands).not.toContain('embed_texts')
   })
 
-  it('records the daily cap marker before automatic embedding starts', async () => {
+  it('handles rejected backfill settings writes without immediately retrying', async () => {
+    const bridge = installPendingBackfillBridge({ failSettingsWrite: true })
+    renderSync()
+
+    await waitFor(() => {
+      expect(bridge.commands.filter((command) => command === 'db_execute')).toHaveLength(2)
+    })
+    const attempts = bridge.commands.filter((command) => command === 'db_execute').length
+    await act(() => new Promise((resolve) => setTimeout(resolve, 100)))
+    expect(bridge.commands.filter((command) => command === 'db_execute')).toHaveLength(attempts)
+    expect(bridge.commands).not.toContain('embed_texts')
+  })
+
+  it('catches up new pending chunks even when a backfill already ran today', async () => {
+    const bridge = installPendingBackfillBridge({ lastDay: todayLocalDayKey() })
+    renderSync()
+    await waitFor(() => expect(bridge.commands).toContain('embed_texts'))
+  })
+
+  it('catches up immediately after a successful in-app mutation', async () => {
+    const bridge = installPendingBackfillBridge({ pendingInitially: false })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+    render(
+      <QueryClientProvider client={client}>
+        <EmbeddingsSync />
+      </QueryClientProvider>,
+    )
+
+    await waitFor(() => expect(bridge.commands).toContain('embed_status'))
+    expect(bridge.commands).not.toContain('embed_texts')
+
+    const mutation = client.getMutationCache().build(client, {
+      mutationFn: async () => {
+        bridge.setPending(true)
+      },
+    })
+    await mutation.execute(undefined)
+
+    await waitFor(() => expect(bridge.commands).toContain('embed_texts'))
+  })
+
+  it('records the last-attempt marker before automatic embedding starts', async () => {
     const bridge = installPendingBackfillBridge()
     renderSync()
     await waitFor(() => expect(bridge.events).toContain('embed_texts'))
     expect(bridge.events.slice(0, 2)).toEqual(['set_last_day', 'embed_texts'])
+  })
+
+  it('throttles repeated successful passes while content keeps changing', async () => {
+    const bridge = installPendingBackfillBridge({ keepPendingAfterApply: true })
+    renderSync()
+    await waitFor(() => expect(bridge.commands).toContain('embed_texts'))
+
+    const attempts = bridge.commands.filter((command) => command === 'embed_texts').length
+    await act(() => new Promise((resolve) => setTimeout(resolve, 100)))
+    expect(bridge.commands.filter((command) => command === 'embed_texts')).toHaveLength(attempts)
+  })
+
+  it('does not apply an in-flight batch after the coordinator unmounts', async () => {
+    let finishEmbedding: (() => void) | null = null
+    const bridge = installPendingBackfillBridge({
+      embedTexts: (texts) =>
+        new Promise((resolve) => {
+          finishEmbedding = () => resolve(texts.map(() => [0.1, 0.2, 0.3]))
+        }),
+    })
+    const rendered = renderSync()
+    await waitFor(() => expect(bridge.commands).toContain('embed_texts'))
+
+    rendered.unmount()
+    await act(async () => {
+      finishEmbedding?.()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(bridge.commands).not.toContain('embed_apply')
+  })
+
+  it('does not apply an in-flight batch after the active brain path changes', async () => {
+    let finishEmbedding: (() => void) | null = null
+    const bridge = installPendingBackfillBridge({
+      embedTexts: (texts) =>
+        new Promise((resolve) => {
+          finishEmbedding = () => resolve(texts.map(() => [0.1, 0.2, 0.3]))
+        }),
+    })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: Number.POSITIVE_INFINITY } },
+    })
+    client.setQueryData(ACTIVE_BRAIN_KEY, brain('/test/brain.sqlite'))
+    renderSync(client)
+    await waitFor(() => expect(bridge.commands).toContain('embed_texts'))
+
+    client.setQueryData(ACTIVE_BRAIN_KEY, brain('/test/other-brain.sqlite'))
+    await act(async () => {
+      finishEmbedding?.()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(bridge.commands).not.toContain('embed_apply')
   })
 
   it('aborts an in-flight backfill when semantic search is disabled mid-pass', async () => {
@@ -262,6 +442,8 @@ describe('EmbeddingsSync', () => {
       invoke: (command, args) => {
         const params = ((args as { params?: unknown[] }).params ?? []) as unknown[]
         switch (command) {
+          case 'embed_database_identity':
+            return Promise.resolve({ databasePath: '/test/brain.sqlite', generation: 1 })
           case 'embed_status':
           case 'embed_ensure':
             return Promise.resolve({ status: 'ready', model: 'all-MiniLM-L6-v2' })

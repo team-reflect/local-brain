@@ -1,11 +1,15 @@
 # Reflect Embeddings → Local Brain: Status
 
-Branch: `codex/local-brain-reflect-embeddings` · Base: `master` @ 58c801f
+Original delivery: `codex/local-brain-reflect-embeddings` (PR #27). Current follow-up:
+`codex/improve-ai-chat-search`.
 
 ## Current phase
 
-**Done — verification green.** Cursor Bugbot review fixes applied on top of PR #27
-(see "Bugbot fixes" below). See `final-report.md`.
+**Done, with the current Chat-search follow-up integrated.** PR #27 established the
+embedding runtime; later work now keeps projected chunks fresh on record mutations and
+uses the same semantic primitives in record-level Chat discovery. The verification
+entries below describe their named historical passes; see `final-report.md` for the
+current architecture.
 
 ## Progress log
 
@@ -17,11 +21,13 @@ Branch: `codex/local-brain-reflect-embeddings` · Base: `master` @ 58c801f
   vec0 cosine 384-dim); `LATEST_SCHEMA_VERSION` → 3. Real vec0 cosine-KNN test.
 - ✅ Phase B — Rust embed runtime + commands: `apps/desktop/src-tauri/src/embed/`
   (fastembed `all-MiniLM-L6-v2`, polled progress); `embed_status/ensure/texts/apply/
-  delete/clear`; transactional `DbState::with_connection_mut`. Storage tests vs real
-  SQLite. Ignored end-to-end test (real model + real KNN) passes locally.
+  delete/clear`; path + generation-pinned transactional writes through
+  `DbState::with_expected_connection_mut`. Storage tests vs real SQLite. Ignored
+  end-to-end test (real model + real KNN) passes locally.
 - ✅ Phase C — TS core embeddings module: `model/commands/semantic/pipeline/status`;
-  `retrieve()` now does real semantic + hybrid (RRF K=60, KNN 24, cosine ≤ 0.7) and
-  degrades to lexical with `semanticAvailable: false`. Exported from core.
+  `retrieve()` now does real semantic + hybrid (RRF K=60, cosine ≤ 0.7) and degrades
+  to lexical with `semanticAvailable: false`. Record-level callers can request bounded
+  adaptive KNN expansion when filtering or source concentration reduces diversity.
 - ✅ Phase D — Desktop UX: `EmbeddingsSync` headless coordinator; Settings "Semantic
   search" section (enable/disable, download progress, index status, manual backfill,
   rebuild); Diagnostics now reports the real state.
@@ -31,6 +37,27 @@ Branch: `codex/local-brain-reflect-embeddings` · Base: `master` @ 58c801f
 - ✅ Phase F — Docs aligned (`launch-schema.md`, plan 06); codegen + JS test harness strip
   vec0 statements (Node SQLite lacks the extension); `schema.gen.ts` regenerated.
 
+## Current Chat-search integration
+
+- `searchRecordCandidates()` is a sibling of `retrieve()`, not a wrapper. It reuses the
+  chunk joins, visibility/date filters, and semantic query, then fuses direct typed
+  fields, FTS, and semantic lists after collapsing to unique records.
+- App record mutations transactionally refresh document, interaction, memory, and
+  profile-bearing person/organization chunks. CLI import/enrichment also maintains its
+  entity projections. A vector whose model/hash differs from the current chunk is
+  excluded immediately; catch-up replaces it or prunes the orphan asynchronously.
+- Successful renderer mutations invalidate embedding status immediately. A 60-second
+  cheap SQLite status poll discovers CLI/external writes; ready pending work is drained
+  with a short success cooldown and the existing exclusive backfill lock.
+- Chat stores tool call/result provenance in local message JSON for inspection, but
+  elides prior raw results from later provider requests. Citations resolve only against
+  exact sources from that assistant message and may carry a derived parent navigation
+  target.
+- Chat turns, approvals, conversation/title persistence, and embedding writers are
+  bound to a captured database path + connection generation, preventing a brain switch
+  from redirecting in-flight work. That identity is not stored in Chat JSON, so a
+  restored approval is dismissible but must be retried before it can execute.
+
 ## Bugbot fixes (post-review pass on PR #27)
 - ✅ **High — rebuild clears without ready model.** `useRebuildEmbeddings` now calls a
   shared `rebuildEmbeddings()` that only `clearEmbeddings()` + `backfillEmbeddings()`
@@ -38,12 +65,11 @@ Branch: `codex/local-brain-reflect-embeddings` · Base: `master` @ 58c801f
   result throws *before* the clear, so a model that can't load can't wipe the index.
   Tests: `apps/desktop/src/lib/queries/embeddings.test.ts` (ready clears; loading/failed
   abort without `embed_clear`).
-- ✅ **Product cadence — automatic backfill capped daily.** `EmbeddingsSync` now runs
-  automatic incremental backfill at most once per local calendar day per brain, recorded in
-  `embeddings.lastBackfillAttemptDay`. Pending chunks no longer ride a 30s idle heartbeat;
-  active backfills still fast-poll progress, and a slow hourly discovery poll runs only until
-  today's automatic slot is used. Settings has a non-destructive "Backfill now" button for
-  explicit catch-up while "Rebuild index" remains the destructive repair action.
+- ✅ **Product cadence — live incremental catch-up.** The original daily/hourly cadence
+  was superseded by mutation-triggered status invalidation plus a 60-second background
+  discovery poll for CLI/external writes. Ready pending work drains automatically with
+  a one-second success cooldown; Settings retains non-destructive "Backfill now" and
+  destructive "Rebuild index" actions.
 - ✅ **Medium — disabled setting ignored by retrieve.** `retrieve()` now reads the
   `embeddings.enabled` kill-switch before touching the runtime; when disabled it never
   embeds the query or uses vectors, even if the in-memory model stays loaded, and reports

@@ -9,12 +9,16 @@ export {
 } from './model'
 export {
   embedStatus,
+  embedDatabaseIdentity,
+  embeddingDatabaseIdentitiesEqual,
+  isEmbeddingDatabaseIdentityCurrent,
   embedEnsure,
   embedTexts,
   embedApply,
   embedDelete,
   embedClear,
   type EmbeddedChunkInput,
+  type EmbeddingDatabaseIdentity,
 } from './commands'
 export {
   semanticHits,
@@ -22,6 +26,7 @@ export {
   KNN_CANDIDATES,
   MAX_COSINE_DISTANCE,
   RRF_K,
+  type SemanticHitOptions,
 } from './semantic'
 export {
   backfillEmbeddings,

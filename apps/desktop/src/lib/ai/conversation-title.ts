@@ -1,6 +1,7 @@
 import { generateText, Output, type LanguageModel } from 'ai'
 import { z } from 'zod'
 import { updateConversationTitle } from '@local-brain/core'
+import type { DatabaseIdentity } from '@local-brain/core'
 
 const TITLE_MAX_LENGTH = 48
 const CONTEXT_MAX_LENGTH = 1_200
@@ -85,18 +86,20 @@ export function generateAndPersistConversationTitle({
   model,
   onUpdated,
   userText,
+  databaseIdentity,
 }: {
   assistantText: string
   conversationId: string
   model: LanguageModel
   onUpdated?: ((conversationId: string) => void) | undefined
   userText: string
+  databaseIdentity: DatabaseIdentity
 }): void {
   void (async () => {
     try {
       const title = await generateConversationTitle({ assistantText, model, userText })
       if (!title) return
-      const count = await updateConversationTitle(conversationId, title)
+      const count = await updateConversationTitle(conversationId, title, databaseIdentity)
       if (count > 0) onUpdated?.(conversationId)
     } catch {
       // Sidebar titles are best-effort metadata; chat persistence should never depend on them.

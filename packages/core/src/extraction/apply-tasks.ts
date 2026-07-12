@@ -5,6 +5,7 @@ import type { ExtractionResult } from './contracts'
 import { normalizeName } from './match'
 import { loadTaskCandidates } from './apply-store'
 import type { ApplyContext } from './apply-context'
+import type { DatabaseIdentity } from '../db/identity'
 
 /**
  * Task applier for {@link applyExtraction}. A task depending on a gated/unresolved
@@ -13,8 +14,12 @@ import type { ApplyContext } from './apply-context'
  * suggestion rather than written incomplete. A title-duplicate of an existing
  * task is reused (linked + evidenced) without mutating its fields (correction 05b).
  */
-export async function applyTasks(ctx: ApplyContext, tasks: ExtractionResult['tasks']): Promise<void> {
-  const candidates = await loadTaskCandidates()
+export async function applyTasks(
+  ctx: ApplyContext,
+  tasks: ExtractionResult['tasks'],
+  databaseIdentity: DatabaseIdentity,
+): Promise<void> {
+  const candidates = await loadTaskCandidates(databaseIdentity)
   for (const task of tasks) {
     if (!ctx.accepts(task.confidence)) {
       ctx.suggest('task', task.ref, task.title, task.confidence)

@@ -10,6 +10,7 @@ import {
 } from './match'
 import { loadAffiliationPairs } from './apply-store'
 import type { ApplyContext } from './apply-context'
+import type { DatabaseIdentity } from '../db/identity'
 
 /**
  * Network-entity appliers for {@link applyExtraction}: people, organizations,
@@ -110,9 +111,11 @@ export function applyProjects(ctx: ApplyContext, projects: ExtractionResult['pro
 export async function applyAffiliations(
   ctx: ApplyContext,
   affiliations: ExtractionResult['affiliations'],
+  databaseIdentity: DatabaseIdentity,
 ): Promise<void> {
   const existing = await loadAffiliationPairs(
     [...ctx.resolved.values()].filter((r) => r.type === 'person').map((r) => r.id),
+    databaseIdentity,
   )
   for (const affiliation of affiliations) {
     if (!ctx.accepts(affiliation.confidence)) continue

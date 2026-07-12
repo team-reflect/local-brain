@@ -44,6 +44,9 @@ export function installFakeBridge(options: FakeBridgeOptions = {}): void {
           return Promise.resolve(1)
         case 'db_batch':
           return Promise.resolve(((args['statements'] as unknown[]) ?? []).map(() => 1))
+        case 'active_database_identity':
+        case 'embed_database_identity':
+          return Promise.resolve({ databasePath: '/test/brain.sqlite', generation: 1 })
         case 'app_version':
           return Promise.resolve({ name: 'Local Brain', version: '0.1.0', platform: 'test' })
         case 'cli_status':

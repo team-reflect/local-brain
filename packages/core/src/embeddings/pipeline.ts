@@ -1,8 +1,18 @@
 import { sql } from 'kysely'
-import { db } from '../db/client'
+import { db, dbForDatabase } from '../db/client'
 import { batch } from '../db/commands'
+import { isAppError } from '../errors'
 import { contentHash } from '../ingest/hash'
-import { type EmbeddedChunkInput, embedApply, embedClear, embedDelete, embedTexts } from './commands'
+import {
+  type EmbeddedChunkInput,
+  type EmbeddingDatabaseIdentity,
+  embedApply,
+  embedClear,
+  embedDatabaseIdentity,
+  embedDelete,
+  embedTexts,
+  isEmbeddingDatabaseIdentityCurrent,
+} from './commands'
 import { EMBEDDING_MODEL_ID } from './model'
 
 /**
@@ -31,6 +41,8 @@ export interface BackfillOptions {
   onProgress?: (progress: BackfillProgress) => void
   /** Abort cooperatively between batches (e.g. semantic search was disabled). */
   isStale?: () => boolean
+  /** Bind a larger clear + backfill operation to one captured connection. */
+  databaseIdentity?: EmbeddingDatabaseIdentity
 }
 
 export interface BackfillResult {
@@ -54,8 +66,8 @@ interface PendingChunk {
  * unmatched and re-embeds the corpus; the null-safe `IS NOT` also flags chunks
  * whose text (hence hash) changed, and chunks with no stored hash yet.
  */
-function pendingQuery(modelId: string) {
-  return db
+function pendingQuery(modelId: string, database: typeof db = db) {
+  return database
     .selectFrom('contentChunks as cc')
     .leftJoin('chunkEmbeddings as ce', (join) =>
       join.onRef('ce.chunkId', '=', 'cc.id').on('ce.modelId', '=', modelId),
@@ -71,8 +83,9 @@ function pendingQuery(modelId: string) {
  * the status count and the pending query compare hashes in SQL with no JS
  * hashing, keeping polling cheap on large libraries.
  */
-async function ensureChunkHashes(): Promise<void> {
-  const rows = await db
+async function ensureChunkHashes(identity: EmbeddingDatabaseIdentity): Promise<void> {
+  const database = dbForDatabase(identity)
+  const rows = await database
     .selectFrom('contentChunks')
     .select(['id', 'text'])
     .where('contentHash', 'is', null)
@@ -80,10 +93,15 @@ async function ensureChunkHashes(): Promise<void> {
   if (rows.length === 0) return
   const updates = await Promise.all(
     rows.map(async (row) =>
-      db.updateTable('contentChunks').set({ contentHash: await contentHash(row.text) }).where('id', '=', row.id),
+      database
+        .updateTable('contentChunks')
+        .set({ contentHash: await contentHash(row.text) })
+        .where('id', '=', row.id)
+        .where('text', '=', row.text)
+        .where('contentHash', 'is', null),
     ),
   )
-  await batch(updates)
+  await batch(updates, identity)
 }
 
 /**
@@ -92,8 +110,11 @@ async function ensureChunkHashes(): Promise<void> {
  * and no chunk is re-hashed here (the fallback only guards a chunk slipping in
  * between that backfill and this read).
  */
-async function pendingChunks(modelId: string): Promise<PendingChunk[]> {
-  const rows = await pendingQuery(modelId)
+async function pendingChunks(
+  modelId: string,
+  identity: EmbeddingDatabaseIdentity,
+): Promise<PendingChunk[]> {
+  const rows = await pendingQuery(modelId, dbForDatabase(identity))
     .select(['cc.id as chunkId', 'cc.text as text', 'cc.contentHash as storedHash'])
     .execute()
 
@@ -117,12 +138,15 @@ export async function countPending(modelId: string = EMBEDDING_MODEL_ID): Promis
 }
 
 /**
- * Drop embeddings whose source content chunk no longer exists. Re-ingestion
- * replaces chunk rows, so orphaned vectors are pruned rather than cascaded.
- * Returns the number of orphaned chunk ids removed.
+ * Drop embeddings whose source content chunk was removed. Surviving projected
+ * chunks keep stable ids; shorter projections and hard deletes can leave vector
+ * rows for ids that no longer exist. Returns the number of orphaned ids removed.
  */
-export async function pruneOrphanEmbeddings(): Promise<number> {
-  const orphans = await db
+export async function pruneOrphanEmbeddings(
+  expectedIdentity?: EmbeddingDatabaseIdentity,
+): Promise<number> {
+  const identity = expectedIdentity ?? (await embedDatabaseIdentity())
+  const orphans = await dbForDatabase(identity)
     .selectFrom('chunkEmbeddings as ce')
     .leftJoin('contentChunks as cc', 'cc.id', 'ce.chunkId')
     .where('cc.id', 'is', null)
@@ -131,8 +155,13 @@ export async function pruneOrphanEmbeddings(): Promise<number> {
     .execute()
   const ids = orphans.map((row) => row.chunkId)
   if (ids.length === 0) return 0
-  await embedDelete(ids)
+  if (!(await isEmbeddingDatabaseIdentityCurrent(identity))) return 0
+  await embedDelete(identity, ids)
   return ids.length
+}
+
+function isStaleEmbeddingError(error: unknown): boolean {
+  return isAppError(error) && error.kind === 'stale'
 }
 
 /**
@@ -142,26 +171,84 @@ export async function pruneOrphanEmbeddings(): Promise<number> {
  */
 export async function backfillEmbeddings(options: BackfillOptions = {}): Promise<BackfillResult> {
   const modelId = options.modelId ?? EMBEDDING_MODEL_ID
-  await ensureChunkHashes()
-  const pruned = await pruneOrphanEmbeddings()
+  const identity = options.databaseIdentity ?? (await embedDatabaseIdentity())
+  if (
+    options.isStale?.() ||
+    !(await isEmbeddingDatabaseIdentityCurrent(identity))
+  ) {
+    return { status: 'aborted', embedded: 0, pruned: 0 }
+  }
+  try {
+    await ensureChunkHashes(identity)
+  } catch (error) {
+    if (isStaleEmbeddingError(error)) return { status: 'aborted', embedded: 0, pruned: 0 }
+    throw error
+  }
+  if (
+    options.isStale?.() ||
+    !(await isEmbeddingDatabaseIdentityCurrent(identity))
+  ) {
+    return { status: 'aborted', embedded: 0, pruned: 0 }
+  }
+  let pruned: number
+  try {
+    pruned = await pruneOrphanEmbeddings(identity)
+  } catch (error) {
+    if (isStaleEmbeddingError(error)) return { status: 'aborted', embedded: 0, pruned: 0 }
+    throw error
+  }
+  if (!(await isEmbeddingDatabaseIdentityCurrent(identity))) {
+    return { status: 'aborted', embedded: 0, pruned }
+  }
 
-  const pending = await pendingChunks(modelId)
+  let pending: PendingChunk[]
+  try {
+    pending = await pendingChunks(modelId, identity)
+  } catch (error) {
+    if (isStaleEmbeddingError(error)) return { status: 'aborted', embedded: 0, pruned }
+    throw error
+  }
+  if (!(await isEmbeddingDatabaseIdentityCurrent(identity))) {
+    return { status: 'aborted', embedded: 0, pruned }
+  }
   const total = pending.length
   let done = 0
   options.onProgress?.({ done, total })
 
   for (let i = 0; i < pending.length; i += EMBED_BATCH) {
-    if (options.isStale?.()) return { status: 'aborted', embedded: done, pruned }
+    if (
+      options.isStale?.() ||
+      !(await isEmbeddingDatabaseIdentityCurrent(identity))
+    ) {
+      return { status: 'aborted', embedded: done, pruned }
+    }
 
     const batch = pending.slice(i, i + EMBED_BATCH)
     const vectors = await embedTexts(batch.map((chunk) => chunk.text))
+    // Model work is the long await in this loop. Re-check immediately after it
+    // so a brain switch/unmount cannot proceed to a write even before the native
+    // identity guard gets the final say.
+    if (
+      options.isStale?.() ||
+      !(await isEmbeddingDatabaseIdentityCurrent(identity))
+    ) {
+      return { status: 'aborted', embedded: done, pruned }
+    }
     const payload: EmbeddedChunkInput[] = batch.map((chunk, index) => ({
       chunkId: chunk.chunkId,
       contentHash: chunk.contentHash,
       modelId,
       vector: vectors[index] ?? [],
     }))
-    await embedApply(payload)
+    try {
+      await embedApply(identity, payload)
+    } catch (error) {
+      // A concurrent source edit (hash mismatch/missing chunk) and a brain switch
+      // are normal stale-work outcomes. The next status pass will pick up the
+      // current chunks; neither should become a sticky indexing failure.
+      if (isStaleEmbeddingError(error)) return { status: 'aborted', embedded: done, pruned }
+      throw error
+    }
     done += batch.length
     options.onProgress?.({ done, total })
   }
@@ -170,6 +257,6 @@ export async function backfillEmbeddings(options: BackfillOptions = {}): Promise
 }
 
 /** Wipe the embedding projection (rebuild / model change). */
-export async function clearEmbeddings(): Promise<number> {
-  return embedClear()
+export async function clearEmbeddings(identity?: EmbeddingDatabaseIdentity): Promise<number> {
+  return embedClear(identity ?? (await embedDatabaseIdentity()))
 }

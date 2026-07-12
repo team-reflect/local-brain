@@ -112,6 +112,7 @@ describe('core domain actions (real SQLite round-trip)', () => {
     // The interaction insert must not have persisted (atomic rollback).
     const interactions = await listInteractions()
     expect(interactions).toHaveLength(0)
+    expect(await db.selectFrom('contentChunks').selectAll().execute()).toEqual([])
   })
 })
 
@@ -283,6 +284,7 @@ describe('04a ingestion (real SQLite round-trip)', () => {
     ).rejects.toBeDefined()
     // Neither the document nor its chunks persisted.
     expect(await listDocuments()).toHaveLength(0)
+    expect(await db.selectFrom('contentChunks').selectAll().execute()).toEqual([])
   })
 
   it('rejects an ingested document whose paste is only whitespace', async () => {

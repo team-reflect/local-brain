@@ -33,12 +33,31 @@ function toSqlParam(value) {
 
 /** A bridge backed by `database` for db_* plus a stubbed embedding runtime. */
 function installComboBridge(database) {
-  const counters = { embedded: 0 }
+  const counters = {
+    embedded: 0,
+    generation: 1,
+    switchAfterEmbed: false,
+    switchAfterHashQuery: false,
+  }
   setBridge({
     invoke(command, args) {
+      const guarded = args?.expectedGeneration !== undefined || args?.expectedDatabasePath !== undefined
+      if (
+        guarded &&
+        (args.expectedGeneration !== counters.generation ||
+          args.expectedDatabasePath !== '/test/brain.sqlite')
+      ) {
+        return Promise.reject({ kind: 'stale', message: 'active brain changed' })
+      }
       switch (command) {
-        case 'db_query':
-          return Promise.resolve(database.prepare(args.sql).all(...args.params.map(toSqlParam)))
+        case 'db_query': {
+          const rows = database.prepare(args.sql).all(...args.params.map(toSqlParam))
+          if (counters.switchAfterHashQuery && args.sql.includes('"content_hash" is null')) {
+            counters.switchAfterHashQuery = false
+            counters.generation += 1
+          }
+          return Promise.resolve(rows)
+        }
         case 'db_execute':
           return Promise.resolve(Number(database.prepare(args.sql).run(...args.params.map(toSqlParam)).changes))
         case 'db_batch': {
@@ -56,9 +75,19 @@ function installComboBridge(database) {
         }
         case 'embed_status':
           return Promise.resolve({ status: 'ready', model: 'all-MiniLM-L6-v2' })
+        case 'embed_database_identity':
+        case 'active_database_identity':
+          return Promise.resolve({
+            databasePath: '/test/brain.sqlite',
+            generation: counters.generation,
+          })
         case 'embed_texts':
+          if (counters.switchAfterEmbed) counters.generation += 1
           return Promise.resolve(args.texts.map(() => new Array(384).fill(0)))
         case 'embed_apply': {
+          if (args.expectedGeneration !== counters.generation) {
+            return Promise.reject({ kind: 'stale', message: 'active brain changed' })
+          }
           for (const chunk of args.chunks) {
             database
               .prepare('DELETE FROM chunk_embeddings WHERE chunk_id = ? AND model_id = ?')
@@ -134,6 +163,32 @@ describe('embedding backfill pipeline', () => {
     const result = await backfillEmbeddings()
     expect(result.embedded).toBe(1)
     expect(await countPending()).toBe(0)
+  })
+
+  it('aborts without applying vectors when the active database changes during model work', async () => {
+    const database = freshDatabase()
+    const counters = installComboBridge(database)
+    await ingestDocument({ title: 'Switching', bodyText: 'pending semantic text' })
+    counters.switchAfterEmbed = true
+
+    const result = await backfillEmbeddings()
+
+    expect(result).toMatchObject({ status: 'aborted', embedded: 0 })
+    expect(counters.embedded).toBe(0)
+    expect(database.prepare('SELECT count(*) AS n FROM chunk_embeddings').get().n).toBe(0)
+  })
+
+  it('aborts after a database switch during the legacy-hash scan', async () => {
+    const database = freshDatabase()
+    const counters = installComboBridge(database)
+    await ingestDocument({ title: 'Switching', bodyText: 'pending semantic text' })
+    counters.switchAfterHashQuery = true
+
+    const result = await backfillEmbeddings()
+
+    expect(result).toMatchObject({ status: 'aborted', embedded: 0 })
+    expect(counters.embedded).toBe(0)
+    expect(database.prepare('SELECT count(*) AS n FROM chunk_embeddings').get().n).toBe(0)
   })
 
   it('backfills a chunk hash written before the column was populated, then stays settled', async () => {

@@ -1,13 +1,22 @@
 import { tool } from 'ai'
 import { z } from 'zod'
-import { retrieve, RETRIEVABLE_SOURCE_KINDS, type SourceRecordType } from '../../retrieval/retrieve'
+import {
+  assertActiveDatabaseIdentity,
+  type DatabaseIdentity,
+} from '../../db/identity'
+import { searchRecordCandidates } from '../../retrieval/record-candidates'
+import type { RelatedRecordRef } from '../../retrieval/related-records'
+import { RETRIEVABLE_SOURCE_KINDS, type SourceRecordType } from '../../retrieval/retrieve'
 import { listProjects } from '../../domains/projects/getters'
 import {
   DEFAULT_RECORD_DETAIL_CHARS,
+  DEFAULT_RECORD_DETAIL_TOTAL_CHARS,
   MAX_RECORD_DETAIL_CHARS,
+  MAX_RECORD_DETAIL_TOTAL_CHARS,
   getChatRecords,
   type ChatRecordRequest,
 } from './record-details'
+import { listChatTasks } from './task-browser'
 import {
   completeTaskSchema,
   createOrganizationSchema,
@@ -45,9 +54,21 @@ const MAX_SEARCH_LIMIT = 50
 const MAX_GET_RECORDS = 10
 const MAX_RECORD_CHUNK_IDS = 5
 const DEFAULT_PROJECTS_LIMIT = 30
+const DEFAULT_TASKS_LIMIT = 30
 const recordTypeEnum = z.enum([...RETRIEVABLE_SOURCE_KINDS] as [string, ...string[]])
-const searchModeEnum = z.enum(['lexical', 'semantic', 'hybrid'])
 const optionalString = z.string().optional()
+const relatedRecordTypeEnum = z.enum([
+  'person',
+  'organization',
+  'project',
+  'task',
+  'document',
+  'interaction',
+])
+const relatedRecordSchema = z.object({
+  recordType: relatedRecordTypeEnum,
+  recordId: z.string().min(1),
+})
 const recordLookupSchema = z.object({
   recordType: recordTypeEnum,
   recordId: z.string().min(1),
@@ -63,45 +84,48 @@ function writeDescription(action: string): string {
   return `${action} Requires explicit user approval before it changes Local Brain.`
 }
 
-export function buildChatTools() {
+async function guardedRead<T>(
+  identity: DatabaseIdentity | undefined,
+  read: () => Promise<T>,
+): Promise<T> {
+  if (identity) await assertActiveDatabaseIdentity(identity)
+  const result = await read()
+  if (identity) await assertActiveDatabaseIdentity(identity)
+  return result
+}
+
+export interface BuildChatToolsOptions {
+  /** Bind every tool read/write in this model turn to one open brain. */
+  databaseIdentity?: DatabaseIdentity
+}
+
+/** Build the bounded read/write tool set for one optionally brain-pinned Chat turn. */
+export function buildChatTools(options: BuildChatToolsOptions = {}) {
+  const identity = options.databaseIdentity
   return {
     search_records: tool({
       description:
-        'Search and browse Local Brain records — documents, interactions, transcripts, emails, tasks, people, and more. ' +
-        'Pass `query` to search by topic or keyword. Searches are hybrid by default, combining lexical and semantic recall. ' +
-        'Set `mode: "semantic"` for semantic-only recall, or `mode: "lexical"` when exact keywords, IDs, or quoted text should stay strictly lexical. Add filters to narrow by record type (`recordTypes`), ' +
-        'interaction kind (`kinds`, e.g. ["email"]), or date window (`after`/`before`), and `sort` to order by relevance or recency. ' +
-        'To list RECENT items (e.g. "recent transcripts / emails"), OMIT `query` and instead set `recordTypes` ' +
-        '(and `kinds` like ["email"]) with `sort: "recency"` and an `after` date — do not put "recent" in the query text. ' +
-        'Each hit includes its record date so you can judge freshness.',
+        'Search Local Brain records by topic, names, or keywords. Meaning-based recall is added when local embeddings are ready; lexical search remains available otherwise. ' +
+        'Use one broad query and raise limit to widen recall; use filters when the topic must be scoped to a person, project, record type, interaction kind, or date. The output reports whether semantic results contributed.',
       inputSchema: z.object({
-        query: optionalString.describe(
-          'Topic or keywords. Omit to browse by filters (record type / kind / date) instead of searching.',
-        ),
+        query: z.string().trim().min(1).describe('One broad topic, name, phrase, or keyword query.'),
         recordTypes: z
           .array(recordTypeEnum)
           .optional()
-          .describe(
-            'Restrict to these record types. Use ["interaction_transcript"] for transcripts, ["interaction"] for emails/meetings/calls, ["document"] for docs.',
-          ),
+          .describe('Optional record types to search.'),
         kinds: z
           .array(z.string())
+          .max(12)
           .optional()
-          .describe(
-            'Restrict interactions to these kinds (e.g. email, meeting, call, message, note). Use ["email"] for emails only.',
-          ),
-        after: optionalString.describe(
-          'Only records on/after this ISO 8601 (UTC) date. For "recent", use a date one or two weeks before today.',
-        ),
+          .describe('Optional interaction kinds from the brain overview, such as email, meeting, or call.'),
+        after: optionalString.describe('Only records on/after this ISO 8601 date.'),
         before: optionalString.describe('Only records on/before this ISO 8601 (UTC) date.'),
-        sort: z
-          .enum(['relevance', 'recency'])
-          .optional()
-          .describe('relevance (default with a query) or recency (newest first; default when browsing without a query).'),
-        mode: searchModeEnum
+        relatedTo: z
+          .array(relatedRecordSchema)
+          .max(5)
           .optional()
           .describe(
-            'Search mode. Omit for hybrid search. Use "semantic" for semantic-only recall, or "lexical" for exact keyword, ID, or quoted-text lookup.',
+            'Restrict to records related to these exact Local Brain ids. Resolve ids with search_records first. Multiple refs are intersected.',
           ),
         limit: z
           .number()
@@ -111,38 +135,92 @@ export function buildChatTools() {
           .optional()
           .describe(`Max results to return (default ${DEFAULT_SEARCH_LIMIT})`),
       }),
-      execute: async ({ query, recordTypes, kinds, after, before, sort, mode, limit }) => {
-        const trimmedQuery = optionalNonBlank(query)
+      execute: async ({ query, recordTypes, kinds, after, before, relatedTo, limit }) => {
+        const afterValue = optionalNonBlank(after)
+        const beforeValue = optionalNonBlank(before)
+        const result = await guardedRead(identity, () =>
+          searchRecordCandidates(query, {
+            mode: 'hybrid',
+            sort: 'relevance',
+            limit: limit ?? DEFAULT_SEARCH_LIMIT,
+            ...(recordTypes && recordTypes.length > 0
+              ? { recordTypes: recordTypes as SourceRecordType[] }
+              : {}),
+            ...(kinds && kinds.length > 0 ? { kinds } : {}),
+            ...(afterValue ? { after: afterValue } : {}),
+            ...(beforeValue ? { before: beforeValue } : {}),
+            ...(relatedTo && relatedTo.length > 0
+              ? { relatedTo: relatedTo as RelatedRecordRef[] }
+              : {}),
+          }),
+        )
+        return {
+          records: result.candidates,
+          count: result.candidates.length,
+          semanticAvailable: result.semanticAvailable,
+        }
+      },
+    }),
+
+    browse_records: tool({
+      description:
+        'Browse Local Brain records by recency, date, type, interaction kind, or relationship without a topic query. ' +
+        'Use this for recent activity, date ranges, or records connected to a known person/project/task.',
+      inputSchema: z.object({
+        recordTypes: z.array(recordTypeEnum).optional().describe('Record types to browse.'),
+        kinds: z
+          .array(z.string())
+          .max(12)
+          .optional()
+          .describe('Interaction kinds from the brain overview, such as email, meeting, or call.'),
+        after: optionalString.describe('Only records on/after this ISO 8601 date.'),
+        before: optionalString.describe('Only records on/before this ISO 8601 date.'),
+        relatedTo: z
+          .array(relatedRecordSchema)
+          .max(5)
+          .optional()
+          .describe('Only records related to these exact Local Brain record ids.'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_SEARCH_LIMIT)
+          .optional()
+          .describe(`Max records to return (default ${DEFAULT_SEARCH_LIMIT})`),
+      }),
+      execute: async ({ recordTypes, kinds, after, before, relatedTo, limit }) => {
+        const afterValue = optionalNonBlank(after)
+        const beforeValue = optionalNonBlank(before)
         const hasFilter =
-          (recordTypes?.length ?? 0) > 0 || (kinds?.length ?? 0) > 0 || Boolean(after) || Boolean(before)
-        if (!trimmedQuery && !hasFilter) {
+          (recordTypes?.length ?? 0) > 0 ||
+          (kinds?.length ?? 0) > 0 ||
+          Boolean(afterValue) ||
+          Boolean(beforeValue) ||
+          (relatedTo?.length ?? 0) > 0
+        if (!hasFilter) {
           throw new Error(
-            'Provide a query or at least one filter (recordTypes, kinds, after, before). ' +
-              'To list recent items, set recordTypes (and kinds) with sort:"recency" and an after date.',
+            'Choose at least one browse filter: recordTypes, kinds, after, before, or relatedTo.',
           )
         }
-        const result = await retrieve(trimmedQuery ?? '', {
-          mode: mode ?? 'hybrid',
-          limit: limit ?? DEFAULT_SEARCH_LIMIT,
-          ...(recordTypes && recordTypes.length > 0
-            ? { recordTypes: recordTypes as SourceRecordType[] }
-            : {}),
-          ...(kinds && kinds.length > 0 ? { kinds } : {}),
-          ...(after ? { after } : {}),
-          ...(before ? { before } : {}),
-          ...(sort ? { sort } : {}),
-        })
+        const result = await guardedRead(identity, () =>
+          searchRecordCandidates('', {
+            mode: 'hybrid',
+            sort: 'recency',
+            limit: limit ?? DEFAULT_SEARCH_LIMIT,
+            ...(recordTypes && recordTypes.length > 0
+              ? { recordTypes: recordTypes as SourceRecordType[] }
+              : {}),
+            ...(kinds && kinds.length > 0 ? { kinds } : {}),
+            ...(afterValue ? { after: afterValue } : {}),
+            ...(beforeValue ? { before: beforeValue } : {}),
+            ...(relatedTo && relatedTo.length > 0
+              ? { relatedTo: relatedTo as RelatedRecordRef[] }
+              : {}),
+          }),
+        )
         return {
-          hits: result.chunks.map((chunk) => ({
-            chunkId: chunk.chunkId,
-            chunkIndex: chunk.chunkIndex,
-            recordType: chunk.recordType,
-            recordId: chunk.recordId,
-            title: chunk.recordTitle ?? null,
-            date: chunk.recordDate ?? null,
-            snippet: chunk.snippet,
-          })),
-          count: result.chunks.length,
+          records: result.candidates,
+          count: result.candidates.length,
           semanticAvailable: result.semanticAvailable,
         }
       },
@@ -166,21 +244,86 @@ export function buildChatTools() {
           .max(MAX_RECORD_DETAIL_CHARS)
           .optional()
           .describe(`Max chunk text characters per record (default ${DEFAULT_RECORD_DETAIL_CHARS})`),
+        maxTotalChars: z
+          .number()
+          .int()
+          .min(1000)
+          .max(MAX_RECORD_DETAIL_TOTAL_CHARS)
+          .optional()
+          .describe(`Total chunk text budget for this batched call (default ${DEFAULT_RECORD_DETAIL_TOTAL_CHARS})`),
       }),
-      execute: async ({ records, maxCharsPerRecord }) => {
+      execute: async ({ records, maxCharsPerRecord, maxTotalChars }) => {
         const requests: ChatRecordRequest[] = records.map((record) => ({
           recordType: record.recordType as SourceRecordType,
           recordId: record.recordId,
           ...(record.chunkIds !== undefined ? { chunkIds: record.chunkIds } : {}),
         }))
-        const details = await getChatRecords(
-          requests,
-          maxCharsPerRecord === undefined ? {} : { maxCharsPerRecord },
+        const details = await guardedRead(identity, () =>
+          getChatRecords(requests, {
+            ...(maxCharsPerRecord === undefined ? {} : { maxCharsPerRecord }),
+            ...(maxTotalChars === undefined ? {} : { maxTotalChars }),
+          }),
         )
         return {
           records: details,
           count: details.length,
         }
+      },
+    }),
+
+    list_tasks: tool({
+      description:
+        'Browse structured Local Brain tasks by status, due date, project, or related person. ' +
+        'Use this instead of topic search for task lists, deadlines, waiting items, and overdue work.',
+      inputSchema: z.object({
+        statuses: z.array(z.string()).max(8).optional().describe('Exact task statuses to include.'),
+        projectId: optionalString.describe('Only tasks in this exact project id.'),
+        personId: optionalString.describe('Only tasks linked to this exact person id.'),
+        dueAfter: optionalString.describe('Only tasks due/scheduled on or after this ISO 8601 date.'),
+        dueBefore: optionalString.describe('Only tasks due/scheduled on or before this ISO 8601 date.'),
+        includeCompleted: z
+          .boolean()
+          .optional()
+          .describe('Include terminal tasks when statuses are omitted (default false).'),
+        sort: z
+          .enum(['due', 'recently_updated'])
+          .optional()
+          .describe('Sort by due date (default) or most recently updated.'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(50)
+          .optional()
+          .describe(`Max tasks to return (default ${DEFAULT_TASKS_LIMIT})`),
+      }),
+      execute: async ({
+        statuses,
+        projectId,
+        personId,
+        dueAfter,
+        dueBefore,
+        includeCompleted,
+        sort,
+        limit,
+      }) => {
+        const projectIdValue = optionalNonBlank(projectId)
+        const personIdValue = optionalNonBlank(personId)
+        const dueAfterValue = optionalNonBlank(dueAfter)
+        const dueBeforeValue = optionalNonBlank(dueBefore)
+        const records = await guardedRead(identity, () =>
+          listChatTasks({
+            ...(statuses && statuses.length > 0 ? { statuses } : {}),
+            ...(projectIdValue ? { projectId: projectIdValue } : {}),
+            ...(personIdValue ? { personId: personIdValue } : {}),
+            ...(dueAfterValue ? { dueAfter: dueAfterValue } : {}),
+            ...(dueBeforeValue ? { dueBefore: dueBeforeValue } : {}),
+            ...(includeCompleted === undefined ? {} : { includeCompleted }),
+            ...(sort === undefined ? {} : { sort }),
+            limit: limit ?? DEFAULT_TASKS_LIMIT,
+          }),
+        )
+        return { records, count: records.length }
       },
     }),
 
@@ -190,7 +333,7 @@ export function buildChatTools() {
       ),
       inputSchema: createTaskSchema,
       needsApproval: true,
-      execute: (input) => executeChatWriteTool('create_task', input),
+      execute: (input) => executeChatWriteTool('create_task', input, identity),
     }),
 
     update_task: tool({
@@ -199,21 +342,21 @@ export function buildChatTools() {
       ),
       inputSchema: updateTaskSchema,
       needsApproval: true,
-      execute: (input) => executeChatWriteTool('update_task', input),
+      execute: (input) => executeChatWriteTool('update_task', input, identity),
     }),
 
     complete_task: tool({
       description: writeDescription('Mark an existing task done by id.'),
       inputSchema: completeTaskSchema,
       needsApproval: true,
-      execute: (input) => executeChatWriteTool('complete_task', input),
+      execute: (input) => executeChatWriteTool('complete_task', input, identity),
     }),
 
     create_person: tool({
       description: writeDescription('Create a person record for a real person the user wants in the brain.'),
       inputSchema: createPersonSchema,
       needsApproval: true,
-      execute: (input) => executeChatWriteTool('create_person', input),
+      execute: (input) => executeChatWriteTool('create_person', input, identity),
     }),
 
     update_person: tool({
@@ -222,14 +365,14 @@ export function buildChatTools() {
       ),
       inputSchema: updatePersonSchema,
       needsApproval: true,
-      execute: (input) => executeChatWriteTool('update_person', input),
+      execute: (input) => executeChatWriteTool('update_person', input, identity),
     }),
 
     create_organization: tool({
       description: writeDescription('Create an organization record for a real company, group, or institution.'),
       inputSchema: createOrganizationSchema,
       needsApproval: true,
-      execute: (input) => executeChatWriteTool('create_organization', input),
+      execute: (input) => executeChatWriteTool('create_organization', input, identity),
     }),
 
     update_organization: tool({
@@ -238,7 +381,7 @@ export function buildChatTools() {
       ),
       inputSchema: updateOrganizationSchema,
       needsApproval: true,
-      execute: (input) => executeChatWriteTool('update_organization', input),
+      execute: (input) => executeChatWriteTool('update_organization', input, identity),
     }),
 
     create_project: tool({
@@ -247,7 +390,7 @@ export function buildChatTools() {
       ),
       inputSchema: createProjectSchema,
       needsApproval: true,
-      execute: (input) => executeChatWriteTool('create_project', input),
+      execute: (input) => executeChatWriteTool('create_project', input, identity),
     }),
 
     update_project: tool({
@@ -256,7 +399,7 @@ export function buildChatTools() {
       ),
       inputSchema: updateProjectSchema,
       needsApproval: true,
-      execute: (input) => executeChatWriteTool('update_project', input),
+      execute: (input) => executeChatWriteTool('update_project', input, identity),
     }),
 
     log_interaction: tool({
@@ -265,7 +408,7 @@ export function buildChatTools() {
       ),
       inputSchema: logInteractionSchema,
       needsApproval: true,
-      execute: (input) => executeChatWriteTool('log_interaction', input),
+      execute: (input) => executeChatWriteTool('log_interaction', input, identity),
     }),
 
     remember_fact: tool({
@@ -274,7 +417,7 @@ export function buildChatTools() {
       ),
       inputSchema: rememberFactSchema,
       needsApproval: true,
-      execute: (input) => executeChatWriteTool('remember_fact', input),
+      execute: (input) => executeChatWriteTool('remember_fact', input, identity),
     }),
 
     update_memory: tool({
@@ -283,7 +426,7 @@ export function buildChatTools() {
       ),
       inputSchema: updateMemorySchema,
       needsApproval: true,
-      execute: (input) => executeChatWriteTool('update_memory', input),
+      execute: (input) => executeChatWriteTool('update_memory', input, identity),
     }),
 
     list_projects: tool({
@@ -304,14 +447,20 @@ export function buildChatTools() {
           .describe(`Max projects to return (default ${DEFAULT_PROJECTS_LIMIT})`),
       }),
       execute: async ({ status, limit }) => {
-        const projects = await listProjects({
-          ...(status !== undefined ? { status } : { activeOnly: true }),
-          limit: limit ?? DEFAULT_PROJECTS_LIMIT,
-        })
+        const projects = await guardedRead(identity, () =>
+          listProjects({
+            ...(status !== undefined ? { status } : { activeOnly: true }),
+            limit: limit ?? DEFAULT_PROJECTS_LIMIT,
+          }),
+        )
         return {
-          projects: projects.map((p) => ({
-            id: p.id,
+          records: projects.map((p) => ({
+            recordType: 'project' as const,
+            recordId: p.id,
+            recordRef: `project:${p.id}`,
+            title: p.name,
             name: p.name,
+            date: p.targetDate ?? p.updatedAt,
             status: p.status ?? null,
             summary: p.summary ?? null,
             targetDate: p.targetDate ?? null,

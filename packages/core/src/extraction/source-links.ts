@@ -1,5 +1,6 @@
 import type { Compilable } from 'kysely'
-import { db } from '../db/client'
+import { db, dbForDatabase } from '../db/client'
+import type { DatabaseIdentity } from '../db/identity'
 import { newId } from '../db/id'
 import type { SourceRecordType } from './preprocess'
 
@@ -36,7 +37,7 @@ interface LinkBinding {
   /** Build the join-row insert linking `entityId` to source `recordId`. */
   insert: (recordId: string, entityId: string) => Compilable
   /** The ids already linked to source `recordId`. */
-  loadLinked: (recordId: string) => Promise<string[]>
+  loadLinked: (recordId: string, readDb: typeof db) => Promise<string[]>
 }
 
 /**
@@ -49,8 +50,8 @@ const BINDINGS: Record<SourceRecordType, Record<LinkEntityType, LinkBinding>> = 
     person: {
       insert: (documentId, personId) =>
         db.insertInto('documentPeople').values({ id: newId(), documentId, personId }),
-      loadLinked: (documentId) =>
-        db
+      loadLinked: (documentId, readDb) =>
+        readDb
           .selectFrom('documentPeople')
           .select('personId')
           .where('documentId', '=', documentId)
@@ -60,8 +61,8 @@ const BINDINGS: Record<SourceRecordType, Record<LinkEntityType, LinkBinding>> = 
     organization: {
       insert: (documentId, organizationId) =>
         db.insertInto('documentOrganizations').values({ id: newId(), documentId, organizationId }),
-      loadLinked: (documentId) =>
-        db
+      loadLinked: (documentId, readDb) =>
+        readDb
           .selectFrom('documentOrganizations')
           .select('organizationId')
           .where('documentId', '=', documentId)
@@ -71,8 +72,8 @@ const BINDINGS: Record<SourceRecordType, Record<LinkEntityType, LinkBinding>> = 
     project: {
       insert: (documentId, projectId) =>
         db.insertInto('projectDocuments').values({ id: newId(), projectId, documentId }),
-      loadLinked: (documentId) =>
-        db
+      loadLinked: (documentId, readDb) =>
+        readDb
           .selectFrom('projectDocuments')
           .select('projectId')
           .where('documentId', '=', documentId)
@@ -82,8 +83,8 @@ const BINDINGS: Record<SourceRecordType, Record<LinkEntityType, LinkBinding>> = 
     task: {
       insert: (documentId, taskId) =>
         db.insertInto('taskDocuments').values({ id: newId(), taskId, documentId }),
-      loadLinked: (documentId) =>
-        db
+      loadLinked: (documentId, readDb) =>
+        readDb
           .selectFrom('taskDocuments')
           .select('taskId')
           .where('documentId', '=', documentId)
@@ -95,8 +96,8 @@ const BINDINGS: Record<SourceRecordType, Record<LinkEntityType, LinkBinding>> = 
     person: {
       insert: (interactionId, personId) =>
         db.insertInto('interactionParticipants').values({ id: newId(), interactionId, personId }),
-      loadLinked: (interactionId) =>
-        db
+      loadLinked: (interactionId, readDb) =>
+        readDb
           .selectFrom('interactionParticipants')
           .select('personId')
           .where('interactionId', '=', interactionId)
@@ -110,8 +111,8 @@ const BINDINGS: Record<SourceRecordType, Record<LinkEntityType, LinkBinding>> = 
         db
           .insertInto('interactionOrganizations')
           .values({ id: newId(), interactionId, organizationId }),
-      loadLinked: (interactionId) =>
-        db
+      loadLinked: (interactionId, readDb) =>
+        readDb
           .selectFrom('interactionOrganizations')
           .select('organizationId')
           .where('interactionId', '=', interactionId)
@@ -121,8 +122,8 @@ const BINDINGS: Record<SourceRecordType, Record<LinkEntityType, LinkBinding>> = 
     project: {
       insert: (interactionId, projectId) =>
         db.insertInto('projectInteractions').values({ id: newId(), projectId, interactionId }),
-      loadLinked: (interactionId) =>
-        db
+      loadLinked: (interactionId, readDb) =>
+        readDb
           .selectFrom('projectInteractions')
           .select('projectId')
           .where('interactionId', '=', interactionId)
@@ -132,8 +133,8 @@ const BINDINGS: Record<SourceRecordType, Record<LinkEntityType, LinkBinding>> = 
     task: {
       insert: (interactionId, taskId) =>
         db.insertInto('taskInteractions').values({ id: newId(), taskId, interactionId }),
-      loadLinked: (interactionId) =>
-        db
+      loadLinked: (interactionId, readDb) =>
+        readDb
           .selectFrom('taskInteractions')
           .select('taskId')
           .where('interactionId', '=', interactionId)
@@ -154,9 +155,15 @@ export function sourceLinkInsert(
 }
 
 /** Load the ids already linked to the source record, so we never re-insert a pair. */
-export async function loadSourceLinks(source: LinkSource): Promise<SourceLinks> {
+export async function loadSourceLinks(
+  source: LinkSource,
+  databaseIdentity?: DatabaseIdentity,
+): Promise<SourceLinks> {
+  const readDb = databaseIdentity ? dbForDatabase(databaseIdentity) : db
   const [person, organization, project, task] = await Promise.all(
-    LINK_ENTITY_TYPES.map((type) => BINDINGS[source.recordType][type].loadLinked(source.recordId)),
+    LINK_ENTITY_TYPES.map((type) =>
+      BINDINGS[source.recordType][type].loadLinked(source.recordId, readDb),
+    ),
   )
   return {
     person: new Set(person),

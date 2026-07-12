@@ -1,4 +1,5 @@
 import { db } from '../db/client'
+import type { DatabaseIdentity } from '../db/identity'
 import { getSetting } from '../domains/settings/getters'
 import { setSetting } from '../domains/settings/setters'
 import { embedStatus } from './commands'
@@ -52,8 +53,11 @@ export async function isEmbeddingsEnabled(): Promise<boolean> {
   return getSetting<boolean>(EMBEDDINGS_ENABLED_KEY, false)
 }
 
-export async function setEmbeddingsEnabled(enabled: boolean): Promise<void> {
-  await setSetting(EMBEDDINGS_ENABLED_KEY, enabled)
+export async function setEmbeddingsEnabled(
+  enabled: boolean,
+  identity?: DatabaseIdentity,
+): Promise<void> {
+  await setSetting(EMBEDDINGS_ENABLED_KEY, enabled, identity)
 }
 
 /** The last persisted incremental-backfill failure, or null when healthy. */
@@ -61,9 +65,12 @@ export async function getBackfillError(): Promise<string | null> {
   return getSetting<string | null>(EMBEDDINGS_BACKFILL_ERROR_KEY, null)
 }
 
-/** Record (or clear, with `null`) the last incremental-backfill failure. */
-export async function setBackfillError(message: string | null): Promise<void> {
-  await setSetting(EMBEDDINGS_BACKFILL_ERROR_KEY, message)
+/** Record the last backfill failure, optionally pinned to one open brain. */
+export async function setBackfillError(
+  message: string | null,
+  identity?: DatabaseIdentity,
+): Promise<void> {
+  await setSetting(EMBEDDINGS_BACKFILL_ERROR_KEY, message, identity)
 }
 
 /** Last local calendar day on which a backfill was attempted. */
@@ -71,9 +78,12 @@ export async function getLastBackfillAttemptDay(): Promise<string | null> {
   return getSetting<string | null>(EMBEDDINGS_LAST_BACKFILL_ATTEMPT_DAY_KEY, null)
 }
 
-/** Record (or clear, with `null`) the last local calendar day backfill marker. */
-export async function setLastBackfillAttemptDay(day: string | null): Promise<void> {
-  await setSetting(EMBEDDINGS_LAST_BACKFILL_ATTEMPT_DAY_KEY, day)
+/** Record the last backfill day, optionally pinned to one open brain. */
+export async function setLastBackfillAttemptDay(
+  day: string | null,
+  identity?: DatabaseIdentity,
+): Promise<void> {
+  await setSetting(EMBEDDINGS_LAST_BACKFILL_ATTEMPT_DAY_KEY, day, identity)
 }
 
 /** A best-effort runtime poll that degrades to `uninitialized` off-desktop. */

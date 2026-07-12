@@ -10,16 +10,23 @@ import {
 } from '../../db/records'
 import { nowIso } from '../../db/time'
 import { validateNewProject, validateProjectPatch } from './validators'
+import type { DatabaseIdentity } from '../../db/identity'
 
 export type NewProject = NewRecord<Projects>
 export type ProjectPatch = RecordPatch<Projects>
 
-export function createProject(input: NewProject): Promise<string> {
-  return insertRecord('projects', validateNewProject(input))
+/** Create a project, optionally rejecting the write after a brain switch. */
+export function createProject(input: NewProject, expectedIdentity?: DatabaseIdentity): Promise<string> {
+  return insertRecord('projects', validateNewProject(input), expectedIdentity)
 }
 
-export function updateProject(id: string, patch: ProjectPatch): Promise<number> {
-  return updateRecord('projects', id, validateProjectPatch(patch))
+/** Update a project, optionally pinned to a captured brain identity. */
+export function updateProject(
+  id: string,
+  patch: ProjectPatch,
+  expectedIdentity?: DatabaseIdentity,
+): Promise<number> {
+  return updateRecord('projects', id, validateProjectPatch(patch), expectedIdentity)
 }
 
 /** Mark a project completed (status + completion date). */

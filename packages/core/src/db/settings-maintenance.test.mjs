@@ -58,6 +58,9 @@ function installFailingEmbedDeleteBridge(database) {
       if (command === 'embed_delete') {
         return Promise.reject(new Error('embed_delete failed: vec0 locked'))
       }
+      if (command === 'embed_database_identity') {
+        return Promise.resolve({ databasePath: '/test/brain.sqlite', generation: 1 })
+      }
       return Promise.reject(new Error(`unexpected command: ${command}`))
     },
   })
@@ -71,8 +74,251 @@ async function tableCount(table) {
   return Number(row.count)
 }
 
+function insertEmbeddedChunk(database, { id, recordType, recordId, text }) {
+  database
+    .prepare(
+      'INSERT INTO content_chunks (id, record_type, record_id, chunk_index, text) VALUES (?, ?, ?, 0, ?)',
+    )
+    .run(id, recordType, recordId, text)
+  database
+    .prepare(
+      "INSERT INTO chunk_embeddings (chunk_id, content_hash, model_id) VALUES (?, 'h', 'all-MiniLM-L6-v2')",
+    )
+    .run(id)
+}
+
 describe('Plan 08 destructive maintenance', () => {
   beforeEach(() => installSqliteBridge(freshDatabase()))
+
+  it.each([
+    ['person', 'people', 'INSERT INTO people (id, full_name) VALUES (?, ?)', 'Person'],
+    ['organization', 'organizations', 'INSERT INTO organizations (id, name) VALUES (?, ?)', 'Organization'],
+    ['project', 'projects', 'INSERT INTO projects (id, name) VALUES (?, ?)', 'Project'],
+    ['task', 'tasks', 'INSERT INTO tasks (id, title) VALUES (?, ?)', 'Task'],
+    ['document', 'documents', 'INSERT INTO documents (id, title) VALUES (?, ?)', 'Document'],
+    ['interaction', 'interactions', 'INSERT INTO interactions (id, title) VALUES (?, ?)', 'Interaction'],
+  ])('removes direct %s chunks, FTS rows, and embeddings', async (kind, table, insertSql, label) => {
+    const database = freshDatabase()
+    installSqliteBridge(database)
+    const recordId = `${kind}-delete`
+    const chunkId = `${kind}-chunk`
+    const noteId = `${kind}-note`
+    const factId = `${kind}-fact`
+    const token = `${kind}harddeletemarker`
+    database.prepare(insertSql).run(recordId, label)
+    database
+      .prepare(
+        'INSERT INTO ai_notes (id, subject_type, subject_id, content) VALUES (?, ?, ?, ?)',
+      )
+      .run(noteId, kind, recordId, `${label} derived note`)
+    database
+      .prepare(
+        'INSERT INTO extracted_facts (id, subject_type, subject_id, key, value_text) VALUES (?, ?, ?, ?, ?)',
+      )
+      .run(factId, kind, recordId, `${kind}-key`, `${label} derived fact`)
+    insertEmbeddedChunk(database, { id: chunkId, recordType: kind, recordId, text: token })
+    insertEmbeddedChunk(database, {
+      id: `${noteId}-chunk`,
+      recordType: 'ai_note',
+      recordId: noteId,
+      text: `${kind}notedeletemarker`,
+    })
+    insertEmbeddedChunk(database, {
+      id: `${factId}-chunk`,
+      recordType: 'extracted_fact',
+      recordId: factId,
+      text: `${kind}factdeletemarker`,
+    })
+
+    expect(
+      database.prepare('SELECT count(*) AS n FROM content_chunks_fts WHERE content_chunks_fts MATCH ?').get(token).n,
+    ).toBe(1)
+
+    await hardDeleteRecord(kind, recordId)
+
+    expect(database.prepare(`SELECT count(*) AS n FROM ${table} WHERE id = ?`).get(recordId).n).toBe(0)
+    expect(database.prepare('SELECT count(*) AS n FROM ai_notes WHERE id = ?').get(noteId).n).toBe(0)
+    expect(database.prepare('SELECT count(*) AS n FROM extracted_facts WHERE id = ?').get(factId).n).toBe(0)
+    expect(database.prepare('SELECT count(*) AS n FROM content_chunks').get().n).toBe(0)
+    expect(database.prepare('SELECT count(*) AS n FROM chunk_embeddings').get().n).toBe(0)
+    expect(
+      database.prepare('SELECT count(*) AS n FROM content_chunks_fts WHERE content_chunks_fts MATCH ?').get(token).n,
+    ).toBe(0)
+  })
+
+  it('removes chunks for organization profiles that cascade with their owner', async () => {
+    const database = freshDatabase()
+    installSqliteBridge(database)
+    database.prepare("INSERT INTO organizations (id, name) VALUES ('org-delete', 'Delete Org')").run()
+    database
+      .prepare(
+        "INSERT INTO organization_profiles (id, organization_id, one_line_description) VALUES ('profile-delete', 'org-delete', 'Profile')",
+      )
+      .run()
+    insertEmbeddedChunk(database, {
+      id: 'profile-chunk',
+      recordType: 'organization_profile',
+      recordId: 'profile-delete',
+      text: 'profileharddeletemarker',
+    })
+
+    await hardDeleteRecord('organization', 'org-delete')
+
+    expect(database.prepare('SELECT count(*) AS n FROM organization_profiles').get().n).toBe(0)
+    expect(database.prepare('SELECT count(*) AS n FROM content_chunks').get().n).toBe(0)
+    expect(database.prepare('SELECT count(*) AS n FROM chunk_embeddings').get().n).toBe(0)
+    expect(
+      database
+        .prepare("SELECT count(*) AS n FROM content_chunks_fts WHERE content_chunks_fts MATCH 'profileharddeletemarker'")
+        .get().n,
+    ).toBe(0)
+  })
+
+  it('removes chunks for transcripts and AI notes that cascade with an interaction', async () => {
+    const database = freshDatabase()
+    installSqliteBridge(database)
+    database.prepare("INSERT INTO interactions (id, title) VALUES ('interaction-delete', 'Delete')").run()
+    database
+      .prepare(
+        "INSERT INTO interaction_transcripts (id, interaction_id, raw_text) VALUES ('transcript-delete', 'interaction-delete', 'Transcript')",
+      )
+      .run()
+    database
+      .prepare(
+        "INSERT INTO ai_notes (id, interaction_id, content) VALUES ('note-delete', 'interaction-delete', 'Note')",
+      )
+      .run()
+    insertEmbeddedChunk(database, {
+      id: 'transcript-chunk',
+      recordType: 'interaction_transcript',
+      recordId: 'transcript-delete',
+      text: 'transcriptharddeletemarker',
+    })
+    insertEmbeddedChunk(database, {
+      id: 'note-chunk',
+      recordType: 'ai_note',
+      recordId: 'note-delete',
+      text: 'noteharddeletemarker',
+    })
+
+    await hardDeleteRecord('interaction', 'interaction-delete')
+
+    expect(database.prepare('SELECT count(*) AS n FROM interaction_transcripts').get().n).toBe(0)
+    expect(database.prepare('SELECT count(*) AS n FROM ai_notes').get().n).toBe(0)
+    expect(database.prepare('SELECT count(*) AS n FROM content_chunks').get().n).toBe(0)
+    expect(database.prepare('SELECT count(*) AS n FROM chunk_embeddings').get().n).toBe(0)
+  })
+
+  it('removes generic target rows and clears source-only fact provenance', async () => {
+    const database = freshDatabase()
+    installSqliteBridge(database)
+    database.prepare("INSERT INTO people (id, full_name) VALUES ('person-delete', 'Delete Person')").run()
+    database.prepare("INSERT INTO organizations (id, name) VALUES ('org-keep', 'Keep Org')").run()
+    database.prepare("INSERT INTO memories (id, claim) VALUES ('memory-keep', 'Keep memory')").run()
+    database
+      .prepare(
+        "INSERT INTO tasks (id, title, source_record_type, source_record_id) VALUES ('task-keep', 'Keep task', 'person', 'person-delete')",
+      )
+      .run()
+    database
+      .prepare(
+        "INSERT INTO assets (id, byte_size, content_hash, storage_path) VALUES ('asset-keep', 1, 'asset-hash', 'asset.bin')",
+      )
+      .run()
+    database.prepare("INSERT INTO sources (id, slug, name) VALUES ('source-1', 'source-1', 'Source')").run()
+    database.prepare("INSERT INTO tags (id, name) VALUES ('tag-1', 'Delete target')").run()
+    database
+      .prepare(
+        "INSERT INTO suggestions (id, kind, title) VALUES ('suggestion-1', 'create_project', 'Suggestion')",
+      )
+      .run()
+    database
+      .prepare(
+        "INSERT INTO content_chunks (id, record_type, record_id, chunk_index, text) VALUES ('memory-chunk', 'memory', 'memory-keep', 0, 'Preserved evidence')",
+      )
+      .run()
+    database
+      .prepare(
+        "INSERT INTO extracted_facts (id, subject_type, subject_id, key, value_text, source_record_type, source_record_id, source_excerpt) VALUES ('source-fact', 'organization', 'org-keep', 'status', 'active', 'person', 'person-delete', 'copied private source')",
+      )
+      .run()
+    database
+      .prepare(
+        "INSERT INTO content_chunks (id, record_type, record_id, source_record_type, source_record_id, chunk_index, text) VALUES ('source-fact-chunk', 'extracted_fact', 'source-fact', 'person', 'person-delete', 0, 'Organization status is active')",
+      )
+      .run()
+
+    database
+      .prepare(
+        "INSERT INTO memory_links (id, memory_id, record_type, record_id) VALUES ('memory-link', 'memory-keep', 'person', 'person-delete')",
+      )
+      .run()
+    database
+      .prepare(
+        "INSERT INTO asset_links (id, asset_id, record_type, record_id) VALUES ('asset-link', 'asset-keep', 'person', 'person-delete')",
+      )
+      .run()
+    database
+      .prepare(
+        "INSERT INTO evidence_refs (id, subject_type, subject_id, chunk_id) VALUES ('evidence-link', 'person', 'person-delete', 'memory-chunk')",
+      )
+      .run()
+    database
+      .prepare(
+        "INSERT INTO taggings (id, tag_id, record_type, record_id) VALUES ('tagging-link', 'tag-1', 'person', 'person-delete')",
+      )
+      .run()
+    database
+      .prepare(
+        "INSERT INTO external_identities (id, entity_type, entity_id, source_id, external_id) VALUES ('external-link', 'person', 'person-delete', 'source-1', 'external-person')",
+      )
+      .run()
+    database
+      .prepare(
+        "INSERT INTO record_provenance (id, record_type, record_id) VALUES ('provenance-link', 'person', 'person-delete')",
+      )
+      .run()
+    database
+      .prepare(
+        "INSERT INTO suggestion_links (id, suggestion_id, record_type, record_id) VALUES ('suggestion-link', 'suggestion-1', 'person', 'person-delete')",
+      )
+      .run()
+
+    await hardDeleteRecord('person', 'person-delete')
+
+    for (const table of [
+      'memory_links',
+      'asset_links',
+      'evidence_refs',
+      'taggings',
+      'external_identities',
+      'record_provenance',
+      'suggestion_links',
+    ]) {
+      expect(database.prepare(`SELECT count(*) AS n FROM ${table}`).get().n).toBe(0)
+    }
+    expect(
+      database
+        .prepare(
+          'SELECT source_record_type, source_record_id, source_excerpt FROM extracted_facts WHERE id = ?',
+        )
+        .get('source-fact'),
+    ).toEqual({ source_record_type: null, source_record_id: null, source_excerpt: null })
+    expect(
+      database
+        .prepare(
+          'SELECT source_record_type, source_record_id FROM content_chunks WHERE id = ?',
+        )
+        .get('source-fact-chunk'),
+    ).toEqual({ source_record_type: null, source_record_id: null })
+    expect(database.prepare('SELECT count(*) AS n FROM memories').get().n).toBe(1)
+    expect(database.prepare('SELECT count(*) AS n FROM assets').get().n).toBe(1)
+    expect(
+      database
+        .prepare('SELECT source_record_type, source_record_id FROM tasks WHERE id = ?')
+        .get('task-keep'),
+    ).toEqual({ source_record_type: null, source_record_id: null })
+  })
 
   it('hard-deletes a document with its chunks and rebuilds FTS', async () => {
     const doc = await ingestDocument({ title: 'Throwaway', bodyText: 'unique-token-zebra appears here' })

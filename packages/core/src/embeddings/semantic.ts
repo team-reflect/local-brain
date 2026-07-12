@@ -2,12 +2,15 @@ import { sql } from 'kysely'
 import { db } from '../db/client'
 import {
   chunkFilterClauses,
+  chunkNavigationRecordId,
+  chunkNavigationRecordType,
   chunkRecordDate,
   chunkRecordJoins,
   chunkRecordTitle,
   chunkVisibilityFilter,
   type ChunkFilters,
 } from '../retrieval/chunk-sources'
+import type { NavigableRecordType } from '../retrieval/record-candidate-types'
 import type { RetrievedChunk, SourceRecordType } from '../retrieval/retrieve'
 import { EMBEDDING_MODEL_ID } from './model'
 
@@ -18,8 +21,18 @@ import { EMBEDDING_MODEL_ID } from './model'
  * is a deterministic combinator with no I/O.
  */
 
-/** How many nearest neighbours to pull before filtering/ranking. */
+/** Minimum KNN pool before filtering; record-diverse callers may expand it. */
 export const KNN_CANDIDATES = 24
+
+/**
+ * Structural filters and record-level diversity are applied after vec0's KNN
+ * selection. Pull a wider neighbour pool so one long record (or many globally
+ * close but filtered records) is much less likely to exhaust that pool before
+ * the typed joins run.
+ */
+const KNN_OVERFETCH_MULTIPLIER = 4
+const MAX_KNN_CANDIDATES = 8_192
+const DEFAULT_RECORD_CHUNK_CAP = 2
 
 /**
  * Cosine-distance cutoff: neighbours farther than this are noise, not matches.
@@ -38,8 +51,22 @@ interface SemanticHitRow {
   recordId: string
   recordTitle: string | null
   recordDate: string | null
+  navigationRecordType: NavigableRecordType | null
+  navigationRecordId: string | null
   chunkIndex: number
   distance: number
+}
+
+/** Bounds and structural filters for one semantic chunk query. */
+export interface SemanticHitOptions {
+  /** Maximum chunks returned after filtering and optional per-record capping. */
+  limit: number
+  /** Typed/date/relation-derived filters applied after vec0 selects neighbours. */
+  filters?: ChunkFilters
+  /** Expand the KNN pool until this many unique filtered records are found. */
+  minUniqueRecords?: number
+  /** Per-record cap used with record-diverse retrieval. */
+  maxChunksPerRecord?: number
 }
 
 /** A short preview when there is no FTS snippet (semantic-only hits). */
@@ -57,13 +84,11 @@ function previewOf(text: string, max = 240): string {
  * (after a model change or a partial rebuild) can never rank into the results.
  * `score` is cosine similarity (1 − distance).
  */
-export async function semanticHits(
-  queryVector: readonly number[],
-  options: { limit: number; filters?: ChunkFilters } = { limit: 12 },
-): Promise<RetrievedChunk[]> {
-  const k = Math.max(options.limit, KNN_CANDIDATES)
-  const vectorJson = JSON.stringify(Array.from(queryVector))
-
+async function semanticRows(
+  vectorJson: string,
+  k: number,
+  filters: ChunkFilters | undefined,
+): Promise<SemanticHitRow[]> {
   const result = await sql<SemanticHitRow>`
     WITH knn AS (
       SELECT rowid, distance
@@ -78,17 +103,22 @@ export async function semanticHits(
       cc.chunk_index  AS "chunkIndex",
       ${chunkRecordTitle} AS "recordTitle",
       ${chunkRecordDate}  AS "recordDate",
+      ${chunkNavigationRecordType} AS "navigationRecordType",
+      ${chunkNavigationRecordId} AS "navigationRecordId",
       knn.distance               AS "distance"
     FROM knn
     JOIN chunk_embeddings ce ON ce.id = knn.rowid AND ce.model_id = ${EMBEDDING_MODEL_ID}
-    JOIN content_chunks cc   ON cc.id = ce.chunk_id
+    JOIN content_chunks cc   ON cc.id = ce.chunk_id AND cc.content_hash = ce.content_hash
     ${chunkRecordJoins}
     WHERE ${chunkVisibilityFilter}
-      ${chunkFilterClauses(options.filters)}
+      ${chunkFilterClauses(filters)}
     ORDER BY knn.distance
   `.execute(db)
-
   return result.rows
+}
+
+function mapSemanticRows(rows: readonly SemanticHitRow[]): RetrievedChunk[] {
+  return rows
     .filter((row) => Number(row.distance) <= MAX_COSINE_DISTANCE)
     .map((row) => {
       const similarity = 1 - Number(row.distance)
@@ -99,6 +129,8 @@ export async function semanticHits(
         recordType: row.recordType,
         recordId: row.recordId,
         recordTitle: row.recordTitle,
+        navigationRecordType: row.navigationRecordType,
+        navigationRecordId: row.navigationRecordId,
         recordDate: row.recordDate ?? null,
         chunkIndex: Number(row.chunkIndex),
         score: similarity,
@@ -106,7 +138,50 @@ export async function semanticHits(
         semanticScore: similarity,
       }
     })
-    .slice(0, options.limit)
+}
+
+function capChunksPerRecord(
+  hits: readonly RetrievedChunk[],
+  maxChunksPerRecord: number,
+): RetrievedChunk[] {
+  const counts = new Map<string, number>()
+  return hits.filter((hit) => {
+    const key = `${hit.recordType}:${hit.recordId}`
+    const count = counts.get(key) ?? 0
+    if (count >= maxChunksPerRecord) return false
+    counts.set(key, count + 1)
+    return true
+  })
+}
+
+/**
+ * Retrieve semantic chunks with optional record-diverse adaptive expansion.
+ * vec0 chooses global neighbours before typed SQL filters run, so record-level
+ * callers can request expansion up to a bounded ceiling when the first pool is
+ * dominated by one source or by rows later removed by filters.
+ */
+export async function semanticHits(
+  queryVector: readonly number[],
+  options: SemanticHitOptions = { limit: 12 },
+): Promise<RetrievedChunk[]> {
+  const vectorJson = JSON.stringify(Array.from(queryVector))
+  const initialK = Math.max(options.limit * KNN_OVERFETCH_MULTIPLIER, KNN_CANDIDATES)
+  const maxK = Math.max(initialK, MAX_KNN_CANDIDATES)
+  let k = initialK
+
+  while (true) {
+    const hits = mapSemanticRows(await semanticRows(vectorJson, k, options.filters))
+    if (!options.minUniqueRecords) return hits.slice(0, options.limit)
+
+    const uniqueRecords = new Set(hits.map((hit) => `${hit.recordType}:${hit.recordId}`)).size
+    if (uniqueRecords >= options.minUniqueRecords || k >= maxK) {
+      return capChunksPerRecord(
+        hits,
+        options.maxChunksPerRecord ?? DEFAULT_RECORD_CHUNK_CAP,
+      ).slice(0, options.limit)
+    }
+    k = Math.min(k * 2, maxK)
+  }
 }
 
 /**

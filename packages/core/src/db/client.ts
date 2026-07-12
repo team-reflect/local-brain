@@ -1,5 +1,6 @@
 import { createDb } from '@local-brain/db'
 import { getBridge } from '../ipc/bridge'
+import { expectedDatabaseArgs, type DatabaseIdentity } from './identity'
 
 /**
  * The app-wide Kysely instance. Reads compile to `{ sql, params }` in TypeScript
@@ -11,3 +12,10 @@ import { getBridge } from '../ipc/bridge'
  * snake_case schema and back on result rows.
  */
 export const db = createDb((sql, params) => getBridge().invoke('db_query', { sql, params }))
+
+/** A read-only Kysely client whose every query is rejected after a brain switch. */
+export function dbForDatabase(identity: DatabaseIdentity): ReturnType<typeof createDb> {
+  return createDb((sql, params) =>
+    getBridge().invoke('db_query', { sql, params, ...expectedDatabaseArgs(identity) }),
+  )
+}

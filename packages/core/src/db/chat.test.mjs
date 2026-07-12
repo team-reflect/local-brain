@@ -6,10 +6,62 @@ import {
   getConversation,
   listConversations,
   listMessages,
+  setBridge,
   updateChatMessageSnapshot,
   updateConversationTitle,
 } from '../index'
 import { freshDatabase, installSqliteBridge } from './sqlite-harness.mjs'
+
+function toSqlParam(value) {
+  if (value === null || value === undefined) return null
+  if (typeof value === 'boolean') return value ? 1 : 0
+  if (typeof value === 'object') return JSON.stringify(value)
+  return value
+}
+
+/** Resolve the message after append's old pre-read but before its upsert runs. */
+function installTerminalInterleavingBridge(database, terminalStatus) {
+  let injected = false
+  setBridge({
+    invoke(command, args) {
+      if (command === 'db_query') {
+        return Promise.resolve(database.prepare(args.sql).all(...args.params.map(toSqlParam)))
+      }
+      if (command === 'db_batch') {
+        if (!injected && args.statements[0]?.sql.includes('chat_messages')) {
+          injected = true
+          database
+            .prepare(
+              'UPDATE chat_messages SET content_text = ?, ui_message_json = ?, status = ?, error = ? WHERE id = ?',
+            )
+            .run(
+              'Terminal snapshot',
+              JSON.stringify({
+                id: 'msg-assistant',
+                role: 'assistant',
+                parts: [{ type: 'text', text: 'Terminal snapshot' }],
+              }),
+              terminalStatus,
+              terminalStatus === 'error' ? 'provider failed' : null,
+              'msg-assistant',
+            )
+        }
+        database.exec('BEGIN')
+        try {
+          const affected = args.statements.map((statement) =>
+            Number(database.prepare(statement.sql).run(...statement.params.map(toSqlParam)).changes),
+          )
+          database.exec('COMMIT')
+          return Promise.resolve(affected)
+        } catch (error) {
+          database.exec('ROLLBACK')
+          return Promise.reject(error)
+        }
+      }
+      return Promise.reject(new Error(`unexpected command: ${command}`))
+    },
+  })
+}
 
 describe('Chat persistence', () => {
   beforeEach(() => installSqliteBridge(freshDatabase()))
@@ -220,6 +272,55 @@ describe('Chat persistence', () => {
       },
     ])
   })
+
+  it.each(['done', 'error'])(
+    'atomically preserves an interleaved %s snapshot inside the streaming upsert',
+    async (terminalStatus) => {
+      const database = freshDatabase()
+      installSqliteBridge(database)
+      const conversationId = await createConversation({ id: 'chat-1', title: 'Tasks' })
+      await appendChatMessage({
+        id: 'msg-assistant',
+        conversationId,
+        role: 'assistant',
+        contentText: 'Approval needed.',
+        uiMessageJson: {
+          id: 'msg-assistant',
+          role: 'assistant',
+          parts: [{ type: 'tool-create_task', state: 'approval-requested' }],
+        },
+        status: 'streaming',
+      })
+
+      installTerminalInterleavingBridge(database, terminalStatus)
+      await appendChatMessage({
+        id: 'msg-assistant',
+        conversationId,
+        role: 'assistant',
+        contentText: 'Late streaming snapshot',
+        uiMessageJson: {
+          id: 'msg-assistant',
+          role: 'assistant',
+          parts: [{ type: 'tool-create_task', state: 'approval-requested' }],
+        },
+        status: 'streaming',
+      })
+
+      expect(await listMessages(conversationId)).toEqual([
+        expect.objectContaining({
+          id: 'msg-assistant',
+          contentText: 'Terminal snapshot',
+          status: terminalStatus,
+          error: terminalStatus === 'error' ? 'provider failed' : null,
+          uiMessageJson: {
+            id: 'msg-assistant',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'Terminal snapshot' }],
+          },
+        }),
+      ])
+    },
+  )
 
   it('hides archived conversations unless requested', async () => {
     await createConversation({ id: 'chat-open', title: 'Open' })

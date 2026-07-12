@@ -4,8 +4,14 @@ import { db } from '../../db/client'
 import type { SourceRecordType } from '../../retrieval/retrieve'
 import { recordSummary } from './record-summaries'
 
+/** Default chunk-text budget allocated to one Chat record detail. */
 export const DEFAULT_RECORD_DETAIL_CHARS = 4000
+/** Hard per-record chunk-text budget accepted by the Chat read tool. */
 export const MAX_RECORD_DETAIL_CHARS = 12000
+/** Default aggregate chunk-text budget for one batched Chat detail read. */
+export const DEFAULT_RECORD_DETAIL_TOTAL_CHARS = 24000
+/** Hard aggregate chunk-text budget accepted by the Chat read tool. */
+export const MAX_RECORD_DETAIL_TOTAL_CHARS = 32000
 
 export interface ChatRecordRequest {
   recordType: SourceRecordType
@@ -22,6 +28,7 @@ export interface ChatRecordChunk {
 export interface ChatRecordDetail {
   recordType: SourceRecordType
   recordId: string
+  recordRef: string
   found: boolean
   title: string | null
   date: string | null
@@ -32,9 +39,16 @@ export interface ChatRecordDetail {
 
 type ContentChunk = Pick<Selectable<ContentChunks>, 'id' | 'chunkIndex' | 'text'>
 
-function limitFor(options: { maxCharsPerRecord?: number }): number {
-  const raw = options.maxCharsPerRecord ?? DEFAULT_RECORD_DETAIL_CHARS
-  return Math.min(Math.max(raw, 1), MAX_RECORD_DETAIL_CHARS)
+/** Per-record and aggregate chunk-text budgets for a batched detail read. */
+export interface ChatRecordDetailOptions {
+  /** Maximum chunk-text characters allocated to any one record. */
+  maxCharsPerRecord?: number
+  /** Maximum chunk-text characters allocated across the whole call. */
+  maxTotalChars?: number
+}
+
+function boundedLimit(raw: number | undefined, fallback: number, maximum: number): number {
+  return Math.min(Math.max(raw ?? fallback, 1), maximum)
 }
 
 async function chunkCount(recordType: SourceRecordType, recordId: string): Promise<number> {
@@ -106,6 +120,50 @@ function fitChunks(rows: readonly ContentChunk[], maxChars: number): {
   return { chunks, truncatedByBudget: false }
 }
 
+function fitFocusedChunks(
+  rows: readonly ContentChunk[],
+  chunkIds: readonly string[],
+  maxChars: number,
+): { chunks: ChatRecordChunk[]; truncatedByBudget: boolean } {
+  const byId = new Map(rows.map((row) => [row.id, row]))
+  const requested = [...new Set(chunkIds)]
+    .map((id) => byId.get(id))
+    .filter((row): row is ContentChunk => row !== undefined)
+  const requestedIds = new Set(requested.map((row) => row.id))
+  const allocations = new Map(requested.map((row) => [row.id, 0]))
+  let remaining = maxChars
+  let pending = requested.filter((row) => row.text.length > 0)
+
+  // Water-fill the requested chunks so no first large chunk can starve later
+  // explicit evidence. At very small budgets a chunk may carry an empty
+  // excerpt, but its stable id still survives for citation/inspection.
+  while (remaining > 0 && pending.length > 0) {
+    const share = Math.max(1, Math.floor(remaining / pending.length))
+    for (const row of pending) {
+      if (remaining <= 0) break
+      const current = allocations.get(row.id) ?? 0
+      const addition = Math.min(row.text.length - current, share, remaining)
+      allocations.set(row.id, current + addition)
+      remaining -= addition
+    }
+    pending = pending.filter((row) => (allocations.get(row.id) ?? 0) < row.text.length)
+  }
+
+  const requestedChunks = requested.map((row) => ({
+    chunkId: row.id,
+    chunkIndex: row.chunkIndex,
+    text: row.text.slice(0, allocations.get(row.id) ?? 0),
+  }))
+  const neighbours = rows.filter((row) => !requestedIds.has(row.id))
+  const fittedNeighbours = fitChunks(neighbours, remaining)
+  return {
+    chunks: [...requestedChunks, ...fittedNeighbours.chunks],
+    truncatedByBudget:
+      requested.some((row) => (allocations.get(row.id) ?? 0) < row.text.length) ||
+      fittedNeighbours.truncatedByBudget,
+  }
+}
+
 async function recordChunks(
   request: ChatRecordRequest,
   maxChars: number,
@@ -115,9 +173,12 @@ async function recordChunks(
     request.chunkIds && request.chunkIds.length > 0
       ? await chunksAroundIds(request.recordType, request.recordId, request.chunkIds)
       : await chunksByRecord(request.recordType, request.recordId)
-  const fitted = fitChunks(rows, maxChars)
+  const fitted =
+    request.chunkIds && request.chunkIds.length > 0
+      ? fitFocusedChunks(rows, request.chunkIds, maxChars)
+      : fitChunks(rows, maxChars)
   return {
-    chunks: fitted.chunks,
+    chunks: fitted.chunks.sort((a, b) => a.chunkIndex - b.chunkIndex),
     truncated: fitted.truncatedByBudget || total > fitted.chunks.length,
   }
 }
@@ -131,6 +192,7 @@ async function getChatRecord(
     return {
       recordType: request.recordType,
       recordId: request.recordId,
+      recordRef: `${request.recordType}:${request.recordId}`,
       found: false,
       title: null,
       date: null,
@@ -144,6 +206,7 @@ async function getChatRecord(
   return {
     recordType: request.recordType,
     recordId: request.recordId,
+    recordRef: `${request.recordType}:${request.recordId}`,
     found: true,
     title: summary.title,
     date: summary.date,
@@ -153,10 +216,28 @@ async function getChatRecord(
   }
 }
 
+/** Load structured records while enforcing both per-record and per-call text budgets. */
 export function getChatRecords(
   requests: readonly ChatRecordRequest[],
-  options: { maxCharsPerRecord?: number } = {},
+  options: ChatRecordDetailOptions = {},
 ): Promise<ChatRecordDetail[]> {
-  const maxChars = limitFor(options)
-  return Promise.all(requests.map((request) => getChatRecord(request, maxChars)))
+  const maxPerRecord = boundedLimit(
+    options.maxCharsPerRecord,
+    DEFAULT_RECORD_DETAIL_CHARS,
+    MAX_RECORD_DETAIL_CHARS,
+  )
+  const maxTotal = boundedLimit(
+    options.maxTotalChars,
+    DEFAULT_RECORD_DETAIL_TOTAL_CHARS,
+    MAX_RECORD_DETAIL_TOTAL_CHARS,
+  )
+  let remaining = maxTotal
+  const budgets = requests.map((_request, index) => {
+    const requestsLeft = requests.length - index
+    const fairShare = Math.floor(remaining / requestsLeft)
+    const allocation = Math.min(maxPerRecord, fairShare)
+    remaining -= allocation
+    return allocation
+  })
+  return Promise.all(requests.map((request, index) => getChatRecord(request, budgets[index] ?? 0)))
 }

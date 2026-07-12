@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react'
+import { memo, useCallback, useMemo, type ReactNode } from 'react'
 import type { UIMessage } from 'ai'
+import { useRouter } from '../../routing/router'
 import { EmptyState } from '../empty-state'
 import { Bubble, BubbleContent } from '../ui/bubble'
 import { Marker, MarkerContent } from '../ui/marker'
@@ -13,6 +14,11 @@ import {
   MessageScrollerViewport,
 } from '../ui/message-scroller'
 import { ChatMarkdown } from './chat-markdown'
+import {
+  chatSourcesFromMessageParts,
+  routeForChatSource,
+  type ChatSource,
+} from './chat-sources'
 import { ChatToolChip, type ToolApprovalResponse, type ToolPart } from './chat-tool-chip'
 
 export function ChatMessageList({
@@ -26,6 +32,12 @@ export function ChatMessageList({
   showThinking: boolean
   onToolApprovalResponse: (response: ToolApprovalResponse) => void | PromiseLike<void>
 }): ReactNode {
+  const { navigate } = useRouter()
+  const onOpenSource = useCallback((source: ChatSource): void => {
+    const route = routeForChatSource(source)
+    if (route) navigate(route)
+  }, [navigate])
+
   if (messages.length === 0 && !showThinking) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center">
@@ -52,6 +64,7 @@ export function ChatMessageList({
                   message={message}
                   streamingMessageId={streamingMessageId}
                   onToolApprovalResponse={onToolApprovalResponse}
+                  onOpenSource={onOpenSource}
                 />
               </MessageScrollerItem>
             ))}
@@ -70,16 +83,19 @@ export function ChatMessageList({
   )
 }
 
-function ChatMessageRow({
+const ChatMessageRow = memo(function ChatMessageRow({
   message,
   streamingMessageId,
   onToolApprovalResponse,
+  onOpenSource,
 }: {
   message: UIMessage
   streamingMessageId: string | null
   onToolApprovalResponse: (response: ToolApprovalResponse) => void | PromiseLike<void>
+  onOpenSource: (source: ChatSource) => void
 }): ReactNode {
   const isStreaming = message.id === streamingMessageId
+  const sources = useMemo(() => chatSourcesFromMessageParts(message.parts), [message.parts])
 
   if (message.role === 'user') {
     return (
@@ -125,7 +141,14 @@ function ChatMessageRow({
                     </div>
                   )
                 }
-                return text ? <ChatMarkdown key={`${message.id}-${index}`} text={text} /> : null
+                return text ? (
+                  <ChatMarkdown
+                    key={`${message.id}-${index}`}
+                    text={text}
+                    sources={sources}
+                    onOpenSource={onOpenSource}
+                  />
+                ) : null
               }
 
               if (partType === 'reasoning') {
@@ -143,6 +166,7 @@ function ChatMessageRow({
                       <ChatToolChip
                         part={partRecord as unknown as ToolPart}
                         onApprovalResponse={onToolApprovalResponse}
+                        onOpenSource={onOpenSource}
                       />
                     </MarkerContent>
                   </Marker>
@@ -156,4 +180,4 @@ function ChatMessageRow({
       </MessageContent>
     </Message>
   )
-}
+})

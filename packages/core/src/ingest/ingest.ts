@@ -1,9 +1,11 @@
 import type { Compilable } from 'kysely'
-import { db } from '../db/client'
+import { db, dbForDatabase } from '../db/client'
 import { batch } from '../db/commands'
+import { activeDatabaseIdentity, type DatabaseIdentity } from '../db/identity'
 import { newId } from '../db/id'
 import { type LinkEntityType, sourceLinkInsert } from '../extraction/source-links'
-import { chunkText, normalizeText } from './chunk'
+import { normalizeText } from './chunk'
+import { contentChunkProjection } from './content-projection'
 import { contentHash } from './hash'
 import { markForExtraction } from './extraction-queue'
 import { recomputeRelationshipIntelligence } from '../domains/relationships/recompute'
@@ -56,38 +58,13 @@ export interface IngestInteractionInput extends BaseIngestInput {
   externalId?: string | null
 }
 
-async function chunkStatements(
-  recordType: 'document' | 'interaction',
-  recordId: string,
-  body: string,
-): Promise<{
-  statements: Compilable[]
-  count: number
-}> {
-  const chunks = chunkText(body)
-  // Store each chunk's text hash so the embedding-status count can compare it
-  // against the embedded hash in SQL instead of re-hashing every chunk per poll.
-  const statements = await Promise.all(
-    chunks.map(async (chunk) =>
-      db.insertInto('contentChunks').values({
-        id: newId(),
-        recordType,
-        recordId,
-        chunkIndex: chunk.index,
-        text: chunk.text,
-        contentHash: await contentHash(chunk.text),
-      }),
-    ),
-  )
-  return { statements, count: chunks.length }
-}
-
 /** Lookup an existing, non-archived record by content hash. */
 async function findDuplicate(
   table: 'documents' | 'interactions',
   hash: string,
+  identity: DatabaseIdentity,
 ): Promise<string | undefined> {
-  const row = await db
+  const row = await dbForDatabase(identity)
     .selectFrom(table)
     .select('id')
     .where('contentHash', '=', hash)
@@ -98,7 +75,8 @@ async function findDuplicate(
 }
 
 export async function ingestDocument(input: IngestDocumentInput): Promise<IngestResult> {
-  const { body, hash, dup } = await prepare('documents', input)
+  const identity = await activeDatabaseIdentity()
+  const { body, hash, dup } = await prepare('documents', input, identity)
 
   // Apply the same write contract as `createDocument` *before* the duplicate
   // short-circuit: normalize the title/body and reject a record with neither, so
@@ -117,7 +95,10 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
   if (dup && !input.allowDuplicate) return { id: dup, isDuplicate: true, chunkCount: 0 }
 
   const id = newId()
-  const chunks = await chunkStatements('document', id, body)
+  const chunks = await contentChunkProjection('document', id, body, {
+    databaseIdentity: identity,
+    readExisting: false,
+  })
   const statements: Compilable[] = [
     db.insertInto('documents').values({
       id,
@@ -134,13 +115,14 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
     ...chunks.statements,
     ...linkStatements('document', id, input.links),
   ]
-  await batch(statements)
+  await batch(statements, identity)
   markForExtraction('document', id)
-  return { id, isDuplicate: Boolean(dup), chunkCount: chunks.count }
+  return { id, isDuplicate: Boolean(dup), chunkCount: chunks.chunkCount }
 }
 
 export async function ingestInteraction(input: IngestInteractionInput): Promise<IngestResult> {
-  const { body, hash, dup } = await prepare('interactions', input)
+  const identity = await activeDatabaseIdentity()
+  const { body, hash, dup } = await prepare('interactions', input, identity)
 
   // Same write contract as `createInteraction` (mirrors `ingestDocument`):
   // normalize title/body and reject a record with neither, *before* the
@@ -160,7 +142,10 @@ export async function ingestInteraction(input: IngestInteractionInput): Promise<
   if (dup && !input.allowDuplicate) return { id: dup, isDuplicate: true, chunkCount: 0 }
 
   const id = newId()
-  const chunks = await chunkStatements('interaction', id, body)
+  const chunks = await contentChunkProjection('interaction', id, body, {
+    databaseIdentity: identity,
+    readExisting: false,
+  })
   const statements: Compilable[] = [
     db.insertInto('interactions').values({
       id,
@@ -178,22 +163,23 @@ export async function ingestInteraction(input: IngestInteractionInput): Promise<
     ...chunks.statements,
     ...linkStatements('interaction', id, input.links),
   ]
-  await batch(statements)
+  await batch(statements, identity)
   markForExtraction('interaction', id)
   // A new interaction refreshes its participants' relationship hints (step 9).
   for (const personId of input.links?.people ?? []) {
-    await recomputeRelationshipIntelligence(personId)
+    await recomputeRelationshipIntelligence(personId, { databaseIdentity: identity })
   }
-  return { id, isDuplicate: Boolean(dup), chunkCount: chunks.count }
+  return { id, isDuplicate: Boolean(dup), chunkCount: chunks.chunkCount }
 }
 
 async function prepare(
   table: 'documents' | 'interactions',
   input: BaseIngestInput,
+  identity: DatabaseIdentity,
 ): Promise<{ body: string; hash: string; dup: string | undefined }> {
   const body = normalizeText(input.bodyText)
   const hash = await contentHash(body)
-  const dup = await findDuplicate(table, hash)
+  const dup = await findDuplicate(table, hash, identity)
   return { body, hash, dup }
 }
 

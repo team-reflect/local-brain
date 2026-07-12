@@ -25,6 +25,8 @@ import {
 import { getProject } from '../../domains/projects/getters'
 import { getTask, listTaskAssignees } from '../../domains/tasks/getters'
 import type { SourceRecordType } from '../../retrieval/retrieve'
+import { cleanMetadata, parseJsonField } from './record-summary-metadata'
+import { isAiNoteAnchorVisible, isVisibleArchived } from './record-visibility'
 
 export interface RecordSummary {
   title: string | null
@@ -36,47 +38,6 @@ type AiNote = Selectable<AiNotes>
 type ExtractedFact = Selectable<ExtractedFacts>
 type InteractionTranscript = Selectable<InteractionTranscripts>
 type OrganizationProfile = Selectable<OrganizationProfiles>
-
-const METADATA_TEXT_LIMIT = 600
-
-function trimMetadataText(value: string, limit = METADATA_TEXT_LIMIT): string {
-  const compact = value.replace(/\s+/g, ' ').trim()
-  return compact.length <= limit ? compact : `${compact.slice(0, limit - 3).trimEnd()}...`
-}
-
-function parseJsonField(value: string | null): unknown {
-  if (!value) return undefined
-  try {
-    return JSON.parse(value) as unknown
-  } catch {
-    return trimMetadataText(value)
-  }
-}
-
-function cleanMetadata(values: Record<string, unknown>): Record<string, unknown> {
-  const metadata: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(values)) {
-    if (value === null || value === undefined || value === '') continue
-    if (typeof value === 'string') {
-      metadata[key] = trimMetadataText(value)
-      continue
-    }
-    if (Array.isArray(value) && value.length === 0) continue
-    if (
-      typeof value === 'object' &&
-      !Array.isArray(value) &&
-      Object.keys(value as Record<string, unknown>).length === 0
-    ) {
-      continue
-    }
-    metadata[key] = value
-  }
-  return metadata
-}
-
-function isVisibleArchived(value: { archivedAt: string | null }): boolean {
-  return value.archivedAt === null
-}
 
 async function getAiNote(id: string): Promise<AiNote | undefined> {
   return db.selectFrom('aiNotes').selectAll().where('id', '=', id).executeTakeFirst()
@@ -110,6 +71,7 @@ async function personSummary(id: string): Promise<RecordSummary | undefined> {
       preferredName: person.preferredName,
       headline: person.headline,
       summary: person.summary,
+      notes: person.notes,
       primaryEmail: person.primaryEmail,
       primaryPhone: person.primaryPhone,
       location: person.location,
@@ -182,12 +144,13 @@ async function organizationProfileSummary(id: string): Promise<RecordSummary | u
   const profile = await getOrganizationProfile(id)
   if (!profile) return undefined
   const organization = await getOrganization(profile.organizationId)
+  if (!organization || !isVisibleArchived(organization)) return undefined
   return {
-    title: profile.oneLineDescription ?? profile.canonicalName ?? organization?.name ?? null,
+    title: profile.oneLineDescription ?? profile.canonicalName ?? organization.name,
     date: profile.researchedAt ?? profile.updatedAt,
     metadata: cleanMetadata({
       organizationId: profile.organizationId,
-      organizationName: organization?.name,
+      organizationName: organization.name,
       canonicalName: profile.canonicalName,
       website: profile.website,
       category: profile.category,
@@ -346,7 +309,7 @@ async function interactionTranscriptSummary(id: string): Promise<RecordSummary |
 
 async function aiNoteSummary(id: string): Promise<RecordSummary | undefined> {
   const note = await getAiNote(id)
-  if (!note) return undefined
+  if (!note || !(await isAiNoteAnchorVisible(note))) return undefined
   return {
     title: note.title,
     date: note.generatedAt ?? note.updatedAt,
