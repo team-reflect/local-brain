@@ -27,12 +27,17 @@ import {
   type DatabaseIdentity,
 } from '@local-brain/core'
 import { generateAndPersistConversationTitle } from './conversation-title'
-import { rememberChatApprovalDatabaseIdentity } from './chat-approval'
+import {
+  rememberChatApprovalDatabaseIdentity,
+  revokeChatApprovalDatabaseIdentities,
+  type ChatApprovalLease,
+} from './chat-approval'
 import {
   beginAssistantPersistenceTurn,
   finishAssistantPersistenceTurn,
   persistAssistantForTurn,
   prepareRegenerationTurn,
+  rollbackRegeneratedAssistantForTurn,
   type AssistantPersistenceTurn,
 } from './chat-persistence'
 import { resolveLanguageModel, type LanguageModelSelection } from './provider'
@@ -231,11 +236,56 @@ function contextWindowForModel(label: string): number {
 export function createChatTransport(options: ChatTransportOptions = {}): ChatTransport<UIMessage> {
   return {
     async sendMessages({ trigger, chatId, messageId, messages, abortSignal }) {
+      let responseFailed = abortSignal?.aborted ?? false
+      let rollbackDisabled = false
       let identity: DatabaseIdentity | null = null
+      let assistantTurn: AssistantPersistenceTurn | null = null
+      let rollbackPromise: Promise<void> | null = null
+      let persistenceOwnershipFinished = false
+      const finishPersistenceOwnership = (turn: AssistantPersistenceTurn): void => {
+        if (persistenceOwnershipFinished) return
+        persistenceOwnershipFinished = true
+        finishAssistantPersistenceTurn(turn)
+      }
+      const startRegenerationRollback = (): Promise<void> | null => {
+        if (trigger !== 'regenerate-message' || rollbackDisabled || !identity || !assistantTurn) {
+          return null
+        }
+        if (!rollbackPromise) {
+          const rollbackIdentity = identity
+          const rollbackTurn = assistantTurn
+          rollbackPromise = rollbackRegeneratedAssistantForTurn(chatId, rollbackIdentity, rollbackTurn)
+            .finally(() => finishPersistenceOwnership(rollbackTurn))
+          void rollbackPromise.catch(() => undefined)
+        }
+        return rollbackPromise
+      }
+      const responseApprovalLeases = new Map<string, ChatApprovalLease>()
+      const revokeResponseApprovals = (): void => {
+        if (trigger !== 'regenerate-message' || rollbackDisabled) return
+        if (!revokeChatApprovalDatabaseIdentities([...responseApprovalLeases.values()])) {
+          rollbackDisabled = true
+        }
+      }
+      const handleAbort = (): void => {
+        responseFailed = true
+        revokeResponseApprovals()
+        startRegenerationRollback()
+      }
+      let abortListenerAttached = false
+      if (abortSignal && !abortSignal.aborted) {
+        abortSignal.addEventListener('abort', handleAbort, { once: true })
+        abortListenerAttached = true
+        if (abortSignal.aborted) handleAbort()
+      }
+      const removeAbortListener = (): void => {
+        if (!abortSignal || !abortListenerAttached) return
+        abortSignal.removeEventListener('abort', handleAbort)
+        abortListenerAttached = false
+      }
       let responseId = trigger === 'regenerate-message'
         ? null
         : responseMessageIdForTurn(messages)
-      let assistantTurn: AssistantPersistenceTurn | null = null
       let responseModel: string | null = null
       try {
         const turnIdentity = await activeDatabaseIdentity()
@@ -261,6 +311,7 @@ export function createChatTransport(options: ChatTransportOptions = {}): ChatTra
           responseId = regeneration.target.id
           responseModel = regeneration.target.model
           assistantTurn = regeneration.turn
+          if (responseFailed) startRegenerationRollback()
         } else {
           if (!responseId) throw new Error('Chat could not create an assistant response id.')
           assistantTurn = await beginAssistantPersistenceTurn(
@@ -310,7 +361,6 @@ export function createChatTransport(options: ChatTransportOptions = {}): ChatTra
           generateMessageId: () => turnResponseId,
         })
         const latest = messages[messages.length - 1]
-        let responseFailed = false
         const stream = createUIMessageStream<UIMessage>({
           originalMessages: messages,
           generateId: () => turnResponseId,
@@ -328,9 +378,21 @@ export function createChatTransport(options: ChatTransportOptions = {}): ChatTra
                 if (value.type === 'text-delta' && value.delta.trim()) hasReplyText = true
                 if (value.type === 'tool-approval-request') {
                   awaitingApproval = true
-                  rememberChatApprovalDatabaseIdentity(value.approvalId, turnIdentity)
+                  let lease = responseApprovalLeases.get(value.approvalId)
+                  if (!lease) {
+                    lease = rememberChatApprovalDatabaseIdentity(value.approvalId, turnIdentity)
+                    responseApprovalLeases.set(value.approvalId, lease)
+                  }
+                  if (responseFailed) {
+                    revokeResponseApprovals()
+                    startRegenerationRollback()
+                  }
                 }
-                if (value.type === 'error' || value.type === 'abort') responseFailed = true
+                if (value.type === 'error' || value.type === 'abort') {
+                  responseFailed = true
+                  revokeResponseApprovals()
+                  startRegenerationRollback()
+                }
                 if (value.type === 'finish' && !hasReplyText && !awaitingApproval && !responseFailed) {
                   const textId = `${turnResponseId}-fallback`
                   writer.write({ type: 'text-start', id: textId })
@@ -342,6 +404,8 @@ export function createChatTransport(options: ChatTransportOptions = {}): ChatTra
               }
             } catch (error) {
               responseFailed = true
+              revokeResponseApprovals()
+              startRegenerationRollback()
               throw error
             }
           },
@@ -352,11 +416,13 @@ export function createChatTransport(options: ChatTransportOptions = {}): ChatTra
                 : messageHasPendingApproval(responseMessage)
                   ? 'streaming'
                   : 'done'
+            const failedResponse = isAborted || responseFailed || finishReason === 'error'
             try {
-              if (
-                trigger === 'regenerate-message' &&
-                (isAborted || responseFailed || finishReason === 'error')
-              ) return
+              if (failedResponse) revokeResponseApprovals()
+              if (trigger === 'regenerate-message' && failedResponse) {
+                await startRegenerationRollback()
+                return
+              }
               await persistAssistantForTurn(
                 chatId,
                 responseMessage,
@@ -367,7 +433,8 @@ export function createChatTransport(options: ChatTransportOptions = {}): ChatTra
                 responseTurn,
               )
             } finally {
-              finishAssistantPersistenceTurn(responseTurn)
+              removeAbortListener()
+              finishPersistenceOwnership(responseTurn)
             }
             if (shouldGenerateTitle && finishReason !== 'error') {
               generateAndPersistConversationTitle({
@@ -392,6 +459,7 @@ export function createChatTransport(options: ChatTransportOptions = {}): ChatTra
         })
         return uiStream
       } catch (error) {
+        removeAbortListener()
         const messageText = errorMessage(error)
         const errorTurn = assistantTurn
         const message = assistantMessage(
@@ -417,7 +485,7 @@ export function createChatTransport(options: ChatTransportOptions = {}): ChatTra
             ))
             .catch(() => undefined)
         }
-        if (errorTurn) finishAssistantPersistenceTurn(errorTurn)
+        if (errorTurn) finishPersistenceOwnership(errorTurn)
         return staticAssistantStream(message, 'error')
       }
     },

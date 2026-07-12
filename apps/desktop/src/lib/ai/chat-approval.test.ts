@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   handleChatToolApprovalResponse,
   rememberChatApprovalDatabaseIdentity,
+  revokeChatApprovalDatabaseIdentity,
+  type ChatApprovalLease,
 } from './chat-approval'
 
 const coreMocks = vi.hoisted(() => ({
@@ -81,9 +83,11 @@ function approvalOptions(
 }
 
 describe('handleChatToolApprovalResponse', () => {
+  let approvalLease: ChatApprovalLease
+
   beforeEach(() => {
     vi.clearAllMocks()
-    rememberChatApprovalDatabaseIdentity('approval-1', {
+    approvalLease = rememberChatApprovalDatabaseIdentity('approval-1', {
       databasePath: '/test/brain.sqlite',
       generation: 1,
     })
@@ -140,6 +144,86 @@ describe('handleChatToolApprovalResponse', () => {
       { title: 'Send budget' },
       { databasePath: '/test/brain.sqlite', generation: 1 },
     )
+  })
+
+  it('does not let a late old lease revoke a newly streamed reuse of its approval id', async () => {
+    rememberChatApprovalDatabaseIdentity('approval-1', {
+      databasePath: '/test/brain.sqlite',
+      generation: 1,
+    })
+    expect(revokeChatApprovalDatabaseIdentity(approvalLease)).toBe(false)
+    let currentMessages: UIMessage[] = [pendingTaskMessage()]
+
+    await handleChatToolApprovalResponse(
+      { id: 'approval-1', approved: true },
+      approvalOptions(
+        new QueryClient(),
+        () => currentMessages,
+        (messages) => {
+          currentMessages = messages
+        },
+      ),
+    )
+
+    expect(coreMocks.executeChatWriteTool).toHaveBeenCalledTimes(1)
+    expect(firstToolPart(currentMessages)).toMatchObject({ state: 'output-available' })
+  })
+
+  it('retains a revoked tombstone until its matching UI approval is available', async () => {
+    expect(revokeChatApprovalDatabaseIdentity(approvalLease)).toBe(true)
+    let currentMessages: UIMessage[] = []
+    const options = approvalOptions(
+      new QueryClient(),
+      () => currentMessages,
+      (messages) => {
+        currentMessages = messages
+      },
+    )
+
+    await handleChatToolApprovalResponse({ id: 'approval-1', approved: true }, options)
+    currentMessages = [pendingTaskMessage()]
+    await handleChatToolApprovalResponse({ id: 'approval-1', approved: true }, options)
+
+    expect(coreMocks.updateChatMessageSnapshot).not.toHaveBeenCalled()
+    expect(coreMocks.executeChatWriteTool).not.toHaveBeenCalled()
+    expect(firstToolPart(currentMessages)).toMatchObject({
+      state: 'output-error',
+      errorText: 'This approval is no longer valid. Retry the request.',
+    })
+  })
+
+  it('lets a user action that starts first win over a later turn revocation', async () => {
+    let currentMessages: UIMessage[] = [pendingTaskMessage()]
+    let resolveIdentity: () => void = () => {
+      throw new Error('Expected approval identity verification to start.')
+    }
+    coreMocks.assertActiveDatabaseIdentity.mockReturnValueOnce(new Promise<void>((resolve) => {
+      resolveIdentity = resolve
+    }))
+
+    const approval = handleChatToolApprovalResponse(
+      { id: 'approval-1', approved: true },
+      approvalOptions(
+        new QueryClient(),
+        () => currentMessages,
+        (messages) => {
+          currentMessages = messages
+        },
+      ),
+    )
+    await vi.waitFor(() => {
+      expect(coreMocks.assertActiveDatabaseIdentity).toHaveBeenCalledTimes(1)
+    })
+    expect(revokeChatApprovalDatabaseIdentity(approvalLease)).toBe(false)
+    resolveIdentity()
+    await approval
+
+    expect(coreMocks.updateChatMessageSnapshot).toHaveBeenCalled()
+    expect(coreMocks.executeChatWriteTool).toHaveBeenCalledTimes(1)
+    expect(firstToolPart(currentMessages)).toMatchObject({
+      state: 'output-available',
+      approval: { id: 'approval-1', approved: true },
+    })
   })
 
   it('settles locally without executing when the approval acknowledgement cannot be persisted', async () => {

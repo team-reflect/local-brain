@@ -20,8 +20,24 @@ import {
 import { invalidateChatTurnQueries } from '../queries'
 import { errorMessage } from '../utils'
 
-const inFlightApprovalIds = new Set<string>()
-const liveApprovalIdentities = new Map<string, DatabaseIdentity>()
+declare const chatApprovalLeaseBrand: unique symbol
+
+/** Opaque ownership token for one streamed approval id registration. */
+export interface ChatApprovalLease {
+  readonly [chatApprovalLeaseBrand]: true
+}
+
+interface ApprovalLeaseRecord {
+  approvalId: string
+  identity: DatabaseIdentity
+  lease: ChatApprovalLease
+  state: 'live' | 'in-flight' | 'revoked' | 'superseded' | 'finished'
+}
+
+const inFlightRestoredApprovalIds = new Set<string>()
+const liveApprovalLeases = new Map<string, ApprovalLeaseRecord>()
+const revokedApprovalLeases = new Map<string, ApprovalLeaseRecord>()
+const approvalLeaseRecords = new WeakMap<ChatApprovalLease, ApprovalLeaseRecord>()
 const STALE_APPROVAL_MESSAGE = 'This approval is no longer valid. Retry the request.'
 const APPROVAL_VERIFY_FAILED_MESSAGE = 'Could not verify this approval. Retry the request.'
 const APPROVAL_SAVE_FAILED_MESSAGE = 'Could not save this approval. Retry the request.'
@@ -30,8 +46,49 @@ const APPROVAL_SAVE_FAILED_MESSAGE = 'Could not save this approval. Retry the re
 export function rememberChatApprovalDatabaseIdentity(
   approvalId: string,
   identity: DatabaseIdentity,
-): void {
-  liveApprovalIdentities.set(approvalId, identity)
+): ChatApprovalLease {
+  const previousLive = liveApprovalLeases.get(approvalId)
+  if (previousLive && previousLive.state === 'live') previousLive.state = 'superseded'
+  const previousRevoked = revokedApprovalLeases.get(approvalId)
+  if (previousRevoked) previousRevoked.state = 'superseded'
+
+  const lease = Object.freeze({}) as ChatApprovalLease
+  const record: ApprovalLeaseRecord = { approvalId, identity, lease, state: 'live' }
+  approvalLeaseRecords.set(lease, record)
+  liveApprovalLeases.set(approvalId, record)
+  revokedApprovalLeases.delete(approvalId)
+  return lease
+}
+
+/**
+ * Revoke one exact streamed approval lease. `false` means a user action or a
+ * newer registration already won and the caller must not roll its turn back.
+ */
+export function revokeChatApprovalDatabaseIdentity(lease: ChatApprovalLease): boolean {
+  return revokeChatApprovalDatabaseIdentities([lease])
+}
+
+/** Atomically revoke every still-live lease, or leave the entire batch unchanged. */
+export function revokeChatApprovalDatabaseIdentities(
+  leases: readonly ChatApprovalLease[],
+): boolean {
+  const records: ApprovalLeaseRecord[] = []
+  for (const lease of leases) {
+    const record = approvalLeaseRecords.get(lease)
+    if (!record) return false
+    if (
+      record.state !== 'revoked' &&
+      (record.state !== 'live' || liveApprovalLeases.get(record.approvalId) !== record)
+    ) return false
+    records.push(record)
+  }
+  for (const record of records) {
+    if (record.state === 'revoked') continue
+    record.state = 'revoked'
+    liveApprovalLeases.delete(record.approvalId)
+    revokedApprovalLeases.set(record.approvalId, record)
+  }
+  return true
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -166,11 +223,11 @@ export interface ChatToolApprovalHandlerOptions {
 }
 
 async function approvalDatabaseIdentity(
-  approvalId: string,
+  claimedIdentity: DatabaseIdentity | undefined,
   expectedDatabasePath: string | undefined,
   allowCurrentIdentity: boolean,
 ): Promise<DatabaseIdentity> {
-  let identity = liveApprovalIdentities.get(approvalId)
+  let identity = claimedIdentity
   if (!identity && allowCurrentIdentity && expectedDatabasePath) {
     identity = await activeDatabaseIdentity()
   }
@@ -201,6 +258,28 @@ function applyApprovalToolPartUpdate(
   return { message: next.message, part: next.part }
 }
 
+function settleRevokedApproval(
+  response: ToolApprovalResponse,
+  options: ChatToolApprovalHandlerOptions,
+): boolean {
+  const revoked = revokedApprovalLeases.get(response.id)
+  if (!revoked || revoked.state !== 'revoked') return false
+  const settled = applyApprovalToolPartUpdate(options, response.id, (part) => response.approved
+    ? {
+        ...part,
+        state: 'output-error',
+        approval: { ...part.approval, approved: true },
+        errorText: STALE_APPROVAL_MESSAGE,
+      }
+    : {
+        ...part,
+        state: 'output-denied',
+        approval: { ...part.approval, approved: false },
+      })
+  if (settled) revokedApprovalLeases.delete(response.id)
+  return true
+}
+
 /**
  * Persist and execute a write-tool approval against its process-local turn
  * identity. Approval fails closed after reload; denial may settle a restored
@@ -210,21 +289,37 @@ export async function handleChatToolApprovalResponse(
   response: ToolApprovalResponse,
   options: ChatToolApprovalHandlerOptions,
 ): Promise<void> {
-  if (inFlightApprovalIds.has(response.id)) return
+  if (settleRevokedApproval(response, options)) return
+
+  const liveLease = liveApprovalLeases.get(response.id)
+  if (liveLease?.state === 'in-flight' || inFlightRestoredApprovalIds.has(response.id)) return
+  if (liveLease?.state === 'live') {
+    liveLease.state = 'in-flight'
+  } else {
+    inFlightRestoredApprovalIds.add(response.id)
+  }
 
   const target = findApprovalTarget(options.getMessages(), response.id, true)
   const toolName = target ? toolNameFromPart(target.part) : null
   if (!target || !toolName || !isChatWriteToolName(toolName)) {
-    await options.addToolApprovalResponse(response)
-    return
+    try {
+      const settledTarget = findApprovalTarget(options.getMessages(), response.id, false)
+      if (!settledTarget) await options.addToolApprovalResponse(response)
+      return
+    } finally {
+      if (liveLease?.state === 'in-flight') liveLease.state = 'finished'
+      if (liveApprovalLeases.get(response.id) === liveLease) {
+        liveApprovalLeases.delete(response.id)
+      }
+      inFlightRestoredApprovalIds.delete(response.id)
+    }
   }
 
-  inFlightApprovalIds.add(response.id)
   try {
     let identity: DatabaseIdentity
     try {
       identity = await approvalDatabaseIdentity(
-        response.id,
+        liveLease?.identity,
         options.expectedDatabasePath,
         !response.approved,
       )
@@ -325,7 +420,10 @@ export async function handleChatToolApprovalResponse(
       )
     }
   } finally {
-    inFlightApprovalIds.delete(response.id)
-    liveApprovalIdentities.delete(response.id)
+    if (liveLease?.state === 'in-flight') liveLease.state = 'finished'
+    if (liveApprovalLeases.get(response.id) === liveLease) {
+      liveApprovalLeases.delete(response.id)
+    }
+    inFlightRestoredApprovalIds.delete(response.id)
   }
 }

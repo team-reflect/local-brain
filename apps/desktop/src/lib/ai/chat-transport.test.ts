@@ -1,6 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { QueryClient } from '@tanstack/react-query'
 import { readUIMessageStream, type ModelMessage, type UIMessage, type UIMessageChunk } from 'ai'
+import type { ChatMessage } from '@local-brain/core'
 import { CHAT_NO_REPLY_FALLBACK, createChatTransport } from './chat-transport'
+import { handleChatToolApprovalResponse } from './chat-approval'
+import {
+  beginAssistantPersistenceTurn,
+  finishAssistantPersistenceTurn,
+  persistAssistantForTurn,
+  rollbackRegeneratedAssistantForTurn,
+} from './chat-persistence'
 
 const coreMocks = vi.hoisted(() => ({
   activeDatabaseIdentity: vi.fn(),
@@ -11,15 +20,18 @@ const coreMocks = vi.hoisted(() => ({
   createChatId: vi.fn(),
   createConversation: vi.fn(),
   defaultAiProvider: vi.fn(),
+  executeChatWriteTool: vi.fn(),
   fitChatMessagesToContextWindow: vi.fn(),
   getConversation: vi.fn(),
   getModelSettings: vi.fn(),
+  isChatWriteToolName: vi.fn(),
   keychainGet: vi.fn(),
   listMessages: vi.fn(),
   loadChatBrainOverview: vi.fn(),
   localDateString: vi.fn(),
   modelContextWindow: vi.fn(),
   replaceChatAssistantMessage: vi.fn(),
+  updateChatMessageSnapshot: vi.fn(),
   updateConversationTitle: vi.fn(),
 }))
 
@@ -46,17 +58,20 @@ vi.mock('@local-brain/core', () => ({
   createChatId: coreMocks.createChatId,
   createConversation: coreMocks.createConversation,
   defaultAiProvider: coreMocks.defaultAiProvider,
+  executeChatWriteTool: coreMocks.executeChatWriteTool,
   fitChatMessagesToContextWindow: coreMocks.fitChatMessagesToContextWindow,
   getConversation: coreMocks.getConversation,
   getModelSettings: coreMocks.getModelSettings,
   isAppError: (value: unknown) =>
     typeof value === 'object' && value !== null && 'kind' in value && 'message' in value,
+  isChatWriteToolName: coreMocks.isChatWriteToolName,
   keychainGet: coreMocks.keychainGet,
   listMessages: coreMocks.listMessages,
   loadChatBrainOverview: coreMocks.loadChatBrainOverview,
   localDateString: coreMocks.localDateString,
   modelContextWindow: coreMocks.modelContextWindow,
   replaceChatAssistantMessage: coreMocks.replaceChatAssistantMessage,
+  updateChatMessageSnapshot: coreMocks.updateChatMessageSnapshot,
   updateConversationTitle: coreMocks.updateConversationTitle,
 }))
 
@@ -195,13 +210,16 @@ function uiMessageTextForTest(message: UIMessage | undefined): string {
     .join('') ?? ''
 }
 
-function persistedMessage(message: UIMessage, status: 'done' | 'error' | 'streaming' = 'done') {
+function persistedMessage(
+  message: UIMessage,
+  status: 'done' | 'error' | 'streaming' = 'done',
+): ChatMessage {
   return {
     id: message.id,
     conversationId: 'chat-1',
     role: message.role,
     contentText: uiMessageTextForTest(message),
-    uiMessageJson: message,
+    uiMessageJson: JSON.parse(JSON.stringify(message)) as Record<string, unknown>,
     model: message.role === 'assistant' ? 'openai/gpt-5.5' : null,
     status,
     error: null,
@@ -248,8 +266,11 @@ describe('createChatTransport', () => {
       keyHint: '12345',
     })
     coreMocks.keychainGet.mockResolvedValue('sk-test')
+    coreMocks.executeChatWriteTool.mockResolvedValue({ kind: 'task', action: 'created', id: 'task-1' })
+    coreMocks.isChatWriteToolName.mockImplementation((toolName: string) => toolName === 'create_task')
     coreMocks.listMessages.mockResolvedValue([])
     coreMocks.replaceChatAssistantMessage.mockResolvedValue(1)
+    coreMocks.updateChatMessageSnapshot.mockResolvedValue(1)
     aiMocks.convertToModelMessages.mockResolvedValue([{ role: 'user', content: 'What did Maya promise?' }])
     aiMocks.generateText.mockResolvedValue({ output: { title: '"Maya Budget!"' } })
     aiMocks.streamText.mockReturnValue({
@@ -746,6 +767,618 @@ describe('createChatTransport', () => {
         databaseIdentity,
       )
     })
+    await settleBackgroundWork()
+    expect(coreMocks.replaceChatAssistantMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it('treats a regenerated approval CAS loss to a fast user action as benign and sticky', async () => {
+    const priorAssistant: UIMessage = {
+      id: 'assistant-prior',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'The prior answer.', state: 'done' }],
+    }
+    const pendingApproval = {
+      id: priorAssistant.id,
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-create_task',
+          toolCallId: 'tool-1',
+          state: 'approval-requested',
+          approval: { id: 'approval-1' },
+          input: { title: 'Send budget' },
+        },
+      ],
+    } as unknown as UIMessage
+    const controlled = controlledRawMessageStream()
+    coreMocks.listMessages.mockResolvedValue([
+      persistedMessage(userMessage),
+      persistedMessage(priorAssistant),
+    ])
+    coreMocks.replaceChatAssistantMessage
+      .mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(0)
+    aiMocks.streamText.mockReturnValueOnce({ toUIMessageStream: () => controlled.stream })
+    const stream = await createChatTransport().sendMessages({
+      trigger: 'regenerate-message',
+      chatId: 'chat-1',
+      messageId: priorAssistant.id,
+      messages: [userMessage],
+      abortSignal: undefined,
+    })
+
+    controlled.write({ type: 'start', messageId: priorAssistant.id })
+    controlled.write({
+      type: 'tool-input-available',
+      toolCallId: 'tool-1',
+      toolName: 'create_task',
+      input: { title: 'Send budget' },
+    })
+    controlled.write({
+      type: 'tool-approval-request',
+      approvalId: 'approval-1',
+      toolCallId: 'tool-1',
+    })
+    await eventually(() => {
+      expect(coreMocks.replaceChatAssistantMessage).toHaveBeenCalledTimes(1)
+    })
+
+    let currentMessages = [pendingApproval]
+    await handleChatToolApprovalResponse(
+      { id: 'approval-1', approved: true },
+      {
+        chatId: 'chat-1',
+        getMessages: () => currentMessages,
+        queryClient: new QueryClient(),
+        setMessages: (messages) => {
+          currentMessages = messages
+        },
+        addToolApprovalResponse: vi.fn(),
+        expectedDatabasePath: databaseIdentity.databasePath,
+      },
+    )
+    controlled.write({ type: 'text-start', id: 'late-text' })
+    controlled.write({ type: 'text-delta', id: 'late-text', delta: 'Additional context.' })
+    controlled.write({ type: 'text-end', id: 'late-text' })
+    controlled.write({ type: 'finish', finishReason: 'stop' })
+    controlled.close()
+
+    const response = await lastMessageFrom(stream)
+    expect(uiMessageTextForTest(response)).toBe('Additional context.')
+    await eventually(() => {
+      expect(coreMocks.replaceChatAssistantMessage).toHaveBeenCalledTimes(2)
+    })
+    expect(coreMocks.replaceChatAssistantMessage).toHaveBeenNthCalledWith(2,
+      expect.objectContaining({
+        contentText: 'Additional context.',
+        expected: expect.objectContaining({ contentText: '', status: 'streaming' }),
+      }),
+      databaseIdentity,
+    )
+    expect(coreMocks.replaceChatAssistantMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ contentText: 'The prior answer.' }),
+      databaseIdentity,
+    )
+    expect(coreMocks.executeChatWriteTool).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    {
+      name: 'aborts before an approval is accepted',
+      tail: [{ type: 'abort', reason: 'stopped' }] as UIMessageChunk[],
+      approvalResponse: true,
+      abortBeforeProvider: true,
+    },
+    {
+      name: 'aborts before an approval is denied',
+      tail: [{ type: 'abort', reason: 'stopped' }] as UIMessageChunk[],
+      approvalResponse: false,
+      abortBeforeProvider: false,
+    },
+    {
+      name: 'emits an error',
+      tail: [
+        { type: 'error', errorText: 'provider stream failed' },
+        { type: 'finish', finishReason: 'stop' },
+      ] as UIMessageChunk[],
+      approvalResponse: undefined,
+      abortBeforeProvider: false,
+    },
+  ])('restores the exact prior assistant when regeneration $name after persisting an approval', async ({
+    abortBeforeProvider,
+    approvalResponse,
+    tail,
+  }) => {
+    const priorAssistant: UIMessage = {
+      id: 'assistant-prior',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'The prior answer.', state: 'done' }],
+    }
+    const priorSnapshot = persistedMessage(priorAssistant)
+    const controlled = controlledRawMessageStream()
+    coreMocks.listMessages.mockResolvedValue([
+      persistedMessage(userMessage),
+      priorSnapshot,
+    ])
+    aiMocks.streamText.mockReturnValueOnce({
+      toUIMessageStream: () => controlled.stream,
+    })
+    const transport = createChatTransport()
+    const abortController = new AbortController()
+
+    const stream = await transport.sendMessages({
+      trigger: 'regenerate-message',
+      chatId: 'chat-1',
+      messageId: priorAssistant.id,
+      messages: [userMessage],
+      abortSignal: abortController.signal,
+    })
+    controlled.write({ type: 'start', messageId: priorAssistant.id })
+    controlled.write({
+      type: 'tool-input-available',
+      toolCallId: 'tool-1',
+      toolName: 'create_task',
+      input: { title: 'Send budget' },
+    })
+    controlled.write({
+      type: 'tool-approval-request',
+      approvalId: 'approval-1',
+      toolCallId: 'tool-1',
+    })
+
+    await eventually(() => {
+      expect(coreMocks.replaceChatAssistantMessage).toHaveBeenCalledTimes(1)
+    })
+    const pendingReplacement = coreMocks.replaceChatAssistantMessage.mock.calls[0]?.[0]
+
+    if (abortBeforeProvider) {
+      abortController.abort()
+      await eventually(() => {
+        expect(coreMocks.replaceChatAssistantMessage).toHaveBeenCalledTimes(2)
+      })
+    }
+
+    for (const chunk of tail) controlled.write(chunk)
+    controlled.close()
+    const response = await lastMessageFrom(stream)
+
+    await eventually(() => {
+      expect(coreMocks.replaceChatAssistantMessage).toHaveBeenCalledTimes(2)
+    })
+    expect(coreMocks.replaceChatAssistantMessage).toHaveBeenNthCalledWith(2, {
+      id: priorSnapshot.id,
+      conversationId: priorSnapshot.conversationId,
+      contentText: priorSnapshot.contentText,
+      uiMessageJson: priorSnapshot.uiMessageJson,
+      model: priorSnapshot.model,
+      status: priorSnapshot.status,
+      error: priorSnapshot.error,
+      expected: {
+        contentText: pendingReplacement.contentText,
+        uiMessageJson: pendingReplacement.uiMessageJson,
+        model: pendingReplacement.model,
+        status: pendingReplacement.status,
+        error: pendingReplacement.error,
+      },
+    }, databaseIdentity)
+    expect(coreMocks.appendChatMessage).not.toHaveBeenCalled()
+
+    if (approvalResponse !== undefined) {
+      if (!response) throw new Error('Expected the aborted approval message to remain visible.')
+      let currentMessages = [response]
+      const addToolApprovalResponse = vi.fn()
+      await handleChatToolApprovalResponse(
+        { id: 'approval-1', approved: approvalResponse },
+        {
+          chatId: 'chat-1',
+          getMessages: () => currentMessages,
+          queryClient: new QueryClient(),
+          setMessages: (nextMessages) => {
+            currentMessages = nextMessages
+          },
+          addToolApprovalResponse,
+          expectedDatabasePath: databaseIdentity.databasePath,
+        },
+      )
+
+      const toolPart = currentMessages[0]?.parts.find((part) => part.type === 'tool-create_task')
+      expect(toolPart).toMatchObject(approvalResponse
+        ? {
+            state: 'output-error',
+            approval: { id: 'approval-1', approved: true },
+            errorText: 'This approval is no longer valid. Retry the request.',
+          }
+        : {
+            state: 'output-denied',
+            approval: { id: 'approval-1', approved: false },
+          })
+      expect(coreMocks.executeChatWriteTool).not.toHaveBeenCalled()
+      expect(coreMocks.updateChatMessageSnapshot).not.toHaveBeenCalled()
+      expect(addToolApprovalResponse).not.toHaveBeenCalled()
+      expect(coreMocks.replaceChatAssistantMessage).toHaveBeenCalledTimes(2)
+    }
+  })
+
+  it('keeps a user-approved continuation when it wins before an abort signal', async () => {
+    const priorAssistant: UIMessage = {
+      id: 'assistant-prior',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'The prior answer.', state: 'done' }],
+    }
+    const pendingApproval = {
+      id: priorAssistant.id,
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-create_task',
+          toolCallId: 'tool-1',
+          state: 'approval-requested',
+          approval: { id: 'approval-1' },
+          input: { title: 'Send budget' },
+        },
+      ],
+    } as unknown as UIMessage
+    const controlled = controlledRawMessageStream()
+    coreMocks.listMessages.mockResolvedValue([
+      persistedMessage(userMessage),
+      persistedMessage(priorAssistant),
+    ])
+    aiMocks.streamText.mockReturnValueOnce({ toUIMessageStream: () => controlled.stream })
+    const abortController = new AbortController()
+    const stream = await createChatTransport().sendMessages({
+      trigger: 'regenerate-message',
+      chatId: 'chat-1',
+      messageId: priorAssistant.id,
+      messages: [userMessage],
+      abortSignal: abortController.signal,
+    })
+
+    controlled.write({ type: 'start', messageId: priorAssistant.id })
+    controlled.write({
+      type: 'tool-input-available',
+      toolCallId: 'tool-1',
+      toolName: 'create_task',
+      input: { title: 'Send budget' },
+    })
+    controlled.write({
+      type: 'tool-approval-request',
+      approvalId: 'approval-1',
+      toolCallId: 'tool-1',
+    })
+    await eventually(() => {
+      expect(coreMocks.replaceChatAssistantMessage).toHaveBeenCalledTimes(1)
+    })
+
+    let currentMessages = [pendingApproval]
+    await handleChatToolApprovalResponse(
+      { id: 'approval-1', approved: true },
+      {
+        chatId: 'chat-1',
+        getMessages: () => currentMessages,
+        queryClient: new QueryClient(),
+        setMessages: (messages) => {
+          currentMessages = messages
+        },
+        addToolApprovalResponse: vi.fn(),
+        expectedDatabasePath: databaseIdentity.databasePath,
+      },
+    )
+    expect(coreMocks.executeChatWriteTool).toHaveBeenCalledTimes(1)
+
+    abortController.abort()
+    controlled.write({ type: 'abort', reason: 'stopped' })
+    controlled.close()
+    await lastMessageFrom(stream)
+    await settleBackgroundWork()
+
+    expect(coreMocks.replaceChatAssistantMessage).toHaveBeenCalledTimes(1)
+    expect(coreMocks.updateChatMessageSnapshot).toHaveBeenCalled()
+  })
+
+  it('keeps sibling approvals actionable when one user action wins before abort', async () => {
+    const priorAssistant: UIMessage = {
+      id: 'assistant-prior',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'The prior answer.', state: 'done' }],
+    }
+    const pendingApprovals = {
+      id: priorAssistant.id,
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-create_task',
+          toolCallId: 'tool-1',
+          state: 'approval-requested',
+          approval: { id: 'approval-1' },
+          input: { title: 'Send budget' },
+        },
+        {
+          type: 'tool-create_task',
+          toolCallId: 'tool-2',
+          state: 'approval-requested',
+          approval: { id: 'approval-2' },
+          input: { title: 'Book review' },
+        },
+      ],
+    } as unknown as UIMessage
+    const controlled = controlledRawMessageStream()
+    coreMocks.listMessages.mockResolvedValue([
+      persistedMessage(userMessage),
+      persistedMessage(priorAssistant),
+    ])
+    aiMocks.streamText.mockReturnValueOnce({ toUIMessageStream: () => controlled.stream })
+    const abortController = new AbortController()
+    const stream = await createChatTransport().sendMessages({
+      trigger: 'regenerate-message',
+      chatId: 'chat-1',
+      messageId: priorAssistant.id,
+      messages: [userMessage],
+      abortSignal: abortController.signal,
+    })
+
+    controlled.write({ type: 'start', messageId: priorAssistant.id })
+    for (const [toolCallId, approvalId, title] of [
+      ['tool-1', 'approval-1', 'Send budget'],
+      ['tool-2', 'approval-2', 'Book review'],
+    ] as const) {
+      controlled.write({
+        type: 'tool-input-available',
+        toolCallId,
+        toolName: 'create_task',
+        input: { title },
+      })
+      controlled.write({ type: 'tool-approval-request', approvalId, toolCallId })
+    }
+    await eventually(() => {
+      expect(coreMocks.replaceChatAssistantMessage).toHaveBeenCalledTimes(1)
+    })
+
+    let currentMessages = [pendingApprovals]
+    const approvalOptions = {
+      chatId: 'chat-1',
+      getMessages: () => currentMessages,
+      queryClient: new QueryClient(),
+      setMessages: (messages: UIMessage[]) => {
+        currentMessages = messages
+      },
+      addToolApprovalResponse: vi.fn(),
+      expectedDatabasePath: databaseIdentity.databasePath,
+    }
+    await handleChatToolApprovalResponse(
+      { id: 'approval-1', approved: true },
+      approvalOptions,
+    )
+
+    abortController.abort()
+    controlled.write({ type: 'abort', reason: 'stopped' })
+    controlled.close()
+    await lastMessageFrom(stream)
+    await settleBackgroundWork()
+    expect(coreMocks.replaceChatAssistantMessage).toHaveBeenCalledTimes(1)
+
+    await handleChatToolApprovalResponse(
+      { id: 'approval-2', approved: true },
+      approvalOptions,
+    )
+    expect(coreMocks.executeChatWriteTool).toHaveBeenNthCalledWith(
+      1,
+      'create_task',
+      { title: 'Send budget' },
+      databaseIdentity,
+    )
+    expect(coreMocks.executeChatWriteTool).toHaveBeenNthCalledWith(
+      2,
+      'create_task',
+      { title: 'Book review' },
+      databaseIdentity,
+    )
+    expect(coreMocks.updateChatMessageSnapshot).toHaveBeenCalledTimes(4)
+    expect(currentMessages[0]?.parts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ toolCallId: 'tool-2', state: 'output-available' }),
+    ]))
+  })
+
+  it('keeps an aborted normal-submit approval durable and actionable', async () => {
+    aiMocks.streamText.mockReturnValueOnce({
+      toUIMessageStream: () => rawMessageStream([
+        { type: 'start', messageId: 'assistant-1' },
+        {
+          type: 'tool-input-available',
+          toolCallId: 'tool-1',
+          toolName: 'create_task',
+          input: { title: 'Send budget' },
+        },
+        {
+          type: 'tool-approval-request',
+          approvalId: 'approval-1',
+          toolCallId: 'tool-1',
+        },
+        { type: 'abort', reason: 'stopped' },
+      ]),
+    })
+    const stream = await createChatTransport().sendMessages({
+      trigger: 'submit-message',
+      chatId: 'chat-1',
+      messageId: undefined,
+      messages: [userMessage],
+      abortSignal: undefined,
+    })
+    const response = await lastMessageFrom(stream)
+    if (!response) throw new Error('Expected the pending approval response.')
+
+    await eventually(() => {
+      expect(coreMocks.appendChatMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'assistant-1',
+          role: 'assistant',
+          status: 'streaming',
+        }),
+        databaseIdentity,
+      )
+    })
+
+    let currentMessages = [response]
+    await handleChatToolApprovalResponse(
+      { id: 'approval-1', approved: true },
+      {
+        chatId: 'chat-1',
+        getMessages: () => currentMessages,
+        queryClient: new QueryClient(),
+        setMessages: (messages) => {
+          currentMessages = messages
+        },
+        addToolApprovalResponse: vi.fn(),
+        expectedDatabasePath: databaseIdentity.databasePath,
+      },
+    )
+
+    expect(coreMocks.executeChatWriteTool).toHaveBeenCalledTimes(1)
+    expect(currentMessages[0]?.parts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'tool-create_task',
+        state: 'output-available',
+      }),
+    ]))
+  })
+
+  it('does not roll back a regenerated approval after a newer turn takes ownership', async () => {
+    const priorAssistant: UIMessage = {
+      id: 'assistant-prior',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'The prior answer.', state: 'done' }],
+    }
+    const pendingApproval = {
+      id: priorAssistant.id,
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-create_task',
+          toolCallId: 'tool-1',
+          state: 'approval-requested',
+          approval: { id: 'approval-1' },
+          input: { title: 'Send budget' },
+        },
+      ],
+    } as unknown as UIMessage
+    const priorSnapshot = persistedMessage(priorAssistant)
+    const oldTurn = await beginAssistantPersistenceTurn(
+      'chat-1',
+      priorAssistant.id,
+      databaseIdentity,
+      priorSnapshot,
+    )
+    await persistAssistantForTurn(
+      'chat-1',
+      pendingApproval,
+      'openai/gpt-5.5',
+      'streaming',
+      null,
+      databaseIdentity,
+      oldTurn,
+    )
+    const newerTurn = await beginAssistantPersistenceTurn(
+      'chat-1',
+      priorAssistant.id,
+      databaseIdentity,
+      null,
+    )
+
+    try {
+      await rollbackRegeneratedAssistantForTurn('chat-1', databaseIdentity, oldTurn)
+      expect(coreMocks.replaceChatAssistantMessage).toHaveBeenCalledTimes(1)
+    } finally {
+      finishAssistantPersistenceTurn(oldTurn)
+      finishAssistantPersistenceTurn(newerTurn)
+    }
+  })
+
+  it('CAS-advances regenerated snapshots and rolls back from the latest owned state', async () => {
+    const priorAssistant: UIMessage = {
+      id: 'assistant-prior',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'The prior answer.', state: 'done' }],
+    }
+    const firstApproval = {
+      id: priorAssistant.id,
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-create_task',
+          toolCallId: 'tool-1',
+          state: 'approval-requested',
+          approval: { id: 'approval-1' },
+          input: { title: 'Send budget' },
+        },
+      ],
+    } as unknown as UIMessage
+    const updatedApproval = {
+      ...firstApproval,
+      parts: [
+        { type: 'text', text: 'This needs your approval.', state: 'done' },
+        ...firstApproval.parts,
+      ],
+    } as UIMessage
+    const priorSnapshot = persistedMessage(priorAssistant)
+    const turn = await beginAssistantPersistenceTurn(
+      'chat-1',
+      priorAssistant.id,
+      databaseIdentity,
+      priorSnapshot,
+    )
+
+    try {
+      await persistAssistantForTurn(
+        'chat-1',
+        firstApproval,
+        'openai/gpt-5.5',
+        'streaming',
+        null,
+        databaseIdentity,
+        turn,
+      )
+      await persistAssistantForTurn(
+        'chat-1',
+        updatedApproval,
+        'openai/gpt-5.5',
+        'streaming',
+        null,
+        databaseIdentity,
+        turn,
+      )
+      await rollbackRegeneratedAssistantForTurn('chat-1', databaseIdentity, turn)
+
+      expect(coreMocks.replaceChatAssistantMessage).toHaveBeenNthCalledWith(2,
+        expect.objectContaining({
+          contentText: 'This needs your approval.',
+          expected: {
+            contentText: '',
+            uiMessageJson: JSON.parse(JSON.stringify(firstApproval)),
+            model: 'openai/gpt-5.5',
+            status: 'streaming',
+            error: null,
+          },
+        }),
+        databaseIdentity,
+      )
+      expect(coreMocks.replaceChatAssistantMessage).toHaveBeenNthCalledWith(3, {
+        id: priorSnapshot.id,
+        conversationId: priorSnapshot.conversationId,
+        contentText: priorSnapshot.contentText,
+        uiMessageJson: priorSnapshot.uiMessageJson,
+        model: priorSnapshot.model,
+        status: priorSnapshot.status,
+        error: priorSnapshot.error,
+        expected: {
+          contentText: 'This needs your approval.',
+          uiMessageJson: JSON.parse(JSON.stringify(updatedApproval)),
+          model: 'openai/gpt-5.5',
+          status: 'streaming',
+          error: null,
+        },
+      }, databaseIdentity)
+    } finally {
+      finishAssistantPersistenceTurn(turn)
+    }
   })
 
   it('keeps the prior durable assistant when regeneration fails before streaming', async () => {
@@ -888,7 +1521,7 @@ describe('createChatTransport', () => {
     expect(coreMocks.appendChatMessage).not.toHaveBeenCalled()
   })
 
-  it('keeps the prior durable assistant when the raw stream rejects after partial text', async () => {
+  it('restores the prior durable assistant when the raw stream rejects after an approval', async () => {
     const priorAssistant: UIMessage = {
       id: 'assistant-prior',
       role: 'assistant',
@@ -913,9 +1546,24 @@ describe('createChatTransport', () => {
     })
     const reader = stream.getReader()
     controlled.write({ type: 'start', messageId: priorAssistant.id })
+    controlled.write({
+      type: 'tool-input-available',
+      toolCallId: 'tool-1',
+      toolName: 'create_task',
+      input: { title: 'Send budget' },
+    })
+    controlled.write({
+      type: 'tool-approval-request',
+      approvalId: 'approval-1',
+      toolCallId: 'tool-1',
+    })
     controlled.write({ type: 'text-start', id: 'partial-text' })
     controlled.write({ type: 'text-delta', id: 'partial-text', delta: 'A partial replacement.' })
     controlled.write({ type: 'text-end', id: 'partial-text' })
+
+    await eventually(() => {
+      expect(coreMocks.replaceChatAssistantMessage).toHaveBeenCalledTimes(1)
+    })
 
     let sawPartialText = false
     while (!sawPartialText) {
@@ -933,7 +1581,15 @@ describe('createChatTransport', () => {
     }
     await settleBackgroundWork()
 
-    expect(coreMocks.replaceChatAssistantMessage).not.toHaveBeenCalled()
+    expect(coreMocks.replaceChatAssistantMessage).toHaveBeenCalledTimes(2)
+    expect(coreMocks.replaceChatAssistantMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        id: priorAssistant.id,
+        contentText: 'The prior answer.',
+        status: 'done',
+      }),
+      databaseIdentity,
+    )
     expect(coreMocks.appendChatMessage).not.toHaveBeenCalled()
   })
 

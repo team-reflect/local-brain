@@ -5,16 +5,19 @@ import {
   replaceChatAssistantMessage,
   type ChatMessage,
   type DatabaseIdentity,
+  type ExpectedChatAssistantSnapshot,
 } from '@local-brain/core'
 
 type PersistedChatStatus = 'submitted' | 'streaming' | 'done' | 'error'
 
-/** Process-local ownership and first-write policy for one assistant response. */
+/** Process-local ownership and durable snapshot state for one assistant response. */
 export interface AssistantPersistenceTurn {
   key: string
   token: symbol
   replacementExpected: ChatMessage | null
   replacementComplete: boolean
+  replacementCurrent: ExpectedChatAssistantSnapshot | null
+  replacementLost: boolean
 }
 
 const assistantPersistenceQueues = new Map<string, Promise<void>>()
@@ -36,6 +39,35 @@ function uiMessageJson(message: UIMessage): Record<string, unknown> {
   return isRecord(cloned) ? cloned : {}
 }
 
+function persistedSnapshot(input: {
+  contentText: string
+  uiMessageJson: Record<string, unknown>
+  model: string | null
+  status: PersistedChatStatus
+  error: string | null
+}): ExpectedChatAssistantSnapshot {
+  return {
+    contentText: input.contentText,
+    uiMessageJson: input.uiMessageJson,
+    model: input.model,
+    status: input.status,
+    error: input.error,
+  }
+}
+
+function snapshotsMatch(
+  left: ExpectedChatAssistantSnapshot,
+  right: ExpectedChatAssistantSnapshot,
+): boolean {
+  return (
+    left.contentText === right.contentText &&
+    JSON.stringify(left.uiMessageJson) === JSON.stringify(right.uiMessageJson) &&
+    left.model === right.model &&
+    left.status === right.status &&
+    left.error === right.error
+  )
+}
+
 function assistantPersistenceKey(
   conversationId: string,
   messageId: string,
@@ -55,7 +87,14 @@ export async function beginAssistantPersistenceTurn(
   const token = Symbol(messageId)
   currentAssistantTurns.set(key, token)
   await assistantPersistenceQueues.get(key)?.catch(() => undefined)
-  return { key, token, replacementExpected, replacementComplete: false }
+  return {
+    key,
+    token,
+    replacementExpected,
+    replacementComplete: false,
+    replacementCurrent: null,
+    replacementLost: false,
+  }
 }
 
 /** Release current-turn ownership without allowing an older token to become current again. */
@@ -137,7 +176,7 @@ export async function prepareRegenerationTurn(
   }
 }
 
-/** Persist only the current turn, using CAS for its first regenerated snapshot. */
+/** Persist only the current turn, advancing every regenerated snapshot with CAS. */
 export async function persistAssistantForTurn(
   conversationId: string,
   message: UIMessage,
@@ -157,27 +196,57 @@ export async function persistAssistantForTurn(
       status,
       error,
     }
-    if (turn.replacementExpected && !turn.replacementComplete) {
-      const expected = turn.replacementExpected
+    if (turn.replacementExpected) {
+      if (turn.replacementLost) return
+      const nextSnapshot = persistedSnapshot(snapshot)
+      const expected = turn.replacementComplete
+        ? turn.replacementCurrent
+        : persistedSnapshot(turn.replacementExpected)
+      if (!expected) {
+        throw new Error('The regenerated assistant lost its persisted snapshot ownership.')
+      }
+      if (snapshotsMatch(nextSnapshot, expected)) return
       const affected = await replaceChatAssistantMessage({
         ...snapshot,
-        expected: {
-          contentText: expected.contentText,
-          uiMessageJson: expected.uiMessageJson,
-          model: expected.model,
-          status: expected.status,
-          error: expected.error,
-        },
+        expected,
       }, identity)
       if (affected !== 1) {
-        throw {
-          kind: 'stale',
-          message: 'The assistant message changed before its regenerated reply could be saved.',
-        }
+        turn.replacementLost = true
+        turn.replacementCurrent = null
+        return
       }
       turn.replacementComplete = true
+      turn.replacementCurrent = nextSnapshot
       return
     }
     await appendChatMessage({ ...snapshot, role: 'assistant' }, identity)
+  })
+}
+
+/** Restore a regenerated assistant only while its latest owned snapshot is still exact. */
+export async function rollbackRegeneratedAssistantForTurn(
+  conversationId: string,
+  identity: DatabaseIdentity,
+  turn: AssistantPersistenceTurn,
+): Promise<void> {
+  await enqueueAssistantPersistence(turn, async () => {
+    const prior = turn.replacementExpected
+    const current = turn.replacementCurrent
+    if (turn.replacementLost || !prior || !turn.replacementComplete || !current) return
+
+    const affected = await replaceChatAssistantMessage({
+      id: prior.id,
+      conversationId,
+      contentText: prior.contentText,
+      uiMessageJson: prior.uiMessageJson,
+      model: prior.model,
+      status: prior.status,
+      error: prior.error,
+      expected: current,
+    }, identity)
+    if (affected === 1) {
+      turn.replacementComplete = false
+      turn.replacementCurrent = null
+    }
   })
 }
