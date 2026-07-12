@@ -35,6 +35,12 @@ import {
 } from '@local-brain/core'
 import { freshDatabase, installSqliteBridge } from './sqlite-harness.mjs'
 
+const DAY_MS = 86_400_000
+
+function daysAgo(now, days) {
+  return new Date(now - days * DAY_MS).toISOString()
+}
+
 describe('05b correction setters (real SQLite)', () => {
   beforeEach(() => {
     installSqliteBridge(freshDatabase())
@@ -183,20 +189,22 @@ describe('05b relationship intelligence recompute (real SQLite)', () => {
   })
 
   it('derives last-interaction and strength from interactions', async () => {
+    const now = Date.now()
+    const olderInteractionAt = daysAgo(now, 120)
+    const recentInteractionAt = daysAgo(now, 12)
     const personId = await createPerson({ fullName: 'Ada Lovelace' })
     await createInteraction(
-      { kind: 'meeting', title: 'Older sync', occurredAt: '2026-03-01T10:00:00.000Z' },
+      { kind: 'meeting', title: 'Older sync', occurredAt: olderInteractionAt },
       [{ personId }],
     )
     await createInteraction(
-      { kind: 'meeting', title: 'Recent sync', occurredAt: '2026-05-20T10:00:00.000Z' },
+      { kind: 'meeting', title: 'Recent sync', occurredAt: recentInteractionAt },
       [{ personId }],
     )
 
-    // createInteraction already recomputes (at real "now"); pin asOf for asserts.
-    await recomputeRelationshipIntelligence(personId, { asOf: '2026-06-01T00:00:00.000Z' })
+    await recomputeRelationshipIntelligence(personId)
     const person = await getPerson(personId)
-    expect(person?.lastInteractionAt).toBe('2026-05-20T10:00:00.000Z')
+    expect(person?.lastInteractionAt).toBe(recentInteractionAt)
     // 2 recent interactions (+2), last seen 12d ago (+3) -> score 5 -> bucket 3.
     expect(person?.relationshipStrength).toBe(3)
   })
@@ -238,25 +246,28 @@ describe('05b relationship intelligence recompute (real SQLite)', () => {
   })
 
   it('computes strength from non-archived interactions', async () => {
+    const now = Date.now()
+    const oldInteractionAt = daysAgo(now, 120)
+    const latestInteractionAt = daysAgo(now, 10)
     const personId = await createPerson({ fullName: 'Archived Latest' })
-    await createInteraction({ kind: 'call', title: 'old', occurredAt: '2026-01-01T00:00:00.000Z' }, [
+    await createInteraction({ kind: 'call', title: 'old', occurredAt: oldInteractionAt }, [
       { personId },
     ])
-    const latest = await createInteraction({ kind: 'call', title: 'archived', occurredAt: '2026-05-10T00:00:00.000Z' }, [
+    const latest = await createInteraction({ kind: 'call', title: 'archived', occurredAt: latestInteractionAt }, [
       { personId },
     ])
-    await recomputeAllRelationships({ asOf: '2026-06-01T00:00:00.000Z' })
+    await recomputeAllRelationships()
 
     await execute(
       db
         .updateTable('interactions')
-        .set({ archivedAt: '2026-05-20T00:00:00.000Z' })
+        .set({ archivedAt: daysAgo(now, 5) })
         .where('id', '=', latest),
     )
 
-    await recomputeAllRelationships({ asOf: '2026-06-01T00:00:00.000Z' })
+    await recomputeAllRelationships()
     const person = await getPerson(personId)
-    expect(person?.lastInteractionAt).toBe('2026-01-01T00:00:00.000Z')
+    expect(person?.lastInteractionAt).toBe(oldInteractionAt)
     expect(person?.relationshipStrength).toBe(2)
   })
 })
