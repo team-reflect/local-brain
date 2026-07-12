@@ -6,6 +6,7 @@ import {
   getConversation,
   listConversations,
   listMessages,
+  replaceChatAssistantMessage,
   setBridge,
   updateChatMessageSnapshot,
   updateConversationTitle,
@@ -270,6 +271,134 @@ describe('Chat persistence', () => {
           },
         ],
       },
+    ])
+  })
+
+  it('atomically replaces a terminal assistant with a reloadable regenerated approval', async () => {
+    const conversationId = await createConversation({ id: 'chat-1', title: 'Tasks' })
+    await appendChatMessage({
+      id: 'msg-assistant',
+      conversationId,
+      role: 'assistant',
+      contentText: 'The original answer.',
+      uiMessageJson: {
+        id: 'msg-assistant',
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'The original answer.', state: 'done' }],
+      },
+      model: 'openai/gpt-5.5',
+      status: 'done',
+    })
+
+    const approvalMessage = {
+      id: 'msg-assistant',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-create_task',
+          toolCallId: 'tool-1',
+          state: 'approval-requested',
+          approval: { id: 'approval-1' },
+          input: { title: 'Send budget' },
+        },
+      ],
+    }
+    expect((await listMessages(conversationId))[0]).toMatchObject({
+      contentText: 'The original answer.',
+      status: 'done',
+    })
+
+    await expect(replaceChatAssistantMessage({
+      id: 'msg-assistant',
+      conversationId,
+      contentText: '',
+      uiMessageJson: approvalMessage,
+      model: 'openai/gpt-5.5',
+      status: 'streaming',
+      error: null,
+      expected: {
+        contentText: 'The original answer.',
+        uiMessageJson: {
+          id: 'msg-assistant',
+          role: 'assistant',
+          parts: [{ type: 'text', text: 'The original answer.', state: 'done' }],
+        },
+        model: 'openai/gpt-5.5',
+        status: 'done',
+        error: null,
+      },
+    })).resolves.toBe(1)
+
+    await expect(replaceChatAssistantMessage({
+      id: 'msg-assistant',
+      conversationId,
+      contentText: 'A stale callback.',
+      uiMessageJson: {
+        id: 'msg-assistant',
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'A stale callback.', state: 'done' }],
+      },
+      model: 'openai/gpt-5.5',
+      status: 'done',
+      error: null,
+      expected: {
+        contentText: 'The original answer.',
+        uiMessageJson: {
+          id: 'msg-assistant',
+          role: 'assistant',
+          parts: [{ type: 'text', text: 'The original answer.', state: 'done' }],
+        },
+        model: 'openai/gpt-5.5',
+        status: 'done',
+        error: null,
+      },
+    })).resolves.toBe(0)
+
+    expect(await listMessages(conversationId)).toEqual([
+      expect.objectContaining({
+        id: 'msg-assistant',
+        conversationId,
+        role: 'assistant',
+        contentText: '',
+        uiMessageJson: approvalMessage,
+        model: 'openai/gpt-5.5',
+        status: 'streaming',
+        error: null,
+      }),
+    ])
+  })
+
+  it('does not reset a user row through the assistant snapshot API', async () => {
+    const conversationId = await createConversation({ id: 'chat-1', title: 'Tasks' })
+    await appendChatMessage({
+      id: 'msg-user',
+      conversationId,
+      role: 'user',
+      contentText: 'Keep this question.',
+      uiMessageJson: {
+        id: 'msg-user',
+        role: 'user',
+        parts: [{ type: 'text', text: 'Keep this question.', state: 'done' }],
+      },
+      status: 'done',
+    })
+
+    await expect(updateChatMessageSnapshot({
+      id: 'msg-user',
+      conversationId,
+      contentText: '',
+      uiMessageJson: { id: 'msg-user', role: 'assistant', parts: [] },
+      status: 'submitted',
+      error: null,
+    })).resolves.toBe(0)
+
+    expect(await listMessages(conversationId)).toEqual([
+      expect.objectContaining({
+        id: 'msg-user',
+        role: 'user',
+        contentText: 'Keep this question.',
+        status: 'done',
+      }),
     ])
   })
 

@@ -273,9 +273,12 @@ export {
   createConversation,
   updateConversationTitle,
   appendChatMessage,
+  replaceChatAssistantMessage,
   updateChatMessageSnapshot,
   archiveConversation,
   type ChatMessageSnapshot,
+  type ChatAssistantReplacement,
+  type ExpectedChatAssistantSnapshot,
   type NewChatConversation,
   type NewChatMessage,
 } from './domains/chat/setters'

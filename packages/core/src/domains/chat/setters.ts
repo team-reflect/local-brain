@@ -31,6 +31,23 @@ export interface ChatMessageSnapshot {
   error?: string | null
 }
 
+/** Complete assistant state used as the compare side of a replacement. */
+export interface ExpectedChatAssistantSnapshot {
+  contentText: string
+  uiMessageJson: Record<string, unknown>
+  model: string | null
+  status: ChatStatus
+  error: string | null
+}
+
+/** Full replacement plus the exact durable assistant state it supersedes. */
+export interface ChatAssistantReplacement extends Omit<ChatMessageSnapshot, 'status' | 'error'> {
+  model: string | null
+  status: ChatStatus
+  error: string | null
+  expected: ExpectedChatAssistantSnapshot
+}
+
 export function createChatId(): string {
   return newId()
 }
@@ -134,7 +151,47 @@ export async function updateChatMessageSnapshot(
         ...(input.error !== undefined ? { error: input.error } : {}),
       })
       .where('id', '=', input.id)
-      .where('conversationId', '=', input.conversationId),
+      .where('conversationId', '=', input.conversationId)
+      .where('role', '=', 'assistant'),
+    db.updateTable('chatConversations').set({ updatedAt: now }).where('id', '=', input.conversationId),
+  ], expectedIdentity)
+  return affected ?? 0
+}
+
+/**
+ * Atomically replace one assistant snapshot only if its complete persisted
+ * state still matches the caller's identity-pinned read.
+ */
+export async function replaceChatAssistantMessage(
+  input: ChatAssistantReplacement,
+  expectedIdentity?: DatabaseIdentity,
+): Promise<number> {
+  const now = nowIso()
+  let replacement = db
+    .updateTable('chatMessages')
+    .set({
+      contentText: input.contentText,
+      uiMessageJson: JSON.stringify(input.uiMessageJson),
+      model: input.model,
+      status: input.status,
+      error: input.error,
+    })
+    .where('id', '=', input.id)
+    .where('conversationId', '=', input.conversationId)
+    .where('role', '=', 'assistant')
+    .where('contentText', '=', input.expected.contentText)
+    .where('uiMessageJson', '=', JSON.stringify(input.expected.uiMessageJson))
+    .where('status', '=', input.expected.status)
+
+  replacement = input.expected.model === null
+    ? replacement.where('model', 'is', null)
+    : replacement.where('model', '=', input.expected.model)
+  replacement = input.expected.error === null
+    ? replacement.where('error', 'is', null)
+    : replacement.where('error', '=', input.expected.error)
+
+  const [affected] = await batch([
+    replacement,
     db.updateTable('chatConversations').set({ updatedAt: now }).where('id', '=', input.conversationId),
   ], expectedIdentity)
   return affected ?? 0

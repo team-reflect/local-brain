@@ -15,9 +15,11 @@ const coreMocks = vi.hoisted(() => ({
   getConversation: vi.fn(),
   getModelSettings: vi.fn(),
   keychainGet: vi.fn(),
+  listMessages: vi.fn(),
   loadChatBrainOverview: vi.fn(),
   localDateString: vi.fn(),
   modelContextWindow: vi.fn(),
+  replaceChatAssistantMessage: vi.fn(),
   updateConversationTitle: vi.fn(),
 }))
 
@@ -50,9 +52,11 @@ vi.mock('@local-brain/core', () => ({
   isAppError: (value: unknown) =>
     typeof value === 'object' && value !== null && 'kind' in value && 'message' in value,
   keychainGet: coreMocks.keychainGet,
+  listMessages: coreMocks.listMessages,
   loadChatBrainOverview: coreMocks.loadChatBrainOverview,
   localDateString: coreMocks.localDateString,
   modelContextWindow: coreMocks.modelContextWindow,
+  replaceChatAssistantMessage: coreMocks.replaceChatAssistantMessage,
   updateConversationTitle: coreMocks.updateConversationTitle,
 }))
 
@@ -149,6 +153,35 @@ function rawMessageStream(chunks: UIMessageChunk[]): ReadableStream<UIMessageChu
   })
 }
 
+function controlledRawMessageStream(): {
+  stream: ReadableStream<UIMessageChunk>
+  write: (chunk: UIMessageChunk) => void
+  close: () => void
+  fail: (error: Error) => void
+} {
+  let controller: ReadableStreamDefaultController<UIMessageChunk> | null = null
+  const stream = new ReadableStream<UIMessageChunk>({
+    start(nextController) {
+      controller = nextController
+    },
+  })
+  return {
+    stream,
+    write: (chunk) => {
+      if (!controller) throw new Error('Expected the controlled stream to be ready.')
+      controller.enqueue(chunk)
+    },
+    close: () => {
+      if (!controller) throw new Error('Expected the controlled stream to be ready.')
+      controller.close()
+    },
+    fail: (error) => {
+      if (!controller) throw new Error('Expected the controlled stream to be ready.')
+      controller.error(error)
+    },
+  }
+}
+
 async function lastMessageFrom(stream: ReadableStream<UIMessageChunk>): Promise<UIMessage | undefined> {
   let latest: UIMessage | undefined
   for await (const message of readUIMessageStream({ stream })) latest = message
@@ -160,6 +193,20 @@ function uiMessageTextForTest(message: UIMessage | undefined): string {
     .filter((part) => part.type === 'text')
     .map((part) => part.text)
     .join('') ?? ''
+}
+
+function persistedMessage(message: UIMessage, status: 'done' | 'error' | 'streaming' = 'done') {
+  return {
+    id: message.id,
+    conversationId: 'chat-1',
+    role: message.role,
+    contentText: uiMessageTextForTest(message),
+    uiMessageJson: message,
+    model: message.role === 'assistant' ? 'openai/gpt-5.5' : null,
+    status,
+    error: null,
+    createdAt: '2026-06-19T00:00:00.000Z',
+  }
 }
 
 describe('createChatTransport', () => {
@@ -201,6 +248,8 @@ describe('createChatTransport', () => {
       keyHint: '12345',
     })
     coreMocks.keychainGet.mockResolvedValue('sk-test')
+    coreMocks.listMessages.mockResolvedValue([])
+    coreMocks.replaceChatAssistantMessage.mockResolvedValue(1)
     aiMocks.convertToModelMessages.mockResolvedValue([{ role: 'user', content: 'What did Maya promise?' }])
     aiMocks.generateText.mockResolvedValue({ output: { title: '"Maya Budget!"' } })
     aiMocks.streamText.mockReturnValue({
@@ -267,6 +316,8 @@ describe('createChatTransport', () => {
       expect.objectContaining({ id: 'user-1', conversationId: 'chat-1', role: 'user' }),
       databaseIdentity,
     )
+    expect(coreMocks.listMessages).not.toHaveBeenCalled()
+    expect(coreMocks.replaceChatAssistantMessage).not.toHaveBeenCalled()
 
     // Assistant message persisted
     await eventually(() => {
@@ -422,6 +473,533 @@ describe('createChatTransport', () => {
         databaseIdentity,
       )
     })
+  })
+
+  it('streams and persists a fallback when a regenerated reply only has tool activity', async () => {
+    const priorAssistant: UIMessage = {
+      id: 'assistant-prior',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'The prior answer.', state: 'done' }],
+    }
+    coreMocks.listMessages.mockResolvedValue([
+      persistedMessage(userMessage),
+      persistedMessage(priorAssistant),
+    ])
+    aiMocks.streamText.mockReturnValueOnce({
+      toUIMessageStream: (options: { generateMessageId?: () => string }) => {
+        const responseId = options.generateMessageId?.() ?? priorAssistant.id
+        return rawMessageStream([
+          { type: 'start', messageId: responseId },
+          {
+            type: 'tool-input-available',
+            toolCallId: 'tool-search',
+            toolName: 'search_records',
+            input: { query: 'budget' },
+          },
+          {
+            type: 'tool-output-available',
+            toolCallId: 'tool-search',
+            output: { records: [], count: 0 },
+          },
+          { type: 'finish', finishReason: 'stop' },
+        ])
+      },
+    })
+    const transport = createChatTransport()
+
+    const stream = await transport.sendMessages({
+      trigger: 'regenerate-message',
+      chatId: 'chat-1',
+      messageId: priorAssistant.id,
+      // AI SDK removes the assistant being regenerated before it calls the
+      // transport and carries that row's identity separately in `messageId`.
+      messages: [userMessage],
+      abortSignal: undefined,
+    })
+    const response = await lastMessageFrom(stream)
+
+    expect(response?.id).toBe(priorAssistant.id)
+    expect(uiMessageTextForTest(response)).toBe(CHAT_NO_REPLY_FALLBACK)
+    expect(aiMocks.convertToModelMessages).toHaveBeenCalledWith([userMessage])
+    expect(coreMocks.listMessages).toHaveBeenCalledWith('chat-1', databaseIdentity)
+    await eventually(() => {
+      expect(coreMocks.replaceChatAssistantMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: priorAssistant.id,
+          contentText: CHAT_NO_REPLY_FALLBACK,
+          status: 'done',
+        }),
+        databaseIdentity,
+      )
+    })
+  })
+
+  it('keeps the prior terminal snapshot until a complete regenerated reply is available', async () => {
+    const priorAssistant: UIMessage = {
+      id: 'assistant-prior',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'The prior answer.', state: 'done' }],
+    }
+    coreMocks.listMessages.mockResolvedValue([
+      persistedMessage(userMessage),
+      persistedMessage(priorAssistant),
+    ])
+    const controlled = controlledRawMessageStream()
+    aiMocks.streamText.mockReturnValueOnce({
+      toUIMessageStream: () => controlled.stream,
+    })
+    const transport = createChatTransport()
+
+    const stream = await transport.sendMessages({
+      trigger: 'regenerate-message',
+      chatId: 'chat-1',
+      messageId: priorAssistant.id,
+      messages: [userMessage],
+      abortSignal: undefined,
+    })
+
+    expect(coreMocks.replaceChatAssistantMessage).not.toHaveBeenCalled()
+    expect(coreMocks.appendChatMessage).not.toHaveBeenCalled()
+
+    controlled.write({ type: 'start', messageId: priorAssistant.id })
+    controlled.write({ type: 'text-start', id: 'regenerated-text' })
+    controlled.write({ type: 'text-delta', id: 'regenerated-text', delta: 'A new answer.' })
+    controlled.write({ type: 'text-end', id: 'regenerated-text' })
+    controlled.write({ type: 'finish', finishReason: 'stop' })
+    controlled.close()
+    await lastMessageFrom(stream)
+
+    await eventually(() => {
+      expect(coreMocks.replaceChatAssistantMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: priorAssistant.id,
+          contentText: 'A new answer.',
+          status: 'done',
+          expected: expect.objectContaining({
+            contentText: 'The prior answer.',
+            status: 'done',
+          }),
+        }),
+        databaseIdentity,
+      )
+    })
+  })
+
+  it('rejects older regeneration identifiers without reusing a persisted record id', async () => {
+    const olderAssistant: UIMessage = {
+      id: 'assistant-older',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'An older answer.', state: 'done' }],
+    }
+    const latestAssistant: UIMessage = {
+      id: 'assistant-latest',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'The latest answer.', state: 'done' }],
+    }
+    coreMocks.listMessages.mockResolvedValue([
+      persistedMessage(userMessage),
+      persistedMessage(olderAssistant),
+      persistedMessage(retryUserMessage),
+      persistedMessage(latestAssistant),
+    ])
+    const transport = createChatTransport()
+
+    const stream = await transport.sendMessages({
+      trigger: 'regenerate-message',
+      chatId: 'chat-1',
+      messageId: olderAssistant.id,
+      messages: [userMessage],
+      abortSignal: undefined,
+    })
+    const response = await lastMessageFrom(stream)
+
+    expect(response?.id).toBe('assistant-1')
+    expect(response?.id).not.toBe(olderAssistant.id)
+    expect(response?.id).not.toBe(userMessage.id)
+    expect(uiMessageTextForTest(response)).toContain('Only the latest persisted user/assistant turn')
+    expect(aiMocks.streamText).not.toHaveBeenCalled()
+    expect(coreMocks.replaceChatAssistantMessage).not.toHaveBeenCalled()
+    expect(coreMocks.appendChatMessage).not.toHaveBeenCalled()
+  })
+
+  it('maps the latest user regeneration id to its following persisted assistant id', async () => {
+    const priorAssistant: UIMessage = {
+      id: 'assistant-prior',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'The prior answer.', state: 'done' }],
+    }
+    coreMocks.listMessages.mockResolvedValue([
+      persistedMessage(userMessage),
+      persistedMessage(priorAssistant),
+    ])
+    const transport = createChatTransport()
+
+    const stream = await transport.sendMessages({
+      trigger: 'regenerate-message',
+      chatId: 'chat-1',
+      messageId: userMessage.id,
+      // AI SDK retains a targeted user message but removes its following
+      // assistant before invoking the transport.
+      messages: [userMessage],
+      abortSignal: undefined,
+    })
+    const response = await lastMessageFrom(stream)
+
+    expect(response?.id).toBe(priorAssistant.id)
+    expect(response?.id).not.toBe(userMessage.id)
+    expect(aiMocks.convertToModelMessages).toHaveBeenCalledWith([userMessage])
+    await eventually(() => {
+      expect(coreMocks.replaceChatAssistantMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ id: priorAssistant.id, status: 'done' }),
+        databaseIdentity,
+      )
+    })
+  })
+
+  it('resolves a no-id regeneration to the latest persisted assistant in the captured brain', async () => {
+    const olderAssistant: UIMessage = {
+      id: 'assistant-older',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'An older answer.', state: 'done' }],
+    }
+    const priorAssistant: UIMessage = {
+      id: 'assistant-latest',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'The prior answer.', state: 'done' }],
+    }
+    coreMocks.listMessages.mockResolvedValue([
+      persistedMessage(userMessage),
+      persistedMessage(olderAssistant),
+      persistedMessage(priorAssistant),
+    ])
+    const transport = createChatTransport()
+
+    const stream = await transport.sendMessages({
+      trigger: 'regenerate-message',
+      chatId: 'chat-1',
+      messageId: undefined,
+      messages: [userMessage],
+      abortSignal: undefined,
+    })
+    const response = await lastMessageFrom(stream)
+
+    expect(response?.id).toBe(priorAssistant.id)
+    expect(coreMocks.listMessages).toHaveBeenCalledWith('chat-1', databaseIdentity)
+    expect(coreMocks.createChatId).not.toHaveBeenCalled()
+    await eventually(() => {
+      expect(coreMocks.replaceChatAssistantMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ id: priorAssistant.id, status: 'done' }),
+        databaseIdentity,
+      )
+    })
+  })
+
+  it('persists a regenerated pending approval without clearing the terminal assistant first', async () => {
+    const priorAssistant: UIMessage = {
+      id: 'assistant-prior',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'The prior answer.', state: 'done' }],
+    }
+    coreMocks.listMessages.mockResolvedValue([
+      persistedMessage(userMessage),
+      persistedMessage(priorAssistant),
+    ])
+    aiMocks.streamText.mockReturnValueOnce({
+      toUIMessageStream: (options: { generateMessageId?: () => string }) => {
+        const responseId = options.generateMessageId?.() ?? priorAssistant.id
+        return rawMessageStream([
+          { type: 'start', messageId: responseId },
+          {
+            type: 'tool-input-available',
+            toolCallId: 'tool-1',
+            toolName: 'create_task',
+            input: { title: 'Send budget' },
+          },
+          {
+            type: 'tool-approval-request',
+            approvalId: 'approval-1',
+            toolCallId: 'tool-1',
+          },
+          { type: 'finish', finishReason: 'stop' },
+        ])
+      },
+    })
+    const transport = createChatTransport()
+
+    const stream = await transport.sendMessages({
+      trigger: 'regenerate-message',
+      chatId: 'chat-1',
+      messageId: priorAssistant.id,
+      messages: [userMessage],
+      abortSignal: undefined,
+    })
+    const response = await lastMessageFrom(stream)
+
+    expect(response?.id).toBe(priorAssistant.id)
+    await eventually(() => {
+      expect(coreMocks.replaceChatAssistantMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: priorAssistant.id,
+          conversationId: 'chat-1',
+          status: 'streaming',
+        }),
+        databaseIdentity,
+      )
+    })
+  })
+
+  it('keeps the prior durable assistant when regeneration fails before streaming', async () => {
+    const priorAssistant: UIMessage = {
+      id: 'assistant-prior',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'The prior answer.', state: 'done' }],
+    }
+    coreMocks.listMessages.mockResolvedValue([
+      persistedMessage(userMessage),
+      persistedMessage(priorAssistant),
+    ])
+    coreMocks.defaultAiProvider.mockReturnValueOnce(null)
+    const transport = createChatTransport()
+
+    const stream = await transport.sendMessages({
+      trigger: 'regenerate-message',
+      chatId: 'chat-1',
+      messageId: priorAssistant.id,
+      messages: [userMessage],
+      abortSignal: undefined,
+    })
+    const response = await lastMessageFrom(stream)
+
+    expect(response?.id).toBe(priorAssistant.id)
+    expect(uiMessageTextForTest(response)).toContain('No AI provider')
+    expect(coreMocks.appendChatMessage).not.toHaveBeenCalled()
+    expect(coreMocks.replaceChatAssistantMessage).not.toHaveBeenCalled()
+    expect(coreMocks.createChatId).not.toHaveBeenCalled()
+    expect(aiMocks.streamText).not.toHaveBeenCalled()
+  })
+
+  it('leaves the prior assistant snapshot intact when regeneration becomes stale', async () => {
+    const priorAssistant: UIMessage = {
+      id: 'assistant-prior',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'The prior answer.', state: 'done' }],
+    }
+    const staleError = Object.assign(new Error('The active brain changed.'), { kind: 'stale' })
+    coreMocks.listMessages.mockResolvedValue([
+      persistedMessage(userMessage),
+      persistedMessage(priorAssistant),
+    ])
+    coreMocks.assertActiveDatabaseIdentity.mockRejectedValueOnce(staleError)
+    const transport = createChatTransport()
+
+    const stream = await transport.sendMessages({
+      trigger: 'regenerate-message',
+      chatId: 'chat-1',
+      messageId: priorAssistant.id,
+      messages: [userMessage],
+      abortSignal: undefined,
+    })
+    const response = await lastMessageFrom(stream)
+
+    expect(response?.id).toBe(priorAssistant.id)
+    expect(uiMessageTextForTest(response)).toContain('The active brain changed.')
+    expect(coreMocks.replaceChatAssistantMessage).not.toHaveBeenCalled()
+    expect(coreMocks.appendChatMessage).not.toHaveBeenCalled()
+    expect(aiMocks.streamText).not.toHaveBeenCalled()
+  })
+
+  it('keeps the prior durable assistant when regeneration is aborted with partial text', async () => {
+    const priorAssistant: UIMessage = {
+      id: 'assistant-prior',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'The prior answer.', state: 'done' }],
+    }
+    coreMocks.listMessages.mockResolvedValue([
+      persistedMessage(userMessage),
+      persistedMessage(priorAssistant),
+    ])
+    aiMocks.streamText.mockReturnValueOnce({
+      toUIMessageStream: () => rawMessageStream([
+        { type: 'start', messageId: priorAssistant.id },
+        { type: 'text-start', id: 'partial-text' },
+        { type: 'text-delta', id: 'partial-text', delta: 'A partial replacement.' },
+        { type: 'text-end', id: 'partial-text' },
+        { type: 'abort', reason: 'stopped' },
+      ]),
+    })
+    const transport = createChatTransport()
+
+    const stream = await transport.sendMessages({
+      trigger: 'regenerate-message',
+      chatId: 'chat-1',
+      messageId: priorAssistant.id,
+      messages: [userMessage],
+      abortSignal: undefined,
+    })
+    await lastMessageFrom(stream)
+    await settleBackgroundWork()
+
+    expect(coreMocks.replaceChatAssistantMessage).not.toHaveBeenCalled()
+    expect(coreMocks.appendChatMessage).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { name: 'closes without a finish chunk', tail: [] as UIMessageChunk[] },
+    {
+      name: 'is followed by a successful-looking finish chunk',
+      tail: [{ type: 'finish', finishReason: 'stop' }] as UIMessageChunk[],
+    },
+  ])('keeps the prior durable assistant when an error-only regeneration $name', async ({ tail }) => {
+    const priorAssistant: UIMessage = {
+      id: 'assistant-prior',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'The prior answer.', state: 'done' }],
+    }
+    coreMocks.listMessages.mockResolvedValue([
+      persistedMessage(userMessage),
+      persistedMessage(priorAssistant),
+    ])
+    aiMocks.streamText.mockReturnValueOnce({
+      toUIMessageStream: () => rawMessageStream([
+        { type: 'start', messageId: priorAssistant.id },
+        { type: 'text-start', id: 'partial-text' },
+        { type: 'text-delta', id: 'partial-text', delta: 'A partial replacement.' },
+        { type: 'text-end', id: 'partial-text' },
+        { type: 'error', errorText: 'provider stream failed' },
+        ...tail,
+      ]),
+    })
+    const transport = createChatTransport()
+
+    const stream = await transport.sendMessages({
+      trigger: 'regenerate-message',
+      chatId: 'chat-1',
+      messageId: priorAssistant.id,
+      messages: [userMessage],
+      abortSignal: undefined,
+    })
+    const reader = stream.getReader()
+    while (!(await reader.read()).done) {
+      // Drain the UI stream so its onFinish persistence policy runs.
+    }
+    await settleBackgroundWork()
+
+    expect(coreMocks.replaceChatAssistantMessage).not.toHaveBeenCalled()
+    expect(coreMocks.appendChatMessage).not.toHaveBeenCalled()
+  })
+
+  it('keeps the prior durable assistant when the raw stream rejects after partial text', async () => {
+    const priorAssistant: UIMessage = {
+      id: 'assistant-prior',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'The prior answer.', state: 'done' }],
+    }
+    const controlled = controlledRawMessageStream()
+    coreMocks.listMessages.mockResolvedValue([
+      persistedMessage(userMessage),
+      persistedMessage(priorAssistant),
+    ])
+    aiMocks.streamText.mockReturnValueOnce({
+      toUIMessageStream: () => controlled.stream,
+    })
+    const transport = createChatTransport()
+
+    const stream = await transport.sendMessages({
+      trigger: 'regenerate-message',
+      chatId: 'chat-1',
+      messageId: priorAssistant.id,
+      messages: [userMessage],
+      abortSignal: undefined,
+    })
+    const reader = stream.getReader()
+    controlled.write({ type: 'start', messageId: priorAssistant.id })
+    controlled.write({ type: 'text-start', id: 'partial-text' })
+    controlled.write({ type: 'text-delta', id: 'partial-text', delta: 'A partial replacement.' })
+    controlled.write({ type: 'text-end', id: 'partial-text' })
+
+    let sawPartialText = false
+    while (!sawPartialText) {
+      const { done, value } = await reader.read()
+      if (done) throw new Error('Expected partial regenerated text before the stream rejection.')
+      sawPartialText = value.type === 'text-delta' && value.delta === 'A partial replacement.'
+    }
+    controlled.fail(new Error('transport stream rejected'))
+    try {
+      while (!(await reader.read()).done) {
+        // Drain any wrapper error chunk emitted after the raw reader rejects.
+      }
+    } catch {
+      // A rejected returned stream is also valid; persistence must still skip it.
+    }
+    await settleBackgroundWork()
+
+    expect(coreMocks.replaceChatAssistantMessage).not.toHaveBeenCalled()
+    expect(coreMocks.appendChatMessage).not.toHaveBeenCalled()
+  })
+
+  it('does not let a delayed prior turn overwrite a newer regeneration of the same assistant', async () => {
+    const priorAssistant: UIMessage = {
+      id: 'assistant-shared',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'The persisted answer.', state: 'done' }],
+    }
+    const oldStream = controlledRawMessageStream()
+    const newStream = controlledRawMessageStream()
+    aiMocks.streamText
+      .mockReturnValueOnce({ toUIMessageStream: () => oldStream.stream })
+      .mockReturnValueOnce({ toUIMessageStream: () => newStream.stream })
+    coreMocks.listMessages.mockResolvedValue([
+      persistedMessage(userMessage),
+      persistedMessage(priorAssistant),
+    ])
+    const transport = createChatTransport()
+
+    const delayedResponse = await transport.sendMessages({
+      trigger: 'submit-message',
+      chatId: 'chat-1',
+      messageId: priorAssistant.id,
+      messages: [userMessage, priorAssistant],
+      abortSignal: undefined,
+    })
+    const regeneratedResponse = await transport.sendMessages({
+      trigger: 'regenerate-message',
+      chatId: 'chat-1',
+      messageId: priorAssistant.id,
+      messages: [userMessage],
+      abortSignal: undefined,
+    })
+
+    oldStream.write({ type: 'start', messageId: priorAssistant.id })
+    oldStream.write({ type: 'text-start', id: 'old-text' })
+    oldStream.write({ type: 'text-delta', id: 'old-text', delta: 'Delayed old answer.' })
+    oldStream.write({ type: 'text-end', id: 'old-text' })
+    oldStream.write({ type: 'finish', finishReason: 'stop' })
+    oldStream.close()
+    await lastMessageFrom(delayedResponse)
+
+    expect(coreMocks.appendChatMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ contentText: 'Delayed old answer.' }),
+      databaseIdentity,
+    )
+
+    newStream.write({ type: 'start', messageId: priorAssistant.id })
+    newStream.write({ type: 'text-start', id: 'new-text' })
+    newStream.write({ type: 'text-delta', id: 'new-text', delta: 'Current regenerated answer.' })
+    newStream.write({ type: 'text-end', id: 'new-text' })
+    newStream.write({ type: 'finish', finishReason: 'stop' })
+    newStream.close()
+    await lastMessageFrom(regeneratedResponse)
+
+    await eventually(() => {
+      expect(coreMocks.replaceChatAssistantMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ contentText: 'Current regenerated answer.' }),
+        databaseIdentity,
+      )
+    })
+    expect(coreMocks.replaceChatAssistantMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ contentText: 'Delayed old answer.' }),
+      databaseIdentity,
+    )
   })
 
   it('uses a chat-selected model instead of the settings default', async () => {
@@ -623,6 +1201,8 @@ describe('createChatTransport', () => {
       expect.anything(),
     )
     expect(aiMocks.convertToModelMessages).toHaveBeenCalledWith([userMessage, approvalResponseMessage])
+    expect(coreMocks.listMessages).not.toHaveBeenCalled()
+    expect(coreMocks.replaceChatAssistantMessage).not.toHaveBeenCalled()
     await eventually(() => {
       expect(coreMocks.appendChatMessage).toHaveBeenCalledWith(
         expect.objectContaining({

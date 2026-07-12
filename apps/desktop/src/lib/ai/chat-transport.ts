@@ -28,6 +28,13 @@ import {
 } from '@local-brain/core'
 import { generateAndPersistConversationTitle } from './conversation-title'
 import { rememberChatApprovalDatabaseIdentity } from './chat-approval'
+import {
+  beginAssistantPersistenceTurn,
+  finishAssistantPersistenceTurn,
+  persistAssistantForTurn,
+  prepareRegenerationTurn,
+  type AssistantPersistenceTurn,
+} from './chat-persistence'
 import { resolveLanguageModel, type LanguageModelSelection } from './provider'
 import { errorMessage } from '../utils'
 
@@ -38,7 +45,6 @@ const MAX_OUTPUT_TOKENS = 8192
 /** Backstop for an empty/tool-only provider completion. */
 export const CHAT_NO_REPLY_FALLBACK =
   'I couldn’t finish answering from the records I gathered. Try narrowing the question or asking again.'
-type PersistedChatStatus = 'submitted' | 'streaming' | 'done' | 'error'
 
 export interface ChatTransportOptions {
   modelSelection?: LanguageModelSelection | null
@@ -48,7 +54,6 @@ export interface ChatTransportOptions {
 }
 
 interface TurnQuestion {
-  question: string
   shouldGenerateTitle: boolean
   titleUserText: string
 }
@@ -131,38 +136,20 @@ function messageHasPendingApproval(message: UIMessage): boolean {
   })
 }
 
-async function persistAssistant(
-  conversationId: string,
-  message: UIMessage,
-  model: string | null,
-  status: PersistedChatStatus,
-  error: string | null,
-  identity: DatabaseIdentity,
-): Promise<void> {
-  await appendChatMessage({
-    id: message.id,
-    conversationId,
-    role: 'assistant',
-    contentText: uiMessageText(message),
-    uiMessageJson: uiMessageJson(message),
-    model,
-    status,
-    error,
-  }, identity)
-}
-
 function watchPendingApprovalPersistence({
   conversationId,
   latestAssistant,
   model,
   stream,
   identity,
+  turn,
 }: {
   conversationId: string
   latestAssistant: UIMessage | undefined
   model: string
   stream: ReadableStream<UIMessageChunk>
   identity: DatabaseIdentity
+  turn: AssistantPersistenceTurn
 }): void {
   void (async () => {
     const readerOptions = {
@@ -174,7 +161,7 @@ function watchPendingApprovalPersistence({
     for await (const message of readUIMessageStream(readerOptions)) {
       if (!persistedPendingApproval && messageHasPendingApproval(message)) {
         persistedPendingApproval = true
-        await persistAssistant(conversationId, message, model, 'streaming', null, identity)
+        await persistAssistantForTurn(conversationId, message, model, 'streaming', null, identity, turn)
       }
     }
   })().catch(() => undefined)
@@ -184,7 +171,7 @@ async function persistLatestUser(
   conversationId: string,
   messages: readonly UIMessage[],
   identity: DatabaseIdentity,
-): Promise<{ shouldGenerateTitle: boolean; text: string; titleUserText: string }> {
+): Promise<{ shouldGenerateTitle: boolean; titleUserText: string }> {
   const latest = messages[messages.length - 1]
   if (!latest || latest.role !== 'user') throw new Error('Chat needs a user message to send.')
   const text = uiMessageText(latest).trim()
@@ -200,7 +187,7 @@ async function persistLatestUser(
     uiMessageJson: uiMessageJson(latest),
     status: 'done',
   }, identity)
-  return { shouldGenerateTitle, text, titleUserText }
+  return { shouldGenerateTitle, titleUserText }
 }
 
 async function questionForTurn(
@@ -212,16 +199,16 @@ async function questionForTurn(
   const latest = messages[messages.length - 1]
   const latestUser = messages.filter((message) => message.role === 'user').at(-1)
   if (trigger === 'submit-message' && latest?.role === 'user') {
-    const { shouldGenerateTitle, text, titleUserText } = await persistLatestUser(
+    const { shouldGenerateTitle, titleUserText } = await persistLatestUser(
       conversationId,
       messages,
       identity,
     )
-    return { question: text, shouldGenerateTitle, titleUserText }
+    return { shouldGenerateTitle, titleUserText }
   }
   const question = uiMessageText(latestUser ?? latest ?? assistantMessage(createChatId(), '')).trim()
   await ensureConversation(conversationId, titleForQuestion(question), identity)
-  return { question, shouldGenerateTitle: false, titleUserText: question }
+  return { shouldGenerateTitle: false, titleUserText: question }
 }
 
 async function loadChatContext(): Promise<{ system: string }> {
@@ -243,8 +230,13 @@ function contextWindowForModel(label: string): number {
 
 export function createChatTransport(options: ChatTransportOptions = {}): ChatTransport<UIMessage> {
   return {
-    async sendMessages({ trigger, chatId, messages, abortSignal }) {
+    async sendMessages({ trigger, chatId, messageId, messages, abortSignal }) {
       let identity: DatabaseIdentity | null = null
+      let responseId = trigger === 'regenerate-message'
+        ? null
+        : responseMessageIdForTurn(messages)
+      let assistantTurn: AssistantPersistenceTurn | null = null
+      let responseModel: string | null = null
       try {
         const turnIdentity = await activeDatabaseIdentity()
         identity = turnIdentity
@@ -257,7 +249,7 @@ export function createChatTransport(options: ChatTransportOptions = {}): ChatTra
             message: 'The active brain changed before this Chat turn could start.',
           }
         }
-        const { question, shouldGenerateTitle, titleUserText } = await questionForTurn(
+        const { shouldGenerateTitle, titleUserText } = await questionForTurn(
           trigger,
           chatId,
           messages,
@@ -265,13 +257,25 @@ export function createChatTransport(options: ChatTransportOptions = {}): ChatTra
         )
 
         if (trigger === 'regenerate-message') {
-          await ensureConversation(chatId, titleForQuestion(question), turnIdentity)
+          const regeneration = await prepareRegenerationTurn(chatId, messageId, turnIdentity)
+          responseId = regeneration.target.id
+          responseModel = regeneration.target.model
+          assistantTurn = regeneration.turn
+        } else {
+          if (!responseId) throw new Error('Chat could not create an assistant response id.')
+          assistantTurn = await beginAssistantPersistenceTurn(
+            chatId,
+            responseId,
+            turnIdentity,
+            null,
+          )
         }
 
         const [{ model, label }, { system }] = await Promise.all([
           resolveLanguageModel(options.modelSelection),
           loadChatContext(),
         ])
+        responseModel = label
         await assertActiveDatabaseIdentity(turnIdentity)
         const contextWindow = contextWindowForModel(label)
         const modelMessages = fitChatMessagesToContextWindow(
@@ -279,6 +283,11 @@ export function createChatTransport(options: ChatTransportOptions = {}): ChatTra
           { contextWindow, systemPrompt: system },
         )
         await assertActiveDatabaseIdentity(turnIdentity)
+        if (!responseId || !assistantTurn) {
+          throw new Error('The assistant message to regenerate is no longer available.')
+        }
+        const turnResponseId = responseId
+        const responseTurn = assistantTurn
         const result = streamText({
           model,
           system,
@@ -296,55 +305,70 @@ export function createChatTransport(options: ChatTransportOptions = {}): ChatTra
           temperature: 0,
           ...(abortSignal ? { abortSignal } : {}),
         })
-        const responseId = responseMessageIdForTurn(messages)
         const rawStream = result.toUIMessageStream<UIMessage>({
           originalMessages: messages,
-          generateMessageId: () => responseId,
+          generateMessageId: () => turnResponseId,
         })
         const latest = messages[messages.length - 1]
+        let responseFailed = false
         const stream = createUIMessageStream<UIMessage>({
           originalMessages: messages,
-          generateId: () => responseId,
+          generateId: () => turnResponseId,
           execute: async ({ writer }) => {
             let hasReplyText =
-              latest?.role === 'assistant' && uiMessageText(latest).trim().length > 0
+              trigger !== 'regenerate-message' &&
+              latest?.role === 'assistant' &&
+              uiMessageText(latest).trim().length > 0
             let awaitingApproval = false
-            let failed = false
             const reader = rawStream.getReader()
-            while (true) {
-              const { done, value } = await reader.read()
-              if (done) break
-              if (value.type === 'text-delta' && value.delta.trim()) hasReplyText = true
-              if (value.type === 'tool-approval-request') {
-                awaitingApproval = true
-                rememberChatApprovalDatabaseIdentity(value.approvalId, turnIdentity)
+            try {
+              while (true) {
+                const { done, value } = await reader.read()
+                if (done) break
+                if (value.type === 'text-delta' && value.delta.trim()) hasReplyText = true
+                if (value.type === 'tool-approval-request') {
+                  awaitingApproval = true
+                  rememberChatApprovalDatabaseIdentity(value.approvalId, turnIdentity)
+                }
+                if (value.type === 'error' || value.type === 'abort') responseFailed = true
+                if (value.type === 'finish' && !hasReplyText && !awaitingApproval && !responseFailed) {
+                  const textId = `${turnResponseId}-fallback`
+                  writer.write({ type: 'text-start', id: textId })
+                  writer.write({ type: 'text-delta', id: textId, delta: CHAT_NO_REPLY_FALLBACK })
+                  writer.write({ type: 'text-end', id: textId })
+                  hasReplyText = true
+                }
+                writer.write(value)
               }
-              if (value.type === 'error' || value.type === 'abort') failed = true
-              if (value.type === 'finish' && !hasReplyText && !awaitingApproval && !failed) {
-                const textId = `${responseId}-fallback`
-                writer.write({ type: 'text-start', id: textId })
-                writer.write({ type: 'text-delta', id: textId, delta: CHAT_NO_REPLY_FALLBACK })
-                writer.write({ type: 'text-end', id: textId })
-                hasReplyText = true
-              }
-              writer.write(value)
+            } catch (error) {
+              responseFailed = true
+              throw error
             }
           },
-          onFinish: async ({ responseMessage, finishReason }) => {
+          onFinish: async ({ responseMessage, finishReason, isAborted }) => {
             const status =
               finishReason === 'error'
                 ? 'error'
                 : messageHasPendingApproval(responseMessage)
                   ? 'streaming'
                   : 'done'
-            await persistAssistant(
-              chatId,
-              responseMessage,
-              label,
-              status,
-              finishReason === 'error' ? 'The model response ended with an error.' : null,
-              turnIdentity,
-            )
+            try {
+              if (
+                trigger === 'regenerate-message' &&
+                (isAborted || responseFailed || finishReason === 'error')
+              ) return
+              await persistAssistantForTurn(
+                chatId,
+                responseMessage,
+                label,
+                status,
+                finishReason === 'error' ? 'The model response ended with an error.' : null,
+                turnIdentity,
+                responseTurn,
+              )
+            } finally {
+              finishAssistantPersistenceTurn(responseTurn)
+            }
             if (shouldGenerateTitle && finishReason !== 'error') {
               generateAndPersistConversationTitle({
                 assistantText: uiMessageText(responseMessage),
@@ -364,17 +388,36 @@ export function createChatTransport(options: ChatTransportOptions = {}): ChatTra
           model: label,
           stream: persistenceStream,
           identity: turnIdentity,
+          turn: responseTurn,
         })
         return uiStream
       } catch (error) {
         const messageText = errorMessage(error)
-        const message = assistantMessage(createChatId(), `I couldn't answer that yet: ${messageText}`)
-        if (identity && (!isAppError(error) || error.kind !== 'stale')) {
+        const errorTurn = assistantTurn
+        const message = assistantMessage(
+          responseId ?? createChatId(),
+          `I couldn't answer that yet: ${messageText}`,
+        )
+        if (
+          identity &&
+          errorTurn &&
+          trigger !== 'regenerate-message' &&
+          (!isAppError(error) || error.kind !== 'stale')
+        ) {
           const errorIdentity = identity
           await assertActiveDatabaseIdentity(errorIdentity)
-            .then(() => persistAssistant(chatId, message, null, 'error', messageText, errorIdentity))
+            .then(() => persistAssistantForTurn(
+              chatId,
+              message,
+              responseModel,
+              'error',
+              messageText,
+              errorIdentity,
+              errorTurn,
+            ))
             .catch(() => undefined)
         }
+        if (errorTurn) finishAssistantPersistenceTurn(errorTurn)
         return staticAssistantStream(message, 'error')
       }
     },

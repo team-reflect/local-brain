@@ -76,8 +76,13 @@ export function getConversation(
   return readDb.selectFrom('chatConversations').selectAll().where('id', '=', id).executeTakeFirst()
 }
 
-export async function listMessages(conversationId: string): Promise<ChatMessage[]> {
-  const rows = await db
+/** List one conversation's messages, optionally pinned to a captured brain. */
+export async function listMessages(
+  conversationId: string,
+  expectedIdentity?: DatabaseIdentity,
+): Promise<ChatMessage[]> {
+  const readDb = expectedIdentity ? dbForDatabase(expectedIdentity) : db
+  const rows = await readDb
     .selectFrom('chatMessages')
     .selectAll()
     .where('conversationId', '=', conversationId)
