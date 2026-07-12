@@ -151,8 +151,34 @@ extracted_fact, memory, asset
 `chunk_vectors` provide sqlite-vec semantic retrieval. Retrieval returns the chunk
 plus its owning typed record, source record, snippet, score, and citation handle.
 
+`content_chunks` is a rebuildable projection, but each writer must keep its rows and
+hashes in the same transaction as the durable source change. App domain writes do this
+for documents, interactions, memories, and profile-bearing person/organization updates.
+CLI import/enrichment does it for those records and its additional entity projections,
+including organization profiles, transcripts, AI notes, and extracted facts. A
+schema-supported record type need not have chunks when its current writer has no
+projected body; direct typed-field search still discovers it.
+
+Stable surviving chunk ids preserve record references. Both app and CLI projections
+clear stale quote offsets when they replace an in-range chunk, while removed tail
+chunks follow the schema's evidence-cascade behavior. Semantic reads join on the
+current model and content hash, so a stale vector becomes ineligible immediately;
+background catch-up replaces changed vectors and prunes orphans asynchronously.
+
 Documents, interactions, and assets also keep navigational FTS projections for
-global search and quick UI lookup.
+global search and quick UI lookup. Grounded Chat uses a sibling record-candidate query
+over direct record fields plus the shared chunk lexical/semantic primitives. It fuses
+ranked legs at record granularity, carries only a bounded set of exact chunk refs into
+follow-up reads, and supplies a derived navigation target when the source itself has no
+detail route (for example, transcript to interaction or organization profile to
+organization).
+
+`chat_messages.ui_message_json` preserves the AI SDK message, including tool-call and
+result provenance, for the local conversation trace. Those request-scoped results do
+not create `evidence_refs`, and their raw payloads are elided before older turns are
+sent to a provider again. Database path/generation is intentionally not serialized into
+Chat JSON: a restored pending approval may be dismissed, but it cannot execute after a
+reload and must be requested again.
 
 ## Suggestions
 

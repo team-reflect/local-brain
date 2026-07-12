@@ -33,6 +33,8 @@ function installEmbeddingMutationBridge(
       commands.push(command)
       const params = ((args as { params?: unknown[] }).params ?? []) as unknown[]
       switch (command) {
+        case 'embed_database_identity':
+          return Promise.resolve({ databasePath: '/test/brain.sqlite', generation: 1 })
         case 'embed_ensure':
           return Promise.resolve(ensure)
         case 'embed_clear':
@@ -118,6 +120,8 @@ describe('embedding mutation invalidation', () => {
       invoke: (command, args) => {
         const params = ((args as { params?: unknown[] }).params ?? []) as unknown[]
         switch (command) {
+          case 'embed_database_identity':
+            return Promise.resolve({ databasePath: '/test/brain.sqlite', generation: 1 })
           case 'embed_ensure':
             return Promise.reject(new Error('load failed'))
           case 'db_execute': {

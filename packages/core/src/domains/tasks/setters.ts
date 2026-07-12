@@ -10,25 +10,37 @@ import {
 } from '../../db/records'
 import { nowIso } from '../../db/time'
 import { validateNewTask, validateTaskPatch } from './validators'
+import type { DatabaseIdentity } from '../../db/identity'
 
 export type NewTask = NewRecord<Tasks>
 export type TaskPatch = RecordPatch<Tasks>
 
-export function createTask(input: NewTask): Promise<string> {
-  return insertRecord('tasks', validateNewTask(input))
+/** Create a task, optionally rejecting the write after a brain switch. */
+export function createTask(input: NewTask, expectedIdentity?: DatabaseIdentity): Promise<string> {
+  return insertRecord('tasks', validateNewTask(input), expectedIdentity)
 }
 
-export function updateTask(id: string, patch: TaskPatch): Promise<number> {
-  return updateRecord('tasks', id, validateTaskPatch(patch))
+/** Update a task, optionally pinned to a captured brain identity. */
+export function updateTask(
+  id: string,
+  patch: TaskPatch,
+  expectedIdentity?: DatabaseIdentity,
+): Promise<number> {
+  return updateRecord('tasks', id, validateTaskPatch(patch), expectedIdentity)
 }
 
-/** Mark a task done (status + completion timestamp). */
-export function completeTask(id: string, completedAt = nowIso()): Promise<number> {
+/** Mark a task done, optionally pinned to a captured brain identity. */
+export function completeTask(
+  id: string,
+  completedAt = nowIso(),
+  expectedIdentity?: DatabaseIdentity,
+): Promise<number> {
   return execute(
     db
       .updateTable('tasks')
       .set({ status: 'done', completedAt, updatedAt: nowIso() })
       .where('id', '=', id),
+    expectedIdentity,
   )
 }
 

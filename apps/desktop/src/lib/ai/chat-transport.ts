@@ -9,29 +9,56 @@ import {
   type UIMessageChunk,
 } from 'ai'
 import {
+  DEFAULT_CONTEXT_WINDOW,
+  activeDatabaseIdentity,
+  assertActiveDatabaseIdentity,
+  aiProviderIdSchema,
   appendChatMessage,
   buildChatSystemPrompt,
   buildChatTools,
   createChatId,
   createConversation,
+  fitChatMessagesToContextWindow,
   getConversation,
-  listProjects,
+  isAppError,
+  loadChatBrainOverview,
   localDateString,
+  modelContextWindow,
+  type DatabaseIdentity,
 } from '@local-brain/core'
 import { generateAndPersistConversationTitle } from './conversation-title'
+import {
+  rememberChatApprovalDatabaseIdentity,
+  revokeChatApprovalDatabaseIdentities,
+  type ChatApprovalLease,
+} from './chat-approval'
+import {
+  beginAssistantPersistenceTurn,
+  finishAssistantPersistenceTurn,
+  persistAssistantForTurn,
+  prepareRegenerationTurn,
+  rollbackRegeneratedAssistantForTurn,
+  type AssistantPersistenceTurn,
+} from './chat-persistence'
 import { resolveLanguageModel, type LanguageModelSelection } from './provider'
+import { errorMessage } from '../utils'
 
-const TOOL_STEPS = 20
+// Twelve rounds leave generous room for batched reads while bounding cost and
+// latency. The last round is synthesis-only (see prepareStep below).
+const TOOL_STEPS = 12
 const MAX_OUTPUT_TOKENS = 8192
-type PersistedChatStatus = 'submitted' | 'streaming' | 'done' | 'error'
+/** Backstop for an empty/tool-only provider completion. */
+export const CHAT_NO_REPLY_FALLBACK =
+  'I couldn’t finish answering from the records I gathered. Try narrowing the question or asking again.'
 
 export interface ChatTransportOptions {
   modelSelection?: LanguageModelSelection | null
   onConversationTitleUpdated?: (conversationId: string) => void
+  /** Brain path of the workspace that created this transport. */
+  expectedDatabasePath?: string
 }
 
 interface TurnQuestion {
-  question: string
   shouldGenerateTitle: boolean
   titleUserText: string
 }
@@ -63,10 +90,14 @@ function titleForQuestion(question: string): string {
   return compact.length > 60 ? `${compact.slice(0, 57)}...` : compact
 }
 
-async function ensureConversation(chatId: string, title: string): Promise<ConversationState> {
-  const existing = await getConversation(chatId)
+async function ensureConversation(
+  chatId: string,
+  title: string,
+  identity: DatabaseIdentity,
+): Promise<ConversationState> {
+  const existing = await getConversation(chatId, identity)
   if (existing) return { createdConversation: false, title: existing.title }
-  await createConversation({ id: chatId, title })
+  await createConversation({ id: chatId, title }, identity)
   return { createdConversation: true, title }
 }
 
@@ -110,35 +141,20 @@ function messageHasPendingApproval(message: UIMessage): boolean {
   })
 }
 
-async function persistAssistant(
-  conversationId: string,
-  message: UIMessage,
-  model: string | null,
-  status: PersistedChatStatus,
-  error: string | null,
-): Promise<void> {
-  await appendChatMessage({
-    id: message.id,
-    conversationId,
-    role: 'assistant',
-    contentText: uiMessageText(message),
-    uiMessageJson: uiMessageJson(message),
-    model,
-    status,
-    error,
-  })
-}
-
 function watchPendingApprovalPersistence({
   conversationId,
   latestAssistant,
   model,
   stream,
+  identity,
+  turn,
 }: {
   conversationId: string
   latestAssistant: UIMessage | undefined
   model: string
   stream: ReadableStream<UIMessageChunk>
+  identity: DatabaseIdentity
+  turn: AssistantPersistenceTurn
 }): void {
   void (async () => {
     const readerOptions = {
@@ -150,21 +166,22 @@ function watchPendingApprovalPersistence({
     for await (const message of readUIMessageStream(readerOptions)) {
       if (!persistedPendingApproval && messageHasPendingApproval(message)) {
         persistedPendingApproval = true
-        await persistAssistant(conversationId, message, model, 'streaming', null)
+        await persistAssistantForTurn(conversationId, message, model, 'streaming', null, identity, turn)
       }
     }
-  })()
+  })().catch(() => undefined)
 }
 
 async function persistLatestUser(
   conversationId: string,
   messages: readonly UIMessage[],
-): Promise<{ shouldGenerateTitle: boolean; text: string; titleUserText: string }> {
+  identity: DatabaseIdentity,
+): Promise<{ shouldGenerateTitle: boolean; titleUserText: string }> {
   const latest = messages[messages.length - 1]
   if (!latest || latest.role !== 'user') throw new Error('Chat needs a user message to send.')
   const text = uiMessageText(latest).trim()
   const titleUserText = uiMessageText(messages.find((message) => message.role === 'user') ?? latest).trim()
-  const conversation = await ensureConversation(conversationId, titleForQuestion(text))
+  const conversation = await ensureConversation(conversationId, titleForQuestion(text), identity)
   const shouldGenerateTitle =
     conversation.createdConversation || conversation.title === titleForQuestion(titleUserText)
   await appendChatMessage({
@@ -174,72 +191,251 @@ async function persistLatestUser(
     contentText: text,
     uiMessageJson: uiMessageJson(latest),
     status: 'done',
-  })
-  return { shouldGenerateTitle, text, titleUserText }
+  }, identity)
+  return { shouldGenerateTitle, titleUserText }
 }
 
 async function questionForTurn(
   trigger: string,
   conversationId: string,
   messages: readonly UIMessage[],
+  identity: DatabaseIdentity,
 ): Promise<TurnQuestion> {
   const latest = messages[messages.length - 1]
   const latestUser = messages.filter((message) => message.role === 'user').at(-1)
   if (trigger === 'submit-message' && latest?.role === 'user') {
-    const { shouldGenerateTitle, text, titleUserText } = await persistLatestUser(conversationId, messages)
-    return { question: text, shouldGenerateTitle, titleUserText }
+    const { shouldGenerateTitle, titleUserText } = await persistLatestUser(
+      conversationId,
+      messages,
+      identity,
+    )
+    return { shouldGenerateTitle, titleUserText }
   }
   const question = uiMessageText(latestUser ?? latest ?? assistantMessage(createChatId(), '')).trim()
-  await ensureConversation(conversationId, titleForQuestion(question))
-  return { question, shouldGenerateTitle: false, titleUserText: question }
+  await ensureConversation(conversationId, titleForQuestion(question), identity)
+  return { shouldGenerateTitle: false, titleUserText: question }
 }
 
 async function loadChatContext(): Promise<{ system: string }> {
   const today = localDateString()
-  const projects = await listProjects({ activeOnly: true, limit: 40 })
+  const overview = await loadChatBrainOverview().catch(() => null)
   return {
-    system: buildChatSystemPrompt({ today, projects }),
+    system: buildChatSystemPrompt({ today, overview }),
   }
+}
+
+function contextWindowForModel(label: string): number {
+  const separator = label.indexOf('/')
+  if (separator <= 0 || separator === label.length - 1) return DEFAULT_CONTEXT_WINDOW
+  const provider = aiProviderIdSchema.safeParse(label.slice(0, separator))
+  return provider.success
+    ? modelContextWindow(provider.data, label.slice(separator + 1))
+    : DEFAULT_CONTEXT_WINDOW
 }
 
 export function createChatTransport(options: ChatTransportOptions = {}): ChatTransport<UIMessage> {
   return {
-    async sendMessages({ trigger, chatId, messages, abortSignal }) {
-      const { question, shouldGenerateTitle, titleUserText } = await questionForTurn(trigger, chatId, messages)
-
-      if (trigger === 'regenerate-message') {
-        await ensureConversation(chatId, titleForQuestion(question))
+    async sendMessages({ trigger, chatId, messageId, messages, abortSignal }) {
+      let responseFailed = abortSignal?.aborted ?? false
+      let rollbackDisabled = false
+      let identity: DatabaseIdentity | null = null
+      let assistantTurn: AssistantPersistenceTurn | null = null
+      let rollbackPromise: Promise<void> | null = null
+      let persistenceOwnershipFinished = false
+      const finishPersistenceOwnership = (turn: AssistantPersistenceTurn): void => {
+        if (persistenceOwnershipFinished) return
+        persistenceOwnershipFinished = true
+        finishAssistantPersistenceTurn(turn)
       }
-
+      const startRegenerationRollback = (): Promise<void> | null => {
+        if (trigger !== 'regenerate-message' || rollbackDisabled || !identity || !assistantTurn) {
+          return null
+        }
+        if (!rollbackPromise) {
+          const rollbackIdentity = identity
+          const rollbackTurn = assistantTurn
+          rollbackPromise = rollbackRegeneratedAssistantForTurn(chatId, rollbackIdentity, rollbackTurn)
+            .finally(() => finishPersistenceOwnership(rollbackTurn))
+          void rollbackPromise.catch(() => undefined)
+        }
+        return rollbackPromise
+      }
+      const responseApprovalLeases = new Map<string, ChatApprovalLease>()
+      const revokeResponseApprovals = (): void => {
+        if (trigger !== 'regenerate-message' || rollbackDisabled) return
+        if (!revokeChatApprovalDatabaseIdentities([...responseApprovalLeases.values()])) {
+          rollbackDisabled = true
+        }
+      }
+      const handleAbort = (): void => {
+        responseFailed = true
+        revokeResponseApprovals()
+        startRegenerationRollback()
+      }
+      let abortListenerAttached = false
+      if (abortSignal && !abortSignal.aborted) {
+        abortSignal.addEventListener('abort', handleAbort, { once: true })
+        abortListenerAttached = true
+        if (abortSignal.aborted) handleAbort()
+      }
+      const removeAbortListener = (): void => {
+        if (!abortSignal || !abortListenerAttached) return
+        abortSignal.removeEventListener('abort', handleAbort)
+        abortListenerAttached = false
+      }
+      let responseId = trigger === 'regenerate-message'
+        ? null
+        : responseMessageIdForTurn(messages)
+      let responseModel: string | null = null
       try {
+        const turnIdentity = await activeDatabaseIdentity()
+        identity = turnIdentity
+        if (
+          options.expectedDatabasePath &&
+          turnIdentity.databasePath !== options.expectedDatabasePath
+        ) {
+          throw {
+            kind: 'stale',
+            message: 'The active brain changed before this Chat turn could start.',
+          }
+        }
+        const { shouldGenerateTitle, titleUserText } = await questionForTurn(
+          trigger,
+          chatId,
+          messages,
+          turnIdentity,
+        )
+
+        if (trigger === 'regenerate-message') {
+          const regeneration = await prepareRegenerationTurn(chatId, messageId, turnIdentity)
+          responseId = regeneration.target.id
+          responseModel = regeneration.target.model
+          assistantTurn = regeneration.turn
+          if (responseFailed) startRegenerationRollback()
+        } else {
+          if (!responseId) throw new Error('Chat could not create an assistant response id.')
+          assistantTurn = await beginAssistantPersistenceTurn(
+            chatId,
+            responseId,
+            turnIdentity,
+            null,
+          )
+        }
+
         const [{ model, label }, { system }] = await Promise.all([
           resolveLanguageModel(options.modelSelection),
           loadChatContext(),
         ])
+        responseModel = label
+        await assertActiveDatabaseIdentity(turnIdentity)
+        const contextWindow = contextWindowForModel(label)
+        const modelMessages = fitChatMessagesToContextWindow(
+          await convertToModelMessages(messages),
+          { contextWindow, systemPrompt: system },
+        )
+        await assertActiveDatabaseIdentity(turnIdentity)
+        if (!responseId || !assistantTurn) {
+          throw new Error('The assistant message to regenerate is no longer available.')
+        }
+        const turnResponseId = responseId
+        const responseTurn = assistantTurn
         const result = streamText({
           model,
           system,
-          messages: await convertToModelMessages(messages),
-          tools: buildChatTools(),
+          messages: modelMessages,
+          tools: buildChatTools({ databaseIdentity: turnIdentity }),
           stopWhen: stepCountIs(TOOL_STEPS),
+          prepareStep: ({ stepNumber, messages: stepMessages }) => ({
+            messages: fitChatMessagesToContextWindow(stepMessages, {
+              contextWindow,
+              systemPrompt: system,
+            }),
+            ...(stepNumber >= TOOL_STEPS - 1 ? { toolChoice: 'none' as const } : {}),
+          }),
           maxOutputTokens: MAX_OUTPUT_TOKENS,
           temperature: 0,
           ...(abortSignal ? { abortSignal } : {}),
         })
-        const responseId = responseMessageIdForTurn(messages)
-        const stream = result.toUIMessageStream<UIMessage>({
+        const rawStream = result.toUIMessageStream<UIMessage>({
           originalMessages: messages,
-          generateMessageId: () => responseId,
-          onFinish: async ({ responseMessage, finishReason }) => {
-            const status = finishReason === 'error' ? 'error' :
-              messageHasPendingApproval(responseMessage) ? 'streaming' : 'done'
-            await persistAssistant(
-              chatId,
-              responseMessage,
-              label,
-              status,
-              finishReason === 'error' ? 'The model response ended with an error.' : null,
-            )
+          generateMessageId: () => turnResponseId,
+        })
+        const latest = messages[messages.length - 1]
+        const stream = createUIMessageStream<UIMessage>({
+          originalMessages: messages,
+          generateId: () => turnResponseId,
+          execute: async ({ writer }) => {
+            let hasReplyText =
+              trigger !== 'regenerate-message' &&
+              latest?.role === 'assistant' &&
+              uiMessageText(latest).trim().length > 0
+            let awaitingApproval = false
+            const reader = rawStream.getReader()
+            try {
+              while (true) {
+                const { done, value } = await reader.read()
+                if (done) break
+                if (value.type === 'text-delta' && value.delta.trim()) hasReplyText = true
+                if (value.type === 'tool-approval-request') {
+                  awaitingApproval = true
+                  let lease = responseApprovalLeases.get(value.approvalId)
+                  if (!lease) {
+                    lease = rememberChatApprovalDatabaseIdentity(value.approvalId, turnIdentity)
+                    responseApprovalLeases.set(value.approvalId, lease)
+                  }
+                  if (responseFailed) {
+                    revokeResponseApprovals()
+                    startRegenerationRollback()
+                  }
+                }
+                if (value.type === 'error' || value.type === 'abort') {
+                  responseFailed = true
+                  revokeResponseApprovals()
+                  startRegenerationRollback()
+                }
+                if (value.type === 'finish' && !hasReplyText && !awaitingApproval && !responseFailed) {
+                  const textId = `${turnResponseId}-fallback`
+                  writer.write({ type: 'text-start', id: textId })
+                  writer.write({ type: 'text-delta', id: textId, delta: CHAT_NO_REPLY_FALLBACK })
+                  writer.write({ type: 'text-end', id: textId })
+                  hasReplyText = true
+                }
+                writer.write(value)
+              }
+            } catch (error) {
+              responseFailed = true
+              revokeResponseApprovals()
+              startRegenerationRollback()
+              throw error
+            }
+          },
+          onFinish: async ({ responseMessage, finishReason, isAborted }) => {
+            const status =
+              finishReason === 'error'
+                ? 'error'
+                : messageHasPendingApproval(responseMessage)
+                  ? 'streaming'
+                  : 'done'
+            const failedResponse = isAborted || responseFailed || finishReason === 'error'
+            try {
+              if (failedResponse) revokeResponseApprovals()
+              if (trigger === 'regenerate-message' && failedResponse) {
+                await startRegenerationRollback()
+                return
+              }
+              await persistAssistantForTurn(
+                chatId,
+                responseMessage,
+                label,
+                status,
+                finishReason === 'error' ? 'The model response ended with an error.' : null,
+                turnIdentity,
+                responseTurn,
+              )
+            } finally {
+              removeAbortListener()
+              finishPersistenceOwnership(responseTurn)
+            }
             if (shouldGenerateTitle && finishReason !== 'error') {
               generateAndPersistConversationTitle({
                 assistantText: uiMessageText(responseMessage),
@@ -247,23 +443,49 @@ export function createChatTransport(options: ChatTransportOptions = {}): ChatTra
                 model,
                 onUpdated: options.onConversationTitleUpdated,
                 userText: titleUserText,
+                databaseIdentity: turnIdentity,
               })
             }
           },
         })
         const [uiStream, persistenceStream] = stream.tee()
-        const latest = messages[messages.length - 1]
         watchPendingApprovalPersistence({
           conversationId: chatId,
           latestAssistant: latest?.role === 'assistant' ? latest : undefined,
           model: label,
           stream: persistenceStream,
+          identity: turnIdentity,
+          turn: responseTurn,
         })
         return uiStream
       } catch (error) {
-        const messageText = error instanceof Error ? error.message : String(error)
-        const message = assistantMessage(createChatId(), `I couldn't answer that yet: ${messageText}`)
-        await persistAssistant(chatId, message, null, 'error', messageText)
+        removeAbortListener()
+        const messageText = errorMessage(error)
+        const errorTurn = assistantTurn
+        const message = assistantMessage(
+          responseId ?? createChatId(),
+          `I couldn't answer that yet: ${messageText}`,
+        )
+        if (
+          identity &&
+          errorTurn &&
+          trigger !== 'regenerate-message' &&
+          (!isAppError(error) || error.kind !== 'stale')
+        ) {
+          const errorIdentity = identity
+          await assertActiveDatabaseIdentity(errorIdentity)
+            .then(() => persistAssistantForTurn(
+              chatId,
+              message,
+              responseModel,
+              'error',
+              messageText,
+              errorIdentity,
+              errorTurn,
+            ))
+            .catch(() => undefined)
+        }
+        if (errorTurn) finishPersistenceOwnership(errorTurn)
         return staticAssistantStream(message, 'error')
       }
     },

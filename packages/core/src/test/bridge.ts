@@ -30,6 +30,11 @@ export function captureDbBridge(rows: unknown[] = []): CapturedCall[] {
           return Promise.resolve(1)
         case 'db_batch':
           return Promise.resolve((args['statements'] as unknown[]).map(() => 1))
+        case 'active_database_identity':
+        case 'embed_database_identity':
+          return Promise.resolve({ databasePath: '/test/brain.sqlite', generation: 1 })
+        case 'embed_delete':
+          return Promise.resolve(0)
         default:
           return Promise.resolve(null)
       }

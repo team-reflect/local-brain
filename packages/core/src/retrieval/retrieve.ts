@@ -54,6 +54,16 @@ export type SourceRecordType =
   | 'memory'
   | 'asset'
 
+/** Source kinds with an existing desktop detail route. */
+export type NavigableRecordType =
+  | 'person'
+  | 'organization'
+  | 'project'
+  | 'task'
+  | 'document'
+  | 'interaction'
+  | 'asset'
+
 export interface RetrievedChunk {
   chunkId: string
   text: string
@@ -62,6 +72,9 @@ export interface RetrievedChunk {
   recordType: SourceRecordType
   recordId: string
   recordTitle: string | null
+  /** Existing detail record that should open for this source, when known. */
+  navigationRecordType?: NavigableRecordType | null
+  navigationRecordId?: string | null
   /** The owning record's event date (ISO 8601), or null when undated. */
   recordDate: string | null
   chunkIndex: number

@@ -10,6 +10,7 @@ import {
   applyExtraction,
   createPerson,
   createProject,
+  db,
   getInteractionLinks,
   getPersonLinks,
   getTaskLinks,
@@ -115,6 +116,14 @@ describe('05a extraction apply (real SQLite golden round-trip)', () => {
     const memoriesAboutAlex = await listMemoriesForRecord('person', alex.id)
     expect(memoriesAboutAlex.map((m) => m.claim)).toEqual(['Alex Rivera founded Northwind Labs.'])
     const memoryId = memoriesAboutAlex[0].id
+    const memoryChunk = await db
+      .selectFrom('contentChunks')
+      .select(['text', 'contentHash'])
+      .where('recordType', '=', 'memory')
+      .where('recordId', '=', memoryId)
+      .executeTakeFirst()
+    expect(memoryChunk?.text).toBe('Alex Rivera founded Northwind Labs.')
+    expect(memoryChunk?.contentHash).toMatch(/^[0-9a-f]{64}$/)
     const fromSource = await listMemoriesForRecord('interaction', meeting.id)
     expect(fromSource.map((m) => m.id)).toContain(memoryId)
     const citations = await listCitationsForSubject('memory', memoryId)

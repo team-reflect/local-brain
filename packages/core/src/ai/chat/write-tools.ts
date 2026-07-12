@@ -36,6 +36,7 @@ import {
   type MemoryPatch,
   type NewMemory,
 } from '../../domains/memories/setters'
+import type { DatabaseIdentity } from '../../db/identity'
 
 const MEMORY_KINDS = ['fact', 'preference', 'decision', 'commitment', 'instruction', 'risk', 'idea'] as const
 
@@ -57,6 +58,10 @@ function compactObject<T extends object>(input: T): Partial<T> {
 function optionalNonBlank(value: string | undefined): string | undefined {
   const trimmed = value?.trim()
   return trimmed ? trimmed : undefined
+}
+
+function identityArgs(identity: DatabaseIdentity | undefined): [] | [DatabaseIdentity] {
+  return identity ? [identity] : []
 }
 
 function requireAffected(kind: string, action: string, id: string, affected: number): number {
@@ -244,41 +249,64 @@ export function isChatWriteToolName(name: string): name is ChatWriteToolName {
 export async function executeChatWriteTool(
   toolName: ChatWriteToolName,
   input: Record<string, unknown>,
+  expectedIdentity?: DatabaseIdentity,
 ): Promise<ChatWriteToolOutput> {
   switch (toolName) {
     case 'create_task': {
       const parsed = createTaskSchema.parse(input)
-      const id = await createTask(compactObject(parsed) as NewTask)
+      const id = await createTask(compactObject(parsed) as NewTask, ...identityArgs(expectedIdentity))
       return { kind: 'task', action: 'created', id }
     }
     case 'update_task': {
       const { id, ...patch } = updateTaskSchema.parse(input)
-      const affected = await updateTask(id, compactObject(patch) as TaskPatch)
+      const affected = await updateTask(
+        id,
+        compactObject(patch) as TaskPatch,
+        ...identityArgs(expectedIdentity),
+      )
       return { kind: 'task', action: 'updated', id, affected: requireAffected('task', 'updated', id, affected) }
     }
     case 'complete_task': {
       const { id, completedAt } = completeTaskSchema.parse(input)
-      const affected = await completeTask(id, optionalNonBlank(completedAt))
+      const affected = await completeTask(
+        id,
+        optionalNonBlank(completedAt),
+        ...identityArgs(expectedIdentity),
+      )
       return { kind: 'task', action: 'completed', id, affected: requireAffected('task', 'completed', id, affected) }
     }
     case 'create_person': {
       const parsed = createPersonSchema.parse(input)
-      const id = await createPerson(compactObject(parsed) as NewPerson)
+      const id = await createPerson(
+        compactObject(parsed) as NewPerson,
+        ...identityArgs(expectedIdentity),
+      )
       return { kind: 'person', action: 'created', id }
     }
     case 'update_person': {
       const { id, ...patch } = updatePersonSchema.parse(input)
-      const affected = await updatePerson(id, compactObject(patch) as PersonPatch)
+      const affected = await updatePerson(
+        id,
+        compactObject(patch) as PersonPatch,
+        ...identityArgs(expectedIdentity),
+      )
       return { kind: 'person', action: 'updated', id, affected: requireAffected('person', 'updated', id, affected) }
     }
     case 'create_organization': {
       const parsed = createOrganizationSchema.parse(input)
-      const id = await createOrganization(compactObject(parsed) as NewOrganization)
+      const id = await createOrganization(
+        compactObject(parsed) as NewOrganization,
+        ...identityArgs(expectedIdentity),
+      )
       return { kind: 'organization', action: 'created', id }
     }
     case 'update_organization': {
       const { id, ...patch } = updateOrganizationSchema.parse(input)
-      const affected = await updateOrganization(id, compactObject(patch) as OrganizationPatch)
+      const affected = await updateOrganization(
+        id,
+        compactObject(patch) as OrganizationPatch,
+        ...identityArgs(expectedIdentity),
+      )
       return {
         kind: 'organization',
         action: 'updated',
@@ -288,12 +316,19 @@ export async function executeChatWriteTool(
     }
     case 'create_project': {
       const parsed = createProjectSchema.parse(input)
-      const id = await createProject(compactObject(parsed) as NewProject)
+      const id = await createProject(
+        compactObject(parsed) as NewProject,
+        ...identityArgs(expectedIdentity),
+      )
       return { kind: 'project', action: 'created', id }
     }
     case 'update_project': {
       const { id, ...patch } = updateProjectSchema.parse(input)
-      const affected = await updateProject(id, compactObject(patch) as ProjectPatch)
+      const affected = await updateProject(
+        id,
+        compactObject(patch) as ProjectPatch,
+        ...identityArgs(expectedIdentity),
+      )
       return { kind: 'project', action: 'updated', id, affected: requireAffected('project', 'updated', id, affected) }
     }
     case 'log_interaction': {
@@ -301,6 +336,7 @@ export async function executeChatWriteTool(
       const id = await createInteraction(
         compactObject(parsed) as NewInteraction,
         (participants ?? []) as InteractionParticipantInput[],
+        ...identityArgs(expectedIdentity),
       )
       return { kind: 'interaction', action: 'created', id }
     }
@@ -313,12 +349,17 @@ export async function executeChatWriteTool(
           recordId: subject.recordId,
           role: subject.role ?? null,
         })),
+        ...identityArgs(expectedIdentity),
       )
       return { kind: 'memory', action: result.created ? 'created' : 'existing', id: result.id }
     }
     case 'update_memory': {
       const { id, ...patch } = updateMemorySchema.parse(input)
-      const affected = await updateMemory(id, compactObject(patch) as MemoryPatch)
+      const affected = await updateMemory(
+        id,
+        compactObject(patch) as MemoryPatch,
+        ...identityArgs(expectedIdentity),
+      )
       return { kind: 'memory', action: 'updated', id, affected: requireAffected('memory', 'updated', id, affected) }
     }
   }

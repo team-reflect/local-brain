@@ -1,4 +1,5 @@
 import { batch } from '../db/commands'
+import { activeDatabaseIdentity, assertActiveDatabaseIdentity } from '../db/identity'
 import { recomputeRelationshipIntelligence } from '../domains/relationships/recompute'
 import { type ExtractionResult, validateExtraction } from './contracts'
 import {
@@ -50,17 +51,18 @@ export async function applyExtraction(
   result: ExtractionResult,
   options: ApplyOptions = {},
 ): Promise<ApplySummary> {
+  const databaseIdentity = await activeDatabaseIdentity()
   const problems = validateExtraction(result)
   if (problems.length > 0) {
     throw new Error(`invalid extraction result: ${problems.join('; ')}`)
   }
 
   const [people, organizations, projects, sourceLinks, chunkMap] = await Promise.all([
-    loadPersonCandidates(),
-    loadOrganizationCandidates(),
-    loadProjectCandidates(),
-    loadSourceLinks(source),
-    loadChunkMap(source),
+    loadPersonCandidates(databaseIdentity),
+    loadOrganizationCandidates(databaseIdentity),
+    loadProjectCandidates(databaseIdentity),
+    loadSourceLinks(source, databaseIdentity),
+    loadChunkMap(source, databaseIdentity),
   ])
 
   const ctx = new ApplyContext(
@@ -75,8 +77,8 @@ export async function applyExtraction(
   applyPeople(ctx, result.people)
   applyOrganizations(ctx, result.organizations)
   applyProjects(ctx, result.projects)
-  await applyAffiliations(ctx, result.affiliations)
-  await applyTasks(ctx, result.tasks)
+  await applyAffiliations(ctx, result.affiliations, databaseIdentity)
+  await applyTasks(ctx, result.tasks, databaseIdentity)
 
   // Link every resolved entity back to the source record, then the memories that
   // reference them.
@@ -87,11 +89,11 @@ export async function applyExtraction(
       ctx.summary.links.created++
     }
   }
-  await applyMemories(ctx, result.memories)
+  await applyMemories(ctx, result.memories, databaseIdentity)
 
   const statements = ctx.statements()
   if (statements.length > 0) {
-    await batch(statements)
+    await batch(statements, databaseIdentity)
   }
 
   // Linking people to an interaction is a "relevant interaction" — refresh their
@@ -99,9 +101,12 @@ export async function applyExtraction(
   if (source.recordType === 'interaction') {
     for (const entity of ctx.resolved.values()) {
       if (entity.type === 'person') {
-        await recomputeRelationshipIntelligence(entity.id)
+        await recomputeRelationshipIntelligence(entity.id, { databaseIdentity })
       }
     }
   }
+  // A fully duplicate/gated extraction can have no guarded write. Recheck the
+  // captured brain before exposing even that derived no-op summary.
+  await assertActiveDatabaseIdentity(databaseIdentity)
   return ctx.summary
 }

@@ -1,4 +1,5 @@
-import { db } from '../db/client'
+import { db, dbForDatabase } from '../db/client'
+import type { DatabaseIdentity } from '../db/identity'
 import { normalizeDomain, normalizeEmail, normalizeName } from '../text/normalize'
 import type { ExtractedOrganization, ExtractedPerson, ExtractedProject } from './contracts'
 
@@ -83,8 +84,8 @@ export function matchProject(
 }
 
 /** Load existing, non-archived people as match candidates. */
-export function loadPersonCandidates(): Promise<PersonCandidate[]> {
-  return db
+export function loadPersonCandidates(databaseIdentity?: DatabaseIdentity): Promise<PersonCandidate[]> {
+  return (databaseIdentity ? dbForDatabase(databaseIdentity) : db)
     .selectFrom('people')
     .where('archivedAt', 'is', null)
     .select(['id', 'fullName', 'primaryEmail'])
@@ -92,8 +93,10 @@ export function loadPersonCandidates(): Promise<PersonCandidate[]> {
 }
 
 /** Load existing, non-archived organizations as match candidates. */
-export function loadOrganizationCandidates(): Promise<OrganizationCandidate[]> {
-  return db
+export function loadOrganizationCandidates(
+  databaseIdentity?: DatabaseIdentity,
+): Promise<OrganizationCandidate[]> {
+  return (databaseIdentity ? dbForDatabase(databaseIdentity) : db)
     .selectFrom('organizations')
     .where('archivedAt', 'is', null)
     .select(['id', 'name', 'domain'])
@@ -101,8 +104,8 @@ export function loadOrganizationCandidates(): Promise<OrganizationCandidate[]> {
 }
 
 /** Load existing, non-archived projects as match candidates. */
-export function loadProjectCandidates(): Promise<ProjectCandidate[]> {
-  return db
+export function loadProjectCandidates(databaseIdentity?: DatabaseIdentity): Promise<ProjectCandidate[]> {
+  return (databaseIdentity ? dbForDatabase(databaseIdentity) : db)
     .selectFrom('projects')
     .where('archivedAt', 'is', null)
     .select(['id', 'name'])

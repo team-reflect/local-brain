@@ -176,6 +176,64 @@ describe('ChatToolChip — list_projects', () => {
     })
     expect(screen.getByText(/1 project\b/)).not.toBeNull()
   })
+
+  it('renders returned projects as sources', () => {
+    const onOpenSource = vi.fn()
+    render(
+      <ChatToolChip
+        part={{
+          type: 'tool-list_projects',
+          state: 'output-available',
+          input: {},
+          output: {
+            records: [{
+              recordType: 'project',
+              recordId: 'p1',
+              recordRef: 'project:p1',
+              title: 'Atlas',
+              date: '2026-07-12',
+            }],
+            count: 1,
+          },
+        }}
+        onOpenSource={onOpenSource}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Atlas/ }))
+    expect(onOpenSource).toHaveBeenCalledWith(expect.objectContaining({ recordRef: 'project:p1' }))
+  })
+})
+
+describe('ChatToolChip — list_tasks', () => {
+  it('shows filters, count, and returned task sources', () => {
+    const onOpenSource = vi.fn()
+    render(
+      <ChatToolChip
+        part={{
+          type: 'tool-list_tasks',
+          state: 'output-available',
+          input: { statuses: ['open', 'waiting'] },
+          output: {
+            records: [{
+              recordType: 'task',
+              recordId: 't1',
+              recordRef: 'task:t1',
+              title: 'Send proposal',
+              date: '2026-07-13',
+            }],
+            count: 1,
+          },
+        }}
+        onOpenSource={onOpenSource}
+      />,
+    )
+
+    expect(screen.getByText(/Listed open, waiting tasks/)).not.toBeNull()
+    expect(screen.getByText(/1 task\b/)).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Send proposal/ }))
+    expect(onOpenSource).toHaveBeenCalledWith(expect.objectContaining({ recordRef: 'task:t1' }))
+  })
 })
 
 describe('ChatToolChip — get_records', () => {
@@ -200,10 +258,62 @@ describe('ChatToolChip — get_records', () => {
     expect(screen.getByText(/Loaded records/)).not.toBeNull()
     expect(screen.getByText(/2 records/)).not.toBeNull()
   })
+
+  it('renders returned record metadata as a compact clickable source', () => {
+    const onOpenSource = vi.fn()
+    const part: ToolPart = {
+      type: 'tool-get_records',
+      toolCallId: 'tc-3',
+      state: 'output-available',
+      input: { records: [{ recordType: 'interaction', recordId: 'i1' }] },
+      output: {
+        records: [
+          {
+            recordType: 'interaction',
+            recordId: 'i1',
+            recordRef: 'interaction:i1',
+            title: 'Budget review',
+            date: '2026-06-18T09:00:00.000Z',
+            found: true,
+            chunks: [{ chunkId: 'chunk-1', chunkIndex: 0 }],
+          },
+        ],
+        count: 1,
+      },
+    }
+    render(<ChatToolChip part={part} onOpenSource={onOpenSource} />)
+
+    const source = screen.getByRole('button', { name: /Budget review/ })
+    expect(screen.getByText(/Interaction · 2026-06-18/)).not.toBeNull()
+    fireEvent.click(source)
+    expect(onOpenSource).toHaveBeenCalledWith(
+      expect.objectContaining({ recordRef: 'interaction:i1', title: 'Budget review' }),
+    )
+  })
+
+  it('keeps missing and non-navigable returned records inert', () => {
+    renderChip({
+      type: 'tool-get_records',
+      toolCallId: 'tc-3',
+      state: 'output-available',
+      input: { records: [] },
+      output: {
+        records: [
+          { recordType: 'document', recordId: 'gone', title: 'Archived doc', found: false },
+          { recordType: 'memory', recordId: 'm1', title: 'Private preference', found: true },
+        ],
+        count: 2,
+      },
+    })
+
+    expect(screen.queryByRole('button', { name: /Archived doc/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Private preference/ })).toBeNull()
+    expect(screen.getByText('Unavailable')).not.toBeNull()
+  })
 })
 
 describe('ChatToolChip — write tools', () => {
-  it('renders a compact approval preview with icon-only controls', () => {
+  it('renders every normalized approval field with icon-only controls', () => {
     const onApprovalResponse = vi.fn()
     render(
       <ChatToolChip
@@ -221,10 +331,10 @@ describe('ChatToolChip — write tools', () => {
     expect(screen.getByText('Create task')).not.toBeNull()
     expect(screen.getByText('Needs approval')).not.toBeNull()
     expect(screen.getByText('Send budget')).not.toBeNull()
-    expect(screen.queryByText('Status')).toBeNull()
-    expect(screen.queryByText('open')).toBeNull()
-    expect(screen.queryByText('Due')).toBeNull()
-    expect(screen.queryByText('2026-06-24')).toBeNull()
+    expect(screen.getByText('status')).not.toBeNull()
+    expect(screen.getByText('open')).not.toBeNull()
+    expect(screen.getByText('dueAt')).not.toBeNull()
+    expect(screen.getByText('2026-06-24')).not.toBeNull()
     expect(screen.queryByText('Approve')).toBeNull()
     expect(screen.queryByText('Deny')).toBeNull()
 
@@ -238,7 +348,7 @@ describe('ChatToolChip — write tools', () => {
     expect(onApprovalResponse).toHaveBeenCalledWith({ id: 'approval-1', approved: false })
   })
 
-  it('renders memory approvals with the claim only', () => {
+  it('renders memory approvals with nested subject fields', () => {
     renderChip({
       type: 'tool-remember_fact',
       toolCallId: 'tc-7',
@@ -254,15 +364,17 @@ describe('ChatToolChip — write tools', () => {
 
     expect(screen.getByText('Remember fact')).not.toBeNull()
     expect(screen.getByText('Maya prefers async updates.')).not.toBeNull()
-    expect(screen.queryByText('Subjects')).toBeNull()
-    expect(screen.queryByText('person-1')).toBeNull()
-    expect(screen.queryByText('Kind')).toBeNull()
-    expect(screen.queryByText('preference')).toBeNull()
-    expect(screen.queryByText('Confidence')).toBeNull()
-    expect(screen.queryByText('0.8')).toBeNull()
+    expect(screen.getByText('subjects[0].recordType')).not.toBeNull()
+    expect(screen.getByText('person-1')).not.toBeNull()
+    expect(screen.getByText('subjects[0].role')).not.toBeNull()
+    expect(screen.getByText('about')).not.toBeNull()
+    expect(screen.getByText('kind')).not.toBeNull()
+    expect(screen.getByText('preference')).not.toBeNull()
+    expect(screen.getByText('confidence')).not.toBeNull()
+    expect(screen.getByText('0.8')).not.toBeNull()
   })
 
-  it('renders update approvals without a field table', () => {
+  it('renders update approvals as a field diff including explicit clears', () => {
     renderChip({
       type: 'tool-update_task',
       toolCallId: 'tc-8',
@@ -273,10 +385,37 @@ describe('ChatToolChip — write tools', () => {
 
     expect(screen.getByText('Update task')).not.toBeNull()
     expect(screen.getByText('task-1')).not.toBeNull()
-    expect(screen.queryByText('Status')).toBeNull()
-    expect(screen.queryByText('done')).toBeNull()
-    expect(screen.queryByText('Project')).toBeNull()
-    expect(screen.queryByText('Clear')).toBeNull()
+    expect(screen.getByText('status')).not.toBeNull()
+    expect(screen.getByText('done')).not.toBeNull()
+    expect(screen.getByText('projectId')).not.toBeNull()
+    expect(screen.getByText('Clear')).not.toBeNull()
+  })
+
+  it('does not hide sensitive or nested participant fields before approval', () => {
+    renderChip({
+      type: 'tool-log_interaction',
+      toolCallId: 'tc-sensitive',
+      state: 'approval-requested',
+      input: {
+        title: 'Private review',
+        bodyText: 'Discuss compensation and health leave.',
+        participants: [{
+          personId: 'person-7',
+          displayName: 'Maya Chen',
+          handle: 'maya@example.com',
+          role: 'attendee',
+        }],
+      },
+      approval: { id: 'approval-sensitive' },
+    })
+
+    expect(screen.getByText('bodyText')).not.toBeNull()
+    expect(screen.getByText('Discuss compensation and health leave.')).not.toBeNull()
+    expect(screen.getByText('participants[0].personId')).not.toBeNull()
+    expect(screen.getByText('participants[0].displayName')).not.toBeNull()
+    expect(screen.getByText('participants[0].handle')).not.toBeNull()
+    expect(screen.getByText('maya@example.com')).not.toBeNull()
+    expect(screen.getByText('participants[0].role')).not.toBeNull()
   })
 
   it('keeps the approval row stable after approval', () => {

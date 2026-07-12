@@ -1,9 +1,11 @@
 import type { Memories, MemoryLinks } from '@local-brain/db'
-import { db } from '../../db/client'
+import { db, dbForDatabase } from '../../db/client'
 import { batch, execute } from '../../db/commands'
+import { activeDatabaseIdentity, type DatabaseIdentity } from '../../db/identity'
 import { newId } from '../../db/id'
 import type { NewRecord, RecordPatch } from '../../db/records'
 import { nowIso } from '../../db/time'
+import { contentChunkProjection } from '../../ingest/content-projection'
 import { requireText } from '../../validation'
 import { squish, trimToNull } from '../../text/normalize'
 
@@ -59,9 +61,13 @@ function memoryLinkKey(link: MemoryLinkValues): string {
   return `${link.recordType}\0${link.recordId}\0${link.role ?? ''}`
 }
 
-async function findActiveMemoryByClaim(claim: string): Promise<string | null> {
+async function findActiveMemoryByClaim(
+  claim: string,
+  expectedIdentity?: DatabaseIdentity,
+): Promise<string | null> {
   const key = memoryClaimKey(claim)
-  const rows = await db
+  const readDb = expectedIdentity ? dbForDatabase(expectedIdentity) : db
+  const rows = await readDb
     .selectFrom('memories')
     .select(['id', 'claim'])
     .where('archivedAt', 'is', null)
@@ -72,10 +78,11 @@ async function findActiveMemoryByClaim(claim: string): Promise<string | null> {
 async function addMissingMemoryLinks(
   memoryId: string,
   links: readonly MemoryLinkValues[],
+  expectedIdentity: DatabaseIdentity,
 ): Promise<void> {
   if (links.length === 0) return
 
-  const existing = await db
+  const existing = await dbForDatabase(expectedIdentity)
     .selectFrom('memoryLinks')
     .select(['recordType', 'recordId', 'role'])
     .where('memoryId', '=', memoryId)
@@ -94,6 +101,7 @@ async function addMissingMemoryLinks(
         role: link.role,
       }),
     ),
+    expectedIdentity,
   )
 }
 
@@ -109,30 +117,43 @@ async function runMemoryWriteExclusive<T>(fn: () => Promise<T>): Promise<T> {
 /**
  * Create a durable memory and optional subject links. Exact active duplicate
  * claims return the existing memory id instead of inserting a second row, while
- * still applying any requested links that are not already present.
+ * still applying any requested links that are not already present. The memory,
+ * claim chunks, and links are written against one captured brain identity.
  */
 export function createMemory(
   input: NewMemory,
   links: readonly MemoryLinkInput[] = [],
+  expectedIdentity?: DatabaseIdentity,
 ): Promise<CreatedMemory> {
-  return runMemoryWriteExclusive(() => createMemoryUnlocked(input, links))
+  return runMemoryWriteExclusive(() => createMemoryUnlocked(input, links, expectedIdentity))
 }
 
 async function createMemoryUnlocked(
   input: NewMemory,
   links: readonly MemoryLinkInput[],
+  expectedIdentity?: DatabaseIdentity,
 ): Promise<CreatedMemory> {
+  const identity = expectedIdentity ?? (await activeDatabaseIdentity())
   const values = normalizeMemory(input)
   const normalizedLinks = links.map(normalizeMemoryLink)
-  const existingId = await findActiveMemoryByClaim(values.claim)
+  const existingId = await findActiveMemoryByClaim(values.claim, identity)
   if (existingId) {
-    await addMissingMemoryLinks(existingId, normalizedLinks)
+    await addMissingMemoryLinks(existingId, normalizedLinks, identity)
+    const projection = await contentChunkProjection('memory', existingId, values.claim, {
+      databaseIdentity: identity,
+    })
+    await batch(projection.statements, identity)
     return { id: existingId, created: false }
   }
 
   const id = newId()
+  const projection = await contentChunkProjection('memory', id, values.claim, {
+    databaseIdentity: identity,
+    readExisting: false,
+  })
   await batch([
     db.insertInto('memories').values({ ...values, id }),
+    ...projection.statements,
     ...normalizedLinks.map((link) =>
       db.insertInto('memoryLinks').values({
         id: newId(),
@@ -142,27 +163,64 @@ async function createMemoryUnlocked(
         role: link.role ?? null,
       }),
     ),
-  ])
+  ], identity)
   return { id, created: true }
 }
 
-/** Edit a memory's claim / kind / confidence / validity window. */
-export function updateMemory(id: string, patch: MemoryPatch): Promise<number> {
+/**
+ * Edit a memory's claim/kind/confidence/validity window. Claim changes refresh
+ * chunks atomically; a supplied identity rejects work after a brain switch.
+ */
+export function updateMemory(
+  id: string,
+  patch: MemoryPatch,
+  expectedIdentity?: DatabaseIdentity,
+): Promise<number> {
   return runMemoryWriteExclusive(async () => {
+    const identity = expectedIdentity ?? (await activeDatabaseIdentity())
     const values: MemoryPatch = { ...patch }
     if (patch.claim !== undefined) {
       values.claim = normalizeClaim(patch.claim)
-      const duplicateId = await findActiveMemoryByClaim(values.claim)
+      const duplicateId = await findActiveMemoryByClaim(values.claim, identity)
       if (duplicateId && duplicateId !== id) {
         throw new Error('An active memory with this claim already exists.')
       }
     }
-    return execute(
+    if (values.claim === undefined) {
+      return execute(
+        db
+          .updateTable('memories')
+          .set({ ...values, updatedAt: nowIso() })
+          .where('id', '=', id),
+        identity,
+      )
+    }
+    const existing = await dbForDatabase(identity)
+      .selectFrom('memories')
+      .select('id')
+      .where('id', '=', id)
+      .executeTakeFirst()
+    if (!existing) {
+      return execute(
+        db
+          .updateTable('memories')
+          .set({ ...values, updatedAt: nowIso() })
+          .where('id', '=', id),
+        identity,
+      )
+    }
+
+    const projection = await contentChunkProjection('memory', id, values.claim, {
+      databaseIdentity: identity,
+    })
+    const [affected] = await batch([
       db
         .updateTable('memories')
         .set({ ...values, updatedAt: nowIso() })
         .where('id', '=', id),
-    )
+      ...projection.statements,
+    ], identity)
+    return affected ?? 0
   })
 }
 

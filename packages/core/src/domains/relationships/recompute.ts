@@ -1,5 +1,6 @@
-import { db } from '../../db/client'
+import { db, dbForDatabase } from '../../db/client'
 import { execute } from '../../db/commands'
+import type { DatabaseIdentity } from '../../db/identity'
 import { nowIso } from '../../db/time'
 import type { PersonPatch } from '../people/setters'
 
@@ -21,6 +22,8 @@ import type { PersonPatch } from '../people/setters'
 export interface RecomputeOptions {
   /** Timestamp used for updated_at; defaults to {@link nowIso}. Injected for tests. */
   asOf?: string
+  /** Reject derived writes if the active brain changes during recomputation. */
+  databaseIdentity?: DatabaseIdentity
 }
 
 /** Recompute and persist one person's relationship hints. No-op for unknown/self rows. */
@@ -29,8 +32,9 @@ export async function recomputeRelationshipIntelligence(
   options: RecomputeOptions = {},
 ): Promise<void> {
   const asOf = options.asOf ?? nowIso()
+  const readDb = options.databaseIdentity ? dbForDatabase(options.databaseIdentity) : db
 
-  const person = await db
+  const person = await readDb
     .selectFrom('people')
     .select(['id'])
     .where('id', '=', personId)
@@ -38,7 +42,7 @@ export async function recomputeRelationshipIntelligence(
     .executeTakeFirst()
   if (!person) return
 
-  const lastRow = await db
+  const lastRow = await readDb
     .selectFrom('interactions')
     .innerJoin('interactionParticipants', 'interactionParticipants.interactionId', 'interactions.id')
     .where('interactionParticipants.personId', '=', personId)
@@ -54,7 +58,10 @@ export async function recomputeRelationshipIntelligence(
     updatedAt: asOf,
   }
 
-  await execute(db.updateTable('people').set(patch).where('id', '=', personId))
+  await execute(
+    db.updateTable('people').set(patch).where('id', '=', personId),
+    options.databaseIdentity,
+  )
 }
 
 /**
@@ -63,7 +70,8 @@ export async function recomputeRelationshipIntelligence(
  * incrementally when an interaction is created (see interactions/ingest).
  */
 export async function recomputeAllRelationships(options: RecomputeOptions = {}): Promise<number> {
-  const people = await db
+  const readDb = options.databaseIdentity ? dbForDatabase(options.databaseIdentity) : db
+  const people = await readDb
     .selectFrom('people')
     .select('id')
     .where('isSelf', '=', 0)

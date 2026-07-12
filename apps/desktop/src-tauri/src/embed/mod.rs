@@ -21,7 +21,7 @@ use hf_hub::Cache;
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
-use crate::db::DbState;
+use crate::db::{ActiveDatabaseIdentity, DbState};
 use crate::error::{AppError, AppResult};
 
 pub use write::EmbeddedChunk;
@@ -262,6 +262,13 @@ pub fn embed_status(state: State<EmbedState>) -> AppResult<EmbedStatus> {
     Ok(status_of(&runtime))
 }
 
+/// Identity of the database an embedding pass is about to inspect. Every later
+/// derived-index write must present this same path + generation.
+#[tauri::command]
+pub fn embed_database_identity(db: State<DbState>) -> AppResult<ActiveDatabaseIdentity> {
+    db.active_database_identity()
+}
+
 /// Ensure the model is loaded, downloading it on first use. Idempotent: a
 /// concurrent call while loading returns immediately. Runs the load on a
 /// blocking thread — model init is seconds even when cached.
@@ -345,24 +352,42 @@ pub async fn embed_texts(
 }
 
 /// Apply a batch of freshly-embedded chunks: upsert each `(chunk_id, model_id)`
-/// row and its vec0 vector. The TS pipeline only sends chunks it actually
-/// embedded (hash-skip happens there), so this is a straight replace.
+/// row and its vec0 vector, but only on the exact database connection the TS
+/// pipeline inspected before doing model work.
 #[tauri::command]
-pub fn embed_apply(db: State<DbState>, chunks: Vec<EmbeddedChunk>) -> AppResult<usize> {
-    db.with_connection_mut(|conn| write::apply_chunks(conn, &chunks))
+pub fn embed_apply(
+    db: State<DbState>,
+    expected_database_path: String,
+    expected_generation: u64,
+    chunks: Vec<EmbeddedChunk>,
+) -> AppResult<usize> {
+    db.with_expected_connection_mut(&expected_database_path, expected_generation, |conn| {
+        write::apply_chunks(conn, &chunks)
+    })
 }
 
 /// Drop the embeddings for content chunks that no longer exist (pruning).
 #[tauri::command]
-pub fn embed_delete(db: State<DbState>, chunk_ids: Vec<String>) -> AppResult<usize> {
-    db.with_connection_mut(|conn| write::delete_chunks(conn, &chunk_ids))
+pub fn embed_delete(
+    db: State<DbState>,
+    expected_database_path: String,
+    expected_generation: u64,
+    chunk_ids: Vec<String>,
+) -> AppResult<usize> {
+    db.with_expected_connection_mut(&expected_database_path, expected_generation, |conn| {
+        write::delete_chunks(conn, &chunk_ids)
+    })
 }
 
 /// Wipe every embedding + vector (rebuild / model change). Product data and the
 /// FTS index are untouched — only this derived projection is cleared.
 #[tauri::command]
-pub fn embed_clear(db: State<DbState>) -> AppResult<usize> {
-    db.with_connection_mut(write::clear)
+pub fn embed_clear(
+    db: State<DbState>,
+    expected_database_path: String,
+    expected_generation: u64,
+) -> AppResult<usize> {
+    db.with_expected_connection_mut(&expected_database_path, expected_generation, write::clear)
 }
 
 #[cfg(test)]
@@ -481,6 +506,15 @@ mod e2e {
         );
 
         let conn = brain_schema::open_in_memory().unwrap();
+        for i in 0..vectors.len() {
+            conn.execute(
+                "INSERT INTO content_chunks \
+                 (id, record_type, record_id, chunk_index, text, content_hash) \
+                 VALUES (?1, 'document', ?1, 0, 'text', ?2)",
+                rusqlite::params![format!("c{i}"), format!("h{i}")],
+            )
+            .unwrap();
+        }
         let chunks: Vec<EmbeddedChunk> = vectors
             .iter()
             .enumerate()

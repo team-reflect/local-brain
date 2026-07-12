@@ -45,6 +45,12 @@ writes cannot land in the wrong brain. `$BRAIN_ROOT` pins one brain root for the
 and automations; `--db` / `$BRAIN_DB` remain advanced escape hatches for direct
 database testing. There is no implicit app-data brain fallback.
 
+Long-running frontend workflows capture `(databasePath, generation)`. Guarded reads
+must reject their result if that identity changes; native writes must pass both values
+to Rust, which compares them while holding the active-connection lock and performs the
+mutation in that same guarded transaction. Do not rely on a separate frontend
+"still active?" check for write safety.
+
 Durable tables:
 
 - people
@@ -76,7 +82,9 @@ The most important transferable patterns are:
 - Kysely builds typed SQL in TypeScript; Rust executes the SQL against SQLite.
 - TanStack Query owns IPC/server-state caching and invalidation in the UI.
 - CLI is a self-contained Rust binary shipped as a Tauri sidecar.
-- Search and AI share one retrieval layer.
+- Search and AI share durable chunks, typed joins/filters, and semantic primitives.
+  Purpose-specific retrieval entry points may be siblings when their result units
+  differ, such as chunk retrieval and Chat's record-level candidates.
 - Typed routes and a central keymap/command registry keep navigation, shortcuts,
   palette commands, deep links, and CLI parity from drifting.
 - Native file operations use Rust primitives with path guards, atomic writes, and
@@ -210,7 +218,9 @@ Provenance belongs on the owning record:
 - assets can store original filename, original path, URL, content hash, MIME type, and
   dimensions.
 - tasks can link back to originating documents or interactions.
-- memories and chat answers cite exact chunks through evidence references.
+- memories and extracted artifacts cite exact chunks through evidence references.
+- Chat tool results remain local conversation provenance; they do not create
+  `evidence_refs`.
 
 ## Asset Storage
 
@@ -252,14 +262,53 @@ drain it later. Do not introduce a local HTTP server unless a native inbox canno
 
 - FTS5 is the first search path.
 - Embeddings are additive and should degrade cleanly to lexical search.
-- `content_chunks` is derived from documents and interactions.
-- One `retrieve()` API should serve search, daily reports, graph context, and CLI
-  reads.
-- Evidence citations should open the owning document or interaction.
+- App writes maintain `content_chunks` for documents, interactions, memories, and
+  profile-bearing person/organization updates in the source transaction. CLI import/
+  enrichment also maintains chunks for its supported entity projections (including
+  organization profiles, transcripts, AI notes, and facts).
+- `retrieve()` is the chunk-oriented API. Grounded Chat's record-candidate API is a
+  sibling over the same chunk joins, visibility/date filters, and semantic primitives;
+  it also searches typed record fields and does not call `retrieve()`.
+- Record candidates fuse direct-field, FTS, and semantic ranked lists with RRF after
+  collapsing chunk hits to unique records. Recency is a tie-break for relevance and
+  the primary order only for explicit chronological browse.
+- Because vec0 selects global neighbors before typed joins/filters, record-oriented
+  semantic search starts with an overfetched KNN pool and doubles it to a bounded ceiling
+  until enough unique filtered records appear. This is bounded recall improvement, not
+  a guarantee that every filtered neighbor is examined.
+- Retrieval results should include an existing navigation target. First-class records
+  navigate directly; derived sources such as transcripts, organization profiles,
+  anchored AI notes, and sourced facts navigate to an unambiguous parent/subject.
+- Durable record writes and their `content_chunks` projection must share a transaction;
+  semantic joins exclude a mismatched model/hash immediately, and background work
+  replaces changed vectors or prunes orphans asynchronously.
+- Successful renderer mutations should invalidate the cheap embedding-status query;
+  keep a 60-second background poll as the catch-up path for CLI/external writes that
+  cannot signal the renderer.
 
 Local embeddings should follow Reflect Open's pattern when enabled: `fastembed` in Rust,
 off the UI thread, with vectors stored in `sqlite-vec`, model/runtime recorded for
 rebuilds, and lexical fallback if unavailable.
+
+## Chat Safety And Context
+
+- Capture one brain identity at the start of a Chat turn. Pre/post-check reads so a
+  switch discards in-flight results; pin conversation writes, generated titles, native
+  mutations, and approvals to the captured path + generation.
+- Keep approval identity process-local; never serialize a database path or generation
+  into Chat JSON. A restored pending approval can be dismissed in its conversation, but
+  execution must fail closed and ask the user to retry the request.
+- Persist AI SDK message JSON, including tool calls/results, as an inspectable local
+  trace. Before a later provider request, replace prior raw tool results with explicit
+  elision markers; never treat them as durable `evidence_refs`.
+- Supply only bounded planning metadata (record counts/date span, self, common real
+  filter vocabulary, and active projects). Detail tools batch records and enforce both
+  per-record and per-call text budgets, preserving requested chunk refs first.
+- Bound tool rounds and make the final allowed model step synthesis-only. If a provider
+  still returns no answer text, show a deterministic fallback rather than ending on an
+  opaque tool trace.
+- A citation is navigable only when its exact record and optional chunk ref came from a
+  read tool in that same assistant message.
 
 ## UI
 

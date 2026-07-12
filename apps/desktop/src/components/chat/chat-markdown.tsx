@@ -1,7 +1,14 @@
-import type { ReactNode, ComponentPropsWithoutRef } from 'react'
+import { useMemo, type ComponentPropsWithoutRef, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { cn } from '../../lib/utils'
+import {
+  chatSourceForCitationHref,
+  isChatCitationHref,
+  prepareChatCitationMarkdown,
+  routeForChatSource,
+  type ChatSource,
+} from './chat-sources'
 
 /** Tailwind-styled component overrides for react-markdown — no raw HTML. */
 const components = {
@@ -48,34 +55,77 @@ const components = {
   em: ({ children }: ComponentPropsWithoutRef<'em'>) => (
     <em className="italic">{children}</em>
   ),
-  a: ({ children, href }: ComponentPropsWithoutRef<'a'>) => (
-    <a
-      href={href}
-      className="text-primary underline underline-offset-2"
-      target="_blank"
-      rel="noopener noreferrer"
-    >
-      {children}
-    </a>
-  ),
   hr: () => <hr className="my-2 border-border" />,
 }
 
 interface ChatMarkdownProps {
   text: string
   className?: string
+  sources?: ReadonlyMap<string, ChatSource>
+  onOpenSource?: (source: ChatSource) => void
 }
+
+const EMPTY_SOURCES = new Map<string, ChatSource>()
+const REMARK_PLUGINS = [remarkGfm]
 
 /**
  * Safe markdown renderer for settled assistant messages. Uses react-markdown
  * with remark-gfm; raw HTML is never enabled so inline `<script>` and other
  * unsafe content is always escaped.
  */
-export function ChatMarkdown({ text, className }: ChatMarkdownProps): ReactNode {
+export function ChatMarkdown({
+  text,
+  className,
+  sources = EMPTY_SOURCES,
+  onOpenSource,
+}: ChatMarkdownProps): ReactNode {
+  const citationMarkdown = useMemo(
+    () => prepareChatCitationMarkdown(text, sources),
+    [sources, text],
+  )
+  const markdownComponents = useMemo(
+    () => ({
+      ...components,
+      a: ({ children, href }: ComponentPropsWithoutRef<'a'>) => {
+        if (isChatCitationHref(href)) {
+          const source = chatSourceForCitationHref(href, sources)
+          if (!source) return <span className="text-muted-foreground">{children}</span>
+          const route = routeForChatSource(source)
+          return route && onOpenSource ? (
+            <button
+              type="button"
+              title={source.recordRef}
+              className="font-medium text-primary underline decoration-primary/35 underline-offset-2 hover:decoration-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => onOpenSource(source)}
+            >
+              {children}
+            </button>
+          ) : (
+            <span title={source.recordRef} className="font-medium text-muted-foreground">
+              {children}
+            </span>
+          )
+        }
+
+        return (
+          <a
+            href={href}
+            className="text-primary underline underline-offset-2"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {children}
+          </a>
+        )
+      },
+    }),
+    [onOpenSource, sources],
+  )
+
   return (
     <div className={cn('text-sm leading-6 text-foreground', className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {text}
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={markdownComponents}>
+        {citationMarkdown}
       </ReactMarkdown>
     </div>
   )

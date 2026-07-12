@@ -120,7 +120,8 @@ Projects
 Chat
   - grounded chat
   - durable conversations and messages
-  - request-local retrieved sources
+  - persisted local tool trace with inspectable record titles
+  - validated record/chunk citations that open direct or derived existing detail routes
   - user-approved writes to people, organizations, projects, tasks, interactions, and memories
 Settings
   - about (description and app version)
@@ -223,10 +224,23 @@ Settings
 ## Interaction Rules
 
 - Search should be global and available from all main surfaces.
-- Chat should answer from local document and interaction chunks using the configured
-  BYOK provider.
+- Chat should discover unique records from names, titles, typed fields, relationships,
+  and local evidence chunks, then answer from bounded record details using the
+  configured BYOK provider.
+- Search and record-read activity should expose the records used. A model-written
+  citation becomes navigable only when that exact record/chunk ref came from a tool in
+  the same assistant turn. Derived sources open an existing parent when unambiguous
+  (for example, a transcript opens its interaction); otherwise they stay inspectable
+  but inert.
+- The local conversation keeps tool calls/results for inspection, but older raw result
+  bodies are not resent to the provider. Planning metadata, record detail reads, tool
+  rounds, and the final synthesis step are all bounded.
 - Chat write tools should require explicit approval before creating or updating
   people, organizations, projects, tasks, interactions, or memories.
+- Switching brains must invalidate an in-flight Chat turn or pending approval rather
+  than allowing its reads or writes to appear in the newly active brain.
+- A pending approval restored after reload can be dismissed, but cannot execute; the
+  user must retry the request so the new turn can capture the active brain identity.
 - A user should be able to correct a task, person link, project link, or remembered
   fact from the detail page where it appears.
 - Graph should be a derived navigation and demonstration surface, not the storage

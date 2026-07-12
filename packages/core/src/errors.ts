@@ -14,6 +14,7 @@ export type AppErrorKind =
   | 'parse'
   | 'auth'
   | 'network'
+  | 'stale'
   // Raised in TypeScript at the domain write boundary (see `validation.ts`);
   // Rust never emits it, but the contract is shared so the UI can branch on it.
   | 'validation'

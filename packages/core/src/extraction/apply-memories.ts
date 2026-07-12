@@ -1,6 +1,8 @@
 import { db } from '../db/client'
 import { newId } from '../db/id'
 import { squish } from '../text/normalize'
+import { contentChunkProjection } from '../ingest/content-projection'
+import type { DatabaseIdentity } from '../db/identity'
 import type { ExtractionResult } from './contracts'
 import { loadMemoryClaims } from './apply-store'
 import type { ApplyContext } from './apply-context'
@@ -15,8 +17,9 @@ import type { ApplyContext } from './apply-context'
 export async function applyMemories(
   ctx: ApplyContext,
   memories: ExtractionResult['memories'],
+  databaseIdentity: DatabaseIdentity,
 ): Promise<void> {
-  const existingClaims = await loadMemoryClaims()
+  const existingClaims = await loadMemoryClaims(databaseIdentity)
   for (const memory of memories) {
     if (!ctx.accepts(memory.confidence)) {
       ctx.suggest('memory', memory.ref, memory.claim, memory.confidence)
@@ -44,6 +47,11 @@ export async function applyMemories(
         validTo: memory.validTo ?? null,
       }),
     )
+    const projection = await contentChunkProjection('memory', id, memory.claim, {
+      databaseIdentity,
+      readExisting: false,
+    })
+    ctx.inserts.contentChunks.push(...projection.statements)
     ctx.summary.memories.created++
 
     // Always link the memory to its source record.

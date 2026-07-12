@@ -2,7 +2,7 @@
 //! ingest paths: chunking text into `content_chunks` and inserting the join-table
 //! rows that connect a record to the people/orgs/projects/tasks it references.
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::commands::{to_like_pattern_lower, EvidenceLocator, EvidenceRef, LinkKind, LinkRef};
 use crate::error::CliError;
@@ -59,7 +59,9 @@ pub(super) fn insert_chunks(
 /// of rows still in range, insert any new tail rows, and drop rows the shorter
 /// body no longer needs. Updating `content_hash` alongside `text` is what makes
 /// a re-import/enrich actually re-embed — without it the embedding pipeline sees
-/// an unchanged hash and serves a stale vector for the old text.
+/// an unchanged hash and serves a stale vector for the old text. A changed
+/// surviving chunk keeps its stable id (and therefore its evidence links), but
+/// quote offsets described the superseded text and are cleared.
 pub(super) fn replace_chunks(
     conn: &Connection,
     record_type: &str,
@@ -69,20 +71,28 @@ pub(super) fn replace_chunks(
     let chunks = chunk_text(body);
     for (index, text) in chunks.iter().enumerate() {
         let chunk_index = index as i64;
-        let existing_id = conn
+        let existing = conn
             .query_row(
-                "SELECT id FROM content_chunks
+                "SELECT id, text FROM content_chunks
                  WHERE record_type = ?1 AND record_id = ?2 AND chunk_index = ?3
                  LIMIT 1",
                 params![record_type, record_id, chunk_index],
-                |row| row.get::<_, String>(0),
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
-            .ok();
-        if let Some(existing_id) = existing_id {
+            .optional()?;
+        if let Some((existing_id, existing_text)) = existing {
             conn.execute(
                 "UPDATE content_chunks SET text = ?1, content_hash = ?2 WHERE id = ?3",
                 params![text, content_hash(text), existing_id],
             )?;
+            if existing_text != *text {
+                conn.execute(
+                    "UPDATE evidence_refs
+                     SET quote_start = NULL, quote_end = NULL
+                     WHERE chunk_id = ?1",
+                    params![existing_id],
+                )?;
+            }
         } else {
             insert_chunk_row(conn, record_type, record_id, chunk_index, text)?;
         }
@@ -351,5 +361,55 @@ mod tests {
             "changed text must change the stored hash"
         );
         assert_eq!(second_hash, content_hash("a completely different body"));
+    }
+
+    #[test]
+    fn replace_chunks_invalidates_only_offsets_for_changed_text() {
+        let conn = brain_schema::open_in_memory().unwrap();
+        conn.execute("INSERT INTO documents (id, title) VALUES ('d1', 'Doc')", [])
+            .unwrap();
+        replace_chunks(&conn, "document", "d1", "first version of the body").unwrap();
+        let chunk_id: String = conn
+            .query_row(
+                "SELECT id FROM content_chunks WHERE record_id='d1' AND chunk_index=0",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        conn.execute(
+            "INSERT INTO evidence_refs
+               (id, subject_type, subject_id, chunk_id, quote_start, quote_end, note)
+             VALUES ('e1', 'memory', 'm1', ?1, 6, 13, 'keep the evidence link')",
+            params![chunk_id],
+        )
+        .unwrap();
+
+        replace_chunks(&conn, "document", "d1", "first version of the body").unwrap();
+        let unchanged_offsets: (Option<i64>, Option<i64>) = conn
+            .query_row(
+                "SELECT quote_start, quote_end FROM evidence_refs WHERE id='e1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(unchanged_offsets, (Some(6), Some(13)));
+
+        replace_chunks(&conn, "document", "d1", "a corrected version of the body").unwrap();
+        let (stable_chunk_id, quote_start, quote_end, note): (
+            String,
+            Option<i64>,
+            Option<i64>,
+            String,
+        ) = conn
+            .query_row(
+                "SELECT evidence_refs.chunk_id, quote_start, quote_end, note
+                 FROM evidence_refs WHERE id='e1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(stable_chunk_id, chunk_id);
+        assert_eq!((quote_start, quote_end), (None, None));
+        assert_eq!(note, "keep the evidence link");
     }
 }

@@ -61,11 +61,11 @@ describe('domain actions', () => {
     await createInteraction({ kind: 'meeting', title: 'Sync' }, [
       { personId: 'p1', role: 'attendee' },
     ])
-    expect(calls[0]?.command).toBe('db_batch')
-    const statements = calls[0]?.args['statements'] as Array<{ sql: string }>
-    expect(statements).toHaveLength(2)
-    expect(statements[0]?.sql).toContain('insert into "interactions"')
-    expect(statements[1]?.sql).toContain('insert into "interaction_participants"')
+    const batchCall = calls.find((call) => call.command === 'db_batch')
+    const statements = batchCall?.args['statements'] as Array<{ sql: string }>
+    expect(statements.some((statement) => statement.sql.includes('insert into "interactions"'))).toBe(true)
+    expect(statements.some((statement) => statement.sql.includes('insert into "interaction_participants"'))).toBe(true)
+    expect(statements.some((statement) => statement.sql.includes('delete from "content_chunks"'))).toBe(true)
   })
 
   it('createMemory inserts a memory and links in one batch', async () => {
@@ -76,14 +76,16 @@ describe('domain actions', () => {
 
     expect(result.created).toBe(true)
     expect(result.id).toHaveLength(26)
-    expect(calls[0]?.command).toBe('db_query')
-    expect(calls[1]?.command).toBe('db_batch')
-    const statements = calls[1]?.args['statements'] as Array<{ sql: string; params: unknown[] }>
-    expect(statements).toHaveLength(2)
-    expect(statements[0]?.sql).toContain('insert into "memories"')
-    expect(statements[0]?.params).toContain('Alex prefers async updates.')
-    expect(statements[1]?.sql).toContain('insert into "memory_links"')
-    expect(statements[1]?.params).toContain('p1')
+    expect(calls[0]?.command).toBe('active_database_identity')
+    const batchCall = calls.find((call) => call.command === 'db_batch')
+    const statements = batchCall?.args['statements'] as Array<{ sql: string; params: unknown[] }>
+    expect(statements.find((statement) => statement.sql.includes('insert into "memories"'))?.params).toContain(
+      'Alex prefers async updates.',
+    )
+    expect(statements.find((statement) => statement.sql.includes('insert into "memory_links"'))?.params).toContain(
+      'p1',
+    )
+    expect(statements.some((statement) => statement.sql.includes('insert into "content_chunks"'))).toBe(true)
   })
 
   it('createMemory returns an active duplicate claim instead of inserting', async () => {
@@ -92,8 +94,12 @@ describe('domain actions', () => {
     const result = await createMemory({ claim: ' alex prefers async updates. ' })
 
     expect(result).toEqual({ id: 'memory-1', created: false })
-    expect(calls).toHaveLength(1)
-    expect(calls[0]?.command).toBe('db_query')
+    expect(calls.map((call) => call.command)).toEqual([
+      'active_database_identity',
+      'db_query',
+      'db_query',
+      'db_batch',
+    ])
   })
 
   it('createMemory links active duplicate claims to new subjects', async () => {
@@ -104,13 +110,12 @@ describe('domain actions', () => {
     ])
 
     expect(result).toEqual({ id: 'memory-1', created: false })
-    expect(calls).toHaveLength(3)
-    expect(calls[0]?.command).toBe('db_query')
-    expect(String(calls[0]?.args['sql'])).toContain('from "memories"')
-    expect(calls[1]?.command).toBe('db_query')
-    expect(String(calls[1]?.args['sql'])).toContain('from "memory_links"')
-    expect(calls[2]?.command).toBe('db_batch')
-    const statements = calls[2]?.args['statements'] as Array<{ sql: string; params: unknown[] }>
+    expect(calls).toHaveLength(6)
+    expect(calls[0]?.command).toBe('active_database_identity')
+    expect(String(calls[1]?.args['sql'])).toContain('from "memories"')
+    expect(String(calls[2]?.args['sql'])).toContain('from "memory_links"')
+    expect(calls[3]?.command).toBe('db_batch')
+    const statements = calls[3]?.args['statements'] as Array<{ sql: string; params: unknown[] }>
     expect(statements).toHaveLength(1)
     expect(statements[0]?.sql).toContain('insert into "memory_links"')
     expect(statements[0]?.params).toContain('memory-1')
@@ -133,6 +138,9 @@ describe('domain actions', () => {
     setBridge({
       invoke: (command, args) => {
         commands.push(command)
+        if (command === 'active_database_identity') {
+          return Promise.resolve({ databasePath: '/test/brain.sqlite', generation: 1 })
+        }
         if (command === 'db_query' && String(args['sql']).includes('from "memories"')) {
           memoryQueryCount += 1
           if (memoryQueryCount === 1) {
@@ -141,12 +149,14 @@ describe('domain actions', () => {
           }
           return Promise.resolve([{ id: createdMemoryId, claim: 'Same claim' }])
         }
+        if (command === 'db_query') return Promise.resolve([])
         if (command === 'db_batch') {
-          const statements = args['statements'] as Array<{ params: readonly unknown[] }>
-          const firstStringParam = statements[0]?.params.find(
+          const statements = args['statements'] as Array<{ sql: string; params: readonly unknown[] }>
+          const memoryInsert = statements.find((statement) => statement.sql.includes('insert into "memories"'))
+          const firstStringParam = memoryInsert?.params.find(
             (param) => typeof param === 'string' && param.length === 26,
           )
-          createdMemoryId = typeof firstStringParam === 'string' ? firstStringParam : 'memory-1'
+          if (typeof firstStringParam === 'string') createdMemoryId = firstStringParam
           return Promise.resolve(statements.map(() => 1))
         }
         return Promise.resolve(1)
@@ -159,22 +169,31 @@ describe('domain actions', () => {
     await Promise.resolve()
 
     expect(memoryQueryCount).toBe(1)
-    expect(commands).toEqual(['db_query'])
+    expect(commands).toEqual(['active_database_identity', 'db_query'])
     releaseFirstQuery()
     const [created, duplicate] = await Promise.all([first, second])
 
     expect(created).toEqual({ id: createdMemoryId, created: true })
     expect(duplicate).toEqual({ id: createdMemoryId, created: false })
-    expect(commands).toEqual(['db_query', 'db_batch', 'db_query'])
+    expect(commands).toEqual([
+      'active_database_identity',
+      'db_query',
+      'db_batch',
+      'active_database_identity',
+      'db_query',
+      'db_query',
+      'db_batch',
+    ])
   })
 
   it('updateMemory normalizes claim patches', async () => {
     await updateMemory('memory-1', { claim: '  Same   claim  ' })
 
-    expect(calls[0]?.command).toBe('db_query')
-    expect(calls[1]?.command).toBe('db_execute')
-    expect(String(calls[1]?.args['sql'])).toContain('update "memories"')
-    expect(calls[1]?.args['params']).toContain('Same claim')
+    expect(calls[0]?.command).toBe('active_database_identity')
+    const executeCall = calls.find((call) => call.command === 'db_execute')
+    expect(executeCall?.command).toBe('db_execute')
+    expect(String(executeCall?.args['sql'])).toContain('update "memories"')
+    expect(executeCall?.args['params']).toContain('Same claim')
   })
 
   it('updateMemory rejects duplicate active claims', async () => {
@@ -184,8 +203,9 @@ describe('domain actions', () => {
       'An active memory with this claim already exists.',
     )
 
-    expect(calls).toHaveLength(1)
-    expect(calls[0]?.command).toBe('db_query')
+    expect(calls).toHaveLength(2)
+    expect(calls[0]?.command).toBe('active_database_identity')
+    expect(calls[1]?.command).toBe('db_query')
   })
 
   it('setAiProvidersState writes provider list and default in one batch', async () => {

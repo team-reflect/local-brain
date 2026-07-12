@@ -16,7 +16,11 @@ app and contrary to `docs/plans/libraries.md` (which commits to `fastembed` + `s
   float[384] distance_metric=cosine)`, keyed `chunk_vectors.rowid == chunk_embeddings.id`.
   `LATEST_SCHEMA_VERSION` → 3.
 - Vectors attach to the durable `content_chunks` table (Local Brain's chunk unit), not
-  Reflect's note paths. No cascade FK: the embedding pipeline owns the projection lifecycle.
+  Reflect's note paths. App writes transactionally project documents, interactions,
+  memories, and profile-bearing person/organization updates; CLI import/enrichment also
+  projects its supported entity text (including organization profiles, transcripts, AI
+  notes, and facts). No cascade FK: the embedding pipeline owns the vector projection
+  lifecycle.
 
 ### Embedding runtime (Rust, `apps/desktop/src-tauri/src/embed/`)
 - `fastembed` (`all-MiniLM-L6-v2`, 384-dim) behind a `Runtime` state machine
@@ -24,7 +28,8 @@ app and contrary to `docs/plans/libraries.md` (which commits to `fastembed` + `s
   app data with byte-level progress via `hf-hub`.
 - Commands: `embed_status`, `embed_ensure`, `embed_texts`, and the transactional writers
   `embed_apply` / `embed_delete` / `embed_clear` (the text↔int rowid coupling `db_batch`
-  can't express, via `DbState::with_connection_mut`).
+  can't express). Each writer requires the expected database path + connection generation
+  and validates it under the active-connection lock before committing.
 - Progress is **polled** (`embed_status`), not event-pushed: the `IpcBridge` only exposes
   `invoke`, and the app uses no Tauri events. This is the Local-Brain-shaped simplification
   of Reflect's `subscribeEmbedStatus`.
@@ -34,15 +39,24 @@ app and contrary to `docs/plans/libraries.md` (which commits to `fastembed` + `s
   `semantic.ts` (vec0 KNN via a CTE + RRF fusion), `pipeline.ts` (hash-skip incremental
   backfill / clear / prune over `content_chunks`), `status.ts` (`getEmbeddingsStatus`,
   enable toggle).
-- `retrieve()` keeps its one shared contract. Semantic/hybrid embed the query, run the
-  vec0 KNN (24 candidates, cosine ≤ 0.7), and blend with lexical via Reciprocal Rank Fusion
-  (K=60). Any failure (no runtime, non-desktop host, embed error) degrades to lexical with
-  `semanticAvailable: false`.
+- `retrieve()` provides chunk-oriented semantic/hybrid search and blends lexical/vector
+  ranks with RRF (K=60, cosine distance ≤ 0.7). `searchRecordCandidates()` is a sibling
+  path for Chat: it shares the joins, filters, and semantic primitive, adds direct typed
+  fields, collapses chunks to records, and performs record-level RRF. It does not compose
+  or rerun `retrieve()`.
+- vec0 selects global neighbors before typed joins and filters. Record-oriented calls
+  therefore overfetch and double K to a bounded ceiling until enough unique filtered
+  records are found. This mitigates filtered/source-concentrated pools but intentionally
+  does not claim exhaustive filtered KNN recall.
+- Semantic rows must match both the current model id and the owning chunk's current hash.
+  Changed vectors become ineligible immediately; incremental backfill replaces them and
+  prunes removed-chunk orphans. Any runtime failure degrades to lexical search.
 
 ### Desktop UX (`apps/desktop`)
-- `EmbeddingsSync` headless coordinator (loads the model + runs automatic incremental
-  backfill at most once per local calendar day; manual backfill/rebuild remain available
-  from Settings).
+- `EmbeddingsSync` headless coordinator loads the model, reacts to successful in-app
+  mutations, and drains pending chunks. A cheap 60-second background status poll catches
+  CLI/external writes; successful passes use a one-second cooldown, and all automatic/
+  manual passes share one exclusive coordinator.
 - Settings → **Semantic search**: enable/disable, model download progress bar, runtime +
   index status (indexed/total, pending), "Backfill now", and "Rebuild index".
 - Diagnostics now reports the real semantic state instead of a hardcoded "off".
@@ -53,7 +67,28 @@ app and contrary to `docs/plans/libraries.md` (which commits to `fastembed` + `s
   like FTS5, vec0 tables are raw-SQL-only and excluded from the typed builder. `schema.gen.ts`
   regenerated with `chunkEmbeddings`.
 
-## Verification
+### Grounded Chat integration (current follow-up)
+- Each turn receives bounded planning metadata, then uses record-level search/browse,
+  structured task/project lists, and batched detail reads with per-record and total text
+  budgets. Explicitly requested chunks are allocated first.
+- Tool calls/results remain in durable local AI SDK message JSON for an inspectable trace,
+  but prior raw results are replaced with elision markers before a later provider request.
+  They are not `evidence_refs`.
+- Search results carry stable record/chunk refs and an existing navigation target. Derived
+  sources can open an unambiguous parent (for example transcript → interaction); unsupported
+  or hallucinated citations remain inert.
+- Tool rounds are bounded and the last allowed model step is synthesis-only, with a
+  deterministic no-answer fallback.
+- The transport captures the active database path + connection generation. Reads are
+  rejected on a switch, and conversation persistence, generated titles, approvals, Chat
+  writes, and native embedding mutations remain pinned to the captured brain. Identity
+  is process-local, not stored in Chat JSON: restored approvals can be dismissed but
+  cannot execute without a retried request.
+
+## Original PR verification
+
+These results are the embedding-port baseline; later post-review sections record their
+own focused reruns. The current Chat-search branch runs its gates separately.
 
 | Check | Result |
 | --- | --- |
@@ -71,7 +106,7 @@ SQLite + stubbed runtime); Rust storage (`apply`/`delete`/`clear`, wrong-dim rej
 vec0 cosine-KNN ordering, and a real end-to-end model + KNN test (ranks by meaning).
 
 ## Acceptance criteria
-1. Local embedding/vector pipeline for documents/interactions chunks — ✅
+1. Local embedding/vector pipeline over current universal chunk projections — ✅
 2. Vectors in SQLite via sqlite-vec; migrations/schema docs aligned — ✅
 3. Semantic + hybrid retrieval, safe lexical fallback — ✅
 4. UX/settings/status: availability, runtime status, progress/backfill/rebuild, honest
@@ -88,8 +123,9 @@ vec0 cosine-KNN ordering, and a real end-to-end model + KNN test (ranks by meani
 - **CLI stays lexical:** semantic is desktop-only. The CLI shares the DB (so
   desktop-written vectors exist) but doesn't embed queries. Adding fastembed to the CLI
   binary is a future step.
-- **No live ingest hook:** backfill runs on enable / app start / manual rebuild; it is
-  hash-skip cheap. A push-on-write trigger could be added later.
+- **Filtered vec0 is bounded, not exhaustive:** sqlite-vec chooses global neighbors before
+  typed SQL filters. Adaptive overfetch improves record diversity up to a bounded ceiling;
+  lexical/direct-field legs remain the deterministic fallback when it cannot fill a page.
 
 ## Post-review fixes (Cursor Bugbot on PR #27)
 - **High — rebuild clears without ready model:** rebuild now goes through a shared
@@ -162,15 +198,12 @@ vec0 cosine-KNN ordering, and a real end-to-end model + KNN test (ranks by meani
   --all-targets` clean.
 
 ## Post-review fixes — fifth pass (Cursor Bugbot on PR #27, head 981dd2b)
-- **Medium — Stale pending stops CLI indexing:** once semantic search was enabled and `pending`
-  hit 0, `useEmbeddingsStatus` stopped polling entirely, so chunks written by a non-UI path (the
-  `brain` CLI indexing while the window is open, or another window) were never embedded until a
-  focus/settings refetch. Final product cadence now caps automatic incremental backfill to one
-  attempt per local calendar day via `embeddings.lastBackfillAttemptDay`; pending chunks no
-  longer keep the old 30s status heartbeat alive. The status query fast-polls only while the
-  model is loading or a backfill is actively running, then uses a slow hourly discovery poll
-  until today's automatic backfill slot is used. Settings exposes non-destructive "Backfill now"
-  for user-triggered catch-up and keeps "Rebuild index" as repair.
+- **Medium — Stale pending stops CLI indexing:** the original fix added a slow discovery
+  heartbeat and daily cap. The current follow-up supersedes that cadence: successful
+  renderer mutations invalidate status immediately, while a 60-second background poll
+  discovers CLI/external writes and lets the coordinator drain pending chunks with a short
+  success cooldown. Settings still exposes non-destructive "Backfill now" and repair-only
+  "Rebuild index".
 - **Medium — Semantic available with empty hits:** in `semantic`/`hybrid` mode a `ready` runtime
   whose KNN found no neighbour within the distance cutoff still returned `semanticAvailable: true`
   with empty/unhelpful chunks and skipped the lexical fallback the unavailable-runtime path
@@ -238,5 +271,6 @@ vec0 cosine-KNN ordering, and a real end-to-end model + KNN test (ranks by meani
   first-run `act(...)` warning).
 
 ## Repo state
-- Branch: `codex/local-brain-reflect-embeddings`
-- PR: https://github.com/maccman/local-brain/pull/27 (base `master`)
+- Original branch: `codex/local-brain-reflect-embeddings`
+- Original PR: https://github.com/maccman/local-brain/pull/27 (base `master`)
+- Current follow-up branch: `codex/improve-ai-chat-search`

@@ -67,6 +67,9 @@ export function installSqliteBridge(database) {
           return Promise.reject(error)
         }
       }
+      if (command === 'active_database_identity' || command === 'embed_database_identity') {
+        return Promise.resolve({ databasePath: '/test/brain.sqlite', generation: 1 })
+      }
       if (command === 'embed_delete') {
         // Mirror the Rust `embed_delete`: drop chunk_embeddings rows (and their
         // chunk_vectors, which this harness strips) for the given chunk ids.

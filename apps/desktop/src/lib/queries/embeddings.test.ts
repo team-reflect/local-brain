@@ -40,6 +40,8 @@ function installBridge(
       commands.push(command)
       const params = ((args as { params?: unknown[] }).params ?? []) as unknown[]
       switch (command) {
+        case 'embed_database_identity':
+          return Promise.resolve({ databasePath: '/test/brain.sqlite', generation: 1 })
         case 'embed_ensure':
           return Promise.resolve(ensure)
         case 'embed_clear':
@@ -61,6 +63,12 @@ function installBridge(
         }
         case 'db_execute': {
           const sql = String((args as { sql?: unknown }).sql ?? '')
+          if (sql.includes('settings')) {
+            expect(args).toMatchObject({
+              expectedDatabasePath: '/test/brain.sqlite',
+              expectedGeneration: 1,
+            })
+          }
           if (sql.includes('settings') && params[0] === 'embeddings.backfillError') {
             persistedError = JSON.parse(String(params[1])) as string | null
           }
@@ -80,10 +88,9 @@ function installBridge(
 }
 
 /**
- * Polling-cadence contract: the status query should only fast-poll while the
- * model loads. Once ready, it uses a slow discovery poll only until today's
- * automatic attempt is used; pending chunks are still capped by EmbeddingsSync's
- * once-per-day gate or explicit user actions.
+ * Polling-cadence contract: the status query fast-polls active work and keeps a
+ * cheap steady-state discovery poll for writes made by the CLI or another
+ * process that cannot invalidate this renderer's React Query cache.
  */
 function status(overrides: Partial<EmbeddingsStatus> = {}): EmbeddingsStatus {
   return {
@@ -110,20 +117,18 @@ describe('embeddingsRefetchInterval', () => {
     expect(embeddingsRefetchInterval(status({ runtime: { status: 'loading' } }))).toBe(1500)
   })
 
-  it('slow-polls for discovery only until today has an automatic attempt', () => {
-    expect(embeddingsRefetchInterval(status())).toBe(3_600_000)
-    expect(embeddingsRefetchInterval(status({ pending: 4, ready: false }))).toBe(3_600_000)
-    expect(embeddingsRefetchInterval(status({ lastBackfillAttemptDay: todayLocalDayKey() }))).toBe(
-      false,
-    )
+  it('keeps a periodic catch-up poll after an automatic attempt', () => {
+    expect(embeddingsRefetchInterval(status())).toBe(60_000)
+    expect(embeddingsRefetchInterval(status({ pending: 4, ready: false }))).toBe(60_000)
+    expect(embeddingsRefetchInterval(status({ lastBackfillAttemptDay: todayLocalDayKey() }))).toBe(60_000)
     expect(
       embeddingsRefetchInterval(
         status({ pending: 4, ready: false, lastBackfillAttemptDay: todayLocalDayKey() }),
       ),
-    ).toBe(false)
+    ).toBe(60_000)
   })
 
-  it('fast-polls while a capped-day backfill is actively running', async () => {
+  it('fast-polls while a backfill is actively running', async () => {
     let release: () => void = () => {}
     const active = withBackfillActive(
       () =>
@@ -144,7 +149,7 @@ describe('embeddingsRefetchInterval', () => {
       embeddingsRefetchInterval(
         status({ pending: 4, ready: false, lastBackfillAttemptDay: todayLocalDayKey() }),
       ),
-    ).toBe(false)
+    ).toBe(60_000)
   })
 
   it('stops polling a failed runtime or a sticky backfill error', () => {
@@ -246,17 +251,15 @@ describe('rebuildEmbeddings', () => {
     expect(commands).toContain('embed_clear')
   })
 
-  it('threads isStale into the rebuild backfill so a mid-rebuild disable aborts', async () => {
-    // Bugbot pass 7 "Rebuild ignores disable abort": a manual rebuild must honor
-    // the same cooperative abort as the incremental pass. With `isStale` already
-    // true the backfill aborts before its first batch, so the wipe happened but
-    // no chunk is re-embedded.
+  it('checks isStale before a rebuild wipe', async () => {
+    // A rebuild prepared for a disabled/switched brain must abort before clearing
+    // vectors. Clearing first would turn a harmless stale action into index loss.
     const { commands } = installBridge(
       { status: 'ready', model: 'all-MiniLM-L6-v2' },
       { pendingChunk: true },
     )
     await expect(rebuildEmbeddings({ isStale: () => true })).resolves.toBeUndefined()
-    expect(commands).toContain('embed_clear')
+    expect(commands).not.toContain('embed_clear')
     expect(commands).not.toContain('embed_texts')
   })
 })

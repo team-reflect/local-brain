@@ -1,6 +1,7 @@
 import type { Interactions } from '@local-brain/db'
-import { db } from '../../db/client'
+import { db, dbForDatabase } from '../../db/client'
 import { batch } from '../../db/commands'
+import { activeDatabaseIdentity, type DatabaseIdentity } from '../../db/identity'
 import { newId } from '../../db/id'
 import {
   archiveRecord,
@@ -9,6 +10,8 @@ import {
   type NewRecord,
   type RecordPatch,
 } from '../../db/records'
+import { nowIso } from '../../db/time'
+import { contentChunkProjection } from '../../ingest/content-projection'
 import { recomputeRelationshipIntelligence } from '../relationships/recompute'
 import { validateNewInteraction, validateInteractionPatch } from './validators'
 
@@ -93,15 +96,17 @@ function participantIdentityKey(row: ParticipantRow): string {
 }
 
 /**
- * Create an interaction and, in the SAME Rust transaction, its participant
- * links. A multi-table write: if any participant insert fails, the interaction
- * insert rolls back too (see `db_batch`).
+ * Create an interaction, body chunks, and participant links in one Rust
+ * transaction pinned to the captured brain. Any failed statement rolls the
+ * whole multi-table write back (see `db_batch`).
  */
 export async function createInteraction(
   input: NewInteraction,
   participants: readonly InteractionParticipantInput[] = [],
+  expectedIdentity?: DatabaseIdentity,
 ): Promise<string> {
   const values = validateNewInteraction(input)
+  const identity = expectedIdentity ?? (await activeDatabaseIdentity())
   const id = newId()
   const seen = new Set<string>()
   const participantRows = participants
@@ -113,26 +118,60 @@ export async function createInteraction(
       seen.add(key)
       return true
     })
+  const projection = await contentChunkProjection('interaction', id, values.bodyText, {
+    databaseIdentity: identity,
+    readExisting: false,
+  })
   const statements = [
     db.insertInto('interactions').values({ ...values, id }),
+    ...projection.statements,
     ...participantRows.map((row) => db.insertInto('interactionParticipants').values(row)),
   ]
-  await batch(statements)
+  await batch(statements, identity)
   // Relationship hints update after a relevant interaction (Plan 05 step 9).
   // Runs after the interaction transaction commits so the recompute sees it.
   // Only the participants actually inserted (with a real personId) count.
   for (const row of participantRows) {
     if (row.personId !== undefined) {
-      await recomputeRelationshipIntelligence(row.personId)
+      await recomputeRelationshipIntelligence(row.personId, { databaseIdentity: identity })
     }
   }
   return id
 }
 
-export async function updateInteraction(id: string, patch: InteractionPatch): Promise<number> {
+/**
+ * Update an interaction, refreshing body chunks atomically when body text
+ * changes. A supplied identity rejects stale work after a brain switch.
+ */
+export async function updateInteraction(
+  id: string,
+  patch: InteractionPatch,
+  expectedIdentity?: DatabaseIdentity,
+): Promise<number> {
   const clean = validateInteractionPatch(patch)
-  await assertTitleOrBody('interactions', id, clean, 'an interaction')
-  return updateRecord('interactions', id, clean)
+  const identity = expectedIdentity ?? (await activeDatabaseIdentity())
+  await assertTitleOrBody('interactions', id, clean, 'an interaction', identity)
+  if (clean.bodyText === undefined) return updateRecord('interactions', id, clean, identity)
+  const existing = await dbForDatabase(identity)
+    .selectFrom('interactions')
+    .select('id')
+    .where('id', '=', id)
+    .executeTakeFirst()
+  if (!existing) {
+    const [affected] = await batch([
+      db.updateTable('interactions').set({ ...clean, updatedAt: nowIso() }).where('id', '=', id),
+    ], identity)
+    return affected ?? 0
+  }
+
+  const projection = await contentChunkProjection('interaction', id, clean.bodyText, {
+    databaseIdentity: identity,
+  })
+  const [affected] = await batch([
+    db.updateTable('interactions').set({ ...clean, updatedAt: nowIso() }).where('id', '=', id),
+    ...projection.statements,
+  ], identity)
+  return affected ?? 0
 }
 
 export function archiveInteraction(id: string): Promise<number> {

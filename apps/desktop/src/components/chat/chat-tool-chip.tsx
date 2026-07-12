@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
-import { Check, FolderOpen, PencilLine, Search, TextSearch, X } from 'lucide-react'
+import { Check, FolderOpen, ListTodo, PencilLine, Search, TextSearch, X } from 'lucide-react'
 import { Button } from '../button'
+import type { ChatSource } from './chat-sources'
+import { ChatToolSources } from './chat-tool-sources'
 
 /**
  * A generic "part" from a persisted UIMessage. We work with plain JSON records
@@ -99,55 +101,82 @@ const WRITE_TOOL_LABEL: Record<string, string> = {
   update_memory: 'Update memory',
 }
 
-interface WriteToolPreview {
-  title: string
-  subject: string | null
+interface ApprovalField {
+  path: string
+  value: string
 }
 
-function inputString(input: Record<string, unknown> | undefined, key: string): string | null {
-  const value = input?.[key]
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
+function approvalFieldValue(value: unknown): string {
+  if (value === null) return 'Clear'
+  if (typeof value === 'string') return value.length > 0 ? value : '“”'
+  return String(value)
 }
 
-function firstInputString(input: Record<string, unknown> | undefined, keys: readonly string[]): string | null {
-  for (const key of keys) {
-    const value = inputString(input, key)
-    if (value) return value
+function approvalFields(input: Record<string, unknown> | undefined): ApprovalField[] {
+  const fields: ApprovalField[] = []
+  const pending = Object.entries(input ?? {})
+    .reverse()
+    .map(([path, value]) => ({ path, value }))
+
+  while (pending.length > 0) {
+    const current = pending.pop()
+    if (!current) break
+    const { path, value } = current
+    if (value === undefined) continue
+    if (Array.isArray(value)) {
+      if (value.length === 0) {
+        fields.push({ path, value: '[]' })
+        continue
+      }
+      for (let index = value.length - 1; index >= 0; index -= 1) {
+        pending.push({ path: `${path}[${index}]`, value: value[index] })
+      }
+      continue
+    }
+    if (typeof value === 'object' && value !== null) {
+      const entries = Object.entries(value)
+        .filter((entry) => entry[1] !== undefined)
+      if (entries.length === 0) {
+        fields.push({ path, value: '{}' })
+        continue
+      }
+      for (const [key, item] of entries.reverse()) {
+        pending.push({ path: path ? `${path}.${key}` : key, value: item })
+      }
+      continue
+    }
+    fields.push({ path, value: approvalFieldValue(value) })
   }
-  return null
+  return fields
 }
 
-function writePreview(toolName: string, input: Record<string, unknown> | undefined): WriteToolPreview {
-  const title = WRITE_TOOL_LABEL[toolName] ?? toolName.replace(/_/g, ' ')
+function WriteApprovalFields({
+  input,
+  label,
+}: {
+  input: Record<string, unknown> | undefined
+  label: string
+}): ReactNode {
+  const fields = approvalFields(input)
+  if (fields.length === 0) return null
 
-  switch (toolName) {
-    case 'create_task':
-      return { title, subject: firstInputString(input, ['title']) }
-    case 'update_task':
-      return { title, subject: firstInputString(input, ['id', 'title']) }
-    case 'complete_task':
-      return { title, subject: firstInputString(input, ['id']) }
-    case 'create_person':
-      return { title, subject: firstInputString(input, ['fullName', 'preferredName']) }
-    case 'update_person':
-      return { title, subject: firstInputString(input, ['id', 'fullName', 'preferredName']) }
-    case 'create_organization':
-      return { title, subject: firstInputString(input, ['name', 'domain']) }
-    case 'update_organization':
-      return { title, subject: firstInputString(input, ['id', 'name', 'domain']) }
-    case 'create_project':
-      return { title, subject: firstInputString(input, ['name']) }
-    case 'update_project':
-      return { title, subject: firstInputString(input, ['id', 'name']) }
-    case 'log_interaction':
-      return { title, subject: firstInputString(input, ['title', 'summary', 'bodyText']) }
-    case 'remember_fact':
-      return { title, subject: firstInputString(input, ['claim']) }
-    case 'update_memory':
-      return { title, subject: firstInputString(input, ['id', 'claim']) }
-    default:
-      return { title, subject: null }
-  }
+  return (
+    <dl
+      aria-label={`${label} fields`}
+      className="grid max-h-48 max-w-full grid-cols-[minmax(5rem,auto)_minmax(0,1fr)] gap-x-3 gap-y-0.5 overflow-y-auto rounded-md border border-border/60 bg-muted/30 px-2 py-1.5"
+    >
+      {fields.map((field) => (
+        <div key={field.path} className="contents">
+          <dt className="min-w-0 font-mono text-[11px] text-muted-foreground">
+            {field.path}
+          </dt>
+          <dd className="min-w-0 whitespace-pre-wrap break-words text-[11px] text-foreground">
+            {field.value}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  )
 }
 
 type ApprovalRowState = 'requested' | 'approved' | 'denied'
@@ -163,15 +192,15 @@ function WriteApprovalRow({
   state: ApprovalRowState
   onApprovalResponse?: (response: ToolApprovalResponse) => void | PromiseLike<void>
 }): ReactNode {
-  const preview = writePreview(toolName, part.input)
+  const title = WRITE_TOOL_LABEL[toolName] ?? toolName.replace(/_/g, ' ')
   const approvalId = part.approval?.id
   const active = state === 'requested' && approvalId !== undefined
   const approveLabel = state === 'approved'
-    ? `Approved ${preview.title.toLowerCase()}`
-    : `Approve ${preview.title.toLowerCase()}`
+    ? `Approved ${title.toLowerCase()}`
+    : `Approve ${title.toLowerCase()}`
   const denyLabel = state === 'denied'
-    ? `Denied ${preview.title.toLowerCase()}`
-    : `Deny ${preview.title.toLowerCase()}`
+    ? `Denied ${title.toLowerCase()}`
+    : `Deny ${title.toLowerCase()}`
   const statusText =
     state === 'requested' ? 'Needs approval' : state === 'approved' ? 'Approved' : 'Denied'
   const statusClass = 'text-[11px] text-muted-foreground'
@@ -189,12 +218,9 @@ function WriteApprovalRow({
           <PencilLine aria-hidden className="mt-0.5 size-3.5 shrink-0" />
           <span className="flex min-w-0 flex-col gap-0.5">
             <span className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-              <span className="font-medium text-foreground">{preview.title}</span>
+              <span className="font-medium text-foreground">{title}</span>
               <span className={statusClass}>{statusText}</span>
             </span>
-            {preview.subject ? (
-              <span className="max-w-full truncate text-foreground">{preview.subject}</span>
-            ) : null}
           </span>
         </span>
         <span className="flex shrink-0 items-center gap-1">
@@ -228,6 +254,7 @@ function WriteApprovalRow({
           </Button>
         </span>
       </div>
+      <WriteApprovalFields input={part.input} label={title} />
     </div>
   )
 }
@@ -270,9 +297,12 @@ function WriteToolChip({
 
   if (part.state === 'output-error') {
     return (
-      <ChipFrame pending={false} icon={<PencilLine aria-hidden className="size-3.5" />}>
-        {label} failed — {part.errorText ?? 'error'}
-      </ChipFrame>
+      <div className="flex max-w-full flex-col gap-1.5">
+        <ChipFrame pending={false} icon={<PencilLine aria-hidden className="size-3.5" />}>
+          {label} failed — {part.errorText ?? 'error'}
+        </ChipFrame>
+        <WriteApprovalFields input={part.input} label={label} />
+      </div>
     )
   }
 
@@ -315,50 +345,101 @@ function browseLabel(input: Record<string, unknown> | undefined): string {
   return `${recent ? 'recent ' : ''}${noun}`
 }
 
-function SearchRecordsChip({ part }: { part: ToolPart }): ReactNode {
+function SearchRecordsChip({
+  part,
+  onOpenSource,
+}: {
+  part: ToolPart
+  onOpenSource?: (source: ChatSource) => void
+}): ReactNode {
   const pending = isToolPartPending(part)
   const query = String(part.input?.['query'] ?? '').trim()
   const count = typeof part.output?.['count'] === 'number' ? part.output['count'] : null
 
   return (
-    <ChipFrame pending={pending} icon={<Search aria-hidden className="size-3.5" />}>
-      {query ? `Searched "${query}"` : `Browsed ${browseLabel(part.input)}`}
-      {!pending && count !== null ? countSuffix(count, 'result') : ''}
-      {!pending && part.state === 'output-error' ? ` — ${part.errorText ?? 'error'}` : ''}
-    </ChipFrame>
+    <div className="min-w-0">
+      <ChipFrame pending={pending} icon={<Search aria-hidden className="size-3.5" />}>
+        {query ? `Searched "${query}"` : `Browsed ${browseLabel(part.input)}`}
+        {!pending && count !== null ? countSuffix(count, 'result') : ''}
+        {!pending && part.state === 'output-error' ? ` — ${part.errorText ?? 'error'}` : ''}
+      </ChipFrame>
+      <ChatToolSources part={part} {...(onOpenSource ? { onOpenSource } : {})} />
+    </div>
   )
 }
 
-function GetRecordsChip({ part }: { part: ToolPart }): ReactNode {
+function GetRecordsChip({
+  part,
+  onOpenSource,
+}: {
+  part: ToolPart
+  onOpenSource?: (source: ChatSource) => void
+}): ReactNode {
   const pending = isToolPartPending(part)
   const count = typeof part.output?.['count'] === 'number' ? part.output['count'] : null
 
   return (
-    <ChipFrame pending={pending} icon={<TextSearch aria-hidden className="size-3.5" />}>
-      Loaded records
-      {!pending && count !== null ? countSuffix(count, 'record') : ''}
-      {!pending && part.state === 'output-error' ? ` — ${part.errorText ?? 'error'}` : ''}
-    </ChipFrame>
+    <div className="min-w-0">
+      <ChipFrame pending={pending} icon={<TextSearch aria-hidden className="size-3.5" />}>
+        Loaded records
+        {!pending && count !== null ? countSuffix(count, 'record') : ''}
+        {!pending && part.state === 'output-error' ? ` — ${part.errorText ?? 'error'}` : ''}
+      </ChipFrame>
+      <ChatToolSources part={part} {...(onOpenSource ? { onOpenSource } : {})} />
+    </div>
   )
 }
 
-function ListProjectsChip({ part }: { part: ToolPart }): ReactNode {
+function ListTasksChip({
+  part,
+  onOpenSource,
+}: {
+  part: ToolPart
+  onOpenSource?: (source: ChatSource) => void
+}): ReactNode {
+  const pending = isToolPartPending(part)
+  const statuses = stringArray(part.input?.['statuses'])
+  const count = typeof part.output?.['count'] === 'number' ? part.output['count'] : null
+
+  return (
+    <div className="min-w-0">
+      <ChipFrame pending={pending} icon={<ListTodo aria-hidden className="size-3.5" />}>
+        {statuses.length > 0 ? `Listed ${statuses.join(', ')} tasks` : 'Listed tasks'}
+        {!pending && count !== null ? countSuffix(count, 'task') : ''}
+        {!pending && part.state === 'output-error' ? ` — ${part.errorText ?? 'error'}` : ''}
+      </ChipFrame>
+      <ChatToolSources part={part} {...(onOpenSource ? { onOpenSource } : {})} />
+    </div>
+  )
+}
+
+function ListProjectsChip({
+  part,
+  onOpenSource,
+}: {
+  part: ToolPart
+  onOpenSource?: (source: ChatSource) => void
+}): ReactNode {
   const pending = isToolPartPending(part)
   const statusFilter = part.input?.['status'] ? String(part.input['status']) : null
   const count = typeof part.output?.['count'] === 'number' ? part.output['count'] : null
 
   return (
-    <ChipFrame pending={pending} icon={<FolderOpen aria-hidden className="size-3.5" />}>
-      {statusFilter ? `Listed ${statusFilter} projects` : 'Listed projects'}
-      {!pending && count !== null ? countSuffix(count, 'project') : ''}
-      {!pending && part.state === 'output-error' ? ` — ${part.errorText ?? 'error'}` : ''}
-    </ChipFrame>
+    <div className="min-w-0">
+      <ChipFrame pending={pending} icon={<FolderOpen aria-hidden className="size-3.5" />}>
+        {statusFilter ? `Listed ${statusFilter} projects` : 'Listed projects'}
+        {!pending && count !== null ? countSuffix(count, 'project') : ''}
+        {!pending && part.state === 'output-error' ? ` — ${part.errorText ?? 'error'}` : ''}
+      </ChipFrame>
+      <ChatToolSources part={part} {...(onOpenSource ? { onOpenSource } : {})} />
+    </div>
   )
 }
 
 interface ChatToolChipProps {
   part: ToolPart
   onApprovalResponse?: (response: ToolApprovalResponse) => void | PromiseLike<void>
+  onOpenSource?: (source: ChatSource) => void
 }
 
 /**
@@ -366,16 +447,20 @@ interface ChatToolChipProps {
  * icon + label + count when settled. Survives reload via persisted UIMessage
  * JSON — reading only `type`, `state`, `input`, `output`, and `errorText`.
  */
-export function ChatToolChip({ part, onApprovalResponse }: ChatToolChipProps): ReactNode {
+export function ChatToolChip({ part, onApprovalResponse, onOpenSource }: ChatToolChipProps): ReactNode {
   const toolName = toolNameFromPart(part)
 
   switch (toolName) {
     case 'search_records':
-      return <SearchRecordsChip part={part} />
+      return <SearchRecordsChip part={part} {...(onOpenSource ? { onOpenSource } : {})} />
+    case 'browse_records':
+      return <SearchRecordsChip part={part} {...(onOpenSource ? { onOpenSource } : {})} />
     case 'get_records':
-      return <GetRecordsChip part={part} />
+      return <GetRecordsChip part={part} {...(onOpenSource ? { onOpenSource } : {})} />
+    case 'list_tasks':
+      return <ListTasksChip part={part} {...(onOpenSource ? { onOpenSource } : {})} />
     case 'list_projects':
-      return <ListProjectsChip part={part} />
+      return <ListProjectsChip part={part} {...(onOpenSource ? { onOpenSource } : {})} />
     default:
       if (WRITE_TOOL_LABEL[toolName]) {
         return (

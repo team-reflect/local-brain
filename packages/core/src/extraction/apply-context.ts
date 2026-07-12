@@ -63,6 +63,7 @@ interface Buckets {
   affiliations: Compilable[]
   links: Compilable[]
   memories: Compilable[]
+  contentChunks: Compilable[]
   memoryLinks: Compilable[]
   evidence: Compilable[]
 }
@@ -79,6 +80,7 @@ export class ApplyContext {
     affiliations: [],
     links: [],
     memories: [],
+    contentChunks: [],
     memoryLinks: [],
     evidence: [],
   }
@@ -158,6 +160,7 @@ export class ApplyContext {
       ...inserts.affiliations,
       ...inserts.links,
       ...inserts.memories,
+      ...inserts.contentChunks,
       ...inserts.memoryLinks,
       ...inserts.evidence,
     ]

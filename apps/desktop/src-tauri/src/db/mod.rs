@@ -10,11 +10,12 @@
 mod convert;
 mod query;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use rusqlite::Connection;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value as JsonValue};
 use tauri::State;
 
@@ -30,11 +31,22 @@ struct Active {
 
 /// The process-wide active brain, serialized behind a mutex so the desktop's
 /// command thread pool can share one writer safely. Switching brains (see
-/// [`crate::brains`]) replaces the connection in place, so every later read or
-/// write lands on the newly active brain.
+/// [`crate::brains`]) replaces the connection in place. Unguarded work follows
+/// that active connection; identity-guarded work prepared earlier is rejected.
 pub struct DbState {
     active: Mutex<Option<Active>>,
+    generation: AtomicU64,
     startup_error: Mutex<Option<String>>,
+}
+
+/// Stable identity of one open database connection. The generation changes on
+/// every swap/close, so switching away and back to the same path cannot make an
+/// old asynchronous write appear current again.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActiveDatabaseIdentity {
+    pub database_path: String,
+    pub generation: u64,
 }
 
 pub(crate) trait IntoActivePaths {
@@ -78,6 +90,7 @@ impl DbState {
                 conn,
                 paths: paths.into_active_paths(),
             })),
+            generation: AtomicU64::new(1),
             startup_error: Mutex::new(None),
         }
     }
@@ -85,6 +98,7 @@ impl DbState {
     pub fn empty() -> Self {
         Self {
             active: Mutex::new(None),
+            generation: AtomicU64::new(0),
             startup_error: Mutex::new(None),
         }
     }
@@ -92,6 +106,7 @@ impl DbState {
     pub fn empty_with_startup_error(message: impl Into<String>) -> Self {
         Self {
             active: Mutex::new(None),
+            generation: AtomicU64::new(0),
             startup_error: Mutex::new(Some(message.into())),
         }
     }
@@ -129,6 +144,34 @@ impl DbState {
         Ok(self.active_paths()?.database_path)
     }
 
+    /// The path plus monotonic connection generation used to bind asynchronous
+    /// derived-index work to the brain it was prepared against.
+    pub fn active_database_identity(&self) -> AppResult<ActiveDatabaseIdentity> {
+        let guard = self.lock()?;
+        let active = guard.as_ref().ok_or_else(Self::no_active)?;
+        Ok(ActiveDatabaseIdentity {
+            database_path: active.paths.database_path.display().to_string(),
+            generation: self.generation.load(Ordering::SeqCst),
+        })
+    }
+
+    fn ensure_expected_identity(
+        &self,
+        active: &Active,
+        expected_database_path: &str,
+        expected_generation: u64,
+    ) -> AppResult<()> {
+        let current_generation = self.generation.load(Ordering::SeqCst);
+        if active.paths.database_path.as_path() != Path::new(expected_database_path)
+            || current_generation != expected_generation
+        {
+            return Err(AppError::stale(
+                "the active brain changed while database work was in flight",
+            ));
+        }
+        Ok(())
+    }
+
     /// The root path of the currently open brain.
     pub fn active_root_path(&self) -> AppResult<PathBuf> {
         Ok(self.active_paths()?.root_path)
@@ -156,6 +199,7 @@ impl DbState {
     {
         let mut guard = self.lock()?;
         before_swap()?;
+        self.generation.fetch_add(1, Ordering::SeqCst);
         *guard = Some(Active {
             conn,
             paths: paths.into_active_paths(),
@@ -177,22 +221,25 @@ impl DbState {
         let mut guard = self.lock()?;
         before_clear()?;
         *guard = None;
+        self.generation.fetch_add(1, Ordering::SeqCst);
         if let Ok(mut startup_error) = self.startup_error.lock() {
             *startup_error = None;
         }
         Ok(())
     }
 
-    /// Run `f` against the durable connection inside one transaction, committing
-    /// on `Ok` and rolling back on `Err`. Used by the embedding write commands,
-    /// which need `last_insert_rowid` coupling that the generic `db_batch` path
-    /// can't express.
-    pub fn with_connection_mut<T>(
+    /// Run a transaction only if the active database still has the exact
+    /// identity captured by the caller. The comparison and mutation share the
+    /// same active-state lock, closing the check/write race with brain switches.
+    pub fn with_expected_connection_mut<T>(
         &self,
+        expected_database_path: &str,
+        expected_generation: u64,
         f: impl FnOnce(&Connection) -> AppResult<T>,
     ) -> AppResult<T> {
         let mut guard = self.lock()?;
         let active = guard.as_mut().ok_or_else(Self::no_active)?;
+        self.ensure_expected_identity(active, expected_database_path, expected_generation)?;
         let tx = active.conn.transaction()?;
         let result = f(&tx)?;
         tx.commit()?;
@@ -210,6 +257,19 @@ impl DbState {
             let _guard = self.active.lock().unwrap();
             panic!("poison database lock for test");
         });
+    }
+}
+
+fn expected_identity(
+    expected_database_path: Option<String>,
+    expected_generation: Option<u64>,
+) -> AppResult<Option<(String, u64)>> {
+    match (expected_database_path, expected_generation) {
+        (None, None) => Ok(None),
+        (Some(path), Some(generation)) => Ok(Some((path, generation))),
+        _ => Err(AppError::parse(
+            "expectedDatabasePath and expectedGeneration must be provided together",
+        )),
     }
 }
 
@@ -243,35 +303,70 @@ pub(super) fn run_batch(
     Ok(affected)
 }
 
-/// Run a read-only Kysely query against the durable database.
+/// Capture the exact active connection for an asynchronous guarded operation.
+#[tauri::command]
+pub fn active_database_identity(state: State<'_, DbState>) -> AppResult<ActiveDatabaseIdentity> {
+    state.active_database_identity()
+}
+
+/// Run a read-only Kysely query. When the expected path and generation are
+/// supplied as a pair, reject the query if that brain is no longer active.
 #[tauri::command]
 pub fn db_query(
     state: State<'_, DbState>,
     sql: String,
     params: Vec<JsonValue>,
+    expected_database_path: Option<String>,
+    expected_generation: Option<u64>,
 ) -> AppResult<Vec<Map<String, JsonValue>>> {
     let guard = state.lock()?;
     let active = guard.as_ref().ok_or_else(DbState::no_active)?;
+    if let Some((path, generation)) =
+        expected_identity(expected_database_path, expected_generation)?
+    {
+        state.ensure_expected_identity(active, &path, generation)?;
+    }
     run_query(&active.conn, &sql, &params)
 }
 
-/// Run a single write statement against the durable database.
+/// Run one write statement. An optional expected path + generation pair binds
+/// the transaction to the captured brain and rejects stale work.
 #[tauri::command]
 pub fn db_execute(
     state: State<'_, DbState>,
     sql: String,
     params: Vec<JsonValue>,
+    expected_database_path: Option<String>,
+    expected_generation: Option<u64>,
 ) -> AppResult<usize> {
-    let guard = state.lock()?;
-    let active = guard.as_ref().ok_or_else(DbState::no_active)?;
-    run_execute(&active.conn, &sql, &params)
+    match expected_identity(expected_database_path, expected_generation)? {
+        Some((path, generation)) => state.with_expected_connection_mut(&path, generation, |conn| {
+            run_execute(conn, &sql, &params)
+        }),
+        None => {
+            let guard = state.lock()?;
+            let active = guard.as_ref().ok_or_else(DbState::no_active)?;
+            run_execute(&active.conn, &sql, &params)
+        }
+    }
 }
 
-/// Run a transaction-scoped batch of write statements.
+/// Run a transaction-scoped write batch, optionally rejecting it unless the
+/// expected path + generation still identifies the active brain.
 #[tauri::command]
-pub fn db_batch(state: State<'_, DbState>, statements: Vec<DbStatement>) -> AppResult<Vec<usize>> {
+pub fn db_batch(
+    state: State<'_, DbState>,
+    statements: Vec<DbStatement>,
+    expected_database_path: Option<String>,
+    expected_generation: Option<u64>,
+) -> AppResult<Vec<usize>> {
     let mut guard = state.lock()?;
     let active = guard.as_mut().ok_or_else(DbState::no_active)?;
+    if let Some((path, generation)) =
+        expected_identity(expected_database_path, expected_generation)?
+    {
+        state.ensure_expected_identity(active, &path, generation)?;
+    }
     run_batch(&mut active.conn, &statements)
 }
 
@@ -328,6 +423,36 @@ mod tests {
         )
         .unwrap();
         assert_eq!(rows[0]["n"], json!(0), "the new brain has no rows");
+    }
+
+    #[test]
+    fn expected_connection_rejects_switches_and_same_path_reopens() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("brain");
+        let paths = paths(root.clone());
+        let state = DbState::new(db(), paths.clone());
+        let first = state.active_database_identity().unwrap();
+
+        state
+            .with_expected_connection_mut(&first.database_path, first.generation, |conn| {
+                insert_person(conn, "p1", "Ada")?;
+                Ok(())
+            })
+            .unwrap();
+
+        // Reopening even the same path gets a new generation. Path-only guards
+        // would accept this ABA switch and let old async work mutate the new
+        // connection.
+        state.swap_after(db(), paths, || Ok(())).unwrap();
+        let second = state.active_database_identity().unwrap();
+        assert_eq!(second.database_path, first.database_path);
+        assert_ne!(second.generation, first.generation);
+
+        let stale =
+            state.with_expected_connection_mut(&first.database_path, first.generation, |_conn| {
+                Ok(())
+            });
+        assert!(matches!(stale, Err(AppError::Stale { .. })));
     }
 
     #[test]
