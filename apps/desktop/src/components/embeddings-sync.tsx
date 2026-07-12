@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useReducer, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   backfillEmbeddings,
@@ -12,6 +12,7 @@ import {
 } from '@local-brain/core'
 import { runExclusiveBackfill } from '../lib/embeddings-coordinator'
 import {
+  EMBEDDINGS_CATCH_UP_REFETCH_MS,
   EMBEDDINGS_STATUS_KEY,
   todayLocalDayKey,
   useEmbeddingsStatus,
@@ -40,6 +41,10 @@ export function EmbeddingsSync(): null {
   const nextAutomaticAttemptAt = useRef(0)
   const retryTimer = useRef<ReturnType<typeof window.setTimeout> | null>(null)
   const mounted = useRef(false)
+  const [automaticRetryVersion, retryAutomaticBackfill] = useReducer(
+    (version: number) => version + 1,
+    0,
+  )
 
   const data = status.data
 
@@ -51,13 +56,34 @@ export function EmbeddingsSync(): null {
   }, [])
 
   useEffect(() => {
+    const clearAutomaticRetry = (): void => {
+      if (retryTimer.current !== null) {
+        window.clearTimeout(retryTimer.current)
+        retryTimer.current = null
+      }
+    }
+    const scheduleAutomaticRetry = (delayMs: number): void => {
+      if (!mounted.current) return
+      clearAutomaticRetry()
+      retryTimer.current = window.setTimeout(() => {
+        retryTimer.current = null
+        if (!mounted.current) return
+        automaticBackfillBlocked.current = false
+        retryAutomaticBackfill()
+      }, delayMs)
+    }
+
     if (!data || !data.enabled) {
       automaticEnsureBlocked.current = false
       automaticBackfillBlocked.current = false
+      clearAutomaticRetry()
       return
     }
     if (data.runtime.status !== 'uninitialized') automaticEnsureBlocked.current = false
-    if (data.pending === 0 || data.backfillError) automaticBackfillBlocked.current = false
+    if (data.pending === 0 || data.backfillError) {
+      automaticBackfillBlocked.current = false
+      clearAutomaticRetry()
+    }
 
     // 1. Bring the runtime up (idempotent; the command coalesces concurrent calls).
     //    Only auto-ensure from `uninitialized`. A `failed` runtime means the load
@@ -98,10 +124,7 @@ export function EmbeddingsSync(): null {
       const delay = nextAutomaticAttemptAt.current - Date.now()
       if (delay > 0) {
         if (retryTimer.current === null) {
-          retryTimer.current = window.setTimeout(() => {
-            retryTimer.current = null
-            void queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY })
-          }, delay)
+          scheduleAutomaticRetry(delay)
         }
         return
       }
@@ -159,17 +182,30 @@ export function EmbeddingsSync(): null {
         })
       })
       void queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY })
-      const settleBackfill = (blocked: boolean): void => {
-        automaticBackfillBlocked.current = blocked
+      const settleBackfill = (): void => {
+        automaticBackfillBlocked.current = false
         backfilling.current = false
+        if (!mounted.current) return
         void queryClient.invalidateQueries({ queryKey: EMBEDDINGS_STATUS_KEY })
+        scheduleAutomaticRetry(AUTOMATIC_BACKFILL_COOLDOWN_MS)
       }
       void backfill.then(
-        () => settleBackfill(false),
-        () => settleBackfill(true),
+        settleBackfill,
+        () => {
+          // This outer rejection means the identity could not be captured or
+          // the identity-bound sticky-error write itself failed. Do not write
+          // an unguarded error into whichever brain is open now, and do not
+          // immediately invalidate into a retry loop. Retry at the same slow
+          // cadence as the durable status heartbeat, against a newly captured
+          // identity, while blocking self-initiated status refreshes meanwhile.
+          automaticBackfillBlocked.current = true
+          backfilling.current = false
+          if (!mounted.current) return
+          scheduleAutomaticRetry(EMBEDDINGS_CATCH_UP_REFETCH_MS)
+        },
       )
     }
-  }, [data, queryClient])
+  }, [automaticRetryVersion, data, queryClient])
 
   useEffect(() => {
     // React Query mutations cover record edits made by this renderer. Their

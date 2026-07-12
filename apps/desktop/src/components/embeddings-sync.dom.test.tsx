@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { type BrainInfo, type EmbedStatus, setBridge } from '@local-brain/core'
 import { act, render, waitFor } from '@testing-library/react'
 import { EmbeddingsSync } from './embeddings-sync'
-import { EMBEDDINGS_STATUS_KEY, todayLocalDayKey } from '../lib/queries'
+import {
+  EMBEDDINGS_CATCH_UP_REFETCH_MS,
+  EMBEDDINGS_STATUS_KEY,
+  todayLocalDayKey,
+} from '../lib/queries'
 import { ACTIVE_BRAIN_KEY } from '../lib/queries/brains'
 
 /**
@@ -131,7 +135,7 @@ function installPendingBackfillBridge(
   options: {
     lastDay?: string | null
     failEmbed?: boolean
-    failIdentity?: boolean
+    failIdentityAttempts?: number
     failSettingsWrite?: boolean
     pendingInitially?: boolean
     keepPendingAfterApply?: boolean
@@ -143,15 +147,18 @@ function installPendingBackfillBridge(
   let persistedError: string | null = null
   let persistedDay: string | null = options.lastDay ?? null
   let pending = options.pendingInitially ?? true
+  let identityFailuresRemaining = options.failIdentityAttempts ?? 0
   setBridge({
     invoke: (command, args) => {
       commands.push(command)
       const params = ((args as { params?: unknown[] }).params ?? []) as unknown[]
       switch (command) {
         case 'embed_database_identity':
-          return options.failIdentity
-            ? Promise.reject(new Error('identity unavailable'))
-            : Promise.resolve({ databasePath: '/test/brain.sqlite', generation: 1 })
+          if (identityFailuresRemaining > 0) {
+            identityFailuresRemaining -= 1
+            return Promise.reject(new Error('identity unavailable'))
+          }
+          return Promise.resolve({ databasePath: '/test/brain.sqlite', generation: 1 })
         case 'embed_status':
         case 'embed_ensure':
           return Promise.resolve({ status: 'ready', model: 'all-MiniLM-L6-v2' })
@@ -307,16 +314,32 @@ describe('EmbeddingsSync', () => {
     expect(bridge.persistedDay()).toBe(todayLocalDayKey())
   })
 
-  it('treats a rejected identity capture as a terminal automatic backfill attempt', async () => {
-    const bridge = installPendingBackfillBridge({ failIdentity: true })
-    renderSync()
+  it('retries a rejected identity capture on the slow catch-up cadence without hot-looping', async () => {
+    vi.useFakeTimers()
+    const bridge = installPendingBackfillBridge({ failIdentityAttempts: 1 })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+    const view = renderSync(client)
 
-    await waitFor(() => {
+    try {
+      await vi.waitFor(() => {
+        expect(bridge.commands.filter((command) => command === 'embed_database_identity')).toHaveLength(1)
+      })
+      await act(() => vi.advanceTimersByTimeAsync(5_000))
       expect(bridge.commands.filter((command) => command === 'embed_database_identity')).toHaveLength(1)
-    })
-    await act(() => new Promise((resolve) => setTimeout(resolve, 1_100)))
-    expect(bridge.commands.filter((command) => command === 'embed_database_identity')).toHaveLength(1)
-    expect(bridge.commands).not.toContain('embed_texts')
+      expect(bridge.commands).not.toContain('embed_texts')
+
+      // The outer failure is not persisted without an identity, but it also
+      // does not permanently block catch-up. The coordinator retries only at
+      // the same low frequency as the durable status heartbeat.
+      await act(() =>
+        vi.advanceTimersByTimeAsync(EMBEDDINGS_CATCH_UP_REFETCH_MS - 5_000),
+      )
+      await vi.waitFor(() => expect(bridge.commands).toContain('embed_texts'))
+      expect(bridge.commands.filter((command) => command === 'embed_database_identity').length).toBeGreaterThan(1)
+    } finally {
+      view.unmount()
+      vi.useRealTimers()
+    }
   })
 
   it('handles rejected backfill settings writes without immediately retrying', async () => {
@@ -378,6 +401,7 @@ describe('EmbeddingsSync', () => {
   })
 
   it('does not apply an in-flight batch after the coordinator unmounts', async () => {
+    const retryTimerSpy = vi.spyOn(window, 'setTimeout')
     let finishEmbedding: (() => void) | null = null
     const bridge = installPendingBackfillBridge({
       embedTexts: (texts) =>
@@ -389,6 +413,7 @@ describe('EmbeddingsSync', () => {
     await waitFor(() => expect(bridge.commands).toContain('embed_texts'))
 
     rendered.unmount()
+    retryTimerSpy.mockClear()
     await act(async () => {
       finishEmbedding?.()
       await Promise.resolve()
@@ -396,6 +421,8 @@ describe('EmbeddingsSync', () => {
     })
 
     expect(bridge.commands).not.toContain('embed_apply')
+    expect(retryTimerSpy).not.toHaveBeenCalled()
+    retryTimerSpy.mockRestore()
   })
 
   it('does not apply an in-flight batch after the active brain path changes', async () => {
