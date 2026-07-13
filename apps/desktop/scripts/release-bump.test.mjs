@@ -1,6 +1,12 @@
 import { expect, test } from 'vitest'
 
-import { computeNextVersion, formatVersion, parseVersion } from './release-bump.mjs'
+import {
+  computeNextVersion,
+  formatVersion,
+  parseVersion,
+  selectReleaseCommit,
+  workflowDispatchArgs,
+} from './release-bump.mjs'
 
 test('parseVersion splits a stable and a prerelease version', () => {
   expect(parseVersion('0.2.0')).toEqual({ major: 0, minor: 2, patch: 0, prerelease: null })
@@ -11,6 +17,10 @@ test('parseVersion rejects malformed input', () => {
   expect(() => parseVersion('1.2')).toThrow()
   expect(() => parseVersion('v1.2.3')).toThrow()
   expect(() => parseVersion('1.2.x')).toThrow()
+  expect(() => parseVersion('01.2.3')).toThrow()
+  expect(() => parseVersion('1.2.3-beta..1')).toThrow()
+  expect(() => parseVersion('1.2.3-beta.01')).toThrow()
+  expect(() => parseVersion('9007199254740993.0.0')).toThrow(/safely represent/)
 })
 
 test('formatVersion round-trips parseVersion', () => {
@@ -58,4 +68,44 @@ test('an explicit garbage version is rejected', () => {
 
 test('beta on a non-beta prerelease is rejected', () => {
   expect(() => computeNextVersion('0.2.0-rc.1', 'beta')).toThrow(/beta\.N/)
+})
+
+test('release requests dispatch the rolling workflow with an explicit target', () => {
+  expect(workflowDispatchArgs('0.3.0')).toEqual([
+    'workflow',
+    'run',
+    'release-pr.yml',
+    '--ref',
+    'master',
+    '-f',
+    'bump=0.3.0',
+  ])
+})
+
+test('tag recovery selects the reviewed version transition instead of a newer master commit', () => {
+  const versions = {
+    feature: '0.2.1',
+    release: '0.2.1',
+    previous: '0.2.0',
+  }
+  const parents = { feature: 'release', release: 'previous' }
+  const changedPaths = {
+    feature: ['apps/desktop/src/main.tsx'],
+    release: [
+      'Cargo.lock',
+      'apps/desktop/src-tauri/Cargo.toml',
+      'apps/desktop/src-tauri/tauri.conf.json',
+    ],
+  }
+
+  expect(
+    selectReleaseCommit({
+      version: '0.2.1',
+      candidates: ['feature', 'release', 'previous'],
+      versionAtCommit: (commit) => versions[commit],
+      versionAtParent: (commit) => versions[parents[commit]],
+      changedPathsAtCommit: (commit) => changedPaths[commit] ?? [],
+      isAncestor: () => true,
+    }),
+  ).toBe('release')
 })

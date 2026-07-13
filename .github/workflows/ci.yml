@@ -81,6 +81,7 @@ jobs:
 
               case "$changed_path" in
                 package.json|pnpm-lock.yaml|pnpm-workspace.yaml|turbo.json|tsconfig.base.json|\
+                .github/scripts/*|\
                 apps/desktop/package.json|apps/desktop/tsconfig.json|apps/desktop/vite.config.*|\
                 apps/desktop/vitest.config.*|apps/desktop/index.html|apps/desktop/components.json|\
                 apps/desktop/assets/*|apps/desktop/scripts/*|apps/desktop/src/*|packages/*|\

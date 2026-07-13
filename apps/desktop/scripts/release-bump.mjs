@@ -1,36 +1,23 @@
-// Bump the app version everywhere it lives and prepare the release.
-//
-// The version is declared in three places that must stay in lockstep:
-//   - apps/desktop/src-tauri/tauri.conf.json  (what release-macos.mjs reads)
-//   - apps/desktop/src-tauri/Cargo.toml       (the crate that gets compiled)
-//   - Cargo.lock                              (the local-brain-desktop entry)
-// This script edits all three, commits the bump on a release branch, opens and
-// immediately merges a PR back to the protected release branch, then pushes the
-// `v<version>` tag - which triggers the Release workflow
-// (.github/workflows/release.yml) to build, sign, notarize and publish.
+// Request a version for the rolling release PR, or recover an already-merged
+// version bump by pushing its tag. The Release PR workflow owns normal version
+// edits so local release commands cannot race a second short-lived PR.
 //
 // Usage:
-//   pnpm release:bump                Cut the next stable patch (0.2.0 -> 0.2.1)
-//   pnpm release:bump beta           Increment an existing beta (0.2.0-beta.1 -> 0.2.0-beta.2)
-//   pnpm release:bump stable         Drop the prerelease (0.2.0-beta.3 -> 0.2.0)
-//   pnpm release:bump patch|minor|major        Stable bump
-//   pnpm release:bump prepatch|preminor|premajor  Open a new beta cycle (...-beta.1)
-//   pnpm release:bump 0.5.0-beta.1   Set an explicit version
-//   pnpm release:bump --tag-only     Recovery: push the tag for an already-merged version bump
+//   pnpm release:bump                         Request the next stable patch
+//   pnpm release:bump patch|minor|major      Request a stable bump
+//   pnpm release:bump beta|stable            Advance or finish a beta
+//   pnpm release:bump prepatch|preminor|premajor
+//   pnpm release:bump 0.5.0-beta.1           Request an explicit version
+//   pnpm release:bump --tag-only             Recovery: tag the current merged version
 //
 // Flags:
-//   --dry-run   Show the plan and exit; touch nothing
-//   --direct    Push the bump commit directly to master and tag immediately
-//   --no-tag    With --direct, bump + push the branch, but don't tag (no release)
+//   --dry-run   Show the request and exit
+//   --tag-only  Push the tag for an already-merged version bump
 //   --yes       Skip the confirmation prompt
 //   --help
-//
-// Local Brain uses one integration branch: all releases are tagged from `master`.
-// Pre-release tags are still published as GitHub pre-releases (`--latest=false`),
-// so the stable updater endpoint only follows GitHub's latest stable release.
 
 import { execFileSync, spawnSync } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -39,17 +26,12 @@ const here = dirname(fileURLToPath(import.meta.url))
 const appDir = join(here, '..')
 const repoRoot = join(here, '..', '..', '..')
 const tauriConfPath = join(appDir, 'src-tauri', 'tauri.conf.json')
-const cargoTomlPath = join(appDir, 'src-tauri', 'Cargo.toml')
-const cargoLockPath = join(repoRoot, 'Cargo.lock')
+const tauriConfRelativePath = 'apps/desktop/src-tauri/tauri.conf.json'
+const versionFilePaths = [tauriConfRelativePath, 'apps/desktop/src-tauri/Cargo.toml', 'Cargo.lock']
 
-/** The Cargo package whose version drives the release (and its lockfile entry). */
-const CRATE = 'local-brain-desktop'
-/** The only prerelease identifier the app uses; bumped numerically. */
 const PREID = 'beta'
-/** The only branch releases are cut from. */
 const RELEASE_BRANCH = 'master'
-
-/** Named bump levels; anything else on the command line is an explicit version. */
+const RELEASE_PR_WORKFLOW = 'release-pr.yml'
 const LEVELS = ['beta', 'stable', 'patch', 'minor', 'major', 'prepatch', 'preminor', 'premajor']
 
 function log(message) {
@@ -61,44 +43,45 @@ function fail(message) {
   process.exit(1)
 }
 
-// ---------------------------------------------------------------------------
-// Version math - pure and exported so it can be unit-tested in isolation.
-// ---------------------------------------------------------------------------
-
-/**
- * Parse `MAJOR.MINOR.PATCH` with an optional `-prerelease` tail into its parts.
- * Throws on anything that isn't a well-formed semver core.
- */
 export function parseVersion(version) {
-  const match = /^(\d+)\.(\d+)\.(\d+)(?:-(.+))?$/.exec(version)
-  if (!match) throw new Error(`"${version}" is not a MAJOR.MINOR.PATCH[-prerelease] version`)
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/.exec(
+    version,
+  )
+  if (!match) throw new Error(`"${version}" is not a valid MAJOR.MINOR.PATCH[-prerelease] version`)
   const [, major, minor, patch, prerelease] = match
-  return { major: Number(major), minor: Number(minor), patch: Number(patch), prerelease: prerelease ?? null }
+  const core = [major, minor, patch].map(Number)
+  if (core.some((part) => !Number.isSafeInteger(part))) {
+    throw new Error(`"${version}" contains a numeric component larger than JavaScript can safely represent`)
+  }
+  for (const identifier of prerelease?.split('.') ?? []) {
+    if (/^\d+$/.test(identifier)) {
+      if (identifier.length > 1 && identifier.startsWith('0')) {
+        throw new Error(`"${version}" contains a prerelease number with a leading zero`)
+      }
+      if (!Number.isSafeInteger(Number(identifier))) {
+        throw new Error(`"${version}" contains a prerelease number larger than JavaScript can safely represent`)
+      }
+    }
+  }
+  return { major: core[0], minor: core[1], patch: core[2], prerelease: prerelease ?? null }
 }
 
-/** Render the parts produced by {@link parseVersion} back into a version string. */
 export function formatVersion({ major, minor, patch, prerelease }) {
   const core = `${major}.${minor}.${patch}`
-  return prerelease ? `${core}-${prerelease}` : core
+  const version = prerelease ? `${core}-${prerelease}` : core
+  parseVersion(version)
+  return version
 }
 
-/** Extract N from a `beta.N` prerelease, rejecting any other shape. */
 function prereleaseNumber(prerelease) {
   const match = new RegExp(`^${PREID}\\.(\\d+)$`).exec(prerelease)
   if (!match) throw new Error(`prerelease "${prerelease}" is not "${PREID}.N" - pass an explicit version instead`)
   return Number(match[1])
 }
 
-/**
- * Compute the next version from `current` given a bump level or an explicit
- * target version. Pure: no I/O, throws (never exits) on invalid input so the
- * caller and the tests can handle errors uniformly.
- */
 export function computeNextVersion(current, bump) {
-  if (!LEVELS.includes(bump)) {
-    // Not a level -> treat as an explicit version target (validated by parsing).
-    return formatVersion(parseVersion(bump))
-  }
+  if (!LEVELS.includes(bump)) return formatVersion(parseVersion(bump))
+
   const version = parseVersion(current)
   switch (bump) {
     case 'beta':
@@ -126,28 +109,20 @@ export function computeNextVersion(current, bump) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Git + filesystem side effects.
-// ---------------------------------------------------------------------------
-
-/** Run a git command in the repo, returning trimmed stdout; throws on failure. */
 function git(args) {
   return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8' }).trim()
 }
 
-/** Run a git command, returning { status, output } without throwing. */
 function tryGit(args) {
   const result = spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8' })
   return { status: result.status, output: `${result.stdout ?? ''}${result.stderr ?? ''}` }
 }
 
-/** Run a command, returning { status, output } without throwing. */
 function run(command, args) {
   const result = spawnSync(command, args, { cwd: repoRoot, encoding: 'utf8' })
   return { status: result.status, output: `${result.stdout ?? ''}${result.stderr ?? ''}` }
 }
 
-/** Assert the GitHub CLI is installed and authenticated. */
 function ensureGhReady() {
   if (run('gh', ['--version']).status !== 0) {
     fail('GitHub CLI not found - install it from https://cli.github.com and run `gh auth login`')
@@ -156,57 +131,16 @@ function ensureGhReady() {
   if (auth.status !== 0) fail(`gh is not authenticated - run \`gh auth login\`\n${auth.output.trim()}`)
 }
 
-/** The current branch name, or fail on a detached HEAD. */
 function currentBranch() {
   const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'])
-  if (branch === 'HEAD') {
-    fail(`detached HEAD - check out ${RELEASE_BRANCH} first`)
-  }
+  if (branch === 'HEAD') fail(`detached HEAD - check out ${RELEASE_BRANCH} first`)
   return branch
 }
 
-/** Read the current version from tauri.conf.json (the release source of truth). */
 function readCurrentVersion() {
   return JSON.parse(readFileSync(tauriConfPath, 'utf8')).version
 }
 
-/**
- * Replace the single expected occurrence of `find` with `replace` in a file,
- * failing loudly if it appears zero or many times - a changed format should
- * stop the release, not silently skip or over-edit.
- */
-function replaceOnce(path, find, replace, label) {
-  const content = readFileSync(path, 'utf8')
-  const occurrences = content.split(find).length - 1
-  if (occurrences !== 1) {
-    fail(`expected exactly one \`${find}\` in ${label}, found ${occurrences} - update release-bump.mjs`)
-  }
-  writeFileSync(path, content.replace(find, replace))
-}
-
-/** Edit all three version sites to `target` (from `current`). */
-function writeVersion(current, target) {
-  replaceOnce(tauriConfPath, `"version": "${current}"`, `"version": "${target}"`, 'tauri.conf.json')
-  replaceOnce(cargoTomlPath, `version = "${current}"`, `version = "${target}"`, 'Cargo.toml')
-  // cargo rewrites the lockfile's local-brain-desktop entry from the new Cargo.toml.
-  // --offline keeps it a pure version edit with no registry round-trip.
-  const update = spawnSync('cargo', ['update', '-p', CRATE, '--offline'], { cwd: repoRoot, encoding: 'utf8' })
-  if (update.status !== 0) {
-    fail(`cargo update -p ${CRATE} failed (is cargo installed?):\n${update.stderr ?? ''}`)
-  }
-}
-
-/** Name the short-lived branch that carries the release bump PR. */
-function releaseBranchName(tag) {
-  return `release/${tag}`
-}
-
-/** Block the current thread for short GitHub propagation waits. */
-function sleep(milliseconds) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds)
-}
-
-/** Confirm the destructive part of the run unless --yes was passed. */
 async function confirm(question) {
   const readline = createInterface({ input: process.stdin, output: process.stdout })
   const answer = (await readline.question(question)).trim().toLowerCase()
@@ -214,15 +148,10 @@ async function confirm(question) {
   return answer === 'y' || answer === 'yes'
 }
 
-/** Push the tag for a version bump that has already landed on master. */
-async function pushTagOnly({ skipPrompt }) {
-  const current = readCurrentVersion()
-  const tag = `v${current}`
-  const isPrerelease = current.includes('-')
+function assertSynchronizedMaster() {
   const branch = currentBranch()
   if (branch !== RELEASE_BRANCH) {
-    const channel = isPrerelease ? 'pre-release' : 'stable'
-    fail(`refusing to tag ${channel} ${current} from "${branch}" - switch to ${RELEASE_BRANCH} first`)
+    fail(`release requests come from ${RELEASE_BRANCH} - switch there and run this again`)
   }
   if (git(['status', '--porcelain']) !== '') {
     fail('the working tree has uncommitted changes - commit or stash them first')
@@ -235,99 +164,95 @@ async function pushTagOnly({ skipPrompt }) {
     fail(`origin/${branch} does not exist - push ${branch} first`)
   }
   if (git(['rev-parse', 'HEAD']) !== git(['rev-parse', `origin/${branch}`])) {
-    fail(`local ${branch} is not in sync with origin/${branch} - pull the merged release PR first`)
+    fail(`local ${branch} is not in sync with origin/${branch} - pull the latest changes first`)
   }
+}
+
+export function selectReleaseCommit({
+  version,
+  candidates,
+  versionAtCommit,
+  versionAtParent,
+  changedPathsAtCommit,
+  isAncestor,
+}) {
+  const expectedPaths = [...versionFilePaths].sort()
+  for (const commit of candidates) {
+    if (!isAncestor(commit) || versionAtCommit(commit) !== version) continue
+    const previousVersion = versionAtParent(commit)
+    if (!previousVersion || previousVersion === version) continue
+    const changedPaths = [...changedPathsAtCommit(commit)].sort()
+    if (JSON.stringify(changedPaths) === JSON.stringify(expectedPaths)) return commit
+  }
+  throw new Error(`could not find the exact three-file commit that introduced version ${version}`)
+}
+
+function findReleaseCommit(version) {
+  const candidates = git(['log', '--first-parent', '--format=%H', `origin/${RELEASE_BRANCH}`])
+    .split('\n')
+    .filter(Boolean)
+  const versionAtRef = (ref) => {
+    const result = tryGit(['show', `${ref}:${tauriConfRelativePath}`])
+    if (result.status !== 0) return null
+    try {
+      return JSON.parse(result.output).version
+    } catch {
+      return null
+    }
+  }
+
+  return selectReleaseCommit({
+    version,
+    candidates,
+    versionAtCommit: versionAtRef,
+    versionAtParent: (commit) => versionAtRef(`${commit}^`),
+    changedPathsAtCommit: (commit) =>
+      git(['diff', '--name-only', `${commit}^`, commit])
+        .split('\n')
+        .filter(Boolean),
+    isAncestor: (commit) =>
+      tryGit(['merge-base', '--is-ancestor', commit, `origin/${RELEASE_BRANCH}`]).status === 0,
+  })
+}
+
+async function pushTagOnly({ skipPrompt }) {
+  assertSynchronizedMaster()
+  const version = readCurrentVersion()
+  const tag = `v${version}`
   if (git(['tag', '--list', tag]) !== '') fail(`tag ${tag} already exists locally`)
   if (git(['ls-remote', '--tags', 'origin', tag]) !== '') fail(`tag ${tag} already exists on origin`)
 
-  const releaseKind = isPrerelease ? 'pre-release' : 'release'
-  log(`version: ${current}`)
-  log(`branch:  ${branch}  (in sync with origin)`)
-  log('plan:')
-  console.log(`  - tag ${tag} at ${branch}`)
-  console.log(`  - push ${tag} to origin -> triggers the Release workflow (${releaseKind})`)
+  let releaseCommit
+  try {
+    releaseCommit = findReleaseCommit(version)
+  } catch (error) {
+    fail(error.message)
+  }
 
+  log(`version: ${version}`)
+  log(`release commit: ${releaseCommit}`)
+  log(`plan: tag that exact reviewed version transition as ${tag} and trigger the Release workflow`)
   if (!skipPrompt && !(await confirm('Proceed? [y/N] '))) {
     log('aborted - nothing changed')
     return
   }
 
-  git(['tag', tag])
-  log(`pushing tag ${tag}...`)
+  git(['tag', tag, releaseCommit])
   if (spawnSync('git', ['push', 'origin', tag], { cwd: repoRoot, stdio: 'inherit' }).status !== 0) {
-    fail(`pushing the tag failed - run \`git push origin ${tag}\` to retry`)
+    fail(`pushing ${tag} failed - run \`git push origin ${tag}\` to retry`)
   }
-  log(`done - ${tag} pushed; the Release workflow will build & publish the ${releaseKind}.`)
-  log('track it in GitHub -> Actions -> Release.')
+  log(`done - ${tag} pushed; the Release workflow will build and publish it`)
 }
 
-/** Create a GitHub PR for the pushed release branch and return its URL. */
-function createReleasePr({ releaseBranch, baseBranch, tag, version }) {
-  const body = [
-    `Bumps Local Brain to ${version}.`,
-    '',
-    'The release bump script will merge this PR, pull the merged commit, and push the release tag.',
-  ].join('\n')
-  const create = run('gh', ['pr', 'create', '--base', baseBranch, '--head', releaseBranch, '--title', `Release ${tag}`, '--body', body])
-  if (create.status === 0) {
-    const prUrl = create.output.trim()
-    log(`opened release PR: ${prUrl}`)
-    return prUrl
-  }
-
-  fail(`could not create the release PR:\n${create.output.trim()}`)
-}
-
-/** Merge the release PR immediately; this intentionally bypasses pending CI. */
-function mergeReleasePr({ prUrl, tag, version }) {
-  const merge = run('gh', [
-    'pr',
-    'merge',
-    prUrl,
-    '--squash',
-    '--delete-branch',
-    '--admin',
-    '--subject',
-    `Release ${tag}`,
-    '--body',
-    `Bump Local Brain to ${version}.`,
-  ])
-  if (merge.status !== 0) fail(`could not merge the release PR:\n${merge.output.trim()}`)
-  log(`merged release PR: ${prUrl}`)
-}
-
-/** Wait until GitHub reports the PR merged and return the merge commit SHA. */
-function waitForMergedPr(prUrl) {
-  for (let attempt = 1; attempt <= 60; attempt += 1) {
-    const view = run('gh', ['pr', 'view', prUrl, '--json', 'state,mergeCommit'])
-    if (view.status !== 0) fail(`could not inspect the release PR:\n${view.output.trim()}`)
-    const pr = JSON.parse(view.output)
-    if (pr.state === 'MERGED' && pr.mergeCommit?.oid) return pr.mergeCommit.oid
-    if (pr.state === 'CLOSED') fail(`release PR closed without merging: ${prUrl}`)
-    if (attempt === 1) log('waiting for GitHub to report the merged release PR...')
-    sleep(5000)
-  }
-  fail(`timed out waiting for release PR to merge: ${prUrl}`)
-}
-
-/** Return to the release branch, fast-forward to the merge commit, and clean up. */
-function syncMergedReleaseBranch({ baseBranch, releaseBranch, mergeCommit }) {
-  git(['fetch', 'origin', baseBranch, '--tags'])
-  git(['switch', baseBranch])
-  git(['pull', '--ff-only', 'origin', baseBranch])
-  const head = git(['rev-parse', 'HEAD'])
-  if (head !== mergeCommit) {
-    fail(`local ${baseBranch} is at ${head.slice(0, 7)} but the release PR merged as ${mergeCommit.slice(0, 7)}`)
-  }
-  const deleteBranch = tryGit(['branch', '-D', releaseBranch])
-  if (deleteBranch.status !== 0) log(`could not delete local ${releaseBranch}: ${deleteBranch.output.trim()}`)
+export function workflowDispatchArgs(targetVersion) {
+  return ['workflow', 'run', RELEASE_PR_WORKFLOW, '--ref', RELEASE_BRANCH, '-f', `bump=${targetVersion}`]
 }
 
 async function main() {
   const argv = process.argv.slice(2)
-  const flags = argv.filter((arg) => arg.startsWith('--'))
-  const positionals = argv.filter((arg) => !arg.startsWith('--'))
-  const knownFlags = ['--dry-run', '--direct', '--no-tag', '--tag-only', '--yes', '--help']
+  const flags = argv.filter((argument) => argument.startsWith('--'))
+  const positionals = argv.filter((argument) => !argument.startsWith('--'))
+  const knownFlags = ['--dry-run', '--tag-only', '--yes', '--help', '--direct', '--no-tag']
   const unknownFlag = flags.find((flag) => !knownFlags.includes(flag))
   if (unknownFlag) fail(`unknown flag "${unknownFlag}" - try --help`)
   if (positionals.length > 1) fail(`expected at most one level/version, got: ${positionals.join(' ')}`)
@@ -335,180 +260,76 @@ async function main() {
     console.log(USAGE)
     return
   }
+  if (flags.includes('--direct') || flags.includes('--no-tag')) {
+    fail(
+      '--direct and --no-tag were retired by the rolling Release PR; use the reviewed PR, or run Release with an exact ref for recovery',
+    )
+  }
 
   const dryRun = flags.includes('--dry-run')
-  const direct = flags.includes('--direct')
-  const noTag = flags.includes('--no-tag')
   const tagOnly = flags.includes('--tag-only')
   const skipPrompt = flags.includes('--yes')
   if (tagOnly) {
     if (positionals.length > 0) fail('--tag-only does not take a level/version')
     if (dryRun) fail('--tag-only cannot be combined with --dry-run')
-    if (direct) fail('--tag-only cannot be combined with --direct')
-    if (noTag) fail('--tag-only cannot be combined with --no-tag')
     await pushTagOnly({ skipPrompt })
     return
   }
-  if (noTag && !direct) {
-    fail('--no-tag only applies with --direct; PR mode always tags after merging the release PR')
-  }
-  const bump = positionals[0] ?? 'patch'
 
+  assertSynchronizedMaster()
   const current = readCurrentVersion()
-  let next
+  const bump = positionals[0] ?? (current.includes('-') ? 'beta' : 'patch')
+  let target
   try {
-    next = computeNextVersion(current, bump)
+    target = computeNextVersion(current, bump)
   } catch (error) {
     fail(error.message)
   }
-  if (next === current) fail(`the new version equals the current one (${current}) - nothing to bump`)
-
-  const branch = currentBranch()
-  const isPrerelease = next.includes('-')
-  const tag = `v${next}`
-
-  // Guardrail: releases are locked to master. A stable version reaches
-  // `releases/latest` and auto-updates every stable install, so it must come
-  // from the integration branch and nowhere else. Pre-releases are allowed on
-  // master too; GitHub marks them `--latest=false`, so stable installs ignore them.
-  if (branch !== RELEASE_BRANCH) {
-    const channel = isPrerelease ? 'pre-release' : 'stable'
-    const hint = `Releases ship from ${RELEASE_BRANCH} - switch there and run this.`
-    fail(`refusing to cut ${channel} ${next} from "${branch}".\n  ${hint}`)
-  }
-  const releaseBranch = releaseBranchName(tag)
-
-  if (git(['status', '--porcelain']) !== '') {
-    fail('the working tree has uncommitted changes - commit or stash them first')
+  if (target === current) fail(`the requested version equals the current one (${current})`)
+  if (git(['ls-remote', '--tags', 'origin', `v${target}`]) !== '') {
+    fail(`tag v${target} already exists on origin - choose a newer version`)
   }
 
-  log('fetching origin...')
-  const fetch = tryGit(['fetch', 'origin', branch, '--tags'])
-  if (fetch.status !== 0) fail(`git fetch failed:\n${fetch.output.trim()}`)
-
-  if (tryGit(['rev-parse', '--verify', `origin/${branch}`]).status !== 0) {
-    fail(`origin/${branch} does not exist - push ${branch} first`)
-  }
-  if (git(['rev-parse', 'HEAD']) !== git(['rev-parse', `origin/${branch}`])) {
-    fail(
-      `local ${branch} is not in sync with origin/${branch}.\n` +
-        '  Pull or push so the release builds exactly the published code plus the version bump.',
-    )
-  }
-
-  if (git(['tag', '--list', tag]) !== '') fail(`tag ${tag} already exists locally - bump to a new version`)
-  if (git(['ls-remote', '--tags', 'origin', tag]) !== '') {
-    fail(`tag ${tag} already exists on origin - bump to a new version`)
-  }
-  if (!direct) {
-    if (tryGit(['rev-parse', '--verify', `refs/heads/${releaseBranch}`]).status === 0) {
-      fail(`local branch ${releaseBranch} already exists - delete it or choose another version`)
-    }
-    if (git(['ls-remote', '--heads', 'origin', releaseBranch]) !== '') {
-      fail(`origin branch ${releaseBranch} already exists - delete it or choose another version`)
-    }
-  }
-
-  const releaseKind = isPrerelease ? 'pre-release' : 'release'
-  if (!direct) ensureGhReady()
   log(`current version: ${current}`)
-  log(`next version:    ${next}  (${bump})`)
-  log(`branch:          ${branch}  (in sync with origin)`)
-  log('plan:')
-  if (!direct) console.log(`  - create ${releaseBranch} from ${branch}`)
-  console.log('  - update tauri.conf.json, Cargo.toml, Cargo.lock')
-  console.log(`  - commit "Release ${tag}"`)
-  if (direct) {
-    console.log(`  - push ${branch} to origin`)
-  } else {
-    console.log(`  - push ${releaseBranch} to origin`)
-    console.log(`  - open a PR into ${branch}`)
-    console.log('  - merge the PR immediately with admin bypass')
-    console.log(`  - fast-forward ${branch} to the merged release commit`)
-    console.log(`  - tag ${tag} and push it -> triggers the Release workflow (${releaseKind})`)
-  }
-  if (direct && noTag) {
-    console.log('  - (skipping the tag - no release will be triggered)')
-  } else if (direct) {
-    console.log(`  - tag ${tag} and push it -> triggers the Release workflow (${releaseKind})`)
-  } else {
-    console.log('  - clean up the local release branch')
-  }
-
+  log(`requested version: ${target} (${bump})`)
+  log('plan: dispatch the Release PR workflow to create or update the reviewed rolling PR')
   if (dryRun) {
     log('dry run - nothing changed')
     return
   }
+  ensureGhReady()
   if (!skipPrompt && !(await confirm('Proceed? [y/N] '))) {
     log('aborted - nothing changed')
     return
   }
 
-  if (!direct) git(['switch', '-c', releaseBranch])
-  writeVersion(current, next)
-  git(['add', tauriConfPath, cargoTomlPath, cargoLockPath])
-  git(['commit', '-m', `Release ${tag}`])
-
-  if (!direct) {
-    log(`pushing ${releaseBranch} to origin...`)
-    if (spawnSync('git', ['push', '-u', 'origin', releaseBranch], { cwd: repoRoot, stdio: 'inherit' }).status !== 0) {
-      fail('pushing the release branch failed - resolve the issue and retry (nothing was tagged)')
-    }
-    const prUrl = createReleasePr({ releaseBranch, baseBranch: branch, tag, version: next })
-    mergeReleasePr({ prUrl, tag, version: next })
-    const mergeCommit = waitForMergedPr(prUrl)
-    syncMergedReleaseBranch({ baseBranch: branch, releaseBranch, mergeCommit })
-    await pushTagOnly({ skipPrompt: true })
-    return
-  }
-
-  log(`pushing ${branch} to origin...`)
-  if (spawnSync('git', ['push', 'origin', `HEAD:${branch}`], { cwd: repoRoot, stdio: 'inherit' }).status !== 0) {
-    fail('pushing the branch failed - resolve the issue and retry (nothing was tagged)')
-  }
-
-  if (noTag) {
-    log(`bumped to ${next} and pushed ${branch} (no tag).`)
-    log(`to release later: git tag ${tag} && git push origin ${tag}`)
-    return
-  }
-
-  git(['tag', tag])
-  log(`pushing tag ${tag}...`)
-  if (spawnSync('git', ['push', 'origin', tag], { cwd: repoRoot, stdio: 'inherit' }).status !== 0) {
-    fail(`pushing the tag failed - the branch is pushed; run \`git push origin ${tag}\` to trigger the release`)
-  }
-  log(`done - ${tag} pushed; the Release workflow will build & publish the ${releaseKind}.`)
-  log('track it in GitHub -> Actions -> Release.')
+  const dispatch = run('gh', workflowDispatchArgs(target))
+  if (dispatch.status !== 0) fail(`could not dispatch the Release PR workflow:\n${dispatch.output.trim()}`)
+  log('release PR request queued - track it in GitHub -> Actions -> Release PR')
 }
 
 const USAGE = `Usage: pnpm release:bump [level|version] [flags]
 
 Levels:
-  patch      (default) stable patch bump: 0.2.0 -> 0.2.1
-  beta       cut the next beta:           0.2.0-beta.1 -> 0.2.0-beta.2
-  stable     drop the prerelease:         0.2.0-beta.3 -> 0.2.0
-  patch      stable patch bump:           0.2.0 -> 0.2.1
-  minor      stable minor bump:           0.2.0 -> 0.3.0
-  major      stable major bump:           0.2.0 -> 1.0.0
-  prepatch   open a beta cycle:           0.2.0 -> 0.2.1-beta.1
-  preminor   open a beta cycle:           0.2.0 -> 0.3.0-beta.1
-  premajor   open a beta cycle:           0.2.0 -> 1.0.0-beta.1
-  <version>  set an explicit version, e.g. 0.5.0-beta.1
+  patch      stable patch bump (default for a stable release)
+  beta       next beta.N (default while on a beta)
+  stable     remove the beta suffix
+  minor      stable minor bump
+  major      stable major bump
+  prepatch   open a patch beta cycle
+  preminor   open a minor beta cycle
+  premajor   open a major beta cycle
+  <version>  explicit version, for example 0.5.0-beta.1
 
 Flags:
-  --dry-run   show the plan and exit; change nothing
-  --tag-only  recovery: push the tag for an already-merged release bump
-  --direct    push the bump commit directly to master and tag immediately
-  --no-tag    with --direct, bump + push the branch, but don't tag (no release)
+  --dry-run   show the release PR request without dispatching it
+  --tag-only  recovery: tag the current merged version and trigger Release
   --yes       skip the confirmation prompt
   --help      show this help
 
-All releases ship from ${RELEASE_BRANCH}; pre-releases publish with --latest=false.
+Normal releases are reviewed in the rolling Release PR and ship when it is merged.
 Docs: docs/macos-distribution.md`
 
-// Only run when invoked directly (`node release-bump.mjs`), not when imported
-// by the unit test - so importing the version math has no side effects.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   await main()
 }

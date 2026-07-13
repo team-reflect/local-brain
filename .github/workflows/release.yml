@@ -1,8 +1,45 @@
 name: Release
 
 on:
+  workflow_call:
+    inputs:
+      release_ref:
+        description: Exact commit SHA to build and publish
+        type: string
+        required: true
+      draft:
+        description: Create the GitHub release as a draft for review
+        type: boolean
+        default: false
+    secrets:
+      APPLE_SIGNING_IDENTITY:
+        required: false
+      APPLE_CERTIFICATE:
+        required: false
+      APPLE_CERTIFICATE_PASSWORD:
+        required: false
+      APPLE_API_KEY:
+        required: false
+      APPLE_API_ISSUER:
+        required: false
+      APPLE_API_KEY_CONTENT:
+        required: false
+      APPLE_ID:
+        required: false
+      APPLE_PASSWORD:
+        required: false
+      APPLE_TEAM_ID:
+        required: false
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: false
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: false
   workflow_dispatch:
     inputs:
+      release_ref:
+        description: Optional commit, branch, or tag to build (defaults to the selected ref)
+        type: string
+        required: false
       draft:
         description: Create the GitHub release as a draft for review
         type: boolean
@@ -11,7 +48,7 @@ on:
     tags: [v*]
 
 # Never run two releases at once, and never cancel one mid-notarization.
-# Queue instead. A cancelled run can leave a half-published release behind.
+# GitHub keeps the newest pending run; cancelling an active run can leave a half-published release behind.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -33,6 +70,22 @@ jobs:
           # HEAD-is-on-an-origin-branch check also passes on tag checkouts.
           persist-credentials: true
           fetch-depth: 0
+          # The rolling release PR passes its exact merge SHA. Tag and manual
+          # runs keep their selected ref unless an explicit recovery ref is set.
+          ref: ${{ inputs.release_ref || github.ref }}
+
+      - name: Verify an automated release uses the requested commit
+        if: inputs.release_ref != ''
+        env:
+          RELEASE_REF: ${{ inputs.release_ref }}
+        run: |
+          set -euo pipefail
+          head_sha="$(git rev-parse HEAD)"
+          requested_sha="$(git rev-parse "$RELEASE_REF^{commit}")"
+          if [ "$head_sha" != "$requested_sha" ]; then
+            echo "::error::checked out $head_sha but the release requested $requested_sha"
+            exit 1
+          fi
 
       # The release is tagged v<version> from tauri.conf.json regardless of
       # the pushed tag, so a mismatch would publish under the wrong name.
@@ -125,4 +178,9 @@ jobs:
           # Pass the boolean flag through an env variable so the shell never
           # interpolates ${{ }} expressions directly into the run command.
           DRAFT_FLAG: ${{ inputs.draft && '--draft' || '' }}
-        run: pnpm release:macos publish $DRAFT_FLAG
+        run: |
+          args=(publish)
+          if [ -n "$DRAFT_FLAG" ]; then
+            args+=("$DRAFT_FLAG")
+          fi
+          pnpm release:macos "${args[@]}"

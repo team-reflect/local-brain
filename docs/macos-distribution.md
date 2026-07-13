@@ -73,15 +73,29 @@ pnpm release:macos publish --draft # same, but leave the release as a draft for 
 pnpm release:macos --no-notarize   # signed-only build (runs locally; Gatekeeper rejects it elsewhere)
 ```
 
-## Cutting a release (`pnpm release:bump`)
+## Cutting a release (the rolling Release PR)
 
 The version is declared in three places that must move together:
 `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/src-tauri/Cargo.toml`, and the
-`local-brain-desktop` entry in `Cargo.lock`. `pnpm release:bump` edits all three, commits the
-bump on a short-lived release branch, pushes that branch, opens and immediately merges a
-PR back to the protected release branch, then pushes the `v<version>` tag from the
-merged commit. That tag push triggers the Release workflow to build, sign, notarize, and
-publish. You don't run `release:macos` by hand for a normal release.
+`local-brain-desktop` entry in `Cargo.lock`.
+
+Every push to `master` runs `.github/workflows/release-pr.yml`. When `master` has commits
+after the current published tag, the workflow creates or updates one ready-for-review
+`automation/release` pull request. Its single generated commit updates all three version
+declarations, while its managed body groups every unreleased pull request into a
+changelog. Human and bot text outside the managed markers is preserved.
+
+Merging that Release PR is the release action. The workflow accepts publishing secrets
+only after it verifies that the merged PR came from the same repository's fixed
+`automation/release` branch, still contains its durable release markers, advances the
+version, and changes exactly the three version files. It then passes the exact merge SHA
+to the signed and notarized Release workflow. Later commits on `master` cannot slip into
+that build.
+
+The default target is the next patch for a stable version or the next `beta.N` for an
+existing beta. To choose another target, dispatch **Actions -> Release PR -> Run
+workflow**, or use `pnpm release:bump`, which validates the local `master` checkout and
+dispatches the same workflow:
 
 ```bash
 pnpm release:bump                # default patch bump: 0.2.0 -> 0.2.1
@@ -90,27 +104,35 @@ pnpm release:bump beta           # increment an existing beta: 0.2.0-beta.1 -> 0
 pnpm release:bump stable         # drop the prerelease: 0.2.0-beta.3 -> 0.2.0
 pnpm release:bump preminor       # open a new beta cycle: 0.2.0 -> 0.3.0-beta.1
 pnpm release:bump 0.5.0-beta.1   # set an explicit version
-pnpm release:bump --dry-run      # show the plan, change nothing
+pnpm release:bump --dry-run      # show the request without dispatching it
 pnpm release:bump --tag-only     # recovery: push the tag for an already-merged bump
 ```
 
-Default (no argument) is `patch`. Local Brain releases from `master` only: the script
-refuses to run on a dirty tree, on a branch out of sync with `origin/master`, or for a
-version whose tag already exists. A stable tag reaches `releases/latest` and
-auto-updates stable installs, so it must come from `master`. Pre-release versions are
-allowed from `master` too; the publish script marks them as GitHub pre-releases with
-`--latest=false`, so stable installs ignore them. The script requires the GitHub CLI
-(`gh`) for the protected-branch PR flow, merges the release PR immediately with admin
-bypass instead of waiting for CI, prints the plan, and asks for confirmation (skip with
-`--yes`).
+Local Brain releases from `master` only. A stable release reaches `releases/latest` and
+auto-updates stable installs; a prerelease is published with `--latest=false`, so stable
+installs ignore it. The local helper requires the GitHub CLI (`gh`), prints the request,
+and asks for confirmation (skip with `--yes`). It does not edit files or merge the PR.
 
-The typical flows are `pnpm release:bump` for the next stable patch and
-`pnpm release:bump preminor` or an explicit `0.x.y-beta.1` when opening a beta cycle.
+The generated branch and pull request use `GITHUB_TOKEN`, so their ordinary push and PR
+events do not start other workflows. The maintainer explicitly dispatches `ci.yml` for
+the generated commit instead. No PAT is stored. The repository's **Allow GitHub Actions
+to create and approve pull requests** setting must remain enabled.
 
-`--direct` keeps the old direct-push behavior for repositories or maintainers that have
-an explicit ruleset bypass. With `--direct`, `--no-tag` bumps and pushes the branch
-without tagging, for when you want the version commit but aren't ready to release.
-`--tag-only` is a recovery path for a release PR that was merged without the tag push.
+The publishing gate also looks up `ci.yml` by the generated head SHA and requires a
+successful completed run. Merging before CI completes, or merging with red CI, fails
+closed without using signing secrets; rerun the failed **Release PR** workflow after the
+same head's CI passes.
+
+If publishing fails before a draft release is created, rerun the failed Release workflow
+so it keeps the original merge SHA. If a draft already exists, finish or delete that
+draft before retrying because the publisher deliberately refuses to replace an existing
+release. `--tag-only` is the narrow recovery path when the version bump merged but no
+tag or release was created. It finds the exact first-parent commit that introduced the
+current version by changing only the three version files, then tags that commit even if
+`master` has advanced. It never tags newer code with an already-reviewed version.
+The former `--direct` and `--no-tag` bypasses are intentionally retired: normal bumps
+go through the rolling PR, while break-glass publishing uses **Actions -> Release** with
+an exact ref.
 
 ## Publishing to GitHub Releases
 
@@ -155,11 +177,12 @@ dedicated beta updater channel is future work.
 
 `.github/workflows/release.yml` runs `pnpm release:macos publish` on a GitHub-hosted
 macOS runner - the same pipeline as a local release, including DMG notarization, the
-Gatekeeper checks, and the updater artifacts. Trigger it from **Actions -> Release ->
-Run workflow** (tick *draft* to review the release before publishing), or by pushing
-the matching `v<version>` tag. The publish preflights apply unchanged, so bump
-`version` in `tauri.conf.json` (and `src-tauri/Cargo.toml`) on the released branch
-first.
+Gatekeeper checks, and the updater artifacts. The rolling Release PR calls it directly
+with the verified merge SHA because tags created with `GITHUB_TOKEN` do not trigger a
+second workflow. Manual recovery remains available from **Actions -> Release -> Run
+workflow** (optionally provide an exact ref and tick *draft*), or by pushing the matching
+`v<version>` tag. The publish preflights apply unchanged, so all three version
+declarations must already agree on the released commit.
 
 The script reads all signing material from environment variables, which take
 precedence over the keychain (exporting them works for local releases too); the
