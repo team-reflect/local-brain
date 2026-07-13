@@ -96,6 +96,7 @@ function createGithub({
   releaseStatus = 'published',
   filesByRef = {},
   gitCommitData = {},
+  gitTagData = {},
   repoCommits = {},
   refs = {},
 } = {}) {
@@ -164,10 +165,16 @@ function createGithub({
           if (!commit) throw notFound(`Missing commit ${commitSha}`)
           return { data: commit }
         },
+        getTag: async ({ tag_sha: tagSha }) => {
+          const tag = gitTagData[tagSha]
+          if (!tag) throw notFound(`Missing tag object ${tagSha}`)
+          return { data: tag }
+        },
         getRef: async ({ ref }) => {
-          const sha = gitRefs.get(ref)
-          if (!sha) throw notFound(`Missing ref ${ref}`)
-          return { data: { object: { sha } } }
+          const value = gitRefs.get(ref)
+          if (!value) throw notFound(`Missing ref ${ref}`)
+          const object = typeof value === 'string' ? { sha: value, type: 'commit' } : value
+          return { data: { object } }
         },
         updateRef: async (parameters) => {
           calls.updateRef.push(parameters)
@@ -227,9 +234,56 @@ function createGithub({
     },
   }
 
-  if (releaseStatus === 'tag-only') gitRefs.set('tags/v0.1.17', 'release-commit')
+  if (releaseStatus === 'tag-only' && !gitRefs.has('tags/v0.1.17')) {
+    gitRefs.set('tags/v0.1.17', 'release-commit')
+  }
 
   return { blobContents, calls, github }
+}
+
+function createMergedReleaseScenario(options = {}) {
+  const releaseRef = 'release-merge-sha'
+  const { github } = createGithub({
+    releaseStatus: 'missing',
+    gitCommitData: {
+      'release-head': {
+        sha: 'release-head',
+        tree: { sha: 'release-tree' },
+        parents: [{ sha: 'previous-sha' }],
+      },
+    },
+    filesByRef: {
+      'previous-sha': versionFiles('0.1.16'),
+      [releaseRef]: versionFiles('0.1.17'),
+    },
+    repoCommits: {
+      [releaseRef]: {
+        sha: releaseRef,
+        parents: [{ sha: 'previous-sha' }],
+        files: VERSION_FILE_PATHS.map((filename) => ({ filename })),
+      },
+    },
+    ...options,
+  })
+  const pullRequest = createPullRequest({
+    number: 99,
+    merged: true,
+    merge_commit_sha: releaseRef,
+    body: `${MANAGED_SECTION_START}\nGenerated\n${MANAGED_SECTION_END}`,
+    head: {
+      ref: 'automation/release',
+      sha: 'release-head',
+      repo: { full_name: 'team-reflect/local-brain' },
+    },
+  })
+  return {
+    github,
+    releaseRef,
+    context: {
+      repo: { owner: 'team-reflect', repo: 'local-brain' },
+      payload: { pull_request: pullRequest },
+    },
+  }
 }
 
 test('updates the three release versions without touching lookalike declarations', () => {
@@ -554,6 +608,54 @@ test('publishes only a marked merged rolling PR that changes the version files',
     releaseRef,
     version: '0.1.17',
   })
+})
+
+test('rejects a published same-version tag on a different commit', async () => {
+  const { context, github } = createMergedReleaseScenario({
+    releaseStatus: 'published',
+    refs: { 'tags/v0.1.17': 'wrong-release-commit' },
+  })
+
+  await assert.rejects(
+    analyzeMergedReleasePullRequest({ github, context, core: createCore() }),
+    /points to wrong-release-commit, not the reviewed release commit release-merge-sha/,
+  )
+})
+
+test('rejects a tag-only same-version tag on a different commit', async () => {
+  const { context, github } = createMergedReleaseScenario({
+    releaseStatus: 'tag-only',
+    refs: { 'tags/v0.1.17': 'wrong-release-commit' },
+  })
+
+  await assert.rejects(
+    analyzeMergedReleasePullRequest({ github, context, core: createCore() }),
+    /points to wrong-release-commit, not the reviewed release commit release-merge-sha/,
+  )
+})
+
+test('rejects a published release with no corresponding Git tag', async () => {
+  const { context, github } = createMergedReleaseScenario({ releaseStatus: 'published' })
+
+  await assert.rejects(
+    analyzeMergedReleasePullRequest({ github, context, core: createCore() }),
+    /published release but no corresponding Git tag/,
+  )
+})
+
+test('accepts an annotated release tag that peels to the reviewed merge', async () => {
+  const { context, github, releaseRef } = createMergedReleaseScenario({
+    releaseStatus: 'published',
+    refs: { 'tags/v0.1.17': { sha: 'annotated-tag', type: 'tag' } },
+    gitTagData: {
+      'annotated-tag': { object: { sha: 'release-merge-sha', type: 'commit' } },
+    },
+  })
+
+  assert.deepEqual(
+    await analyzeMergedReleasePullRequest({ github, context, core: createCore() }),
+    { releaseNeeded: false, releaseRef, version: '0.1.17' },
+  )
 })
 
 test('refuses to publish a release PR head without successful CI', async () => {

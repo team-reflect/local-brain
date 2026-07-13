@@ -23,11 +23,15 @@ import { createInterface } from 'node:readline/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const appDir = join(here, '..')
 const repoRoot = join(here, '..', '..', '..')
-const tauriConfPath = join(appDir, 'src-tauri', 'tauri.conf.json')
-const tauriConfRelativePath = 'apps/desktop/src-tauri/tauri.conf.json'
-const versionFilePaths = [tauriConfRelativePath, 'apps/desktop/src-tauri/Cargo.toml', 'Cargo.lock']
+
+export const RELEASE_VERSION_FILE_PATHS = [
+  'apps/desktop/src-tauri/tauri.conf.json',
+  'apps/desktop/src-tauri/Cargo.toml',
+  'Cargo.lock',
+]
+
+const DESKTOP_CRATE = 'local-brain-desktop'
 
 const PREID = 'beta'
 const RELEASE_BRANCH = 'master'
@@ -71,6 +75,76 @@ export function formatVersion({ major, minor, patch, prerelease }) {
   const version = prerelease ? `${core}-${prerelease}` : core
   parseVersion(version)
   return version
+}
+
+export function compareSemver(left, right) {
+  const leftVersion = parseVersion(left)
+  const rightVersion = parseVersion(right)
+  for (const key of ['major', 'minor', 'patch']) {
+    if (leftVersion[key] !== rightVersion[key]) return leftVersion[key] - rightVersion[key]
+  }
+  if (leftVersion.prerelease === rightVersion.prerelease) return 0
+  if (leftVersion.prerelease === null) return 1
+  if (rightVersion.prerelease === null) return -1
+
+  const leftParts = leftVersion.prerelease.split('.')
+  const rightParts = rightVersion.prerelease.split('.')
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    if (leftParts[index] === undefined) return -1
+    if (rightParts[index] === undefined) return 1
+    if (leftParts[index] === rightParts[index]) continue
+    const leftNumber = /^\d+$/.test(leftParts[index]) ? Number(leftParts[index]) : null
+    const rightNumber = /^\d+$/.test(rightParts[index]) ? Number(rightParts[index]) : null
+    if (leftNumber !== null && rightNumber !== null) return leftNumber - rightNumber
+    if (leftNumber !== null) return -1
+    if (rightNumber !== null) return 1
+    return leftParts[index] < rightParts[index] ? -1 : 1
+  }
+  return 0
+}
+
+function readCargoPackageVersion(content) {
+  const packageSection = /^\[package\]\s*$([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(content)?.[1]
+  if (!packageSection) throw new Error('Cargo.toml is missing its [package] section')
+  const versions = [...packageSection.matchAll(/^version\s*=\s*"([^"]+)"\s*$/gm)]
+  if (versions.length !== 1) {
+    throw new Error(`Expected one package version in Cargo.toml, found ${versions.length}`)
+  }
+  return versions[0][1]
+}
+
+function readCargoLockVersion(content) {
+  const packageBlocks = content
+    .split('[[package]]')
+    .slice(1)
+    .filter((block) => new RegExp(`^name = "${DESKTOP_CRATE}"$`, 'm').test(block))
+  if (packageBlocks.length !== 1) {
+    throw new Error(`Expected one ${DESKTOP_CRATE} package in Cargo.lock, found ${packageBlocks.length}`)
+  }
+  const versions = [...packageBlocks[0].matchAll(/^version = "([^"]+)"$/gm)]
+  if (versions.length !== 1) {
+    throw new Error(`Expected one ${DESKTOP_CRATE} version in Cargo.lock, found ${versions.length}`)
+  }
+  return versions[0][1]
+}
+
+export function readReleaseVersionFiles(files) {
+  const tauriVersion = JSON.parse(files[RELEASE_VERSION_FILE_PATHS[0]]).version
+  const cargoVersion = readCargoPackageVersion(files[RELEASE_VERSION_FILE_PATHS[1]])
+  const lockVersion = readCargoLockVersion(files[RELEASE_VERSION_FILE_PATHS[2]])
+
+  if (typeof tauriVersion !== 'string') {
+    throw new Error('tauri.conf.json is missing its string version')
+  }
+  parseVersion(tauriVersion)
+
+  const versions = new Set([tauriVersion, cargoVersion, lockVersion])
+  if (versions.size !== 1) {
+    throw new Error(
+      `Release versions are out of sync: tauri.conf.json=${tauriVersion}, Cargo.toml=${cargoVersion}, Cargo.lock=${lockVersion}`,
+    )
+  }
+  return tauriVersion
 }
 
 function prereleaseNumber(prerelease) {
@@ -138,7 +212,11 @@ function currentBranch() {
 }
 
 function readCurrentVersion() {
-  return JSON.parse(readFileSync(tauriConfPath, 'utf8')).version
+  return readReleaseVersionFiles(
+    Object.fromEntries(
+      RELEASE_VERSION_FILE_PATHS.map((path) => [path, readFileSync(join(repoRoot, path), 'utf8')]),
+    ),
+  )
 }
 
 async function confirm(question) {
@@ -176,13 +254,35 @@ export function selectReleaseCommit({
   changedPathsAtCommit,
   isAncestor,
 }) {
-  const expectedPaths = [...versionFilePaths].sort()
+  const expectedPaths = [...RELEASE_VERSION_FILE_PATHS].sort()
+  let startedCurrentVersionHistory = false
   for (const commit of candidates) {
-    if (!isAncestor(commit) || versionAtCommit(commit) !== version) continue
+    if (!isAncestor(commit)) continue
+    const commitVersion = versionAtCommit(commit)
+    if (!startedCurrentVersionHistory) {
+      startedCurrentVersionHistory = true
+      if (commitVersion !== version) {
+        throw new Error(`first release-history commit ${commit} is not synchronized at version ${version}`)
+      }
+    }
+    if (commitVersion !== version) {
+      throw new Error(`version ${version} history ended before a valid release transition was found`)
+    }
+
     const previousVersion = versionAtParent(commit)
-    if (!previousVersion || previousVersion === version) continue
+    if (previousVersion === version) continue
+    if (!previousVersion) {
+      throw new Error(`could not read synchronized release versions before commit ${commit}`)
+    }
+    if (compareSemver(commitVersion, previousVersion) <= 0) {
+      throw new Error(`commit ${commit} is not a forward version transition: ${previousVersion} -> ${commitVersion}`)
+    }
+
     const changedPaths = [...changedPathsAtCommit(commit)].sort()
-    if (JSON.stringify(changedPaths) === JSON.stringify(expectedPaths)) return commit
+    if (JSON.stringify(changedPaths) !== JSON.stringify(expectedPaths)) {
+      throw new Error(`version transition commit ${commit} did not change exactly the three release files`)
+    }
+    return commit
   }
   throw new Error(`could not find the exact three-file commit that introduced version ${version}`)
 }
@@ -192,10 +292,14 @@ function findReleaseCommit(version) {
     .split('\n')
     .filter(Boolean)
   const versionAtRef = (ref) => {
-    const result = tryGit(['show', `${ref}:${tauriConfRelativePath}`])
-    if (result.status !== 0) return null
+    const files = {}
+    for (const path of RELEASE_VERSION_FILE_PATHS) {
+      const result = tryGit(['show', `${ref}:${path}`])
+      if (result.status !== 0) return null
+      files[path] = result.output
+    }
     try {
-      return JSON.parse(result.output).version
+      return readReleaseVersionFiles(files)
     } catch {
       return null
     }
@@ -217,7 +321,12 @@ function findReleaseCommit(version) {
 
 async function pushTagOnly({ skipPrompt }) {
   assertSynchronizedMaster()
-  const version = readCurrentVersion()
+  let version
+  try {
+    version = readCurrentVersion()
+  } catch (error) {
+    fail(error.message)
+  }
   const tag = `v${version}`
   if (git(['tag', '--list', tag]) !== '') fail(`tag ${tag} already exists locally`)
   if (git(['ls-remote', '--tags', 'origin', tag]) !== '') fail(`tag ${tag} already exists on origin`)
@@ -277,7 +386,12 @@ async function main() {
   }
 
   assertSynchronizedMaster()
-  const current = readCurrentVersion()
+  let current
+  try {
+    current = readCurrentVersion()
+  } catch (error) {
+    fail(error.message)
+  }
   const bump = positionals[0] ?? (current.includes('-') ? 'beta' : 'patch')
   let target
   try {
