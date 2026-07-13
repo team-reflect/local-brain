@@ -7,6 +7,7 @@ import {
   createUpdaterManifest,
   githubAssetName,
   missingUpdaterAssetUrls,
+  releaseAssetUrlForTag,
 } from './release-macos.mjs'
 
 const baseInput = {
@@ -144,6 +145,27 @@ test('GitHub asset names replace spaces with dots', () => {
   expect(githubAssetName('Local Brain.app.tar.gz')).toBe('Local.Brain.app.tar.gz')
 })
 
+test('draft asset URLs project onto their final tagged release URLs', () => {
+  const assetUrl =
+    'https://github.com/team-reflect/local-brain/releases/download/untagged-a5ce18f2f46d03af7e68/Local.Brain.app.tar.gz'
+  for (const tag of ['v0.2.0', 'v0.2.0+build.1']) {
+    expect(releaseAssetUrlForTag({ assetUrl, tag })).toBe(
+      `https://github.com/team-reflect/local-brain/releases/download/${tag}/Local.Brain.app.tar.gz`,
+    )
+  }
+})
+
+test('release asset URL projection rejects non-GitHub and malformed asset URLs', () => {
+  for (const assetUrl of [
+    'https://example.com/team-reflect/local-brain/releases/download/untagged-123/Local.Brain.app.tar.gz',
+    'https://github.com/team-reflect/local-brain/releases/download/untagged-123/nested/Local.Brain.app.tar.gz',
+    'https://github.com/team-reflect/local-brain/releases/download/untagged-123/Local.Brain.app.tar.gz?token=secret',
+    'https://github.com/team-reflect/local-brain/releases/download/v0.1.9/Local.Brain.app.tar.gz',
+  ]) {
+    expect(releaseAssetUrlForTag({ assetUrl, tag: 'v0.2.0' })).toBeNull()
+  }
+})
+
 test('updater manifest targets the exact GitHub release asset name', () => {
   const manifest = createUpdaterManifest({
     version: '0.2.0',
@@ -170,8 +192,9 @@ test('updater manifest targets the exact GitHub release asset name', () => {
     missingUpdaterAssetUrls({
       manifest,
       assetUrls: [
-        'https://github.com/team-reflect/local-brain/releases/download/v0.2.0/Local.Brain.app.tar.gz',
+        'https://github.com/team-reflect/local-brain/releases/download/untagged-a5ce18f2f46d03af7e68/Local.Brain.app.tar.gz',
       ],
+      tag: 'v0.2.0',
     }),
   ).toEqual([])
 })
@@ -187,8 +210,31 @@ test('release validation reports updater URLs without matching assets', () => {
         },
       },
       assetUrls: [
-        'https://github.com/team-reflect/local-brain/releases/download/v0.2.0/Local.Brain.app.tar.gz',
+        'https://github.com/team-reflect/local-brain/releases/download/untagged-a5ce18f2f46d03af7e68/Local.Brain.app.tar.gz',
       ],
+      tag: 'v0.2.0',
     }),
   ).toEqual([brokenUrl])
+})
+
+test('release validation rejects updater URLs for the wrong repository or tag', () => {
+  const assetUrls = [
+    'https://github.com/team-reflect/local-brain/releases/download/untagged-a5ce18f2f46d03af7e68/Local.Brain.app.tar.gz',
+  ]
+  for (const brokenUrl of [
+    'https://github.com/another-org/local-brain/releases/download/v0.2.0/Local.Brain.app.tar.gz',
+    'https://github.com/team-reflect/local-brain/releases/download/v0.1.9/Local.Brain.app.tar.gz',
+  ]) {
+    expect(
+      missingUpdaterAssetUrls({
+        manifest: {
+          platforms: {
+            'darwin-aarch64': { signature: 'minisign-signature', url: brokenUrl },
+          },
+        },
+        assetUrls,
+        tag: 'v0.2.0',
+      }),
+    ).toEqual([brokenUrl])
+  }
 })

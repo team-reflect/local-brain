@@ -135,9 +135,11 @@ than after notarization:
   `src-tauri/Cargo.toml` in step).
 
 The publisher creates and fills a draft release first, then verifies that every payload
-URL in `latest.json` exactly matches an asset URL reported by GitHub before making the
-release visible. GitHub rewrites spaces in uploaded asset names to dots, so this check
-keeps a filename mismatch from replacing the working `releases/latest` feed. Pass
+URL in `latest.json` exactly matches the eventual tagged URL for an asset reported by
+GitHub before making the release visible. Draft asset URLs use a temporary `untagged-*`
+segment, so validation replaces only that segment while preserving GitHub's exact repo
+and filename. GitHub rewrites spaces in uploaded asset names to dots, so this check keeps
+a filename mismatch from replacing the working `releases/latest` feed. Pass
 `--draft` to stop after validation and leave the release unpublished for review in the
 GitHub UI.
 
