@@ -117,9 +117,17 @@ export {
   type TaskAssignee,
 } from './domains/tasks/getters'
 export {
+  isTaskStatus,
+  OPEN_TASK_STATUSES,
+  TASK_STATUSES,
+  TERMINAL_TASK_STATUSES,
+  type TaskStatus,
+} from './domains/tasks/lifecycle'
+export {
   createTask,
   updateTask,
   completeTask,
+  setTaskCompleted,
   archiveTask,
   type NewTask,
   type TaskPatch,
@@ -228,7 +236,7 @@ export {
 } from './domains/memories/setters'
 
 // Linked records (the typed join-table neighborhood of a record)
-export { type LinkedRecord, type RecordKind } from './domains/relations/types'
+export { type LinkedRecord, type LinkedTask, type RecordKind } from './domains/relations/types'
 export {
   getPersonLinks,
   getOrganizationLinks,
@@ -494,7 +502,6 @@ export {
   planDay,
   getWaitingItems,
   getChangesSince,
-  OPEN_TASK_STATUSES,
   type DailyBrief,
   type DailyBriefOptions,
   type BriefTask,

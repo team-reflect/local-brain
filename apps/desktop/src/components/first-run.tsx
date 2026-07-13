@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { Database, KeyRound, Terminal, Sparkles } from 'lucide-react'
 import {
   useCompleteFirstRun,
@@ -6,7 +6,7 @@ import {
   useFirstRun,
   useModelStatus,
 } from '../lib/queries'
-import { pushBlockingModal } from '../lib/commands/modal-guard'
+import { useBlockingModal } from '../lib/commands/use-blocking-modal'
 import { useRouter } from '../routing/router'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
 
@@ -33,10 +33,7 @@ export function FirstRun(): ReactNode {
 
   // While shown, suppress global shortcuts (⌘K, navigation, …) so the gate also
   // blocks keyboard users; Radix already blocks pointer/focus to the background.
-  useEffect(() => {
-    if (!shown) return
-    return pushBlockingModal()
-  }, [shown])
+  useBlockingModal(shown)
 
   if (!shown) return null
 

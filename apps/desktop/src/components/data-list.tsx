@@ -4,6 +4,7 @@ import { sectionLabel } from '../lib/ui'
 import { cn } from '../lib/utils'
 import { EmptyState } from './empty-state'
 import { Loading } from './loading'
+import { QueryError } from './query-error'
 
 export interface Column<T> {
   key: string
@@ -20,6 +21,9 @@ interface DataListProps<T> {
   onRowClick?: (row: T) => void
   empty?: ReactNode
   isLoading?: boolean
+  error?: unknown
+  errorTitle?: string
+  onRetry?: () => unknown
   virtualize?: boolean
   estimateRowHeight?: number
   className?: string
@@ -34,6 +38,9 @@ export function DataList<T>({
   onRowClick,
   empty,
   isLoading,
+  error,
+  errorTitle = 'Could not load this list',
+  onRetry,
   virtualize = false,
   estimateRowHeight = 40,
   className,
@@ -41,6 +48,17 @@ export function DataList<T>({
 }: DataListProps<T>): ReactNode {
   if (isLoading) {
     return <Loading className="px-1 py-6" />
+  }
+  const hasError = error !== null && error !== undefined
+  if (hasError && rows.length === 0) {
+    return (
+      <QueryError
+        title={errorTitle}
+        error={error}
+        {...(onRetry ? { onRetry } : {})}
+        {...(className !== undefined ? { className } : {})}
+      />
+    )
   }
   if (rows.length === 0) {
     return empty ?? <EmptyState title="Nothing here yet" />
@@ -54,6 +72,9 @@ export function DataList<T>({
         rowKey={rowKey}
         onRowClick={onRowClick}
         estimateRowHeight={estimateRowHeight}
+        error={hasError ? error : undefined}
+        errorTitle={errorTitle}
+        onRetry={onRetry}
         className={className}
         bodyClassName={bodyClassName}
       />
@@ -62,6 +83,14 @@ export function DataList<T>({
 
   return (
     <div className={cn('flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border', className)}>
+      {hasError ? (
+        <QueryError
+          title={errorTitle}
+          error={error}
+          {...(onRetry ? { onRetry } : {})}
+          className="m-2 shrink-0"
+        />
+      ) : null}
       <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
         <table className="w-full border-collapse text-sm">
           <thead>
@@ -81,9 +110,17 @@ export function DataList<T>({
             <tr
               key={rowKey(row)}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
+              tabIndex={onRowClick ? 0 : undefined}
+              onKeyDown={
+                onRowClick
+                  ? (event) => activateRowFromKeyboard(event, () => onRowClick(row))
+                  : undefined
+              }
               className={cn(
                 'border-b border-border/60 last:border-b-0',
-                onRowClick ? 'cursor-pointer transition-colors hover:bg-secondary/50' : undefined,
+                onRowClick
+                  ? 'cursor-pointer transition-colors hover:bg-secondary/50 focus-visible:bg-secondary/50'
+                  : undefined,
               )}
             >
               {columns.map((column) => (
@@ -106,6 +143,9 @@ interface VirtualDataListProps<T> {
   rowKey: (row: T) => string
   onRowClick: ((row: T) => void) | undefined
   estimateRowHeight: number
+  error: unknown
+  errorTitle: string
+  onRetry: (() => unknown) | undefined
   className: string | undefined
   bodyClassName: string | undefined
 }
@@ -116,6 +156,9 @@ function VirtualDataList<T>({
   rowKey,
   onRowClick,
   estimateRowHeight,
+  error,
+  errorTitle,
+  onRetry,
   className,
   bodyClassName,
 }: VirtualDataListProps<T>): ReactNode {
@@ -133,6 +176,14 @@ function VirtualDataList<T>({
       role="table"
       className={cn('flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border text-sm', className)}
     >
+      {error !== undefined ? (
+        <QueryError
+          title={errorTitle}
+          error={error}
+          {...(onRetry ? { onRetry } : {})}
+          className="m-2 shrink-0"
+        />
+      ) : null}
       <div role="rowgroup">
         <div
           role="row"
@@ -173,16 +224,15 @@ function VirtualDataList<T>({
                 onClick={clickable ? () => handleRowClick(row) : undefined}
                 onKeyDown={
                   clickable
-                    ? (event: KeyboardEvent<HTMLDivElement>) => {
-                        if (event.key !== 'Enter' && event.key !== ' ') return
-                        event.preventDefault()
-                        handleRowClick(row)
-                      }
+                    ? (event: KeyboardEvent<HTMLDivElement>) =>
+                        activateRowFromKeyboard(event, () => handleRowClick(row))
                     : undefined
                 }
                 className={cn(
                   'absolute inset-x-0 grid border-b border-border/60 bg-background',
-                  clickable ? 'cursor-pointer transition-colors hover:bg-secondary/50' : undefined,
+                  clickable
+                    ? 'cursor-pointer transition-colors hover:bg-secondary/50 focus-visible:bg-secondary/50'
+                    : undefined,
                 )}
                 style={{
                   gridTemplateColumns,
@@ -205,4 +255,15 @@ function VirtualDataList<T>({
       </div>
     </div>
   )
+}
+
+function activateRowFromKeyboard<T extends HTMLElement>(
+  event: KeyboardEvent<T>,
+  activate: () => void,
+): void {
+  // Nested controls own their own keys; only the focused row itself activates.
+  if (event.target !== event.currentTarget) return
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  event.preventDefault()
+  activate()
 }

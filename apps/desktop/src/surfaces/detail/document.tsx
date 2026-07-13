@@ -4,6 +4,7 @@ import { CitationList } from '../../components/citation-list'
 import { DetailFields } from '../../components/detail-fields'
 import { DetailPage } from '../../components/detail-page'
 import { LinkedRecords } from '../../components/linked-records'
+import { LinkedTasks } from '../../components/linked-tasks'
 import { PageHead } from '../../components/page-head'
 import { Section } from '../../components/section'
 import {
@@ -53,7 +54,7 @@ export function DocumentDetail({ id }: { id: string }): ReactNode {
               <LinkedRecords title="People" records={links.data.people} onUnlink={onUnlink} />
               <LinkedRecords title="Projects" records={links.data.projects} onUnlink={onUnlink} />
               <LinkedRecords title="Interactions" records={links.data.interactions} onUnlink={onUnlink} />
-              <LinkedRecords title="Tasks" records={links.data.tasks} onUnlink={onUnlink} />
+              <LinkedTasks tasks={links.data.tasks} onUnlink={onUnlink} />
               <LinkedRecords title="Assets" records={links.data.assets} onUnlink={onUnlink} />
             </>
           ) : null}

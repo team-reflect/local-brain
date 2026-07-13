@@ -6,7 +6,13 @@ import { getCommand, listCommands, registerCommands, resetCommands, runCommand }
 import type { CommandContext } from './types'
 
 function context(): CommandContext {
-  return { navigate: vi.fn(), back: vi.fn(), forward: vi.fn(), openPalette: vi.fn() }
+  return {
+    navigate: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+    openPalette: vi.fn(),
+    openTaskCreate: vi.fn(),
+  }
 }
 
 describe('command registry', () => {
@@ -35,6 +41,15 @@ describe('command registry', () => {
     expect(() => registerAppCommands()).not.toThrow()
     expect(listCommands().length).toBe(APP_COMMANDS.length)
     expect(getCommand('go.today')).toBeDefined()
+  })
+
+  it('opens task creation through the task.create command', async () => {
+    const ctx = context()
+    registerAppCommands()
+
+    await runCommand('task.create', ctx)
+
+    expect(ctx.openTaskCreate).toHaveBeenCalledOnce()
   })
 })
 

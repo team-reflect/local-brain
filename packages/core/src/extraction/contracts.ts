@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { TASK_STATUSES } from '../domains/tasks/lifecycle'
 
 /**
  * Extraction output contracts (Plan 05 step 1).
@@ -99,7 +100,7 @@ export const extractedTaskSchema = z.object({
   ref,
   title: z.string().min(1),
   description: z.string().nullish(),
-  status: z.string().nullish(),
+  status: z.enum(TASK_STATUSES).nullish(),
   priority: z.number().int().nullish(),
   dueAt: z.string().nullish(),
   scheduledFor: z.string().nullish(),

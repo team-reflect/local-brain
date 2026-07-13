@@ -21,7 +21,7 @@ pub const SUPPORT_DIRNAME: &str = ".local-brain";
 
 /// Bumped whenever a migration is appended below. Asserted against the applied
 /// `user_version` in tests so the constant can never drift from the list.
-pub const LATEST_SCHEMA_VERSION: usize = 5;
+pub const LATEST_SCHEMA_VERSION: usize = 6;
 
 /// The canonical filesystem layout for one Local Brain root directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +52,7 @@ static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
         M::up(include_str!("../migrations/0003_suggestions.sql")),
         M::up(include_str!("../migrations/0004_seed.sql")),
         M::up(include_str!("../migrations/0005_event_details.sql")),
+        M::up(include_str!("../migrations/0006_task_statuses.sql")),
     ])
 });
 
@@ -357,6 +358,55 @@ mod tests {
             .query_row("SELECT count(*) FROM schema_meta", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn task_status_migration_normalizes_legacy_ui_values() {
+        register_sqlite_vec().unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        MIGRATIONS.to_version(&mut conn, 5).unwrap();
+        for (id, status) in [
+            ("t1", "scheduled"),
+            ("t2", "canceled"),
+            ("t3", "in progress"),
+            ("t4", "waiting"),
+        ] {
+            conn.execute(
+                "INSERT INTO tasks (id, title, status, updated_at) VALUES (?1, ?1, ?2, '2025-01-01T00:00:00.000Z')",
+                rusqlite::params![id, status],
+            )
+            .unwrap();
+        }
+
+        MIGRATIONS.to_latest(&mut conn).unwrap();
+
+        let statuses: Vec<(String, String)> = conn
+            .prepare("SELECT id, status FROM tasks WHERE id LIKE 't%' ORDER BY id")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            statuses,
+            vec![
+                ("t1".into(), "open".into()),
+                ("t2".into(), "cancelled".into()),
+                ("t3".into(), "in_progress".into()),
+                ("t4".into(), "waiting".into()),
+            ]
+        );
+        let changed_timestamps: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM tasks WHERE id LIKE 't%' AND updated_at != '2025-01-01T00:00:00.000Z'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            changed_timestamps, 0,
+            "status normalization must not create artificial recent activity"
+        );
     }
 
     #[test]

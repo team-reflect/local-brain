@@ -23,3 +23,17 @@ export interface LinkedRecord {
   title: string
   subtitle: string | null
 }
+
+/**
+ * A task reference with the workflow fields needed by actionable task rows.
+ *
+ * It remains assignable to {@link LinkedRecord} so correction handlers can unlink
+ * it without learning a second relationship shape.
+ */
+export interface LinkedTask extends LinkedRecord {
+  kind: 'task'
+  status: string
+  dueAt: string | null
+  scheduledFor: string | null
+  priority: number | null
+}

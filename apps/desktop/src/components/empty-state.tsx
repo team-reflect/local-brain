@@ -7,10 +7,12 @@ type EmptyStateVariant = 'panel' | 'plain'
 export function EmptyState({
   title,
   hint,
+  action,
   variant = 'panel',
 }: {
   title: string
   hint?: ReactNode
+  action?: ReactNode
   variant?: EmptyStateVariant
 }): ReactNode {
   return (
@@ -22,6 +24,7 @@ export function EmptyState({
     >
       <p className="text-sm font-medium text-foreground">{title}</p>
       {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+      {action ? <div className="mt-3">{action}</div> : null}
     </div>
   )
 }

@@ -40,6 +40,7 @@ pub struct CompleteTaskArgs<'a> {
 }
 
 pub fn add_task(conn: &mut Connection, json: bool, args: AddTaskArgs) -> Result<(), CliError> {
+    let status = normalize_status(args.status)?;
     let project_links = args
         .links
         .iter()
@@ -58,7 +59,7 @@ pub fn add_task(conn: &mut Connection, json: bool, args: AddTaskArgs) -> Result<
     let tx = conn.transaction()?;
     tx.execute(
         "INSERT INTO tasks (id, title, status, due_at, project_id) VALUES (?1,?2,?3,?4,?5)",
-        params![id, args.title, args.status, args.due_at, args.project_id],
+        params![id, args.title, status, args.due_at, args.project_id],
     )?;
     for link in &args.links {
         match link.kind {
@@ -145,9 +146,11 @@ fn require_active_task(conn: &Connection, id: &str) -> Result<(), CliError> {
 fn normalize_status(raw: &str) -> Result<String, CliError> {
     let status = raw.trim().to_lowercase();
     match status.as_str() {
-        "open" | "waiting" | "done" | "cancelled" => Ok(status),
+        "open" | "in_progress" | "waiting" | "blocked" | "done" | "cancelled" => {
+            Ok(status)
+        }
         _ => Err(CliError::Runtime(format!(
-            "invalid task status '{raw}' (expected open, waiting, done, or cancelled)"
+            "invalid task status '{raw}' (expected open, in_progress, waiting, blocked, done, or cancelled)"
         ))),
     }
 }

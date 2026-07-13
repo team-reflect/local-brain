@@ -45,11 +45,9 @@ export function BrainChooser({ errorMessage }: { errorMessage?: string | null })
         </div>
 
         {visibleError ? (
-          <div role="alert">
-            <Alert variant="error" className="text-center">
-              {visibleError}
-            </Alert>
-          </div>
+          <Alert variant="error" className="text-center">
+            {visibleError}
+          </Alert>
         ) : null}
 
         {(brains.data?.length ?? 0) > 0 ? (

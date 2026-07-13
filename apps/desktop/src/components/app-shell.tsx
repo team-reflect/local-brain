@@ -1,10 +1,19 @@
-import { useCallback, useMemo, useState, type ComponentType, type ReactNode } from 'react'
+import {
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from 'react'
 import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
   ListTodo,
   MessageSquare,
+  Plus,
   Search,
   Settings,
   Users,
@@ -13,13 +22,15 @@ import { cn } from '../lib/utils'
 import { controlClass, keycapClass } from '../lib/ui'
 import { useAppShortcuts } from '../lib/commands/use-shortcuts'
 import type { CommandContext } from '../lib/commands/types'
-import { sectionForRoute, type Route } from '../routing/route'
+import { routesEqual, sectionForRoute, type Route } from '../routing/route'
 import { useRouter } from '../routing/router'
 import { BrainSwitcher } from './brain-switcher'
+import { Button } from './button'
 import { CommandPalette } from './command-palette'
 import { FirstRun } from './first-run'
 import { RouteContent } from './route-content'
 import { SidebarProjects } from './sidebar-projects'
+import { TaskCreateDialog } from './task-create-dialog'
 import { UpdateNotice } from './update-notice'
 import { WindowDragRegion } from './window-drag-region'
 
@@ -46,17 +57,63 @@ const SEARCH_TRIGGER_CLASS = cn(
 )
 
 export function AppShell(): ReactNode {
-  const { route, navigate, back, forward, canBack, canForward } = useRouter()
+  const {
+    route,
+    navigate,
+    back,
+    forward,
+    canBack,
+    canForward,
+    entryKey,
+    navigationType,
+  } = useRouter()
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [taskCreateOpen, setTaskCreateOpen] = useState(false)
+  const mainRef = useRef<HTMLElement>(null)
+  const previousEntryKeyRef = useRef(entryKey)
+  const scrollPositionsRef = useRef(new Map<string, { left: number; top: number }>())
+  const routeFocusReadyRef = useRef(false)
   const activeSection = sectionForRoute(route)
 
   const openPalette = useCallback(() => setPaletteOpen(true), [])
+  const openTaskCreate = useCallback(() => setTaskCreateOpen(true), [])
   const context = useMemo<CommandContext>(
-    () => ({ navigate, back, forward, openPalette }),
-    [navigate, back, forward, openPalette],
+    () => ({ navigate, back, forward, openPalette, openTaskCreate }),
+    [navigate, back, forward, openPalette, openTaskCreate],
   )
   useAppShortcuts(context)
   const settingsActive = activeSection === 'settings'
+  const settingsCurrent = routesEqual(route, { kind: 'settings' })
+
+  // The shell owns this route scroll container. Fresh entries start at the top;
+  // browser Back/Forward restores the position previously held by that entry.
+  // Focus follows navigation without scrolling again so keyboard and screen-
+  // reader users land in the newly rendered route content.
+  useLayoutEffect(() => {
+    const main = mainRef.current
+    if (!main) return
+
+    const previousEntryKey = previousEntryKeyRef.current
+    if (previousEntryKey !== entryKey) {
+      scrollPositionsRef.current.set(previousEntryKey, {
+        left: main.scrollLeft,
+        top: main.scrollTop,
+      })
+    }
+
+    const restored = navigationType === 'pop'
+      ? scrollPositionsRef.current.get(entryKey)
+      : undefined
+    main.scrollLeft = restored?.left ?? 0
+    main.scrollTop = restored?.top ?? 0
+    previousEntryKeyRef.current = entryKey
+
+    if (routeFocusReadyRef.current) {
+      main.focus({ preventScroll: true })
+    } else {
+      routeFocusReadyRef.current = true
+    }
+  }, [entryKey, navigationType])
 
   return (
     <div className="flex h-full min-h-0">
@@ -67,11 +124,13 @@ export function AppShell(): ReactNode {
           {NAV.map((item) => {
             const Icon = item.icon
             const active = item.section === activeSection
+            const current = routesEqual(item.route, route)
             return (
               <button
                 key={item.section}
                 type="button"
                 onClick={() => navigate(item.route)}
+                aria-current={current ? 'page' : active ? 'location' : undefined}
                 className={cn(
                   'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium transition-colors',
                   active
@@ -94,7 +153,7 @@ export function AppShell(): ReactNode {
             type="button"
             onClick={() => navigate({ kind: 'settings' })}
             aria-label="Settings"
-            aria-current={settingsActive ? 'page' : undefined}
+            aria-current={settingsCurrent ? 'page' : settingsActive ? 'location' : undefined}
             title="Settings"
             className={cn(
               'inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground',
@@ -108,45 +167,61 @@ export function AppShell(): ReactNode {
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
         <header className="flex h-12 items-center justify-center border-b border-border px-4">
-          <div className="relative w-[min(760px,100%)]">
-            <div className="absolute left-0 top-1/2 z-40 flex -translate-x-[calc(100%+0.5rem)] -translate-y-1/2 items-center gap-1">
+          <div className="flex w-[min(840px,100%)] items-center gap-2">
+            <div className="relative min-w-0 flex-1">
+              <div className="absolute left-0 top-1/2 z-40 flex -translate-x-[calc(100%+0.5rem)] -translate-y-1/2 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={back}
+                  disabled={!canBack}
+                  aria-label="Back"
+                  className={HISTORY_BUTTON_CLASS}
+                >
+                  <ChevronLeft className="size-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={forward}
+                  disabled={!canForward}
+                  aria-label="Forward"
+                  className={HISTORY_BUTTON_CLASS}
+                >
+                  <ChevronRight className="size-4" />
+                </button>
+              </div>
               <button
                 type="button"
-                onClick={back}
-                disabled={!canBack}
-                aria-label="Back"
-                className={HISTORY_BUTTON_CLASS}
+                onClick={openPalette}
+                aria-label="Search or run a command"
+                className={SEARCH_TRIGGER_CLASS}
               >
-                <ChevronLeft className="size-4" />
-              </button>
-              <button
-                type="button"
-                onClick={forward}
-                disabled={!canForward}
-                aria-label="Forward"
-                className={HISTORY_BUTTON_CLASS}
-              >
-                <ChevronRight className="size-4" />
+                <Search className="size-3.5" />
+                <span className="flex-1 truncate text-left">Search anything…</span>
+                <kbd className={keycapClass}>⌘K</kbd>
               </button>
             </div>
-            <button
-              type="button"
-              onClick={openPalette}
-              aria-label="Search or run a command"
-              className={SEARCH_TRIGGER_CLASS}
-            >
-              <Search className="size-3.5" />
-              <span className="flex-1 truncate text-left">Search anything…</span>
-              <kbd className={keycapClass}>⌘K</kbd>
-            </button>
+            <Button variant="outline" onClick={openTaskCreate}>
+              <Plus aria-hidden className="size-3.5" />
+              Add task
+            </Button>
           </div>
         </header>
-        <main className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
+        <main
+          ref={mainRef}
+          tabIndex={-1}
+          aria-label={`${activeSection} workspace`}
+          className="min-h-0 flex-1 overflow-y-auto px-7 py-6 focus:outline-none"
+        >
           <RouteContent route={route} />
         </main>
       </div>
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} context={context} />
+      <TaskCreateDialog
+        open={taskCreateOpen}
+        onClose={() => setTaskCreateOpen(false)}
+        onCreated={(id) => navigate({ kind: 'task', id })}
+      />
       <FirstRun />
     </div>
   )

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { TodaySurface } from './today'
 import { installFakeBridge, renderWithProviders } from '../test/utils'
 
@@ -97,5 +97,71 @@ describe('TodaySurface daily brief', () => {
     expect(container.querySelector('.animate-spin')).not.toBeNull()
 
     resolveBrief(savedDailyBriefRows()[0])
+  })
+
+  it('shows only a retryable error when the brief cannot be loaded', async () => {
+    let briefAttempts = 0
+    installFakeBridge({
+      query: (sql, params) => {
+        const firstParam = params[0]
+        if (firstParam === 'model.aiProviders') {
+          return [{ valueJson: JSON.stringify([]) }]
+        }
+        if (firstParam === 'model.defaultAiProviderId') return []
+        if (sql.includes('from "ai_notes"')) {
+          briefAttempts += 1
+          return briefAttempts === 1
+            ? Promise.reject(new Error('daily brief unavailable'))
+            : savedDailyBriefRows()
+        }
+        return []
+      },
+    })
+    renderWithProviders(<TodaySurface />)
+
+    expect(await screen.findByText('Could not load the daily brief.')).not.toBeNull()
+    expect(screen.queryByText(/Generate a grounded brief/)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Generate' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByText('Focus:')).not.toBeNull()
+    expect(briefAttempts).toBe(2)
+  })
+
+  it('keeps a stale brief visible when refreshing it fails', async () => {
+    let briefAttempts = 0
+    installFakeBridge({
+      query: (sql, params) => {
+        const firstParam = params[0]
+        if (firstParam === 'model.aiProviders') {
+          return [
+            {
+              valueJson: JSON.stringify([
+                { id: 'provider-1', provider: 'openai', model: 'gpt-5.5', keyHint: '12345' },
+              ]),
+            },
+          ]
+        }
+        if (firstParam === 'model.defaultAiProviderId') {
+          return [{ valueJson: JSON.stringify('provider-1') }]
+        }
+        if (sql.includes('from "ai_notes"')) {
+          briefAttempts += 1
+          return briefAttempts === 1
+            ? savedDailyBriefRows()
+            : Promise.reject(new Error('daily brief refresh failed'))
+        }
+        return []
+      },
+    })
+    renderWithProviders(<TodaySurface />)
+
+    expect(await screen.findByText('ship the launch checklist.')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }))
+
+    expect(await screen.findByText('Could not load the daily brief.')).not.toBeNull()
+    expect(screen.getByText('ship the launch checklist.')).not.toBeNull()
+    expect(screen.queryByText(/Generate a grounded brief/)).toBeNull()
+    expect(briefAttempts).toBe(2)
   })
 })

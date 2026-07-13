@@ -3,6 +3,7 @@ import type { InteractionEventDetail, InteractionEventFlightSegment } from '@loc
 import { DetailFields } from '../../components/detail-fields'
 import { DetailPage } from '../../components/detail-page'
 import { LinkedRecords } from '../../components/linked-records'
+import { LinkedTasks } from '../../components/linked-tasks'
 import { PageHead } from '../../components/page-head'
 import { Section } from '../../components/section'
 import {
@@ -81,7 +82,7 @@ export function InteractionDetail({ id }: { id: string }): ReactNode {
               <LinkedRecords title="Projects" records={links.data.projects} onUnlink={onUnlink} />
               <LinkedRecords title="Organizations" records={links.data.organizations} onUnlink={onUnlink} />
               <LinkedRecords title="Documents" records={links.data.documents} onUnlink={onUnlink} />
-              <LinkedRecords title="Tasks" records={links.data.tasks} onUnlink={onUnlink} />
+              <LinkedTasks tasks={links.data.tasks} onUnlink={onUnlink} />
               <LinkedRecords title="Assets" records={links.data.assets} onUnlink={onUnlink} />
             </>
           ) : null}

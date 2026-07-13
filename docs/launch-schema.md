@@ -36,6 +36,7 @@ The clean launch baseline is:
 - `0004_seed.sql` - built-in source rows.
 - `0005_event_details.sql` - structured child tables for event semantics,
   bookings, lodging stays, and flight segments.
+- `0006_task_statuses.sql` - canonical task lifecycle normalization.
 
 Backwards compatibility with old `brain.sqlite` files is not required before
 launch. Reimport from source instead of carrying old incremental migrations.
@@ -91,7 +92,9 @@ typed links. Do not add company-specific partnership tables.
 
 `tasks` are commitments, waiting items, reminders, and follow-ups. They may link
 to one project, people, organizations, documents, interactions, and exact
-evidence chunks.
+evidence chunks. Their lifecycle is `open`, `in_progress`, `waiting`, `blocked`,
+`done`, or `cancelled`; scheduling lives in `scheduled_for` rather than in the
+status field.
 
 Typed join tables link people, organizations, projects, tasks, documents,
 interactions, assets, memories, tags, and source records. The graph surface is

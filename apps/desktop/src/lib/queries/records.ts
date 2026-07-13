@@ -1,8 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query'
 import {
   archiveTask,
   completeTask,
   createProject,
+  createTask,
   getAssetDetail,
   getDocument,
   getDocumentLinks,
@@ -32,17 +33,168 @@ import {
   listRecordProvenanceForRecord,
   listProjects,
   listTasks,
+  setTaskCompleted,
   updateTask,
+  type LinkedTask,
   type ListTasksOptions,
   type NewProject,
+  type NewTask,
+  type SearchHit,
+  type Task,
   type TaskPatch,
 } from '@local-brain/core'
+import { PALETTE_SEARCH_QUERY_KEY } from './search'
 
 /**
  * Read hooks for the typed records and their linked-record neighborhoods, plus
  * the two task mutations. Components read data through these, never the bridge or
  * SQL directly.
  */
+
+/** Input accepted by the reversible task-completion mutation. */
+export interface SetTaskCompletedInput {
+  id: string
+  completed: boolean
+}
+
+interface SetTaskCompletedCallbacks {
+  onError?: (error: Error, input: SetTaskCompletedInput) => void
+}
+
+interface QuerySnapshot {
+  queryKey: QueryKey
+  data: unknown
+}
+
+interface TaskLinkedNeighborhood {
+  tasks: LinkedTask[]
+}
+
+const TASK_LINK_OWNER_KEYS = new Set(['person', 'organization', 'project', 'document', 'interaction'])
+
+function isTaskLinkedNeighborhoodKey(queryKey: QueryKey): boolean {
+  return queryKey.length === 3 && queryKey[2] === 'links' && TASK_LINK_OWNER_KEYS.has(String(queryKey[0]))
+}
+
+function completionStatus(completed: boolean): 'done' | 'open' {
+  return completed ? 'done' : 'open'
+}
+
+function optimisticTask(task: Task, input: SetTaskCompletedInput, changedAt: string): Task {
+  return {
+    ...task,
+    status: completionStatus(input.completed),
+    completedAt: input.completed ? changedAt : null,
+    updatedAt: changedAt,
+  }
+}
+
+function optimisticTaskList(
+  tasks: Task[],
+  queryKey: QueryKey,
+  input: SetTaskCompletedInput,
+  changedAt: string,
+): Task[] {
+  const options = queryKey[1]
+  const filteredStatus =
+    typeof options === 'object' && options !== null && 'status' in options
+      ? (options as ListTasksOptions).status
+      : undefined
+  const nextStatus = completionStatus(input.completed)
+
+  return tasks.flatMap((task) => {
+    if (task.id !== input.id) return [task]
+    if (filteredStatus !== undefined && filteredStatus !== nextStatus) return []
+    return [optimisticTask(task, input, changedAt)]
+  })
+}
+
+function optimisticLinkedNeighborhood(
+  value: TaskLinkedNeighborhood,
+  input: SetTaskCompletedInput,
+): TaskLinkedNeighborhood {
+  const status = completionStatus(input.completed)
+  return {
+    ...value,
+    tasks: value.tasks.map((task) =>
+      task.id === input.id ? { ...task, status, subtitle: status } : task,
+    ),
+  }
+}
+
+function optimisticSearchResults(results: SearchHit[], input: SetTaskCompletedInput): SearchHit[] {
+  const status = completionStatus(input.completed)
+  return results.map((hit) =>
+    hit.kind === 'task' && hit.id === input.id ? { ...hit, subtitle: status } : hit,
+  )
+}
+
+function completionSnapshots(queryClient: QueryClient, id: string): QuerySnapshot[] {
+  const entries = [
+    ...queryClient.getQueriesData({ queryKey: ['tasks'] }),
+    ...queryClient.getQueriesData({ queryKey: ['task', id], exact: true }),
+    ...queryClient.getQueriesData({
+      predicate: (query) => isTaskLinkedNeighborhoodKey(query.queryKey),
+    }),
+    ...queryClient.getQueriesData({ queryKey: PALETTE_SEARCH_QUERY_KEY }),
+  ]
+  return entries.map(([queryKey, data]) => ({ queryKey, data }))
+}
+
+async function cancelTaskViews(queryClient: QueryClient, id: string): Promise<void> {
+  await Promise.all([
+    queryClient.cancelQueries({ queryKey: ['tasks'] }),
+    queryClient.cancelQueries({ queryKey: ['task', id], exact: true }),
+    queryClient.cancelQueries({
+      predicate: (query) => isTaskLinkedNeighborhoodKey(query.queryKey),
+    }),
+    queryClient.cancelQueries({ queryKey: PALETTE_SEARCH_QUERY_KEY }),
+  ])
+}
+
+async function invalidateTaskViews(queryClient: QueryClient, id?: string): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+    ...(id ? [queryClient.invalidateQueries({ queryKey: ['task', id] })] : []),
+    queryClient.invalidateQueries({
+      predicate: (query) => isTaskLinkedNeighborhoodKey(query.queryKey),
+    }),
+    queryClient.invalidateQueries({ queryKey: ['graph'] }),
+    queryClient.invalidateQueries({ queryKey: PALETTE_SEARCH_QUERY_KEY }),
+  ])
+}
+
+function applyOptimisticCompletion(
+  queryClient: QueryClient,
+  snapshots: QuerySnapshot[],
+  input: SetTaskCompletedInput,
+): void {
+  const changedAt = new Date().toISOString()
+  for (const snapshot of snapshots) {
+    const [scope, keyId] = snapshot.queryKey
+    if (scope === 'tasks' && Array.isArray(snapshot.data)) {
+      queryClient.setQueryData(
+        snapshot.queryKey,
+        optimisticTaskList(snapshot.data as Task[], snapshot.queryKey, input, changedAt),
+      )
+    } else if (scope === 'task' && keyId === input.id && snapshot.data) {
+      queryClient.setQueryData(
+        snapshot.queryKey,
+        optimisticTask(snapshot.data as Task, input, changedAt),
+      )
+    } else if (isTaskLinkedNeighborhoodKey(snapshot.queryKey) && snapshot.data) {
+      queryClient.setQueryData(
+        snapshot.queryKey,
+        optimisticLinkedNeighborhood(snapshot.data as TaskLinkedNeighborhood, input),
+      )
+    } else if (scope === PALETTE_SEARCH_QUERY_KEY[0] && Array.isArray(snapshot.data)) {
+      queryClient.setQueryData(
+        snapshot.queryKey,
+        optimisticSearchResults(snapshot.data as SearchHit[], input),
+      )
+    }
+  }
+}
 
 export function useSelf() {
   return useQuery({ queryKey: ['self'], queryFn: () => getSelf().then((p) => p ?? null) })
@@ -83,6 +235,22 @@ export function useCreateProject() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['projects'] }),
         queryClient.invalidateQueries({ queryKey: ['graph'] }),
+      ])
+    },
+  })
+}
+
+/** Create a task and refresh every task-discovery surface after it commits. */
+export function useCreateTask() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: NewTask) => createTask(input),
+    onSuccess: async (_id, input) => {
+      await Promise.all([
+        invalidateTaskViews(queryClient),
+        ...(input.projectId
+          ? [queryClient.invalidateQueries({ queryKey: ['project', input.projectId, 'links'] })]
+          : []),
       ])
     },
   })
@@ -164,7 +332,33 @@ export function useCompleteTask() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => completeTask(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+    onSuccess: (_count, id) => invalidateTaskViews(queryClient, id),
+  })
+}
+
+/**
+ * Reversibly complete or reopen a task with immediate cache feedback.
+ * Failed writes restore every optimistically changed cache before refetching.
+ */
+export function useSetTaskCompleted(callbacks: SetTaskCompletedCallbacks = {}) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, completed }: SetTaskCompletedInput) => setTaskCompleted(id, completed),
+    onMutate: async (input) => {
+      await cancelTaskViews(queryClient, input.id)
+      const snapshots = completionSnapshots(queryClient, input.id)
+      applyOptimisticCompletion(queryClient, snapshots, input)
+      return { snapshots }
+    },
+    onError: (error, input, context) => {
+      for (const snapshot of context?.snapshots ?? []) {
+        queryClient.setQueryData(snapshot.queryKey, snapshot.data)
+      }
+      callbacks.onError?.(error, input)
+    },
+    onSettled: async (_data, _error, input) => {
+      await invalidateTaskViews(queryClient, input.id)
+    },
   })
 }
 
@@ -172,7 +366,7 @@ export function useArchiveTask() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => archiveTask(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+    onSuccess: (_count, id) => invalidateTaskViews(queryClient, id),
   })
 }
 

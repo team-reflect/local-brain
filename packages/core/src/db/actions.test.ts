@@ -7,6 +7,7 @@ import {
   listPeople,
   setBridge,
   setAiProvidersState,
+  setTaskCompleted,
   updateMemory,
   updateTask,
 } from '../index'
@@ -45,6 +46,14 @@ describe('domain actions', () => {
     expect(calls[0]?.command).toBe('db_execute')
     expect(String(calls[0]?.args['sql'])).toContain('update "tasks"')
     expect(calls[0]?.args['params']).toContain('done')
+  })
+
+  it('setTaskCompleted reopens to open and clears completed_at', async () => {
+    await setTaskCompleted('t1', false)
+    expect(calls[0]?.command).toBe('db_execute')
+    expect(String(calls[0]?.args['sql'])).toContain('update "tasks"')
+    expect(calls[0]?.args['params']).toContain('open')
+    expect(calls[0]?.args['params']).toContain(null)
   })
 
   it('updateTask patches tasks and stamps updated_at', async () => {

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { FolderClosed, FolderOpen, Plus } from 'lucide-react'
+import { ChevronDown, ChevronRight, FolderClosed, FolderOpen, Plus } from 'lucide-react'
 import type { Project } from '@local-brain/core'
 import { useProjects } from '../lib/queries'
 import { cn } from '../lib/utils'
@@ -19,6 +19,7 @@ export function SidebarProjects({ activeSection, route }: SidebarProjectsProps):
   const [createOpen, setCreateOpen] = useState(false)
   const active = activeSection === 'projects'
   const ProjectsIcon = open ? FolderOpen : FolderClosed
+  const ExpandIcon = open ? ChevronDown : ChevronRight
 
   function openProject(project: Project): void {
     navigate({ kind: 'project', id: project.id })
@@ -34,12 +35,21 @@ export function SidebarProjects({ activeSection, route }: SidebarProjectsProps):
       >
         <button
           type="button"
-          aria-expanded={open}
-          onClick={() => setOpen((current) => !current)}
+          onClick={() => navigate({ kind: 'projects' })}
+          aria-current={route.kind === 'projects' ? 'page' : active ? 'location' : undefined}
           className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium"
         >
           <ProjectsIcon className={cn('size-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} />
           <span className="min-w-0 flex-1 truncate">Projects</span>
+        </button>
+        <button
+          type="button"
+          aria-label={open ? 'Collapse projects' : 'Expand projects'}
+          aria-expanded={open}
+          onClick={() => setOpen((current) => !current)}
+          className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+        >
+          <ExpandIcon className="size-3.5" />
         </button>
         <button
           type="button"

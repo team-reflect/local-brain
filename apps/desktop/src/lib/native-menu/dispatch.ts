@@ -10,6 +10,7 @@ const FALLBACK_CONTEXT: CommandContext = {
   back: () => {},
   forward: () => {},
   openPalette: () => {},
+  openTaskCreate: () => {},
 }
 
 function runCommandAndLog(commandId: string, context: CommandContext): void {

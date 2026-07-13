@@ -4,6 +4,7 @@ import { StatusBadge } from '../../components/badge'
 import { DetailFields } from '../../components/detail-fields'
 import { DetailPage } from '../../components/detail-page'
 import { LinkedRecords } from '../../components/linked-records'
+import { LinkedTasks } from '../../components/linked-tasks'
 import { PageHead } from '../../components/page-head'
 import { DetailNote } from '../../components/record-detail-sections'
 import { Drawer, DrawerContent, DrawerTitle } from '../../components/ui/drawer'
@@ -39,11 +40,10 @@ export function ProjectDetail({ id }: { id: string }): ReactNode {
             <DetailNote title="Notes">{p.notes}</DetailNote>
             {links.data ? (
               <>
-                <LinkedRecords
-                  title="Tasks"
-                  records={links.data.tasks}
+                <LinkedTasks
+                  tasks={links.data.tasks}
                   onUnlink={onUnlink}
-                  onOpenRecord={(record) => setSelectedTaskId(record.id)}
+                  onOpenTask={(task) => setSelectedTaskId(task.id)}
                 />
                 <LinkedRecords title="People" records={links.data.people} onUnlink={onUnlink} />
                 <LinkedRecords title="Organizations" records={links.data.organizations} onUnlink={onUnlink} />

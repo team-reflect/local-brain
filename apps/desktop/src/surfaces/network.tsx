@@ -4,6 +4,7 @@ import { X } from 'lucide-react'
 import { Badge } from '../components/badge'
 import { DataList, type Column } from '../components/data-list'
 import { EmptyState } from '../components/empty-state'
+import { PageHead } from '../components/page-head'
 import { Drawer, DrawerContent, DrawerTitle } from '../components/ui/drawer'
 import { cn } from '../lib/utils'
 import { useOrganizations, usePeople } from '../lib/queries'
@@ -25,7 +26,7 @@ type NetworkDetail =
   | { kind: 'organization'; id: string }
 
 export function NetworkSurface({ tab, detail }: { tab: NetworkTab; detail?: NetworkDetail }): ReactNode {
-  const { navigate } = useRouter()
+  const { navigate, back, canBack } = useRouter()
   const people = usePeople()
   const organizations = useOrganizations()
 
@@ -94,64 +95,77 @@ export function NetworkSurface({ tab, detail }: { tab: NetworkTab; detail?: Netw
 
   return (
     <>
-      {tab === 'graph' ? (
-        <div
-          className="relative mx-auto h-full min-h-0 max-w-6xl overflow-hidden"
-          data-testid="network-graph-layout"
-        >
-          <NetworkTabs
-            tab={tab}
-            onSelect={(nextTab) => navigate({ kind: 'network', tab: nextTab })}
-            className="absolute left-0 top-0 z-10 w-40 border-l border-border bg-background/95 py-1"
-          />
-          <GraphSurface showHeader={false} className="max-w-none" />
-        </div>
-      ) : (
-        <div
-          className="mx-auto grid h-full min-h-0 max-w-6xl grid-cols-[10rem_minmax(0,1fr)] gap-6"
-          data-testid="network-list-layout"
-        >
-          <NetworkTabs
-            tab={tab}
-            onSelect={(nextTab) => navigate({ kind: 'network', tab: nextTab })}
-            className="h-fit border-l border-border py-1"
-          />
-          <div className="min-h-0 min-w-0">
-            {tab === 'people' ? (
-              <DataList
-                rows={people.data ?? []}
-                columns={columns}
-                rowKey={(person) => person.id}
-                isLoading={people.isLoading}
-                onRowClick={(person) => navigate({ kind: 'person', id: person.id })}
-                empty={<EmptyState title="No people yet" />}
-                virtualize
-                estimateRowHeight={40}
-              />
-            ) : (
-              <DataList
-                rows={organizations.data ?? []}
-                columns={orgColumns}
-                rowKey={(org) => org.id}
-                isLoading={organizations.isLoading}
-                onRowClick={(org) => navigate({ kind: 'organization', id: org.id })}
-                empty={<EmptyState title="No organizations yet" />}
-                virtualize
-                estimateRowHeight={40}
-              />
-            )}
+      <div className="mx-auto flex h-full min-h-0 max-w-6xl flex-col gap-4">
+        <PageHead eyebrow="Workspace" title="Network" />
+        {tab === 'graph' ? (
+          <div
+            className="relative h-full min-h-0 flex-1 overflow-hidden"
+            data-testid="network-graph-layout"
+          >
+            <NetworkTabs
+              tab={tab}
+              onSelect={(nextTab) => navigate({ kind: 'network', tab: nextTab })}
+              className="absolute left-0 top-0 z-10 w-40 border-l border-border bg-background/95 py-1"
+            />
+            <GraphSurface showHeader={false} className="max-w-none" />
           </div>
-        </div>
-      )}
+        ) : (
+          <div
+            className="grid min-h-0 flex-1 grid-cols-[10rem_minmax(0,1fr)] gap-6"
+            data-testid="network-list-layout"
+          >
+            <NetworkTabs
+              tab={tab}
+              onSelect={(nextTab) => navigate({ kind: 'network', tab: nextTab })}
+              className="h-fit border-l border-border py-1"
+            />
+            <div className="min-h-0 min-w-0">
+              {tab === 'people' ? (
+                <DataList
+                  rows={people.data ?? []}
+                  columns={columns}
+                  rowKey={(person) => person.id}
+                  isLoading={people.isLoading}
+                  error={people.error}
+                  errorTitle="Could not load people"
+                  onRetry={() => void people.refetch()}
+                  onRowClick={(person) => navigate({ kind: 'person', id: person.id })}
+                  empty={<EmptyState title="No people yet" />}
+                  virtualize
+                  estimateRowHeight={40}
+                />
+              ) : (
+                <DataList
+                  rows={organizations.data ?? []}
+                  columns={orgColumns}
+                  rowKey={(org) => org.id}
+                  isLoading={organizations.isLoading}
+                  error={organizations.error}
+                  errorTitle="Could not load organizations"
+                  onRetry={() => void organizations.refetch()}
+                  onRowClick={(org) => navigate({ kind: 'organization', id: org.id })}
+                  empty={<EmptyState title="No organizations yet" />}
+                  virtualize
+                  estimateRowHeight={40}
+                />
+              )}
+            </div>
+          </div>
+        )}
+      </div>
       {detail ? (
         <NetworkDetailDrawer
           detail={detail}
-          onClose={() =>
+          onClose={() => {
+            if (canBack) {
+              back()
+              return
+            }
             navigate({
               kind: 'network',
               tab: detail.kind === 'person' ? 'people' : 'organizations',
             })
-          }
+          }}
         />
       ) : null}
     </>
