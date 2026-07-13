@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { Graph } from '@local-brain/core'
 import { Checkbox } from '../components/ui/checkbox'
@@ -144,7 +144,9 @@ export function GraphSurface({
     })
   }
 
-  useEffect(() => {
+  // The async layout can commit the SVG after render. Install its non-passive
+  // listener before paint so the first wheel event cannot slip through.
+  useLayoutEffect(() => {
     const svg = svgRef.current
     if (!svg || !layout) return undefined
 
