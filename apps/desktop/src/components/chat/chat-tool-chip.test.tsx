@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { installFakeBridge, renderWithProviders } from '../../test/utils'
 import {
   ChatToolChip,
   isToolPartAwaitingApproval,
@@ -11,6 +13,47 @@ import {
 
 function renderChip(part: ToolPart): void {
   render(<ChatToolChip part={part} />)
+}
+
+const taskRow = {
+  id: 'task-1',
+  title: 'Send the investor update',
+  description: null,
+  status: 'open',
+  priority: null,
+  project_id: null,
+  due_at: '2026-07-14',
+  scheduled_for: null,
+  completed_at: null,
+  origin_document_id: null,
+  origin_interaction_id: null,
+  source_record_type: null,
+  source_record_id: null,
+  created_at: '2026-07-01T00:00:00.000Z',
+  updated_at: '2026-07-12T00:00:00.000Z',
+  archived_at: null,
+}
+
+function renderTaskChip(
+  part: ToolPart,
+  options: {
+    row?: typeof taskRow | null
+    onApprovalResponse?: (response: { id: string; approved: boolean }) => void
+  } = {},
+): void {
+  installFakeBridge({
+    query: (sql, params) => {
+      if (!sql.includes('from "tasks"')) return []
+      const row = options.row === undefined ? taskRow : options.row
+      return row && params[0] === row.id ? [row] : []
+    },
+  })
+  renderWithProviders(
+    <ChatToolChip
+      part={part}
+      {...(options.onApprovalResponse ? { onApprovalResponse: options.onApprovalResponse } : {})}
+    />,
+  )
 }
 
 describe('toolNameFromPart', () => {
@@ -313,6 +356,152 @@ describe('ChatToolChip — get_records', () => {
 })
 
 describe('ChatToolChip — write tools', () => {
+  it('does not query partial task ids while tool input is still streaming', () => {
+    let taskQueries = 0
+    installFakeBridge({
+      query: (sql) => {
+        if (sql.includes('from "tasks"')) taskQueries += 1
+        return []
+      },
+    })
+    renderWithProviders(
+      <ChatToolChip
+        part={{
+          type: 'tool-complete_task',
+          state: 'input-streaming',
+          input: { id: '01K' },
+        }}
+      />,
+    )
+
+    expect(screen.getByText('Complete task')).not.toBeNull()
+    expect(taskQueries).toBe(0)
+  })
+
+  it('revalidates a cached task before enabling approval', async () => {
+    let resolveTaskRows: (rows: unknown[]) => void = () => {}
+    const taskRows = new Promise<unknown[]>((resolve) => {
+      resolveTaskRows = resolve
+    })
+    installFakeBridge({
+      query: (sql) => sql.includes('from "tasks"') ? taskRows : [],
+    })
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    })
+    queryClient.setQueryData(['task', 'task-1'], {
+      id: 'task-1',
+      title: 'Stale cached title',
+    })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ChatToolChip
+          part={{
+            type: 'tool-complete_task',
+            state: 'approval-requested',
+            input: { id: 'task-1' },
+            approval: { id: 'approval-cached' },
+          }}
+        />
+      </QueryClientProvider>,
+    )
+
+    expect(screen.getByText('Loading task…')).not.toBeNull()
+    expect(screen.queryByText('Stale cached title')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Approve complete task' })).toHaveProperty('disabled', true)
+
+    await act(async () => {
+      resolveTaskRows([{ ...taskRow, title: 'Fresh task title' }])
+      await taskRows
+    })
+    expect(await screen.findByText('Fresh task title')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Approve complete task: Fresh task title' })).toHaveProperty(
+      'disabled',
+      false,
+    )
+  })
+
+  it('shows the current task title instead of its id before completion', async () => {
+    const onApprovalResponse = vi.fn()
+    renderTaskChip(
+      {
+        type: 'tool-complete_task',
+        toolCallId: 'tc-complete',
+        state: 'approval-requested',
+        input: { id: 'task-1', completedAt: '2026-07-13T00:00:00Z' },
+        approval: { id: 'approval-complete' },
+      },
+      { onApprovalResponse },
+    )
+
+    expect(screen.getByText('Loading task…')).not.toBeNull()
+    const loadingApprove = screen.getByRole('button', { name: 'Approve complete task' })
+    const loadingDeny = screen.getByRole('button', { name: 'Deny complete task' })
+    expect(loadingApprove).toHaveProperty('disabled', true)
+    expect(loadingDeny).toHaveProperty('disabled', false)
+    expect(screen.queryByText('task-1')).toBeNull()
+
+    expect(await screen.findByText('Send the investor update')).not.toBeNull()
+    expect(screen.queryByText('task-1')).toBeNull()
+    expect(screen.getByText('completedAt')).not.toBeNull()
+    expect(screen.getByText('2026-07-13T00:00:00Z')).not.toBeNull()
+
+    const approve = screen.getByRole('button', {
+      name: 'Approve complete task: Send the investor update',
+    })
+    expect(approve).toHaveProperty('disabled', false)
+    fireEvent.click(approve)
+    expect(onApprovalResponse).toHaveBeenCalledWith({ id: 'approval-complete', approved: true })
+  })
+
+  it('shows that completion uses the current time when no timestamp is supplied', async () => {
+    renderTaskChip({
+      type: 'tool-complete_task',
+      state: 'approval-requested',
+      input: { id: 'task-1' },
+      approval: { id: 'approval-complete-now' },
+    })
+
+    expect(await screen.findByText('Send the investor update')).not.toBeNull()
+    expect(screen.getByText('completedAt')).not.toBeNull()
+    expect(screen.getByText('Now')).not.toBeNull()
+  })
+
+  it('fails closed when the target task cannot be loaded while keeping denial available', async () => {
+    const onApprovalResponse = vi.fn()
+    renderTaskChip(
+      {
+        type: 'tool-complete_task',
+        state: 'approval-requested',
+        input: { id: 'missing-task' },
+        approval: { id: 'approval-missing' },
+      },
+      { row: null, onApprovalResponse },
+    )
+
+    expect(await screen.findByText('Task unavailable — verify the ID below')).not.toBeNull()
+    expect(screen.getByText('missing-task')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Approve complete task' })).toHaveProperty('disabled', true)
+
+    const deny = screen.getByRole('button', { name: 'Deny complete task' })
+    expect(deny).toHaveProperty('disabled', false)
+    fireEvent.click(deny)
+    expect(onApprovalResponse).toHaveBeenCalledWith({ id: 'approval-missing', approved: false })
+  })
+
+  it('resolves the exact task id without trimming the mutation target', async () => {
+    renderTaskChip({
+      type: 'tool-complete_task',
+      state: 'approval-requested',
+      input: { id: ' task-1 ' },
+      approval: { id: 'approval-spaced-id' },
+    })
+
+    expect(await screen.findByText('Task unavailable — verify the ID below')).not.toBeNull()
+    expect(screen.queryByText('Send the investor update')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Approve complete task' })).toHaveProperty('disabled', true)
+  })
+
   it('renders every normalized approval field with icon-only controls', () => {
     const onApprovalResponse = vi.fn()
     render(
@@ -374,17 +563,20 @@ describe('ChatToolChip — write tools', () => {
     expect(screen.getByText('0.8')).not.toBeNull()
   })
 
-  it('renders update approvals as a field diff including explicit clears', () => {
-    renderChip({
+  it('identifies update targets while preserving the complete field diff', async () => {
+    renderTaskChip({
       type: 'tool-update_task',
       toolCallId: 'tc-8',
       state: 'approval-requested',
-      input: { id: 'task-1', status: 'done', projectId: null },
+      input: { id: 'task-1', title: 'Send the final investor update', status: 'done', projectId: null },
       approval: { id: 'approval-3' },
     })
 
     expect(screen.getByText('Update task')).not.toBeNull()
-    expect(screen.getByText('task-1')).not.toBeNull()
+    expect(await screen.findByText('Send the investor update')).not.toBeNull()
+    expect(screen.queryByText('task-1')).toBeNull()
+    expect(screen.getByText('title')).not.toBeNull()
+    expect(screen.getByText('Send the final investor update')).not.toBeNull()
     expect(screen.getByText('status')).not.toBeNull()
     expect(screen.getByText('done')).not.toBeNull()
     expect(screen.getByText('projectId')).not.toBeNull()
@@ -475,8 +667,8 @@ describe('ChatToolChip — write tools', () => {
     expect(screen.queryByText(/memory-1/)).toBeNull()
   })
 
-  it('renders denied write output as a stable row', () => {
-    renderChip({
+  it('retains resolved task context after denial', async () => {
+    renderTaskChip({
       type: 'tool-update_task',
       toolCallId: 'tc-6',
       state: 'output-denied',
@@ -485,7 +677,10 @@ describe('ChatToolChip — write tools', () => {
 
     expect(screen.getByText('Update task')).not.toBeNull()
     expect(screen.getByText('Denied')).not.toBeNull()
-    expect(screen.getByText('task-1')).not.toBeNull()
+    expect(await screen.findByText('Send the investor update')).not.toBeNull()
+    expect(screen.queryByText('task-1')).toBeNull()
+    expect(screen.getByText('status')).not.toBeNull()
+    expect(screen.getByText('done')).not.toBeNull()
   })
 })
 

@@ -124,7 +124,7 @@ const ChatMessageRow = memo(function ChatMessageRow({
     <Message>
       <MessageContent>
         <Bubble variant="ghost" className="max-w-full">
-          <BubbleContent className="w-full max-w-full">
+          <BubbleContent className="flex w-full max-w-full flex-col gap-2">
             {message.parts.map((part, index) => {
               const partRecord = part as Record<string, unknown>
               const partType = String(partRecord['type'] ?? '')

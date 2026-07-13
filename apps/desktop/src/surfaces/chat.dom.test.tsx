@@ -444,6 +444,41 @@ describe('ChatSurface', () => {
     expect(screen.getByText(/3 projects/)).not.toBeNull()
   })
 
+  it('adds explicit spacing between stacked approval cards', async () => {
+    chatMocks.messages = [
+      {
+        id: 'a1',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'tool-create_task',
+            toolCallId: 'tc-1',
+            state: 'approval-requested',
+            input: { title: 'Send the investor update' },
+            approval: { id: 'approval-1' },
+          },
+          {
+            type: 'tool-create_task',
+            toolCallId: 'tc-2',
+            state: 'approval-requested',
+            input: { title: 'Schedule the review' },
+            approval: { id: 'approval-2' },
+          },
+        ],
+      } as unknown as UIMessage,
+    ]
+    await renderReadyChat()
+
+    const approvals = screen.getAllByText('Create task')
+    expect(approvals).toHaveLength(2)
+    const content = approvals[0]?.closest('[data-slot="bubble-content"]')
+    expect(content).not.toBeNull()
+    expect(approvals[1]?.closest('[data-slot="bubble-content"]')).toBe(content)
+    expect(content?.classList.contains('flex')).toBe(true)
+    expect(content?.classList.contains('flex-col')).toBe(true)
+    expect(content?.classList.contains('gap-2')).toBe(true)
+  })
+
   it('executes approved write tools immediately and updates the approval chip', async () => {
     const calls: Array<{ command: string; args: Record<string, unknown> }> = []
     installFakeBridge({
