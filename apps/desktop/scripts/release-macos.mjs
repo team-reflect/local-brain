@@ -223,9 +223,62 @@ export function createUpdaterManifest({
   }
 }
 
+/** Project a GitHub asset URL onto its final tagged release URL. */
+export function releaseAssetUrlForTag({ assetUrl, tag }) {
+  let url
+  try {
+    url = new URL(assetUrl)
+  } catch {
+    return null
+  }
+  if (
+    url.origin !== 'https://github.com' ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    !tag ||
+    tag.includes('/')
+  ) {
+    return null
+  }
+
+  const parts = url.pathname.split('/')
+  if (
+    parts.length !== 7 ||
+    parts[0] !== '' ||
+    !parts[1] ||
+    !parts[2] ||
+    parts[3] !== 'releases' ||
+    parts[4] !== 'download' ||
+    !parts[5] ||
+    !parts[6]
+  ) {
+    return null
+  }
+
+  const [, owner, repo, , , , assetName] = parts
+  let sourceTag
+  try {
+    sourceTag = decodeURIComponent(parts[5])
+  } catch {
+    return null
+  }
+  const isDraftTag = sourceTag.startsWith('untagged-') && sourceTag.length > 'untagged-'.length
+  if (sourceTag !== tag && !isDraftTag) return null
+
+  return `https://github.com/${owner}/${repo}/releases/download/${tag}/${assetName}`
+}
+
 /** Return manifest payload URLs that do not match an uploaded release asset. */
-export function missingUpdaterAssetUrls({ manifest, assetUrls }) {
-  const publishedUrls = new Set(assetUrls)
+export function missingUpdaterAssetUrls({ manifest, assetUrls, tag }) {
+  // Draft assets use a temporary `untagged-*` release segment. Canonicalize
+  // only that location while preserving GitHub's exact repo and asset name.
+  const publishedUrls = new Set(
+    assetUrls
+      .map((assetUrl) => releaseAssetUrlForTag({ assetUrl, tag }))
+      .filter((assetUrl) => assetUrl !== null),
+  )
   return Object.values(manifest.platforms)
     .map((platform) => platform.url)
     .filter((url) => !publishedUrls.has(url))
@@ -267,6 +320,7 @@ function verifyReleaseUpdaterAssets({ tag, manifestPath }) {
   const missingUrls = missingUpdaterAssetUrls({
     manifest,
     assetUrls: assets.map((asset) => asset.url),
+    tag,
   })
   if (missingUrls.length > 0) {
     fail(`${tag} updater manifest references missing release asset(s):\n  ${missingUrls.join('\n  ')}`)
