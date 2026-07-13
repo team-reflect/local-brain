@@ -1,6 +1,7 @@
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 
 import {
+  completeValidatedRelease,
   createReleaseArgs,
   createFinalizeReleaseArgs,
   createUpdaterManifest,
@@ -75,6 +76,68 @@ test('finalizing a prerelease keeps it out of the stable latest channel', () => 
     '--latest=false',
     '--draft=false',
   ])
+})
+
+test('release completion validates before publishing', () => {
+  const calls = []
+  const finalizeResult = { status: 0, stdout: 'published' }
+  const result = completeValidatedRelease({
+    draft: false,
+    manifestPath: '/tmp/latest.json',
+    prerelease: false,
+    tag: 'v0.2.0',
+    verifyRelease: (input) => calls.push(['verify', input]),
+    finalizeRelease: (args) => {
+      calls.push(['finalize', args])
+      return finalizeResult
+    },
+  })
+
+  expect(calls).toEqual([
+    ['verify', { tag: 'v0.2.0', manifestPath: '/tmp/latest.json' }],
+    [
+      'finalize',
+      ['release', 'edit', 'v0.2.0', '--prerelease=false', '--latest', '--draft=false'],
+    ],
+  ])
+  expect(result).toBe(finalizeResult)
+})
+
+test('a validation failure prevents release publication', () => {
+  const finalizeRelease = vi.fn()
+  expect(() =>
+    completeValidatedRelease({
+      draft: false,
+      manifestPath: '/tmp/latest.json',
+      prerelease: false,
+      tag: 'v0.2.0',
+      verifyRelease: () => {
+        throw new Error('missing updater asset')
+      },
+      finalizeRelease,
+    }),
+  ).toThrow('missing updater asset')
+  expect(finalizeRelease).not.toHaveBeenCalled()
+})
+
+test('an explicit draft is validated but never published', () => {
+  const verifyRelease = vi.fn()
+  const finalizeRelease = vi.fn()
+  const result = completeValidatedRelease({
+    draft: true,
+    manifestPath: '/tmp/latest.json',
+    prerelease: true,
+    tag: 'v0.2.0-beta.15',
+    verifyRelease,
+    finalizeRelease,
+  })
+
+  expect(verifyRelease).toHaveBeenCalledWith({
+    tag: 'v0.2.0-beta.15',
+    manifestPath: '/tmp/latest.json',
+  })
+  expect(finalizeRelease).not.toHaveBeenCalled()
+  expect(result).toBeNull()
 })
 
 test('GitHub asset names replace spaces with dots', () => {

@@ -223,7 +223,7 @@ export function createUpdaterManifest({
   }
 }
 
-/** Return manifest payload URLs that do not match a published release asset. */
+/** Return manifest payload URLs that do not match an uploaded release asset. */
 export function missingUpdaterAssetUrls({ manifest, assetUrls }) {
   const publishedUrls = new Set(assetUrls)
   return Object.values(manifest.platforms)
@@ -526,6 +526,24 @@ export function createFinalizeReleaseArgs({ prerelease, tag }) {
   return args
 }
 
+/** Validate an uploaded draft, then publish it unless the caller requested a draft. */
+export function completeValidatedRelease({
+  draft,
+  manifestPath,
+  prerelease,
+  tag,
+  verifyRelease = verifyReleaseUpdaterAssets,
+  finalizeRelease = (args) =>
+    spawnSync('gh', args, {
+      encoding: 'utf8',
+      stdio: ['inherit', 'pipe', 'inherit'],
+    }),
+}) {
+  verifyRelease({ tag, manifestPath })
+  if (draft) return null
+  return finalizeRelease(createFinalizeReleaseArgs({ prerelease, tag }))
+}
+
 /**
  * Build a signed + notarized DMG and upload it to a new GitHub release tagged
  * v<version> (from tauri.conf.json). A version with a prerelease segment
@@ -558,16 +576,13 @@ function publish({ draft }) {
   })
   const result = spawnSync('gh', releaseArgs, { encoding: 'utf8', stdio: ['inherit', 'pipe', 'inherit'] })
   if (result.status !== 0) fail(`creating the GitHub release failed${result.stdout ? `\n${result.stdout.trim()}` : ''}`)
-  verifyReleaseUpdaterAssets({ tag, manifestPath })
+  const finalize = completeValidatedRelease({ draft, manifestPath, prerelease, tag })
 
   if (draft) {
     log(`draft release created: ${result.stdout.trim()}`)
     return
   }
-  const finalize = spawnSync('gh', createFinalizeReleaseArgs({ prerelease, tag }), {
-    encoding: 'utf8',
-    stdio: ['inherit', 'pipe', 'inherit'],
-  })
+  if (finalize === null) fail('validated release was not finalized')
   if (finalize.status !== 0) {
     fail(`publishing the validated GitHub release failed${finalize.stdout ? `\n${finalize.stdout.trim()}` : ''}`)
   }
