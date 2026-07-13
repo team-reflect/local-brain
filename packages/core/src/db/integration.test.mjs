@@ -24,6 +24,7 @@ import {
   getPersonLinks,
   getProjectLinks,
   getSelf,
+  getTask,
   getTaskLinks,
   ingestDocument,
   ingestInteraction,
@@ -38,6 +39,7 @@ import {
   listTasks,
   newId,
   seedDemoData,
+  setTaskCompleted,
   updateDocument,
   updateInteraction,
   ValidationError,
@@ -91,6 +93,31 @@ describe('core domain actions (real SQLite round-trip)', () => {
     expect(ids).toContain(openTask)
     expect(ids).not.toContain(doneTask)
     expect(ids).not.toContain(archivedTask)
+  })
+
+  it('completes and reopens a task symmetrically', async () => {
+    const taskId = await createTask({ title: 'Reversible task', status: 'waiting' })
+
+    await setTaskCompleted(taskId, true, '2026-07-13T09:30:00.000Z')
+    expect(await getTask(taskId)).toMatchObject({
+      status: 'done',
+      completedAt: '2026-07-13T09:30:00.000Z',
+    })
+
+    await setTaskCompleted(taskId, false)
+    expect(await getTask(taskId)).toMatchObject({ status: 'open', completedAt: null })
+  })
+
+  it('orders undated tasks after dated tasks', async () => {
+    await createTask({ title: 'Undated', status: 'open' })
+    await createTask({ title: 'Later', status: 'open', dueAt: '2026-07-20' })
+    await createTask({ title: 'Sooner', status: 'open', dueAt: '2026-07-14' })
+
+    expect((await listTasks({ status: 'open' })).map((task) => task.title)).toEqual([
+      'Sooner',
+      'Later',
+      'Undated',
+    ])
   })
 
   it('shows project tasks through the canonical task project_id', async () => {

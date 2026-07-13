@@ -2463,7 +2463,7 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
                 "assigneeFlag": "Use --assignee <person-id> (repeatable) to mark someone as responsible for the task. Creates a task_people row with role='assignee'. Distinct from generic --link person:<id> which creates a generic person link.",
             },
             "tasksUpdate": {
-                "usage": "brain --json tasks update <task-id> [--title <title>] [--description <text>] [--status open|waiting|done|cancelled] [--due-at <iso>] [--scheduled-for <date>] [--link kind:id...] --evidence record_type:id#0",
+                "usage": "brain --json tasks update <task-id> [--title <title>] [--description <text>] [--status open|in_progress|waiting|blocked|done|cancelled] [--due-at <iso>] [--scheduled-for <date>] [--link kind:id...] --evidence record_type:id#0",
                 "purpose": "Evidence-backed maintenance for existing tasks when an imported source clearly advances the task state. Interaction links also fill origin_interaction_id when blank.",
                 "requiresEvidence": true,
             },

@@ -6,6 +6,7 @@ export interface CommandContext {
   back: () => void
   forward: () => void
   openPalette: () => void
+  openTaskCreate: () => void
 }
 
 /**

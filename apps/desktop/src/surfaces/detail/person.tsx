@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { DetailFields } from '../../components/detail-fields'
 import { DetailPage } from '../../components/detail-page'
 import { LinkedRecords } from '../../components/linked-records'
+import { LinkedTasks } from '../../components/linked-tasks'
 import { MemoryList } from '../../components/memory-list'
 import { PageHead } from '../../components/page-head'
 import {
@@ -90,7 +91,7 @@ export function PersonDetail({ id }: { id: string }): ReactNode {
               <>
                 <LinkedRecords title="Organizations" records={links.data.organizations} onUnlink={onUnlink} />
                 <LinkedRecords title="Projects" records={links.data.projects} onUnlink={onUnlink} />
-                <LinkedRecords title="Tasks" records={links.data.tasks} onUnlink={onUnlink} />
+                <LinkedTasks tasks={links.data.tasks} onUnlink={onUnlink} />
                 <LinkedRecords title="Interactions" records={links.data.interactions} onUnlink={onUnlink} />
                 <LinkedRecords title="Documents" records={links.data.documents} onUnlink={onUnlink} />
               </>

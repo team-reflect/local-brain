@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { AlertCircle } from 'lucide-react'
+import { useBlockingModal } from '../lib/commands/use-blocking-modal'
 import { useCreateProject } from '../lib/queries'
 import { Button } from './button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
@@ -18,6 +19,8 @@ export function ProjectCreateDialog({ open, onClose, onCreated }: ProjectCreateD
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [error, setError] = useState<string | null>(null)
+
+  useBlockingModal(open)
 
   useEffect(() => {
     if (!open) return
@@ -46,13 +49,24 @@ export function ProjectCreateDialog({ open, onClose, onCreated }: ProjectCreateD
   }
 
   return (
-    <Dialog open={open} onOpenChange={(next) => (next ? undefined : onClose())}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && !createProject.isPending) onClose()
+      }}
+    >
       <DialogContent
         className="w-[22rem]"
         aria-describedby="new-project-description"
         onOpenAutoFocus={(event) => {
           event.preventDefault()
           inputRef.current?.focus()
+        }}
+        onEscapeKeyDown={(event) => {
+          if (createProject.isPending) event.preventDefault()
+        }}
+        onInteractOutside={(event) => {
+          if (createProject.isPending) event.preventDefault()
         }}
       >
         <DialogTitle className="border-b border-border px-4 py-2.5">New project</DialogTitle>
@@ -82,8 +96,8 @@ export function ProjectCreateDialog({ open, onClose, onCreated }: ProjectCreateD
             />
           </label>
           {error ? (
-            <p className="flex items-center gap-1.5 text-xs text-destructive">
-              <AlertCircle className="size-3.5" />
+            <p role="alert" className="flex items-center gap-1.5 text-xs text-destructive">
+              <AlertCircle aria-hidden className="size-3.5" />
               {error}
             </p>
           ) : null}

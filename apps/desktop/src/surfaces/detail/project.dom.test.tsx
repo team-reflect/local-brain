@@ -68,7 +68,14 @@ function installProjectBridge(overrides: Partial<ProjectRow> = {}): void {
       }
       if (sql.includes('from "tasks"') && sql.includes('where "id" = ?')) return [taskRow]
       if (sql.includes('from "tasks"') && sql.includes('"tasks"."project_id" = ?')) {
-        return [{ id: 't1', title: 'Send deck', subtitle: 'open' }]
+        return [{
+          id: 't1',
+          title: 'Send deck',
+          status: 'open',
+          dueAt: null,
+          scheduledFor: null,
+          priority: null,
+        }]
       }
       if (sql.includes('from "people"') && sql.includes('inner join "project_people"')) {
         return [{ id: 'p1', title: 'Ada Lovelace', subtitle: 'advisor' }]

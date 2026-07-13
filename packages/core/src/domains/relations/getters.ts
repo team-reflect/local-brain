@@ -1,6 +1,6 @@
 import { sql } from 'kysely'
 import { db } from '../../db/client'
-import type { LinkedRecord, RecordKind } from './types'
+import type { LinkedRecord, LinkedTask, RecordKind } from './types'
 
 /**
  * Read-only "neighborhood" queries: for a given record, the records linked to it
@@ -22,6 +22,28 @@ function asLinks(kind: RecordKind, rows: RawRow[]): LinkedRecord[] {
     id: row.id,
     title: row.title ?? '(untitled)',
     subtitle: row.subtitle,
+  }))
+}
+
+interface RawTaskRow {
+  id: string
+  title: string
+  status: string
+  dueAt: string | null
+  scheduledFor: string | null
+  priority: number | null
+}
+
+function asTaskLinks(rows: RawTaskRow[]): LinkedTask[] {
+  return rows.map((row) => ({
+    kind: 'task',
+    id: row.id,
+    title: row.title,
+    subtitle: row.status,
+    status: row.status,
+    dueAt: row.dueAt,
+    scheduledFor: row.scheduledFor,
+    priority: row.priority,
   }))
 }
 
@@ -49,7 +71,7 @@ async function getAssetLinks(recordType: string, recordId: string): Promise<Link
 export interface PersonLinks {
   organizations: LinkedRecord[]
   projects: LinkedRecord[]
-  tasks: LinkedRecord[]
+  tasks: LinkedTask[]
   interactions: LinkedRecord[]
   documents: LinkedRecord[]
 }
@@ -78,7 +100,14 @@ export async function getPersonLinks(personId: string): Promise<PersonLinks> {
       .where('taskPeople.personId', '=', personId)
       .where('tasks.archivedAt', 'is', null)
       .orderBy('tasks.title', 'asc')
-      .select(['tasks.id as id', 'tasks.title as title', 'tasks.status as subtitle'])
+      .select([
+        'tasks.id',
+        'tasks.title',
+        'tasks.status',
+        'tasks.dueAt',
+        'tasks.scheduledFor',
+        'tasks.priority',
+      ])
       .execute(),
     db
       .selectFrom('interactions')
@@ -100,7 +129,7 @@ export async function getPersonLinks(personId: string): Promise<PersonLinks> {
   return {
     organizations: asLinks('organization', organizations),
     projects: asLinks('project', projects),
-    tasks: asLinks('task', tasks),
+    tasks: asTaskLinks(tasks),
     interactions: asLinks('interaction', interactions),
     documents: asLinks('document', documents),
   }
@@ -111,7 +140,7 @@ export interface OrganizationLinks {
   projects: LinkedRecord[]
   documents: LinkedRecord[]
   interactions: LinkedRecord[]
-  tasks: LinkedRecord[]
+  tasks: LinkedTask[]
 }
 
 export async function getOrganizationLinks(organizationId: string): Promise<OrganizationLinks> {
@@ -154,7 +183,14 @@ export async function getOrganizationLinks(organizationId: string): Promise<Orga
       .where('taskOrganizations.organizationId', '=', organizationId)
       .where('tasks.archivedAt', 'is', null)
       .orderBy('tasks.title', 'asc')
-      .select(['tasks.id as id', 'tasks.title as title', 'tasks.status as subtitle'])
+      .select([
+        'tasks.id',
+        'tasks.title',
+        'tasks.status',
+        'tasks.dueAt',
+        'tasks.scheduledFor',
+        'tasks.priority',
+      ])
       .execute(),
   ])
   return {
@@ -162,13 +198,13 @@ export async function getOrganizationLinks(organizationId: string): Promise<Orga
     projects: asLinks('project', projects),
     documents: asLinks('document', documents),
     interactions: asLinks('interaction', interactions),
-    tasks: asLinks('task', tasks),
+    tasks: asTaskLinks(tasks),
   }
 }
 
 export interface ProjectLinks {
   people: LinkedRecord[]
-  tasks: LinkedRecord[]
+  tasks: LinkedTask[]
   documents: LinkedRecord[]
   interactions: LinkedRecord[]
   organizations: LinkedRecord[]
@@ -188,8 +224,16 @@ export async function getProjectLinks(projectId: string): Promise<ProjectLinks> 
       .selectFrom('tasks')
       .where('tasks.projectId', '=', projectId)
       .where('tasks.archivedAt', 'is', null)
+      .orderBy(sql`tasks.due_at IS NULL`)
       .orderBy('tasks.dueAt', 'asc')
-      .select(['tasks.id as id', 'tasks.title as title', 'tasks.status as subtitle'])
+      .select([
+        'tasks.id',
+        'tasks.title',
+        'tasks.status',
+        'tasks.dueAt',
+        'tasks.scheduledFor',
+        'tasks.priority',
+      ])
       .execute(),
     db
       .selectFrom('documents')
@@ -218,7 +262,7 @@ export async function getProjectLinks(projectId: string): Promise<ProjectLinks> 
   ])
   return {
     people: asLinks('person', people),
-    tasks: asLinks('task', tasks),
+    tasks: asTaskLinks(tasks),
     documents: asLinks('document', documents),
     interactions: asLinks('interaction', interactions),
     organizations: asLinks('organization', organizations),
@@ -292,7 +336,7 @@ export interface DocumentLinks {
   people: LinkedRecord[]
   projects: LinkedRecord[]
   interactions: LinkedRecord[]
-  tasks: LinkedRecord[]
+  tasks: LinkedTask[]
   assets: LinkedRecord[]
 }
 
@@ -328,7 +372,14 @@ export async function getDocumentLinks(documentId: string): Promise<DocumentLink
       .where('taskDocuments.documentId', '=', documentId)
       .where('tasks.archivedAt', 'is', null)
       .orderBy('tasks.title', 'asc')
-      .select(['tasks.id as id', 'tasks.title as title', 'tasks.status as subtitle'])
+      .select([
+        'tasks.id',
+        'tasks.title',
+        'tasks.status',
+        'tasks.dueAt',
+        'tasks.scheduledFor',
+        'tasks.priority',
+      ])
       .execute(),
     getAssetLinks('document', documentId),
   ])
@@ -336,7 +387,7 @@ export async function getDocumentLinks(documentId: string): Promise<DocumentLink
     people: asLinks('person', people),
     projects: asLinks('project', projects),
     interactions: asLinks('interaction', interactions),
-    tasks: asLinks('task', tasks),
+    tasks: asTaskLinks(tasks),
     assets,
   }
 }
@@ -345,7 +396,7 @@ export interface InteractionLinks {
   projects: LinkedRecord[]
   organizations: LinkedRecord[]
   documents: LinkedRecord[]
-  tasks: LinkedRecord[]
+  tasks: LinkedTask[]
   assets: LinkedRecord[]
 }
 
@@ -381,7 +432,14 @@ export async function getInteractionLinks(interactionId: string): Promise<Intera
       .where('taskInteractions.interactionId', '=', interactionId)
       .where('tasks.archivedAt', 'is', null)
       .orderBy('tasks.title', 'asc')
-      .select(['tasks.id as id', 'tasks.title as title', 'tasks.status as subtitle'])
+      .select([
+        'tasks.id',
+        'tasks.title',
+        'tasks.status',
+        'tasks.dueAt',
+        'tasks.scheduledFor',
+        'tasks.priority',
+      ])
       .execute(),
     getAssetLinks('interaction', interactionId),
   ])
@@ -389,7 +447,7 @@ export async function getInteractionLinks(interactionId: string): Promise<Intera
     projects: asLinks('project', projects),
     organizations: asLinks('organization', organizations),
     documents: asLinks('document', documents),
-    tasks: asLinks('task', tasks),
+    tasks: asTaskLinks(tasks),
     assets,
   }
 }

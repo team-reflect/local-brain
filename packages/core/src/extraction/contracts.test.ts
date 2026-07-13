@@ -23,6 +23,16 @@ describe('parseExtractionResult', () => {
   it('rejects an unknown memory kind', () => {
     expect(() => parseExtractionResult({ memories: [{ kind: 'gossip', claim: 'x' }] })).toThrow()
   })
+
+  it('accepts canonical task statuses and rejects scheduling as a status', () => {
+    expect(
+      parseExtractionResult({ tasks: [{ ref: 't1', title: 'Wait', status: 'blocked' }] })
+        .tasks[0]?.status,
+    ).toBe('blocked')
+    expect(() =>
+      parseExtractionResult({ tasks: [{ ref: 't1', title: 'Wait', status: 'scheduled' }] }),
+    ).toThrow()
+  })
 })
 
 describe('validateExtraction', () => {

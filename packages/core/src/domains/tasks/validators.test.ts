@@ -12,6 +12,11 @@ describe('validateNewTask', () => {
   it('rejects a blank title', () => {
     expect(() => validateNewTask({ title: '   ' })).toThrow(ValidationError)
   })
+
+  it('normalizes canonical statuses and rejects unsupported values', () => {
+    expect(validateNewTask({ title: 'Ship it', status: ' IN_PROGRESS ' }).status).toBe('in_progress')
+    expect(() => validateNewTask({ title: 'Ship it', status: 'scheduled' })).toThrow(ValidationError)
+  })
 })
 
 describe('validateTaskPatch', () => {
@@ -25,5 +30,9 @@ describe('validateTaskPatch', () => {
       description: 'Bring the deck',
     })
     expect(validateTaskPatch({ description: '   ' })).toEqual({ description: null })
+  })
+
+  it('rejects unsupported status patches', () => {
+    expect(() => validateTaskPatch({ status: 'canceled' })).toThrow(ValidationError)
   })
 })

@@ -13,7 +13,9 @@ const VARIANT: Record<AlertVariant, string> = {
 /**
  * A small inline status box for form errors, notices, and confirmations. One
  * place owns the border/background/padding so error and success messages look
- * the same wherever they appear (dialogs, settings).
+ * the same wherever they appear (dialogs, settings). Errors and warnings use
+ * an assertive alert role; informational and success feedback is announced
+ * politely as status.
  */
 export function Alert({
   variant = 'info',
@@ -24,9 +26,15 @@ export function Alert({
   className?: string
   children: ReactNode
 }): ReactNode {
+  const role = variant === 'error' || variant === 'warning' ? 'alert' : 'status'
+
   return (
-    <p className={cn('rounded-md border px-3 py-2 text-xs', VARIANT[variant], className)}>
+    <div
+      role={role}
+      aria-atomic="true"
+      className={cn('rounded-md border px-3 py-2 text-xs', VARIANT[variant], className)}
+    >
       {children}
-    </p>
+    </div>
   )
 }

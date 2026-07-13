@@ -1,6 +1,6 @@
 /**
- * A tiny reference-counted registry of open *blocking* modals — currently the
- * first-run onboarding overlay. Global keyboard shortcuts consult
+ * A tiny reference-counted registry of open *blocking* modals, including
+ * onboarding and record-creation dialogs. Global keyboard shortcuts consult
  * {@link blockingModalOpen} so they do not fire (⌘K, navigation, add, …) while a
  * modal owns the screen, matching the modal's pointer blocking for keyboard users.
  */

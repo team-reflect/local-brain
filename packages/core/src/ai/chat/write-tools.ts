@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { TASK_STATUSES } from '../../domains/tasks/lifecycle'
 import {
   createPerson,
   updatePerson,
@@ -74,7 +75,7 @@ function requireAffected(kind: string, action: string, id: string, affected: num
 const taskFields = {
   title: z.string().min(1),
   description: nullableString,
-  status: optionalString,
+  status: z.enum(TASK_STATUSES).optional(),
   priority: optionalNumber,
   projectId: nullableString.describe('Existing project id, or null to clear'),
   dueAt: nullableString.describe('Due date/time string stored as-is, usually ISO 8601'),
@@ -84,7 +85,7 @@ const taskFields = {
 const taskPatchFields = {
   title: optionalString,
   description: nullableString,
-  status: optionalString,
+  status: z.enum(TASK_STATUSES).optional(),
   priority: optionalNumber,
   projectId: nullableString.describe('Existing project id, or null to clear'),
   dueAt: nullableString.describe('Due date/time string stored as-is, usually ISO 8601'),

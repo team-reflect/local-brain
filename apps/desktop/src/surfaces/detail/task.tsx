@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { Task } from '@local-brain/core'
+import { TASK_STATUSES, type Task } from '@local-brain/core'
 import { AlertCircle, Loader2 } from 'lucide-react'
 import { StatusBadge } from '../../components/badge'
 import { DetailPage } from '../../components/detail-page'
@@ -8,9 +8,9 @@ import { InlineEditableSelect } from '../../components/inline-edit-select'
 import { InlineEditableTextarea } from '../../components/inline-edit-textarea'
 import { LinkedRecords } from '../../components/linked-records'
 import { PageHead } from '../../components/page-head'
+import { TaskCompletionControl } from '../../components/task-completion-control'
 import { useProjects, useTask, useTaskLinks, useUnlinkFrom, useUpdateTask } from '../../lib/queries'
 
-const TASK_STATUSES = ['open', 'waiting', 'scheduled', 'done', 'canceled'] as const
 const PRIORITY_OPTIONS = [
   { value: '1', label: 'High' },
   { value: '2', label: 'Normal' },
@@ -246,7 +246,24 @@ function TaskInlineEditor({ task }: { task: Task }): ReactNode {
 
   return (
     <>
-      <PageHead eyebrow="Task" title={displayTitle(form.title)} actions={<SaveIndicator state={saveState} />} />
+      <PageHead
+        eyebrow="Task"
+        title={displayTitle(form.title)}
+        actions={(
+          <>
+            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+              <TaskCompletionControl
+                id={task.id}
+                title={displayTitle(form.title)}
+                status={form.status}
+                disabled={saveState !== 'idle' || hasUnsavedChanges(form)}
+              />
+              {form.status === 'done' ? 'Completed' : 'Mark complete'}
+            </span>
+            <SaveIndicator state={saveState} />
+          </>
+        )}
+      />
       <div className="flex flex-col gap-3">
         <InlineEditableInput
           label="Title"
@@ -284,7 +301,7 @@ function TaskInlineEditor({ task }: { task: Task }): ReactNode {
           >
             {TASK_STATUSES.map((status) => (
               <option key={status} value={status}>
-                {status}
+                {statusLabel(status)}
               </option>
             ))}
           </InlineEditableSelect>
@@ -468,6 +485,10 @@ function displayTitle(title: string): string {
 function priorityLabel(priority: string): string {
   if (!priority) return 'No priority'
   return PRIORITY_OPTIONS.find((option) => option.value === priority)?.label ?? `Priority ${priority}`
+}
+
+function statusLabel(status: string): string {
+  return status.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
 function toDateInput(value: string | null | undefined): string {

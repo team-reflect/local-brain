@@ -35,10 +35,27 @@ export function completeTask(
   completedAt = nowIso(),
   expectedIdentity?: DatabaseIdentity,
 ): Promise<number> {
+  return setTaskCompleted(id, true, completedAt, expectedIdentity)
+}
+
+/**
+ * Set or clear task completion, optionally pinned to a captured brain identity.
+ * Clearing completion deterministically reopens the task and removes its completion timestamp.
+ */
+export function setTaskCompleted(
+  id: string,
+  completed: boolean,
+  completedAt = nowIso(),
+  expectedIdentity?: DatabaseIdentity,
+): Promise<number> {
   return execute(
     db
       .updateTable('tasks')
-      .set({ status: 'done', completedAt, updatedAt: nowIso() })
+      .set({
+        status: completed ? 'done' : 'open',
+        completedAt: completed ? completedAt : null,
+        updatedAt: nowIso(),
+      })
       .where('id', '=', id),
     expectedIdentity,
   )

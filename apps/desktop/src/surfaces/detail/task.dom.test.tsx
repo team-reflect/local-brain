@@ -152,6 +152,35 @@ describe('TaskDetail inline editing', () => {
     expect(updateCalls(calls)).toHaveLength(0)
   })
 
+  it('blocks completion while invalid edits could overwrite its status', async () => {
+    const calls = installTaskDetailBridge()
+    renderWithProviders(<TaskDetail id="t1" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit title' }))
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: '   ' } })
+
+    expect(await screen.findByText('Title is required')).toBeDefined()
+    const completion = screen.getByRole('checkbox', { name: 'Complete Untitled task' })
+    expect(completion).toHaveProperty('disabled', true)
+    fireEvent.click(completion)
+    expect(updateCalls(calls)).toHaveLength(0)
+
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Recovered title' } })
+    await waitForUpdateContaining(calls, ['Recovered title', 'open'])
+    await waitFor(() => {
+      expect(screen.getByRole('checkbox', { name: 'Complete Recovered title' })).toHaveProperty(
+        'disabled',
+        false,
+      )
+    })
+    expect(
+      updateCalls(calls).some((call) => {
+        const params = call.args['params'] as unknown[]
+        return params.length === 4 && params[0] === 'done'
+      }),
+    ).toBe(false)
+  })
+
   it('sets completedAt when status changes to done', async () => {
     const calls = installTaskDetailBridge({ status: 'open', completed_at: null })
     renderWithProviders(<TaskDetail id="t1" />)

@@ -17,6 +17,13 @@ export const APP_COMMANDS: readonly AppCommand[] = [
   { id: 'go.settings', title: 'Open Settings', keybinding: 'Mod-,', run: (c) => c.navigate({ kind: 'settings' }) },
   { id: 'go.brain', title: 'Brain settings', keywords: ['workspace', 'switch', 'brains', 'picker'], keybinding: 'Mod-Shift-B', run: (c) => c.navigate({ kind: 'settings', section: 'brain' }) },
   { id: 'palette.open', title: 'Open command palette', keybinding: 'Mod-k', run: (c) => c.openPalette() },
+  {
+    id: 'task.create',
+    title: 'Create task',
+    keywords: ['new task', 'add task', 'todo'],
+    keybinding: 'Mod-Shift-T',
+    run: (c) => c.openTaskCreate(),
+  },
   { id: 'history.back', title: 'Back', keybinding: 'Mod-[', run: (c) => c.back() },
   { id: 'history.forward', title: 'Forward', keybinding: 'Mod-]', run: (c) => c.forward() },
   { id: 'report.daily', title: 'Run daily report', keybinding: 'Mod-Shift-R', run: (c) => c.navigate({ kind: 'today' }) },

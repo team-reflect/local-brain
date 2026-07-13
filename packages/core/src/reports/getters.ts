@@ -1,6 +1,7 @@
 import { db } from '../db/client'
 import { localDateString, nowIso } from '../db/time'
 import type { Task } from '../domains/tasks/getters'
+import { OPEN_TASK_STATUSES, TERMINAL_TASK_STATUSES } from '../domains/tasks/lifecycle'
 import {
   addDays,
   daysBetween,
@@ -15,9 +16,10 @@ import {
  * the same structured context — no per-caller queries, no separate report table.
  */
 
-/** Non-terminal task statuses (everything still actionable). */
-export const OPEN_TASK_STATUSES = ['open', 'in_progress', 'waiting', 'blocked'] as const
-const TERMINAL = new Set(['done', 'cancelled', 'canceled'])
+export { OPEN_TASK_STATUSES } from '../domains/tasks/lifecycle'
+
+// Keep the pre-canonical US spelling terminal while existing local databases are corrected.
+const TERMINAL = new Set<string>([...TERMINAL_TASK_STATUSES, 'canceled'])
 
 export interface BriefTask {
   id: string

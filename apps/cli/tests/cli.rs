@@ -5787,6 +5787,51 @@ fn tasks_update_status_done_stamps_completed_at_and_non_done_clears_it() {
 }
 
 #[test]
+fn add_task_accepts_the_canonical_lifecycle_and_rejects_scheduled_as_a_status() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+
+    for status in [
+        "open",
+        "in_progress",
+        "waiting",
+        "blocked",
+        "done",
+        "cancelled",
+    ] {
+        let created = run_json(
+            &db,
+            &[
+                "--json", "add", "task", "--title", status, "--status", status,
+            ],
+        );
+        let id = created["id"].as_str().unwrap();
+        let conn = Connection::open(&db).unwrap();
+        let stored: String = conn
+            .query_row("SELECT status FROM tasks WHERE id = ?1", [id], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(stored, status);
+    }
+
+    let rejected = run(
+        &db,
+        &[
+            "--json",
+            "add",
+            "task",
+            "--title",
+            "Legacy",
+            "--status",
+            "scheduled",
+        ],
+    );
+    assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("invalid task status"));
+}
+
+#[test]
 fn tasks_update_rolls_back_when_quote_evidence_is_missing() {
     let dir = TempDir::new().unwrap();
     let db = db_path(&dir);

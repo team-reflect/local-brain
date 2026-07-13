@@ -1,4 +1,4 @@
-import type { Selectable } from 'kysely'
+import { sql, type Selectable } from 'kysely'
 import type { Tasks } from '@local-brain/db'
 import { db } from '../../db/client'
 
@@ -32,7 +32,7 @@ export function listTasks(options: ListTasksOptions = {}): Promise<Task[]> {
   if (options.projectId !== undefined) {
     query = query.where('projectId', '=', options.projectId)
   }
-  query = query.orderBy('dueAt', 'asc')
+  query = query.orderBy(sql<boolean>`due_at IS NULL`, 'asc').orderBy('dueAt', 'asc')
   if (options.limit !== undefined) {
     query = query.limit(options.limit)
   }
