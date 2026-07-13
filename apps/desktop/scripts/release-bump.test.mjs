@@ -1,12 +1,23 @@
 import { expect, test } from 'vitest'
 
 import {
+  RELEASE_VERSION_FILE_PATHS,
+  compareSemver,
   computeNextVersion,
   formatVersion,
   parseVersion,
+  readReleaseVersionFiles,
   selectReleaseCommit,
   workflowDispatchArgs,
 } from './release-bump.mjs'
+
+function versionFiles(version) {
+  return {
+    [RELEASE_VERSION_FILE_PATHS[0]]: JSON.stringify({ version }),
+    [RELEASE_VERSION_FILE_PATHS[1]]: `[package]\nname = "local-brain-desktop"\nversion = "${version}"\n`,
+    [RELEASE_VERSION_FILE_PATHS[2]]: `[[package]]\nname = "local-brain-desktop"\nversion = "${version}"\n`,
+  }
+}
 
 test('parseVersion splits a stable and a prerelease version', () => {
   expect(parseVersion('0.2.0')).toEqual({ major: 0, minor: 2, patch: 0, prerelease: null })
@@ -27,6 +38,22 @@ test('formatVersion round-trips parseVersion', () => {
   for (const version of ['0.0.0', '0.2.0', '1.4.10-beta.3']) {
     expect(formatVersion(parseVersion(version))).toBe(version)
   }
+})
+
+test('SemVer prerelease identifiers use ASCII ordering', () => {
+  expect(compareSemver('1.0.0-A', '1.0.0-a')).toBeLessThan(0)
+  expect(compareSemver('1.0.0-a', '1.0.0-A')).toBeGreaterThan(0)
+})
+
+test('release versions must agree across Tauri, Cargo.toml, and Cargo.lock', () => {
+  const files = versionFiles('0.2.1')
+  expect(readReleaseVersionFiles(files)).toBe('0.2.1')
+
+  files[RELEASE_VERSION_FILE_PATHS[2]] = files[RELEASE_VERSION_FILE_PATHS[2]].replace(
+    '0.2.1',
+    '0.2.0',
+  )
+  expect(() => readReleaseVersionFiles(files)).toThrow(/versions are out of sync/i)
 })
 
 test('beta increments the prerelease number, including past nine', () => {
@@ -108,4 +135,38 @@ test('tag recovery selects the reviewed version transition instead of a newer ma
       isAncestor: () => true,
     }),
   ).toBe('release')
+})
+
+test('tag recovery rejects a rollback that reintroduces an older version', () => {
+  const versions = {
+    rollback: '0.2.0',
+    newer: '0.2.1',
+    oldRelease: '0.2.0',
+    oldParent: '0.1.9',
+  }
+  const parents = { rollback: 'newer', oldRelease: 'oldParent' }
+
+  expect(() =>
+    selectReleaseCommit({
+      version: '0.2.0',
+      candidates: ['rollback', 'newer', 'oldRelease', 'oldParent'],
+      versionAtCommit: (commit) => versions[commit],
+      versionAtParent: (commit) => versions[parents[commit]],
+      changedPathsAtCommit: () => [...RELEASE_VERSION_FILE_PATHS],
+      isAncestor: () => true,
+    }),
+  ).toThrow(/not a forward version transition/)
+})
+
+test('tag recovery does not scan past an inconsistent current-version commit', () => {
+  expect(() =>
+    selectReleaseCommit({
+      version: '0.2.0',
+      candidates: ['inconsistent', 'oldRelease'],
+      versionAtCommit: (commit) => (commit === 'oldRelease' ? '0.2.0' : null),
+      versionAtParent: () => '0.1.9',
+      changedPathsAtCommit: () => [...RELEASE_VERSION_FILE_PATHS],
+      isAncestor: () => true,
+    }),
+  ).toThrow(/first release-history commit inconsistent is not synchronized/)
 })

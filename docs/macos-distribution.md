@@ -128,8 +128,9 @@ so it keeps the original merge SHA. If a draft already exists, finish or delete 
 draft before retrying because the publisher deliberately refuses to replace an existing
 release. `--tag-only` is the narrow recovery path when the version bump merged but no
 tag or release was created. It finds the exact first-parent commit that introduced the
-current version by changing only the three version files, then tags that commit even if
-`master` has advanced. It never tags newer code with an already-reviewed version.
+current version with a forward transition, requires all three declarations to agree on
+both sides of that transition, and tags that commit even if `master` has advanced. It
+never tags newer code with an already-reviewed version.
 The former `--direct` and `--no-tag` bypasses are intentionally retired: normal bumps
 go through the rolling PR, while break-glass publishing uses **Actions -> Release** with
 an exact ref.
@@ -182,7 +183,9 @@ with the verified merge SHA because tags created with `GITHUB_TOKEN` do not trig
 second workflow. Manual recovery remains available from **Actions -> Release -> Run
 workflow** (optionally provide an exact ref and tick *draft*), or by pushing the matching
 `v<version>` tag. The publish preflights apply unchanged, so all three version
-declarations must already agree on the released commit.
+declarations must already agree on the released commit. After a successful direct tag
+or non-draft manual release, the workflow dispatches Release PR maintenance again so
+commits that landed during publishing are not left without a rolling PR.
 
 The script reads all signing material from environment variables, which take
 precedence over the keychain (exporting them works for local releases too); the

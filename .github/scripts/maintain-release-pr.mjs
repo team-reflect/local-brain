@@ -1,18 +1,19 @@
-import { computeNextVersion, parseVersion } from '../../apps/desktop/scripts/release-bump.mjs'
+import {
+  RELEASE_VERSION_FILE_PATHS,
+  compareSemver,
+  computeNextVersion,
+  parseVersion,
+  readReleaseVersionFiles,
+} from '../../apps/desktop/scripts/release-bump.mjs'
 
 const RELEASE_BASE = 'master'
 const RELEASE_HEAD = 'automation/release'
 const RELEASE_CI_WORKFLOW = 'ci.yml'
-const DESKTOP_CRATE = 'local-brain-desktop'
 
 export const MANAGED_SECTION_START = '<!-- local-brain-release-pr:start -->'
 export const MANAGED_SECTION_END = '<!-- local-brain-release-pr:end -->'
 
-export const VERSION_FILE_PATHS = [
-  'apps/desktop/src-tauri/tauri.conf.json',
-  'apps/desktop/src-tauri/Cargo.toml',
-  'Cargo.lock',
-]
+export const VERSION_FILE_PATHS = RELEASE_VERSION_FILE_PATHS
 
 const CHANGELOG_CATEGORIES = ['Breaking changes', 'Features', 'Fixes', 'Other changes']
 
@@ -86,52 +87,8 @@ function replaceExactlyOnce(content, find, replacement, label) {
   return content.replace(find, replacement)
 }
 
-function readCargoPackageVersion(content) {
-  const packageSection = /^\[package\]\s*$([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(content)?.[1]
-  if (!packageSection) throw new Error('Cargo.toml is missing its [package] section')
-  const versions = [...packageSection.matchAll(/^version\s*=\s*"([^"]+)"\s*$/gm)]
-  if (versions.length !== 1) {
-    throw new Error(`Expected one package version in Cargo.toml, found ${versions.length}`)
-  }
-  return versions[0][1]
-}
-
-function readCargoLockVersion(content) {
-  const packageBlocks = content
-    .split('[[package]]')
-    .slice(1)
-    .filter((block) => new RegExp(`^name = "${DESKTOP_CRATE}"$`, 'm').test(block))
-  if (packageBlocks.length !== 1) {
-    throw new Error(`Expected one ${DESKTOP_CRATE} package in Cargo.lock, found ${packageBlocks.length}`)
-  }
-  const versions = [...packageBlocks[0].matchAll(/^version = "([^"]+)"$/gm)]
-  if (versions.length !== 1) {
-    throw new Error(`Expected one ${DESKTOP_CRATE} version in Cargo.lock, found ${versions.length}`)
-  }
-  return versions[0][1]
-}
-
 export function readVersionFiles(files) {
-  const tauriPath = VERSION_FILE_PATHS[0]
-  const cargoTomlPath = VERSION_FILE_PATHS[1]
-  const cargoLockPath = VERSION_FILE_PATHS[2]
-  const tauriVersion = JSON.parse(files[tauriPath]).version
-  const cargoVersion = readCargoPackageVersion(files[cargoTomlPath])
-  const lockVersion = readCargoLockVersion(files[cargoLockPath])
-
-  if (typeof tauriVersion !== 'string') {
-    throw new Error('tauri.conf.json is missing its string version')
-  }
-  parseVersion(tauriVersion)
-
-  const versions = new Set([tauriVersion, cargoVersion, lockVersion])
-  if (versions.size !== 1) {
-    throw new Error(
-      `Release versions are out of sync: tauri.conf.json=${tauriVersion}, Cargo.toml=${cargoVersion}, Cargo.lock=${lockVersion}`,
-    )
-  }
-
-  return tauriVersion
+  return readReleaseVersionFiles(files)
 }
 
 export function updateVersionFiles(files, targetVersion) {
@@ -173,48 +130,24 @@ export function updateVersionFiles(files, targetVersion) {
 
   const lockBlocks = files[VERSION_FILE_PATHS[2]].split('[[package]]')
   const lockBlockIndexes = lockBlocks.flatMap((block, index) =>
-    new RegExp(`^name = "${DESKTOP_CRATE}"$`, 'm').test(block) ? [index] : [],
+    /^name = "local-brain-desktop"$/m.test(block) ? [index] : [],
   )
   if (lockBlockIndexes.length !== 1) {
-    throw new Error(`Expected one ${DESKTOP_CRATE} package in Cargo.lock, found ${lockBlockIndexes.length}`)
+    throw new Error(
+      `Expected one local-brain-desktop package in Cargo.lock, found ${lockBlockIndexes.length}`,
+    )
   }
   const lockIndex = lockBlockIndexes[0]
   lockBlocks[lockIndex] = replaceExactlyOnce(
     lockBlocks[lockIndex],
     `version = "${currentVersion}"`,
     `version = "${targetVersion}"`,
-    `${DESKTOP_CRATE} version in Cargo.lock`,
+    'local-brain-desktop version in Cargo.lock',
   )
   updated[VERSION_FILE_PATHS[2]] = lockBlocks.join('[[package]]')
 
   readVersionFiles(updated)
   return updated
-}
-
-function compareSemver(left, right) {
-  const leftVersion = parseVersion(left)
-  const rightVersion = parseVersion(right)
-  for (const key of ['major', 'minor', 'patch']) {
-    if (leftVersion[key] !== rightVersion[key]) return leftVersion[key] - rightVersion[key]
-  }
-  if (leftVersion.prerelease === rightVersion.prerelease) return 0
-  if (leftVersion.prerelease === null) return 1
-  if (rightVersion.prerelease === null) return -1
-
-  const leftParts = leftVersion.prerelease.split('.')
-  const rightParts = rightVersion.prerelease.split('.')
-  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
-    if (leftParts[index] === undefined) return -1
-    if (rightParts[index] === undefined) return 1
-    if (leftParts[index] === rightParts[index]) continue
-    const leftNumber = /^\d+$/.test(leftParts[index]) ? Number(leftParts[index]) : null
-    const rightNumber = /^\d+$/.test(rightParts[index]) ? Number(rightParts[index]) : null
-    if (leftNumber !== null && rightNumber !== null) return leftNumber - rightNumber
-    if (leftNumber !== null) return -1
-    if (rightNumber !== null) return 1
-    return leftParts[index].localeCompare(rightParts[index])
-  }
-  return 0
 }
 
 async function getFileContent({ github, owner, repo, path, ref }) {
@@ -233,23 +166,48 @@ export async function readReleaseStateAtRef({ github, owner, repo, ref }) {
   return { files, version: readVersionFiles(files) }
 }
 
-async function getReleaseStatus({ github, owner, repo, version }) {
+async function getTagCommitShaOrNull({ github, owner, repo, tag }) {
+  let object
+  try {
+    const response = await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` })
+    object = response.data.object
+  } catch (error) {
+    if (error.status === 404) return null
+    throw error
+  }
+
+  const seen = new Set()
+  while (object.type === 'tag') {
+    if (seen.has(object.sha)) throw new Error(`${tag} contains an annotated tag cycle`)
+    seen.add(object.sha)
+    const response = await github.rest.git.getTag({ owner, repo, tag_sha: object.sha })
+    object = response.data.object
+  }
+  if (object.type !== 'commit') {
+    throw new Error(`${tag} points to a ${object.type}, not a commit`)
+  }
+  return object.sha
+}
+
+async function getReleaseStatus({ github, owner, repo, version, expectedCommitSha }) {
   const tag = `v${version}`
+  let releaseStatus = null
   try {
     const response = await github.rest.repos.getReleaseByTag({ owner, repo, tag })
-    return response.data.draft ? 'draft' : 'published'
+    releaseStatus = response.data.draft ? 'draft' : 'published'
   } catch (error) {
     if (error.status !== 404) throw error
   }
 
-  try {
-    await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` })
-    return 'tag-only'
-  } catch (error) {
-    if (error.status !== 404) throw error
+  const tagCommitSha = await getTagCommitShaOrNull({ github, owner, repo, tag })
+  if (expectedCommitSha && tagCommitSha && tagCommitSha !== expectedCommitSha) {
+    throw new Error(`${tag} points to ${tagCommitSha}, not the reviewed release commit ${expectedCommitSha}`)
+  }
+  if (expectedCommitSha && releaseStatus === 'published' && !tagCommitSha) {
+    throw new Error(`${tag} has a published release but no corresponding Git tag`)
   }
 
-  return 'missing'
+  return releaseStatus ?? (tagCommitSha ? 'tag-only' : 'missing')
 }
 
 async function compareRefs({ github, owner, repo, base, head }) {
@@ -736,6 +694,7 @@ export async function analyzeMergedReleasePullRequest({ github, context, core })
     owner,
     repo,
     version: releaseState.version,
+    expectedCommitSha: releaseRef,
   })
   if (releaseStatus === 'published') {
     core.info(`v${releaseState.version} is already published`)
