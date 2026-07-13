@@ -70,6 +70,7 @@ function TaskInlineEditor({ task }: { task: Task }): ReactNode {
   const [form, setForm] = useState<TaskFormState>(() => stateFromTask(task))
   const [error, setError] = useState<string | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('idle')
+  const [completionPending, setCompletionPending] = useState(false)
   const formRef = useRef(form)
   const taskRef = useRef(task)
   const taskIdRef = useRef(task.id)
@@ -196,10 +197,7 @@ function TaskInlineEditor({ task }: { task: Task }): ReactNode {
     void drainSaveQueue()
   }
 
-  function resetForm(
-    next: TaskFormState,
-    { clearActiveField }: { clearActiveField: boolean },
-  ): void {
+  function resetForm(next: TaskFormState, { clearActiveField }: { clearActiveField: boolean }): void {
     formRef.current = next
     savedSnapshotRef.current = serializeState(next)
     skipAutosaveRef.current = true
@@ -257,6 +255,7 @@ function TaskInlineEditor({ task }: { task: Task }): ReactNode {
                 title={displayTitle(form.title)}
                 status={form.status}
                 disabled={saveState !== 'idle' || hasUnsavedChanges(form)}
+                onPendingChange={setCompletionPending}
               />
               {form.status === 'done' ? 'Completed' : 'Mark complete'}
             </span>
@@ -264,7 +263,7 @@ function TaskInlineEditor({ task }: { task: Task }): ReactNode {
           </>
         )}
       />
-      <div className="flex flex-col gap-3">
+      <fieldset aria-label="Task details" aria-busy={completionPending} disabled={completionPending} className="m-0 flex min-w-0 flex-col gap-3 border-0 p-0 disabled:opacity-60">
         <InlineEditableInput
           label="Title"
           value={form.title}
@@ -385,7 +384,7 @@ function TaskInlineEditor({ task }: { task: Task }): ReactNode {
             {error}
           </p>
         ) : null}
-      </div>
+      </fieldset>
     </>
   )
 }

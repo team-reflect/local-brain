@@ -11,6 +11,7 @@ interface TaskCompletionControlProps {
   status: string
   className?: string
   disabled?: boolean
+  onPendingChange?: (pending: boolean) => void
 }
 
 /** A reusable, reversible task checkbox with pending and rollback feedback. */
@@ -20,6 +21,7 @@ export function TaskCompletionControl({
   status,
   className,
   disabled = false,
+  onPendingChange,
 }: TaskCompletionControlProps): ReactNode {
   const feedback = useTaskCompletionFeedback()
   const mutation = useSetTaskCompleted({
@@ -50,7 +52,11 @@ export function TaskCompletionControl({
         onCheckedChange={(checked) => {
           feedback?.clearFailure(id)
           mutation.reset()
-          mutation.mutate({ id, completed: checked === true })
+          onPendingChange?.(true)
+          mutation.mutate(
+            { id, completed: checked === true },
+            { onSettled: () => onPendingChange?.(false) },
+          )
         }}
         aria-label={label}
         aria-describedby={mutationError ? errorId : undefined}

@@ -58,7 +58,10 @@ const projectRow = {
   started_on: null,
 }
 
-function installTaskDetailBridge(overrides: Partial<TaskRow> = {}): CapturedCall[] {
+function installTaskDetailBridge(
+  overrides: Partial<TaskRow> = {},
+  { completionWrite }: { completionWrite?: Promise<number> } = {},
+): CapturedCall[] {
   const calls: CapturedCall[] = []
   const row = { ...taskRow, ...overrides }
   installFakeBridge({
@@ -66,6 +69,15 @@ function installTaskDetailBridge(overrides: Partial<TaskRow> = {}): CapturedCall
       calls.push({ command, args })
       if (command === 'db_execute' && String(args['sql']).includes('update "tasks"')) {
         const params = args['params'] as unknown[]
+        if ((params[0] === 'done' || params[0] === 'open') && params.length === 4) {
+          const status = params[0]
+          const applyCompletion = (): number => {
+            row.status = status
+            row.completed_at = typeof params[1] === 'string' ? params[1] : null
+            return 1
+          }
+          return completionWrite ? completionWrite.then(applyCompletion) : applyCompletion()
+        }
         row.title = String(params[0])
       }
       return undefined
@@ -179,6 +191,32 @@ describe('TaskDetail inline editing', () => {
         return params.length === 4 && params[0] === 'done'
       }),
     ).toBe(false)
+  })
+
+  it('locks inline editing while a completion write is pending', async () => {
+    let resolveCompletion: (value: number) => void = () => {}
+    const completionWrite = new Promise<number>((resolve) => {
+      resolveCompletion = resolve
+    })
+    const calls = installTaskDetailBridge({}, { completionWrite })
+    renderWithProviders(<TaskDetail id="t1" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit title' }))
+    const titleInput = screen.getByLabelText('Title')
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Complete Send deck' }))
+
+    const details = screen.getByRole('group', { name: 'Task details' })
+    await waitFor(() => expect(details).toHaveProperty('disabled', true))
+    expect(titleInput.matches(':disabled')).toBe(true)
+    expect(details.contains(screen.getByRole('button', { name: 'Edit status' }))).toBe(true)
+
+    resolveCompletion(1)
+
+    await waitFor(() => expect(details).toHaveProperty('disabled', false))
+    await waitFor(() => {
+      expect(screen.getByRole('checkbox', { name: 'Reopen Send deck' })).toBeDefined()
+    })
+    expect(updateCalls(calls)).toHaveLength(1)
   })
 
   it('sets completedAt when status changes to done', async () => {
