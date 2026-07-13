@@ -134,8 +134,12 @@ than after notarization:
   Publishing a new release means bumping `version` in `tauri.conf.json` first (keep
   `src-tauri/Cargo.toml` in step).
 
-Pass `--draft` to create the release without publishing it, then review and publish it
-from the GitHub UI.
+The publisher creates and fills a draft release first, then verifies that every payload
+URL in `latest.json` exactly matches an asset URL reported by GitHub before making the
+release visible. GitHub rewrites spaces in uploaded asset names to dots, so this check
+keeps a filename mismatch from replacing the working `releases/latest` feed. Pass
+`--draft` to stop after validation and leave the release unpublished for review in the
+GitHub UI.
 
 ## Pre-releases
 

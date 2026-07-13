@@ -195,17 +195,40 @@ function bundlePaths() {
   }
 }
 
-export function updaterManifest({ version, signature, url, pubDate = new Date().toISOString(), arch = hostArch() }) {
+/** Match GitHub's release-asset rewrite for uploaded file names. */
+export function githubAssetName(fileName) {
+  return fileName.replace(/ /g, '.')
+}
+
+/** Build the static Tauri updater manifest for one macOS artifact. */
+export function createUpdaterManifest({
+  version,
+  signature,
+  slug,
+  tag,
+  updaterArchive,
+  pubDate = new Date().toISOString(),
+  arch = hostArch(),
+}) {
+  const assetName = githubAssetName(basename(updaterArchive))
   return {
     version,
     pub_date: pubDate,
     platforms: {
       [`darwin-${arch}`]: {
         signature,
-        url,
+        url: `https://github.com/${slug}/releases/download/${tag}/${assetName}`,
       },
     },
   }
+}
+
+/** Return manifest payload URLs that do not match a published release asset. */
+export function missingUpdaterAssetUrls({ manifest, assetUrls }) {
+  const publishedUrls = new Set(assetUrls)
+  return Object.values(manifest.platforms)
+    .map((platform) => platform.url)
+    .filter((url) => !publishedUrls.has(url))
 }
 
 /**
@@ -220,14 +243,35 @@ export function updaterManifest({ version, signature, url, pubDate = new Date().
 function writeUpdaterManifest({ version, tag }) {
   const { updaterArchive, updaterSignature } = bundlePaths()
   const slug = capture('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner']).trim()
-  const manifest = updaterManifest({
+  const manifest = createUpdaterManifest({
     version,
     signature: readFileSync(updaterSignature, 'utf8').trim(),
-    url: `https://github.com/${slug}/releases/download/${tag}/${basename(updaterArchive)}`,
+    slug,
+    tag,
+    updaterArchive,
   })
   const manifestPath = join(dirname(updaterArchive), 'latest.json')
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
   return manifestPath
+}
+
+/** Confirm GitHub uploaded every asset referenced by the updater manifest. */
+function verifyReleaseUpdaterAssets({ tag, manifestPath }) {
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  const assets = JSON.parse(capture('gh', ['release', 'view', tag, '--json', 'assets', '-q', '.assets']))
+  const assetNames = new Set(assets.map((asset) => asset.name))
+  if (!assetNames.has(basename(manifestPath))) {
+    fail(`${tag} is missing ${basename(manifestPath)}`)
+  }
+
+  const missingUrls = missingUpdaterAssetUrls({
+    manifest,
+    assetUrls: assets.map((asset) => asset.url),
+  })
+  if (missingUrls.length > 0) {
+    fail(`${tag} updater manifest references missing release asset(s):\n  ${missingUrls.join('\n  ')}`)
+  }
+  log(`verified ${tag} updater manifest against uploaded release assets`)
 }
 
 /**
@@ -446,8 +490,8 @@ function ensureTagMatchesCommit(tag, commit) {
   }
 }
 
-/** Build the GitHub CLI args that publish the release and upload artifacts. */
-export function createReleaseArgs({ assets, commit, draft, prerelease, productName, tag, version }) {
+/** Build the GitHub CLI args that create and populate a draft release. */
+export function createReleaseArgs({ assets, commit, prerelease, productName, tag, version }) {
   const releaseArgs = [
     'release',
     'create',
@@ -464,8 +508,22 @@ export function createReleaseArgs({ assets, commit, draft, prerelease, productNa
   } else {
     releaseArgs.push('--latest')
   }
-  if (draft) releaseArgs.push('--draft')
+  // Keep releases invisible until the updater manifest has been checked
+  // against GitHub's actual uploaded asset URLs.
+  releaseArgs.push('--draft')
   return releaseArgs
+}
+
+/** Build the GitHub CLI args that publish a validated draft release. */
+export function createFinalizeReleaseArgs({ prerelease, tag }) {
+  const args = ['release', 'edit', tag]
+  if (prerelease) {
+    args.push('--prerelease', '--latest=false')
+  } else {
+    args.push('--prerelease=false', '--latest')
+  }
+  args.push('--draft=false')
+  return args
 }
 
 /**
@@ -493,7 +551,6 @@ function publish({ draft }) {
   const releaseArgs = createReleaseArgs({
     assets: [dmg, updaterArchive, updaterSignature, manifestPath],
     commit,
-    draft,
     prerelease,
     productName,
     tag,
@@ -501,7 +558,20 @@ function publish({ draft }) {
   })
   const result = spawnSync('gh', releaseArgs, { encoding: 'utf8', stdio: ['inherit', 'pipe', 'inherit'] })
   if (result.status !== 0) fail(`creating the GitHub release failed${result.stdout ? `\n${result.stdout.trim()}` : ''}`)
-  log(`${draft ? 'draft release created' : 'release published'}: ${result.stdout.trim()}`)
+  verifyReleaseUpdaterAssets({ tag, manifestPath })
+
+  if (draft) {
+    log(`draft release created: ${result.stdout.trim()}`)
+    return
+  }
+  const finalize = spawnSync('gh', createFinalizeReleaseArgs({ prerelease, tag }), {
+    encoding: 'utf8',
+    stdio: ['inherit', 'pipe', 'inherit'],
+  })
+  if (finalize.status !== 0) {
+    fail(`publishing the validated GitHub release failed${finalize.stdout ? `\n${finalize.stdout.trim()}` : ''}`)
+  }
+  log(`release published: ${tag}`)
 }
 
 async function setup() {
