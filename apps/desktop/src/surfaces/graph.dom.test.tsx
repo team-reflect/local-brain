@@ -208,9 +208,17 @@ describe('GraphSurface', () => {
     const svg = await mockGraphBounds()
     const viewport = screen.getByTestId('graph-viewport')
 
-    fireEvent.wheel(svg, { deltaY: -100, clientX: 440, clientY: 380 })
+    const wheelEvent = new WheelEvent('wheel', {
+      bubbles: true,
+      cancelable: true,
+      deltaY: -100,
+      clientX: 440,
+      clientY: 380,
+    })
+    fireEvent(svg, wheelEvent)
 
     const transform = viewport.getAttribute('transform') ?? ''
+    expect(wheelEvent.defaultPrevented).toBe(true)
     expect(transform).not.toBe('translate(0 0) scale(1)')
     expect(transform).toMatch(/scale\(1\.\d+\)/)
   })
