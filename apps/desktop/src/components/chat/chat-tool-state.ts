@@ -35,6 +35,7 @@ export function isToolPartAwaitingApproval(part: ToolPart): boolean {
   return part.state === 'approval-requested' && typeof part.approval?.id === 'string'
 }
 
+/** True when an assistant message contains a tool part awaiting approval. */
 export function messageHasAwaitingToolApproval(message: {
   role?: string
   parts?: readonly unknown[]
