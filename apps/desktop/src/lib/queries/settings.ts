@@ -158,6 +158,30 @@ export function useMakeDefaultAiProvider() {
   })
 }
 
+export function useUpdateAiProviderModel() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, model }: { id: string; model: string }) => {
+      const nextModel = model.trim()
+      if (!nextModel) throw new Error('Choose a default model.')
+
+      await updateAiProvidersState((state) => {
+        let found = false
+        const providers = state.providers.map((provider) => {
+          if (provider.id !== id) return provider
+          found = true
+          return { ...provider, model: nextModel }
+        })
+        if (!found) throw new Error('AI provider no longer exists.')
+        return { providers, defaultProviderId: state.defaultProviderId }
+      })
+    },
+    onSuccess: async () => {
+      await refreshModelQueries(queryClient)
+    },
+  })
+}
+
 // First-run onboarding (Plan 09). Completion is once per app install, NOT per
 // brain. Switching or creating a brain remounts the workspace keyed by the brain
 // path, so a per-brain `settings` row would re-show onboarding on every new or

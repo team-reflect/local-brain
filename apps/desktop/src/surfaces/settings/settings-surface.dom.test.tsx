@@ -60,6 +60,95 @@ describe('SettingsSurface (Plan 08)', () => {
     expect(screen.getByText('API key')).toBeDefined()
   })
 
+  it('edits the default model for an existing provider without replacing it', async () => {
+    const batches: Array<Array<{ params: unknown[] }>> = []
+    const keychainWrites: string[] = []
+    installFakeBridge({
+      respond: (command, args) => {
+        if (command === 'keychain_set' || command === 'keychain_delete') {
+          keychainWrites.push(command)
+        }
+        if (command === 'db_batch') {
+          const statements = args['statements'] as Array<{ params: unknown[] }>
+          batches.push(statements)
+          return statements.map(() => 1)
+        }
+        return undefined
+      },
+      query: (_sql, params) => {
+        const key = params[0]
+        if (key === 'model.aiProviders') {
+          return [
+            {
+              valueJson: JSON.stringify([
+                {
+                  id: 'provider-1',
+                  provider: 'openai',
+                  model: 'gpt-5.4',
+                  keyHint: '12345',
+                },
+                {
+                  id: 'provider-2',
+                  provider: 'openai',
+                  model: 'gpt-5.5',
+                  keyHint: '67890',
+                },
+              ]),
+            },
+          ]
+        }
+        if (key === 'model.defaultAiProviderId') {
+          return [{ valueJson: JSON.stringify('provider-1') }]
+        }
+        return []
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="ai-providers" />)
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Edit model for OpenAI — GPT-5.4, API key ending 12345',
+      }),
+    )
+
+    expect(await screen.findByRole('dialog', { name: 'Edit OpenAI' })).toBeDefined()
+    const model = screen.getByLabelText('Default model')
+    expect(model.getAttribute('value')).toBe('gpt-5.4')
+
+    fireEvent.change(model, { target: { value: 'gpt-5.6' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save model' }))
+
+    await waitFor(() => expect(batches).toHaveLength(1))
+    const providerStatement = batches[0]?.find((statement) =>
+      statement.params.includes('model.aiProviders'),
+    )
+    expect(providerStatement?.params).toContain(
+      JSON.stringify([
+        {
+          id: 'provider-1',
+          provider: 'openai',
+          model: 'gpt-5.6',
+          keyHint: '12345',
+        },
+        {
+          id: 'provider-2',
+          provider: 'openai',
+          model: 'gpt-5.5',
+          keyHint: '67890',
+        },
+      ]),
+    )
+    const defaultStatement = batches[0]?.find((statement) =>
+      statement.params.includes('model.defaultAiProviderId'),
+    )
+    expect(defaultStatement?.params).toContain(JSON.stringify('provider-1'))
+    expect(keychainWrites).toEqual([])
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Edit OpenAI' })).toBeNull(),
+    )
+  })
+
   it('shows manual semantic backfill as the primary action and keeps rebuild available', async () => {
     const commands: string[] = []
     installFakeBridge({

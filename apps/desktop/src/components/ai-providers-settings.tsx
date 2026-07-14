@@ -1,14 +1,17 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Plus } from 'lucide-react'
+import type { AiProviderConfig } from '@local-brain/core'
 import {
   useAddAiProvider,
   useMakeDefaultAiProvider,
   useModelSettings,
   useRemoveAiProvider,
+  useUpdateAiProviderModel,
 } from '../lib/queries'
 import { AddAiProviderDialog } from './add-ai-provider-dialog'
 import { AiProviderRow } from './ai-provider-row'
 import { Button } from './button'
+import { EditAiProviderDialog } from './edit-ai-provider-dialog'
 import { SettingsSection } from './settings/section'
 
 /**
@@ -21,7 +24,9 @@ export function AiProvidersSettings(): ReactNode {
   const addProvider = useAddAiProvider()
   const removeProvider = useRemoveAiProvider()
   const makeDefault = useMakeDefaultAiProvider()
+  const updateProviderModel = useUpdateAiProviderModel()
   const [adding, setAdding] = useState(false)
+  const [editing, setEditing] = useState<AiProviderConfig | null>(null)
   const configured = settings.data?.providers ?? []
   const defaultProvider = useMemo(
     () => configured.find((entry) => entry.id === settings.data?.defaultProviderId) ?? configured[0],
@@ -42,6 +47,7 @@ export function AiProvidersSettings(): ReactNode {
               key={config.id}
               config={config}
               isDefault={config.id === defaultProvider?.id}
+              onEdit={setEditing}
               onMakeDefault={(id) => makeDefault.mutate(id)}
               onRemove={(id) => removeProvider.mutateAsync(id)}
             />
@@ -66,6 +72,13 @@ export function AiProvidersSettings(): ReactNode {
         <AddAiProviderDialog
           onAdd={(draft) => addProvider.mutateAsync(draft)}
           onClose={() => setAdding(false)}
+        />
+      ) : null}
+      {editing ? (
+        <EditAiProviderDialog
+          config={editing}
+          onSave={(model) => updateProviderModel.mutateAsync({ id: editing.id, model })}
+          onClose={() => setEditing(null)}
         />
       ) : null}
     </>
