@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { Trash2 } from 'lucide-react'
+import { Pencil, Trash2 } from 'lucide-react'
 import { aiModelLabel, aiProvider, type AiProviderConfig } from '@local-brain/core'
 import { Alert } from './alert'
 import { Badge } from './badge'
@@ -8,11 +8,13 @@ import { Button } from './button'
 export function AiProviderRow({
   config,
   isDefault,
+  onEdit,
   onMakeDefault,
   onRemove,
 }: {
   config: AiProviderConfig
   isDefault: boolean
+  onEdit: (config: AiProviderConfig) => void
   onMakeDefault: (id: string) => void
   onRemove: (id: string) => Promise<void>
 }): ReactNode {
@@ -20,6 +22,7 @@ export function AiProviderRow({
   const providerLabel = aiProvider(config.provider).label
   const modelLabel = aiModelLabel(config.provider, config.model)
   const name = `${providerLabel} — ${modelLabel}`
+  const keyIdentity = config.keyHint ? `API key ending ${config.keyHint}` : 'stored API key'
 
   async function remove(): Promise<void> {
     setError(null)
@@ -53,6 +56,16 @@ export function AiProviderRow({
               Make default
             </Button>
           )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-label={`Edit model for ${name}, ${keyIdentity}`}
+            onClick={() => onEdit(config)}
+            className="size-7 px-0 text-muted-foreground"
+          >
+            <Pencil aria-hidden className="size-4" strokeWidth={1.75} />
+          </Button>
           <Button
             type="button"
             variant="ghost"
