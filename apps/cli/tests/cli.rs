@@ -7767,7 +7767,8 @@ fn repair_chunks_dedupe_exact_previews_preserves_evidence_and_is_idempotent() {
     assert_eq!(preview["mode"], "preview");
     assert_eq!(preview["applied"], false);
     assert_eq!(preview["duplicateChunksBefore"], 1);
-    assert_eq!(preview["duplicateChunksAfter"], 1);
+    assert_eq!(preview["recordsWithDuplicatesAfter"], 0);
+    assert_eq!(preview["duplicateChunksAfter"], 0);
     assert_eq!(preview["projectedDuplicateChunksAfterApply"], 0);
     assert_eq!(preview["evidenceRefsToRepoint"], 1);
     assert_eq!(preview["embeddingsToDelete"], 1);
@@ -7782,6 +7783,39 @@ fn repair_chunks_dedupe_exact_previews_preserves_evidence_and_is_idempotent() {
     assert_eq!(
         duplicate_still_exists, 1,
         "preview must not mutate the database"
+    );
+    drop(conn);
+
+    let missing = run(
+        &db,
+        &[
+            "--json",
+            "repair",
+            "chunks",
+            "dedupe-exact",
+            "--record",
+            &document_ref,
+            "--record",
+            "task:missing-task",
+            "--apply",
+        ],
+    );
+    assert!(!missing.status.success());
+    assert!(missing.stdout.is_empty());
+    let error: Value = serde_json::from_slice(&missing.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "not_found");
+    assert_eq!(error["error"]["exitCode"], 3);
+    let conn = Connection::open(&db).unwrap();
+    let duplicate_still_exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM content_chunks WHERE id = 'duplicate-chunk'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        duplicate_still_exists, 1,
+        "a missing requested record must leave every requested record untouched"
     );
     drop(conn);
 
@@ -7863,4 +7897,74 @@ fn repair_chunks_dedupe_exact_previews_preserves_evidence_and_is_idempotent() {
     assert_eq!(rerun["evidenceRefsRepointed"], 0);
     assert_eq!(rerun["embeddingsDeleted"], 0);
     assert_eq!(rerun["hashesRefreshed"], 0);
+}
+
+#[test]
+fn repair_chunks_dedupe_exact_scans_an_existing_record_without_chunks() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let task = run_json(
+        &db,
+        &["--json", "add", "task", "--title", "No projected body"],
+    );
+    let task_id = task["id"].as_str().unwrap();
+    let task_ref = format!("task:{task_id}");
+
+    let conn = Connection::open(&db).unwrap();
+    let chunks: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM content_chunks
+             WHERE record_type = 'task' AND record_id = ?1",
+            [task_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(chunks, 0);
+    drop(conn);
+
+    let preview = run_json(
+        &db,
+        &[
+            "--json",
+            "repair",
+            "chunks",
+            "dedupe-exact",
+            "--record",
+            &task_ref,
+        ],
+    );
+    assert_eq!(preview["mode"], "preview");
+    assert_eq!(preview["recordsScanned"], 1);
+    assert_eq!(preview["recordsWithDuplicatesBefore"], 0);
+    assert_eq!(preview["recordsWithDuplicatesAfter"], 0);
+    assert_eq!(preview["duplicateChunksBefore"], 0);
+    assert_eq!(preview["duplicateChunksAfter"], 0);
+
+    let text_preview = run(
+        &db,
+        &["repair", "chunks", "dedupe-exact", "--record", &task_ref],
+    );
+    assert!(text_preview.status.success());
+    let stdout = String::from_utf8_lossy(&text_preview.stdout);
+    assert!(stdout.contains("close Local Brain"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("back up the brain folder"),
+        "stdout: {stdout}"
+    );
+
+    let applied = run_json(
+        &db,
+        &[
+            "--json",
+            "repair",
+            "chunks",
+            "dedupe-exact",
+            "--record",
+            &task_ref,
+            "--apply",
+        ],
+    );
+    assert_eq!(applied["mode"], "applied");
+    assert_eq!(applied["recordsScanned"], 1);
+    assert_eq!(applied["chunksRemoved"], 0);
 }

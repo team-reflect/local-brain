@@ -39,7 +39,7 @@ describe('record candidate evidence selection', () => {
     expect(candidateQueryTerms('Model S')).toEqual(['model', 's'])
     expect(candidateQueryTerms('Project D')).toEqual(['project', 'd'])
     expect(candidateQueryTerms('X budget')).toEqual(['budget'])
-    expect(candidateQueryTerms('S')).toEqual([])
+    expect(candidateQueryTerms('S')).toEqual(['s'])
     expect(candidateQueryTerms('what is a project')).toEqual(['project'])
   })
 

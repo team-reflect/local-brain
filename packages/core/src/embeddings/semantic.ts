@@ -184,7 +184,9 @@ function roundRobinUniqueChunks(
       if (selected.length >= limit) break
     }
   }
-  return selected
+  // Round-robin decides which chunks survive the fixed-size diversity budget;
+  // callers still expect semantic hits themselves to be ranked by similarity.
+  return selected.sort((left, right) => right.score - left.score)
 }
 
 function stripContentHash(hits: readonly SemanticChunk[]): RetrievedChunk[] {

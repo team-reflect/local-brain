@@ -221,8 +221,7 @@ async function lexicalChunkCandidates(
       FROM deduplicated
       WHERE duplicateRank = 1
     ), best AS (
-      SELECT "recordType", "recordId", MIN(bm25) AS bestBm25,
-        MAX("evidenceScore") AS bestEvidenceScore,
+      SELECT "recordType", "recordId", MAX("evidenceScore") AS bestEvidenceScore,
         MAX("termMatches") AS bestTermMatches,
         MAX("recordDate") AS "recordDate"
       FROM unique_matching
@@ -230,7 +229,7 @@ async function lexicalChunkCandidates(
       ORDER BY ${bestOrder}
       LIMIT ${limit}
     ), selected AS (
-      SELECT unique_matching.*, best.bestBm25, best.bestEvidenceScore, best.bestTermMatches,
+      SELECT unique_matching.*, best.bestEvidenceScore, best.bestTermMatches,
         best."recordDate" AS bestRecordDate,
         ROW_NUMBER() OVER (
           PARTITION BY unique_matching."recordType", unique_matching."recordId"
@@ -423,7 +422,9 @@ export async function searchRecordCandidates(
   const limit = Math.max(1, options.limit ?? DEFAULT_LIMIT)
   const candidateLimit = limit * CANDIDATE_MULTIPLIER
   const terms = candidateQueryTerms(query)
-  const match = toMatchQuery(terms.join(' '), { op: 'or' })
+  // Keep the raw query as a safe FTS fallback when normalization intentionally
+  // removes every ranking term; structural browsing still handles empty input.
+  const match = toMatchQuery(terms.length > 0 ? terms.join(' ') : query, { op: 'or' })
   if (!match && !hasStructuralFilters(options)) {
     return { query, mode, semanticAvailable: false, candidates: [] }
   }

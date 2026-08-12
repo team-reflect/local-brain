@@ -46,7 +46,9 @@ function requestsWrite(message: UIMessage | undefined): boolean {
 }
 
 export interface ChatTurnPolicy {
+  /** Maximum provider steps in the current turn, including final synthesis. */
   toolStepLimit: number
+  /** Optional stricter record-detail limits applied to factual/read-first turns. */
   recordDetailBudget?: ChatRecordDetailBudget
 }
 

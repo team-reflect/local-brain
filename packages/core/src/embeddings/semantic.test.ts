@@ -227,10 +227,13 @@ describe('semanticHits', () => {
       maxChunksPerRecord: 4,
     })
 
-    expect(new Set(hits.map((item) => item.recordId))).toHaveLength(48)
+    expect(new Set(hits.map((item) => item.recordId)).size).toBe(48)
     expect(hits).toHaveLength(96)
     for (let recordIndex = 32; recordIndex < 48; recordIndex += 1) {
       expect(hits.some((item) => item.recordId === `record-${recordIndex}`)).toBe(true)
     }
+    expect(hits.map((item) => item.score)).toEqual(
+      [...hits].map((item) => item.score).sort((left, right) => right - left),
+    )
   })
 })

@@ -118,7 +118,10 @@ describe('record candidate ranking (real SQLite)', () => {
   })
 
   it('does not credit a query term that only appears inside a longer field token', async () => {
-    await createDocument({ title: 'Corporate Project' })
+    await createDocument({
+      title: 'Rateplan Project',
+      summary: 'Rateplan terms are confirmed.',
+    })
     const completeMatch = await createDocument({
       title: 'Project financing note',
       summary: 'Rate terms are confirmed.',
@@ -131,6 +134,43 @@ describe('record candidate ranking (real SQLite)', () => {
     })
 
     expect(result.candidates[0]?.recordRef).toBe(`document:${completeMatch}`)
+  })
+
+  it('does not let embedded title substrings crowd an exact summary token out of the direct limit', async () => {
+    const completeMatch = await createDocument({
+      title: 'Target financing note',
+      summary: 'Rate terms are confirmed.',
+    })
+    for (let index = 0; index < 12; index += 1) {
+      await createDocument({ title: `Corporate filing ${index}` })
+    }
+
+    const result = await searchRecordCandidates('rate', {
+      mode: 'lexical',
+      recordTypes: ['document'],
+      limit: 1,
+    })
+
+    expect(result.candidates[0]?.recordRef).toBe(`document:${completeMatch}`)
+    expect(result.candidates[0]?.matchReasons).toContain('summary')
+    expect(result.candidates[0]?.matchReasons).not.toContain('title')
+  })
+
+  it('keeps multi-token title matches across ordinary punctuation', async () => {
+    const phraseMatch = await createDocument({ title: 'North-Star launch plan' })
+    await createDocument({
+      title: 'North planning note',
+      summary: 'A different star is under review.',
+    })
+
+    const result = await searchRecordCandidates('north star', {
+      mode: 'lexical',
+      recordTypes: ['document'],
+      limit: 1,
+    })
+
+    expect(result.candidates[0]?.recordRef).toBe(`document:${phraseMatch}`)
+    expect(result.candidates[0]?.matchReasons).toContain('title')
   })
 
   it('uses exact FTS tokens for coverage before applying the lexical candidate limit', async () => {

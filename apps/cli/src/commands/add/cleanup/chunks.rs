@@ -2,11 +2,11 @@
 
 use std::collections::HashSet;
 
-use rusqlite::{params, Connection};
+use rusqlite::Connection;
 use serde_json::json;
 
 use super::super::links::{dedupe_exact_chunks_for_record, ExactChunkDedupeStats};
-use super::super::record_ref::parse_record_ref;
+use super::super::record_ref::{parse_record_ref, require_record};
 use crate::error::CliError;
 use crate::output::print_json;
 
@@ -26,20 +26,7 @@ fn record_keys(conn: &Connection, requested: &[&str]) -> Result<Vec<(String, Str
             if !seen.insert(key.clone()) {
                 continue;
             }
-            let exists: bool = conn.query_row(
-                "SELECT EXISTS(
-                   SELECT 1 FROM content_chunks
-                   WHERE record_type = ?1 AND record_id = ?2
-                 )",
-                params![key.0, key.1],
-                |row| row.get(0),
-            )?;
-            if !exists {
-                return Err(CliError::NotFound(format!(
-                    "{}:{} has no content chunks",
-                    key.0, key.1
-                )));
-            }
+            require_record(conn, &key.0, &key.1)?;
             keys.push(key);
         }
         keys.sort();
@@ -100,11 +87,7 @@ pub fn repair_exact_chunks(
     } else {
         RepairSummary {
             records_scanned: before.records_scanned,
-            records_with_duplicates: before.records_with_duplicates,
-            stats: ExactChunkDedupeStats {
-                duplicate_chunks: before.stats.duplicate_chunks,
-                ..ExactChunkDedupeStats::default()
-            },
+            ..RepairSummary::default()
         }
     };
 
@@ -154,7 +137,9 @@ pub fn repair_exact_chunks(
             }
         );
         if !args.apply {
-            println!("preview only; rerun with --apply after backing up the brain folder");
+            println!(
+                "preview only; close Local Brain, back up the brain folder, then rerun with --apply"
+            );
         }
         Ok(())
     }

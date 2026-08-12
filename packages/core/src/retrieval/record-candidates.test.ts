@@ -40,9 +40,6 @@ describe('record candidate fusion', () => {
       chunkIndex: hit.chunkIndex,
       snippet: hit.text,
     }))
-    lexical.matchedTerms = ['mortgage', 'rate', 'product']
-    lexical.termMatches = 3
-
     const semantic = newInternalCandidate(
       'interaction',
       'mortgage-thread',

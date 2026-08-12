@@ -47,9 +47,11 @@ export function candidateQueryTerms(query: string): string[] {
     }
     return stem
   }).filter(Boolean)
+  const loneIdentifier = all.length === 1 && all[0]?.length === 1
+    && query.trim().toLocaleLowerCase() === all[0]
   const useful = all.filter((term, index) => {
     if (term.length > 1) return !QUESTION_WORDS.has(term)
-    return index > 0 && IDENTIFIER_LABELS.has(all[index - 1] ?? '')
+    return loneIdentifier || (index > 0 && IDENTIFIER_LABELS.has(all[index - 1] ?? ''))
   })
   const fallback = all.filter((term) => term.length > 1)
   return [...new Set(useful.length > 0 ? useful : fallback)]

@@ -33,4 +33,14 @@ describe('planExactChunkCompaction', () => {
     expect(plan.duplicates).toEqual([])
     expect(plan.survivors.map((chunk) => chunk.chunkIndex)).toEqual([0, 1])
   })
+
+  it('uses the stable id tie-break when corrupt legacy rows share an index', () => {
+    const plan = planExactChunkCompaction([
+      { id: 'chunk-z', chunkIndex: 0, text: 'same passage', contentHash: null },
+      { id: 'chunk-a', chunkIndex: 0, text: 'same passage', contentHash: null },
+    ])
+
+    expect(plan.duplicates).toEqual([{ duplicateId: 'chunk-z', canonicalId: 'chunk-a' }])
+    expect(plan.survivors.map((chunk) => chunk.id)).toEqual(['chunk-a'])
+  })
 })

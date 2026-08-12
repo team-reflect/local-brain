@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 
 use crate::commands::{to_like_pattern_lower, EvidenceLocator, EvidenceRef, LinkKind, LinkRef};
 use crate::error::CliError;
@@ -56,6 +56,37 @@ struct ExistingChunk {
     chunk_index: i64,
     text: String,
     content_hash: Option<String>,
+}
+
+fn count_duplicate_dependents(
+    conn: &Connection,
+    duplicate_ids: &[&str],
+) -> Result<(usize, usize), CliError> {
+    // Bound each statement well below SQLite's host-parameter limit. Numbered
+    // parameters can be reused by both subqueries, so each batch needs only one
+    // binding per duplicate id rather than one query per duplicate row.
+    const BATCH_SIZE: usize = 500;
+
+    let mut evidence_refs = 0;
+    let mut embeddings = 0;
+    for batch in duplicate_ids.chunks(BATCH_SIZE) {
+        let placeholders = (1..=batch.len())
+            .map(|index| format!("?{index}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT
+               (SELECT COUNT(*) FROM evidence_refs WHERE chunk_id IN ({placeholders})),
+               (SELECT COUNT(*) FROM chunk_embeddings WHERE chunk_id IN ({placeholders}))"
+        );
+        let (batch_evidence_refs, batch_embeddings): (i64, i64) =
+            conn.query_row(&sql, params_from_iter(batch.iter().copied()), |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?;
+        evidence_refs += batch_evidence_refs as usize;
+        embeddings += batch_embeddings as usize;
+    }
+    Ok((evidence_refs, embeddings))
 }
 
 fn existing_chunks(
@@ -112,18 +143,12 @@ pub(super) fn dedupe_exact_chunks_for_record(
         duplicate_chunks: duplicates.len(),
         ..ExactChunkDedupeStats::default()
     };
-    for (duplicate_id, _) in &duplicates {
-        stats.evidence_refs_repointed += conn.query_row(
-            "SELECT COUNT(*) FROM evidence_refs WHERE chunk_id = ?1",
-            params![duplicate_id],
-            |row| row.get::<_, i64>(0),
-        )? as usize;
-        stats.embeddings_deleted += conn.query_row(
-            "SELECT COUNT(*) FROM chunk_embeddings WHERE chunk_id = ?1",
-            params![duplicate_id],
-            |row| row.get::<_, i64>(0),
-        )? as usize;
-    }
+    let duplicate_ids = duplicates
+        .iter()
+        .map(|(duplicate_id, _)| *duplicate_id)
+        .collect::<Vec<_>>();
+    (stats.evidence_refs_repointed, stats.embeddings_deleted) =
+        count_duplicate_dependents(conn, &duplicate_ids)?;
     stats.hashes_refreshed = survivors
         .iter()
         .filter(|chunk| chunk.content_hash.as_deref() != Some(content_hash(&chunk.text).as_str()))

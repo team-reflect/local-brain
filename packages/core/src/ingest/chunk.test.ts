@@ -53,7 +53,7 @@ describe('chunkText', () => {
     ])
   })
 
-  it('does not collapse chunks that differ by case or whitespace', () => {
+  it('does not collapse chunks that differ by case', () => {
     expect(chunkText('Quoted text\n\nquoted text', { maxChars: 11 })).toEqual([
       { index: 0, text: 'Quoted text' },
       { index: 1, text: 'quoted text' },
