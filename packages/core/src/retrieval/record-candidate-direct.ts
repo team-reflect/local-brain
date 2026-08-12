@@ -116,16 +116,12 @@ function hasTokenPhrase(valueTokens: readonly string[], terms: readonly string[]
   )
 }
 
-function tokenExpression(value: RawBuilder<unknown>): RawBuilder<unknown> {
-  return sql`replace(replace(replace(replace(replace(replace(replace(replace(replace(
-    replace(lower(COALESCE(${value}, '')), '.', ' '), ',', ' '), ':', ' '), ';', ' '),
-    '/', ' '), '-', ' '), '_', ' '), char(9), ' '), char(10), ' '), char(13), ' ')`
-}
-
 function matchesTerm(value: RawBuilder<unknown>, term: string): RawBuilder<unknown> {
-  // The durable fields are plain text; normalize their common separators before
-  // preselection, then verify all match reasons again with Unicode tokens in JS.
-  return sql`instr(' ' || ${tokenExpression(value)} || ' ', ${` ${term} `}) > 0`
+  // GLOB's negated alphanumeric boundary handles every punctuation separator
+  // (email @/dots, phone parentheses, slashes, etc.) without an incomplete
+  // replacement list. Unicode token sets verify reasons again after selection.
+  return sql`(' ' || lower(COALESCE(${value}, '')) || ' ')
+    GLOB ${`*[^0-9a-z]${term}[^0-9a-z]*`}`
 }
 
 function matchesAnyTerm(value: RawBuilder<unknown>, terms: readonly string[]): RawBuilder<unknown> {

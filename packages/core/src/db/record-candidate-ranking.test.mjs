@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   createDocument,
   createInteraction,
+  createPerson,
   db,
   newId,
   searchRecordCandidates,
@@ -171,6 +172,45 @@ describe('record candidate ranking (real SQLite)', () => {
 
     expect(result.candidates[0]?.recordRef).toBe(`document:${phraseMatch}`)
     expect(result.candidates[0]?.matchReasons).toContain('title')
+  })
+
+  it('finds typed-only email local and domain tokens across punctuation before limiting', async () => {
+    const personId = await createPerson({
+      fullName: 'Typed Email Contact',
+      primaryEmail: 'orchid@northwind.example',
+    })
+    for (let index = 0; index < 8; index += 1) {
+      await createPerson({ fullName: `Recent Contact ${index}` })
+    }
+
+    for (const query of ['orchid', 'northwind']) {
+      const result = await searchRecordCandidates(query, {
+        mode: 'lexical',
+        recordTypes: ['person'],
+        limit: 1,
+      })
+      expect(result.candidates[0]?.recordRef).toBe(`person:${personId}`)
+      expect(result.candidates[0]?.matchReasons).toContain('typed_field')
+    }
+  })
+
+  it('finds a typed-only parenthesized phone area code before limiting', async () => {
+    const personId = await createPerson({
+      fullName: 'Typed Phone Contact',
+      primaryPhone: '(415) 555-0199',
+    })
+    for (let index = 0; index < 8; index += 1) {
+      await createPerson({ fullName: `Recent Phone Contact ${index}` })
+    }
+
+    const result = await searchRecordCandidates('415', {
+      mode: 'lexical',
+      recordTypes: ['person'],
+      limit: 1,
+    })
+
+    expect(result.candidates[0]?.recordRef).toBe(`person:${personId}`)
+    expect(result.candidates[0]?.matchReasons).toContain('typed_field')
   })
 
   it('uses exact FTS tokens for coverage before applying the lexical candidate limit', async () => {
