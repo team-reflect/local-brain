@@ -7693,3 +7693,174 @@ fn import_finalize_supports_explicit_waivers_for_structured_events() {
     let audit = run_json(&db, &["--json", "import", "audit", "--limit", "10"]);
     assert_eq!(audit["incompleteCount"], 0);
 }
+
+#[test]
+fn repair_chunks_dedupe_exact_previews_preserves_evidence_and_is_idempotent() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let document = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "document",
+            "--title",
+            "Quoted thread",
+            "--text",
+            "first exact passage",
+        ],
+    );
+    let document_id = document["id"].as_str().unwrap();
+    let document_ref = format!("document:{document_id}");
+
+    let conn = Connection::open(&db).unwrap();
+    let canonical_id: String = conn
+        .query_row(
+            "SELECT id FROM content_chunks
+             WHERE record_type = 'document' AND record_id = ?1 AND chunk_index = 0",
+            [document_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    conn.execute(
+        "INSERT INTO content_chunks
+           (id, record_type, record_id, chunk_index, text, content_hash)
+         VALUES
+           ('duplicate-chunk', 'document', ?1, 1, 'first exact passage', NULL),
+           ('shifted-chunk', 'document', ?1, 2, 'later unique passage', NULL)",
+        [document_id],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO evidence_refs
+           (id, subject_type, subject_id, chunk_id, quote_start, quote_end)
+         VALUES ('duplicate-evidence', 'memory', 'memory-1', 'duplicate-chunk', 2, 8)",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO chunk_embeddings (chunk_id, content_hash, model_id)
+         VALUES ('duplicate-chunk', 'stale-hash', 'test-model')",
+        [],
+    )
+    .unwrap();
+    let body_before: String = conn
+        .query_row(
+            "SELECT body_text FROM documents WHERE id = ?1",
+            [document_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    drop(conn);
+
+    let preview = run_json(
+        &db,
+        &[
+            "--json",
+            "repair",
+            "chunks",
+            "dedupe-exact",
+            "--record",
+            &document_ref,
+        ],
+    );
+    assert_eq!(preview["mode"], "preview");
+    assert_eq!(preview["applied"], false);
+    assert_eq!(preview["duplicateChunksBefore"], 1);
+    assert_eq!(preview["duplicateChunksAfter"], 1);
+    assert_eq!(preview["projectedDuplicateChunksAfterApply"], 0);
+    assert_eq!(preview["evidenceRefsToRepoint"], 1);
+    assert_eq!(preview["embeddingsToDelete"], 1);
+    let conn = Connection::open(&db).unwrap();
+    let duplicate_still_exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM content_chunks WHERE id = 'duplicate-chunk'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        duplicate_still_exists, 1,
+        "preview must not mutate the database"
+    );
+    drop(conn);
+
+    let applied = run_json(
+        &db,
+        &[
+            "--json",
+            "repair",
+            "chunks",
+            "dedupe-exact",
+            "--record",
+            &document_ref,
+            "--apply",
+        ],
+    );
+    assert_eq!(applied["mode"], "applied");
+    assert_eq!(applied["duplicateChunksBefore"], 1);
+    assert_eq!(applied["duplicateChunksAfter"], 0);
+    assert_eq!(applied["chunksRemoved"], 1);
+    assert_eq!(applied["evidenceRefsRepointed"], 1);
+    assert_eq!(applied["embeddingsDeleted"], 1);
+    assert_eq!(applied["durableBodiesChanged"], false);
+
+    let conn = Connection::open(&db).unwrap();
+    let body_after: String = conn
+        .query_row(
+            "SELECT body_text FROM documents WHERE id = ?1",
+            [document_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(body_after, body_before);
+    let evidence: (String, Option<i64>, Option<i64>) = conn
+        .query_row(
+            "SELECT chunk_id, quote_start, quote_end
+             FROM evidence_refs WHERE id = 'duplicate-evidence'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(evidence, (canonical_id.clone(), Some(2), Some(8)));
+    let chunks: Vec<(String, i64)> = conn
+        .prepare(
+            "SELECT id, chunk_index FROM content_chunks
+             WHERE record_type = 'document' AND record_id = ?1
+             ORDER BY chunk_index",
+        )
+        .unwrap()
+        .query_map([document_id], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(chunks, vec![(canonical_id, 0), ("shifted-chunk".into(), 1)]);
+    let embeddings: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM chunk_embeddings WHERE chunk_id = 'duplicate-chunk'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(embeddings, 0);
+    drop(conn);
+
+    let rerun = run_json(
+        &db,
+        &[
+            "--json",
+            "repair",
+            "chunks",
+            "dedupe-exact",
+            "--record",
+            &document_ref,
+            "--apply",
+        ],
+    );
+    assert_eq!(rerun["duplicateChunksBefore"], 0);
+    assert_eq!(rerun["duplicateChunksAfter"], 0);
+    assert_eq!(rerun["chunksRemoved"], 0);
+    assert_eq!(rerun["evidenceRefsRepointed"], 0);
+    assert_eq!(rerun["embeddingsDeleted"], 0);
+    assert_eq!(rerun["hashesRefreshed"], 0);
+}

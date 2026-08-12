@@ -135,4 +135,102 @@ describe('semanticHits', () => {
     expect(requested).toEqual([40, 80])
     expect(new Set(hits.map((item) => item.recordId)).size).toBe(10)
   })
+
+  it('counts unique content rather than duplicate neighbors toward the per-record cap', async () => {
+    setBridge({
+      invoke: (command) => {
+        if (command !== 'db_query') return Promise.reject(new Error(`unexpected ${command}`))
+        return Promise.resolve([
+          ...Array.from({ length: 16 }, (_, index) => ({
+            chunkId: `quoted-${index}`,
+            text: 'Repeated quoted mortgage history.',
+            contentHash: 'quoted-history-hash',
+            recordType: 'interaction',
+            recordId: 'mortgage-thread',
+            chunkIndex: index,
+            recordTitle: 'Mortgage email',
+            recordDate: null,
+            distance: 0.1 + index * 0.001,
+          })),
+          ...Array.from({ length: 3 }, (_, index) => ({
+            chunkId: `quoted-variant-${index}`,
+            text: `  REPEATED${' '.repeat(index + 2)}quoted\nmortgage history.  `,
+            contentHash: `quoted-variant-hash-${index}`,
+            recordType: 'interaction',
+            recordId: 'mortgage-thread',
+            chunkIndex: 16 + index,
+            recordTitle: 'Mortgage email',
+            recordDate: null,
+            distance: 0.12 + index * 0.001,
+          })),
+          {
+            chunkId: 'answer',
+            text: 'The mortgage interest rate is 5.125%.',
+            contentHash: 'answer-hash',
+            recordType: 'interaction',
+            recordId: 'mortgage-thread',
+            chunkIndex: 19,
+            recordTitle: 'Mortgage email',
+            recordDate: null,
+            distance: 0.2,
+          },
+        ])
+      },
+    })
+
+    const hits = await semanticHits([0.1, 0.2], {
+      limit: 2,
+      minUniqueRecords: 1,
+      maxChunksPerRecord: 2,
+    })
+
+    expect(hits.map((item) => item.chunkId)).toEqual(['quoted-0', 'answer'])
+    expect(hits[1]?.text).toContain('5.125%')
+    expect(hits[0]).not.toHaveProperty('contentHash')
+  })
+
+  it('preserves broad record diversity when nearest chunks are front-loaded by long records', async () => {
+    setBridge({
+      invoke: (command) => {
+        if (command !== 'db_query') return Promise.reject(new Error(`unexpected ${command}`))
+        const frontLoaded = Array.from({ length: 32 }, (_, recordIndex) =>
+          Array.from({ length: 4 }, (_, chunkIndex) => ({
+            chunkId: `long-${recordIndex}-${chunkIndex}`,
+            text: `unique long text ${recordIndex} ${chunkIndex}`,
+            contentHash: `long-hash-${recordIndex}-${chunkIndex}`,
+            recordType: 'document',
+            recordId: `record-${recordIndex}`,
+            chunkIndex,
+            recordTitle: null,
+            recordDate: null,
+            distance: 0.1 + (recordIndex * 4 + chunkIndex) * 0.001,
+          })),
+        ).flat()
+        const remaining = Array.from({ length: 16 }, (_, index) => ({
+          chunkId: `short-${index + 32}`,
+          text: `unique short text ${index + 32}`,
+          contentHash: `short-hash-${index + 32}`,
+          recordType: 'document',
+          recordId: `record-${index + 32}`,
+          chunkIndex: 0,
+          recordTitle: null,
+          recordDate: null,
+          distance: 0.3 + index * 0.001,
+        }))
+        return Promise.resolve([...frontLoaded, ...remaining])
+      },
+    })
+
+    const hits = await semanticHits([0.1, 0.2], {
+      limit: 96,
+      minUniqueRecords: 48,
+      maxChunksPerRecord: 4,
+    })
+
+    expect(new Set(hits.map((item) => item.recordId))).toHaveLength(48)
+    expect(hits).toHaveLength(96)
+    for (let recordIndex = 32; recordIndex < 48; recordIndex += 1) {
+      expect(hits.some((item) => item.recordId === `record-${recordIndex}`)).toBe(true)
+    }
+  })
 })

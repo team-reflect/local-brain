@@ -1,6 +1,7 @@
 import { sql, type RawBuilder } from 'kysely'
 import { db } from '../db/client'
 import { toLikePattern } from './match-query'
+import { candidateQueryTerms } from './record-candidate-evidence'
 import {
   candidateRecordTime,
   newInternalCandidate,
@@ -105,19 +106,12 @@ const DIRECT_SOURCES: readonly DirectSource[] = [
 ]
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/
-const QUESTION_WORDS = new Set([
-  'a', 'an', 'and', 'are', 'did', 'do', 'for', 'from', 'how', 'in', 'is', 'of', 'on',
-  'the', 'to', 'was', 'what', 'when', 'where', 'who', 'with',
-])
-
 function fold(value: string | null | undefined): string {
   return (value ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase()
 }
 
-function queryTerms(query: string): string[] {
-  const all = query.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []
-  const useful = all.filter((term) => term.length > 1 && !QUESTION_WORDS.has(term))
-  return [...new Set(useful.length > 0 ? useful : all)]
+function tokens(value: string): ReadonlySet<string> {
+  return new Set(value.match(/[\p{L}\p{N}]+/gu) ?? [])
 }
 
 function concatenatedColumns(columns: readonly string[]): RawBuilder<unknown> {
@@ -155,11 +149,8 @@ async function directSourceHits(
   const date = sql.raw(source.dateExpression)
   const kind = source.kindColumn ? sql.raw(`r.${source.kindColumn}`) : sql`NULL`
   const haystack = sql`lower(COALESCE(${title}, '') || ' ' || ${summary} || ' ' || ${typed})`
-  const terms = queryTerms(query)
+  const terms = candidateQueryTerms(query)
   const patterns = [...new Set([query, ...terms].map(toLikePattern).filter((value): value is string => Boolean(value)))]
-  const termPatterns = terms
-    .map(toLikePattern)
-    .filter((value): value is string => Boolean(value))
   const foldedQuery = fold(query)
   const exactTitle = foldedQuery
     ? sql`CASE WHEN lower(trim(${title})) = ${foldedQuery} THEN 1 ELSE 0 END`
@@ -172,10 +163,12 @@ async function directSourceHits(
     WHEN ${summaryMatch} THEN 2
     ELSE 3
   END`
-  const termMatches = termPatterns.length > 0
+  const termMatches = terms.length > 0
     ? sql`(${sql.join(
-        termPatterns.map(
-          (pattern) => sql`CASE WHEN ${haystack} LIKE lower(${pattern}) ESCAPE '\\' THEN 1 ELSE 0 END`,
+        terms.map(
+          (term) => sql`CASE WHEN (' ' || replace(replace(replace(replace(replace(
+            ${haystack}, char(13), ' '), char(10), ' '), char(9), ' '), '-', ' '), '_', ' ') || ' ')
+            LIKE ${`% ${term} %`} THEN 1 ELSE 0 END`,
         ),
         sql` + `,
       )})`
@@ -219,6 +212,7 @@ async function directSourceHits(
     const titleText = fold(row.title)
     const summaryText = fold(row.summaryText)
     const typedText = fold(row.typedText)
+    const fieldTokens = tokens(`${titleText} ${summaryText} ${typedText}`)
     candidate.exactTitle = titleText === foldedQuery
     const titleMatch = titleText.includes(foldedQuery) || terms.some((term) => titleText.includes(term))
     const summaryMatch = summaryText.includes(foldedQuery) || terms.some((term) => summaryText.includes(term))
@@ -229,7 +223,9 @@ async function directSourceHits(
       ...(summaryMatch ? ['summary'] : []),
       ...(typedMatch ? ['typed_field'] : []),
     ]
-    candidate.termMatches = terms.filter((term) => `${titleText} ${summaryText} ${typedText}`.includes(term)).length
+    candidate.fieldMatchedTerms = terms.filter((term) => fieldTokens.has(term))
+    candidate.matchedTerms = [...candidate.fieldMatchedTerms]
+    candidate.termMatches = candidate.fieldMatchedTerms.length
     candidate.quality = candidate.exactTitle ? 0 : titleMatch ? 1 : summaryMatch ? 2 : 3
     return candidate
   })

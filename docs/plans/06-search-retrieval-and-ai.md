@@ -25,6 +25,10 @@ Chat conversations, daily report/todo retrieval, and model boundary settings.
 - Grounded discovery ranks unique visible records by fusing exact name/title and
   typed-field matches with lexical and semantic chunk matches. A long source must
   not consume the result budget with many chunks from the same record.
+- Evidence selection de-duplicates byte-identical and normalized-equivalent passages
+  within a record before applying its two-passage cap. Multi-term coverage and explicit
+  answer-bearing values outrank repeated quoted history; semantic per-record caps count
+  unique passages rather than raw vector neighbours.
 - Chunk retrieval remains available through `retrieve()`. Grounded Chat uses a sibling
   record-candidate path: it shares the chunk joins, visibility/date filters, and
   semantic primitives with `retrieve()`, then fuses those results with typed record
@@ -134,6 +138,12 @@ Chat conversations, daily report/todo retrieval, and model boundary settings.
      projects, self identity, and bounded real filter vocabularies
    - old bulky tool results are elided and old turns dropped as whole units before a
      provider context window is exceeded
+   - factual turns use at most four model steps, including a synthesis-only final step;
+     approved write workflows retain the larger multi-step allowance they need
+   - search and browse share a two-call discovery budget, with 12 results by default
+     and 16 maximum; factual turns may load one detail batch containing at most six
+     unique records and 24,000 text characters; once `get_records` returns bounded
+     details, earlier candidate payloads are elided from the provider request
    - the final allowed model step cannot call another tool, so a turn ends with a
      synthesized answer instead of tool activity alone
    - returned record titles are inspectable in the tool trace; validated record/chunk
@@ -173,6 +183,10 @@ Chat conversations, daily report/todo retrieval, and model boundary settings.
   synthetic chunk, and source edits cannot leave stale chunk text searchable.
 - One long document or transcript cannot crowd other relevant records out of the
   candidate list.
+- Repeated quoted chunks cannot fill a record's evidence slots or semantic per-record
+  allowance, and an explicit answer-bearing passage survives for the detail read.
+- A factual Chat turn cannot exceed two discovery calls, one six-record/24,000-character
+  detail batch, or four model steps, and its final step is reserved for synthesis.
 - Every explicitly requested evidence chunk survives the detail-read budget before
   neighboring context is added.
 - A Chat citation is clickable only when its record (and optional chunk) was returned
@@ -198,7 +212,8 @@ Chat conversations, daily report/todo retrieval, and model boundary settings.
 - Unit test command registry execution and keyboard-result behavior.
 - Unit test chunk hash stability and lexical fallback when embeddings are unavailable.
 - Real-SQLite golden tests cover title/summary/typed-field recall, record-level
-  diversity, relationship filtering, source-edit freshness, and chronological browse.
+  diversity, duplicate quoted-history evidence, answer-bearing passage selection,
+  relationship filtering, source-edit freshness, and chronological browse.
 - Unit test context-window trimming, final-step synthesis, batched record reads, and
   unsupported citation refs.
 - Integration test cited task/memory evidence persistence.

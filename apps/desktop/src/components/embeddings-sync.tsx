@@ -80,7 +80,7 @@ export function EmbeddingsSync(): null {
       return
     }
     if (data.runtime.status !== 'uninitialized') automaticEnsureBlocked.current = false
-    if (data.pending === 0 || data.backfillError) {
+    if ((data.pending === 0 && data.orphaned === 0) || data.backfillError) {
       automaticBackfillBlocked.current = false
       clearAutomaticRetry()
     }
@@ -116,7 +116,7 @@ export function EmbeddingsSync(): null {
     const today = todayLocalDayKey()
     if (
       data.runtime.status === 'ready' &&
-      data.pending > 0 &&
+      (data.pending > 0 || data.orphaned > 0) &&
       !data.backfillError &&
       !backfilling.current &&
       !automaticBackfillBlocked.current

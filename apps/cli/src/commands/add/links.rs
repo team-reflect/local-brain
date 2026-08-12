@@ -2,6 +2,8 @@
 //! ingest paths: chunking text into `content_chunks` and inserting the join-table
 //! rows that connect a record to the people/orgs/projects/tasks it references.
 
+use std::collections::HashMap;
+
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::commands::{to_like_pattern_lower, EvidenceLocator, EvidenceRef, LinkKind, LinkRef};
@@ -39,6 +41,138 @@ fn insert_chunk_row(
     Ok(())
 }
 
+/// Exact-duplicate maintenance stats for one record's derived chunks.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ExactChunkDedupeStats {
+    pub duplicate_chunks: usize,
+    pub evidence_refs_repointed: usize,
+    pub embeddings_deleted: usize,
+    pub hashes_refreshed: usize,
+}
+
+#[derive(Debug)]
+struct ExistingChunk {
+    id: String,
+    chunk_index: i64,
+    text: String,
+    content_hash: Option<String>,
+}
+
+fn existing_chunks(
+    conn: &Connection,
+    record_type: &str,
+    record_id: &str,
+) -> Result<Vec<ExistingChunk>, CliError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, chunk_index, text, content_hash
+         FROM content_chunks
+         WHERE record_type = ?1 AND record_id = ?2
+         ORDER BY chunk_index ASC, id ASC",
+    )?;
+    let rows = stmt.query_map(params![record_type, record_id], |row| {
+        Ok(ExistingChunk {
+            id: row.get(0)?,
+            chunk_index: row.get(1)?,
+            text: row.get(2)?,
+            content_hash: row.get(3)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// Preview or apply exact-text de-duplication for one record's rebuildable
+/// `content_chunks` projection.
+///
+/// The durable source body is never touched. Before deleting a later duplicate,
+/// evidence refs are moved to the earliest byte-identical chunk, so citations
+/// keep the same text and quote offsets. Remaining chunks are compacted in their
+/// original order while retaining their ids. Duplicate embedding rows/vectors
+/// are removed because they are a rebuildable projection too.
+pub(super) fn dedupe_exact_chunks_for_record(
+    conn: &Connection,
+    record_type: &str,
+    record_id: &str,
+    apply: bool,
+) -> Result<ExactChunkDedupeStats, CliError> {
+    let chunks = existing_chunks(conn, record_type, record_id)?;
+    let mut canonical_by_text: HashMap<&str, &str> = HashMap::new();
+    let mut survivors = Vec::new();
+    let mut duplicates = Vec::new();
+
+    for chunk in &chunks {
+        if let Some(canonical_id) = canonical_by_text.get(chunk.text.as_str()) {
+            duplicates.push((chunk.id.as_str(), *canonical_id));
+        } else {
+            canonical_by_text.insert(chunk.text.as_str(), chunk.id.as_str());
+            survivors.push(chunk);
+        }
+    }
+
+    let mut stats = ExactChunkDedupeStats {
+        duplicate_chunks: duplicates.len(),
+        ..ExactChunkDedupeStats::default()
+    };
+    for (duplicate_id, _) in &duplicates {
+        stats.evidence_refs_repointed += conn.query_row(
+            "SELECT COUNT(*) FROM evidence_refs WHERE chunk_id = ?1",
+            params![duplicate_id],
+            |row| row.get::<_, i64>(0),
+        )? as usize;
+        stats.embeddings_deleted += conn.query_row(
+            "SELECT COUNT(*) FROM chunk_embeddings WHERE chunk_id = ?1",
+            params![duplicate_id],
+            |row| row.get::<_, i64>(0),
+        )? as usize;
+    }
+    stats.hashes_refreshed = survivors
+        .iter()
+        .filter(|chunk| chunk.content_hash.as_deref() != Some(content_hash(&chunk.text).as_str()))
+        .count();
+
+    if !apply {
+        return Ok(stats);
+    }
+
+    for (duplicate_id, canonical_id) in duplicates {
+        conn.execute(
+            "UPDATE evidence_refs SET chunk_id = ?1 WHERE chunk_id = ?2",
+            params![canonical_id, duplicate_id],
+        )?;
+        conn.execute(
+            "DELETE FROM chunk_vectors
+             WHERE rowid IN (SELECT id FROM chunk_embeddings WHERE chunk_id = ?1)",
+            params![duplicate_id],
+        )?;
+        conn.execute(
+            "DELETE FROM chunk_embeddings WHERE chunk_id = ?1",
+            params![duplicate_id],
+        )?;
+        conn.execute(
+            "DELETE FROM content_chunks WHERE id = ?1",
+            params![duplicate_id],
+        )?;
+    }
+
+    // Deleting a later duplicate leaves a hole. Moving survivors in ascending
+    // original order is conflict-free because every lower destination is either
+    // the same survivor index or a duplicate row that was just removed.
+    for (new_index, chunk) in survivors.iter().enumerate() {
+        let hash = content_hash(&chunk.text);
+        if chunk.chunk_index != new_index as i64
+            || chunk.content_hash.as_deref() != Some(hash.as_str())
+        {
+            conn.execute(
+                "UPDATE content_chunks
+                 SET chunk_index = ?1, content_hash = ?2
+                 WHERE id = ?3",
+                params![new_index as i64, hash, chunk.id],
+            )?;
+        }
+    }
+
+    Ok(stats)
+}
+
 /// Chunk `body` and insert the ordered `content_chunks` rows for a record,
 /// returning the chunk count. The chunking is the Rust twin of the app's, so the
 /// derived FTS/embedding data matches regardless of which writer ingested it.
@@ -68,6 +202,10 @@ pub(super) fn replace_chunks(
     record_id: &str,
     body: &str,
 ) -> Result<usize, CliError> {
+    // Legacy imports may contain repeated quoted-history chunks. Collapse them
+    // before the index-preserving replacement so a shifted unique chunk keeps
+    // its original id and any evidence refs to a duplicate are not cascaded.
+    dedupe_exact_chunks_for_record(conn, record_type, record_id, true)?;
     let chunks = chunk_text(body);
     for (index, text) in chunks.iter().enumerate() {
         let chunk_index = index as i64;

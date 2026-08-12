@@ -63,10 +63,29 @@ export interface RecordCandidateSearchResult {
   candidates: RecordCandidate[]
 }
 
+export interface InternalCandidateEvidenceHit {
+  chunkId: string
+  text: string
+  snippet: string | null
+  contentHash?: string | null
+  recordType: SourceRecordType
+  recordId: string
+  recordTitle: string | null
+  recordDate: string | null
+  navigationRecordType?: NavigableRecordType | null
+  navigationRecordId?: string | null
+  chunkIndex: number
+  bm25?: number
+}
+
 export interface InternalCandidate extends RecordCandidate {
   exactTitle: boolean
   quality: number
+  fieldMatchedTerms: string[]
+  matchedTerms: string[]
   termMatches: number
+  answerStrength: number
+  evidencePool: InternalCandidateEvidenceHit[]
 }
 
 export function candidateKey(
@@ -102,7 +121,11 @@ export function newInternalCandidate(
     matchReasons: [...reasons],
     exactTitle: false,
     quality: 4,
+    fieldMatchedTerms: [],
+    matchedTerms: [],
     termMatches: 0,
+    answerStrength: 0,
+    evidencePool: [],
   }
 }
 

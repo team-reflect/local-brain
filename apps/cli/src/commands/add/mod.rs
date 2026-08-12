@@ -96,9 +96,9 @@ pub use affiliation::{affiliate, AffiliateArgs};
 pub use asset::{add_asset, set_asset_text, AddAssetArgs};
 pub use cleanup::{
     archive_record, merge_person, person_email_add, person_email_remove, person_phone_add,
-    person_phone_remove, rename_person, repair_person_phone_move, unlink_records, ArchiveArgs,
-    ArchiveKind, MergePersonArgs, PersonContactArgs, PersonPhoneMoveArgs, PersonRenameArgs,
-    UnlinkArgs,
+    person_phone_remove, rename_person, repair_exact_chunks, repair_person_phone_move,
+    unlink_records, ArchiveArgs, ArchiveKind, MergePersonArgs, PersonContactArgs,
+    PersonPhoneMoveArgs, PersonRenameArgs, RepairExactChunksArgs, UnlinkArgs,
 };
 pub use document::{add_document, AddDocumentArgs};
 pub use import_completion::{import_audit, import_finalize, ImportAuditArgs, ImportFinalizeArgs};

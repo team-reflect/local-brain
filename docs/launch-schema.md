@@ -168,6 +168,14 @@ chunks follow the schema's evidence-cascade behavior. Semantic reads join on the
 current model and content hash, so a stale vector becomes ineligible immediately;
 background catch-up replaces changed vectors and prunes orphans asynchronously.
 
+Within one record, the projection keeps only the earliest byte-identical chunk. This
+does not rewrite or redact the durable source body; it prevents repeated quoted email
+history from multiplying FTS rows and embeddings. When repairing legacy duplicates,
+evidence refs move to the earliest exact-text chunk before deletion (quote offsets stay
+valid), later unique chunks retain their ids while indexes compact, and duplicate
+embedding rows/vectors are pruned. `brain repair chunks dedupe-exact` previews this
+repair by default and requires `--apply`; rerunning the applied repair is a no-op.
+
 Documents, interactions, and assets also keep navigational FTS projections for
 global search and quick UI lookup. Grounded Chat uses a sibling record-candidate query
 over direct record fields plus the shared chunk lexical/semantic primitives. It fuses
