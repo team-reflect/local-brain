@@ -100,6 +100,7 @@ function status(overrides: Partial<EmbeddingsStatus> = {}): EmbeddingsStatus {
     indexed: 10,
     totalChunks: 10,
     pending: 0,
+    orphaned: 0,
     ready: true,
     backfillError: null,
     lastBackfillAttemptDay: null,
@@ -120,6 +121,7 @@ describe('embeddingsRefetchInterval', () => {
   it('keeps a periodic catch-up poll after an automatic attempt', () => {
     expect(embeddingsRefetchInterval(status())).toBe(60_000)
     expect(embeddingsRefetchInterval(status({ pending: 4, ready: false }))).toBe(60_000)
+    expect(embeddingsRefetchInterval(status({ orphaned: 1, ready: false }))).toBe(60_000)
     expect(embeddingsRefetchInterval(status({ lastBackfillAttemptDay: todayLocalDayKey() }))).toBe(60_000)
     expect(
       embeddingsRefetchInterval(

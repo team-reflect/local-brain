@@ -3,6 +3,7 @@
 //! neutral and operate on the durable SQLite schema directly in one transaction.
 
 mod archive;
+mod chunks;
 pub(super) mod contacts;
 mod merge;
 mod unlink;
@@ -16,6 +17,7 @@ use super::text::normalize_optional;
 use crate::error::CliError;
 
 pub use archive::archive_record;
+pub use chunks::{repair_exact_chunks, RepairExactChunksArgs};
 pub use contacts::{
     person_email_add, person_email_remove, person_phone_add, person_phone_remove, rename_person,
     repair_person_phone_move,

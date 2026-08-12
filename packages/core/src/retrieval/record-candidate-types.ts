@@ -63,10 +63,34 @@ export interface RecordCandidateSearchResult {
   candidates: RecordCandidate[]
 }
 
+/** Unranked internal chunk evidence retained until cross-leg selection. */
+export interface InternalCandidateEvidenceHit {
+  chunkId: string
+  text: string
+  snippet: string | null
+  contentHash?: string | null
+  recordType: SourceRecordType
+  recordId: string
+  recordTitle: string | null
+  recordDate: string | null
+  navigationRecordType?: NavigableRecordType | null
+  navigationRecordId?: string | null
+  chunkIndex: number
+  bm25?: number
+}
+
+/** Internal record candidate with ranking signals removed from the public result. */
 export interface InternalCandidate extends RecordCandidate {
   exactTitle: boolean
   quality: number
+  fieldMatchedTerms: string[]
+  /** Useful query terms covered by the merged direct fields and selected evidence. */
+  matchedTerms: string[]
   termMatches: number
+  /** Generic answer-shape score from 0 (none) through 6 (paired structured fields). */
+  answerStrength: number
+  /** Unranked, content-unique candidates available for final evidence selection. */
+  evidencePool: InternalCandidateEvidenceHit[]
 }
 
 export function candidateKey(
@@ -102,7 +126,11 @@ export function newInternalCandidate(
     matchReasons: [...reasons],
     exactTitle: false,
     quality: 4,
+    fieldMatchedTerms: [],
+    matchedTerms: [],
     termMatches: 0,
+    answerStrength: 0,
+    evidencePool: [],
   }
 }
 

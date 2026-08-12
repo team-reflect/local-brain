@@ -386,6 +386,7 @@ export {
   backfillEmbeddings,
   clearEmbeddings,
   countPending,
+  countOrphanEmbeddings,
   pruneOrphanEmbeddings,
   getEmbeddingsStatus,
   isEmbeddingsEnabled,
@@ -604,7 +605,12 @@ export {
 export { seedDemoData, type SeedResult } from './seed/seed'
 
 // Chat AI: read-only tools and system prompt builder
-export { buildChatTools, type ChatTools } from './ai/chat/tools'
+export {
+  buildChatTools,
+  type BuildChatToolsOptions,
+  type ChatRecordDetailBudget,
+  type ChatTools,
+} from './ai/chat/tools'
 export { buildChatSystemPrompt, type ChatSystemPromptInput } from './ai/chat/system-prompt'
 export {
   loadChatBrainOverview,

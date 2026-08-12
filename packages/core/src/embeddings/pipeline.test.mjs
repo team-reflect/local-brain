@@ -285,6 +285,41 @@ describe('getEmbeddingsStatus', () => {
     expect(status.enabled).toBe(true)
     expect(status.indexed).toBe(3)
     expect(status.pending).toBe(0)
+    expect(status.orphaned).toBe(0)
     expect(status.ready).toBe(true)
+  })
+
+  it('status exposes orphaned embedding maintenance', async () => {
+    const database = freshDatabase()
+    installComboBridge(database)
+    await setEmbeddingsEnabled(true)
+    database
+      .prepare("INSERT INTO chunk_embeddings (chunk_id, content_hash, model_id) VALUES ('ghost-status', 'h', 'all-MiniLM-L6-v2')")
+      .run()
+
+    const status = await getEmbeddingsStatus()
+    expect(status.pending).toBe(0)
+    expect(status.orphaned).toBe(1)
+    expect(status.ready).toBe(false)
+  })
+
+  it('reports orphaned vectors as maintenance work even when no chunk is pending', async () => {
+    const database = freshDatabase()
+    installComboBridge(database)
+    await ingestDocument({ title: 'Doc', bodyText: 'settled searchable text' })
+    await setEmbeddingsEnabled(true)
+    await backfillEmbeddings()
+    database
+      .prepare("INSERT INTO chunk_embeddings (chunk_id, content_hash, model_id) VALUES ('ghost', 'h', 'all-MiniLM-L6-v2')")
+      .run()
+
+    const status = await getEmbeddingsStatus()
+    expect(status.pending).toBe(0)
+    expect(status.orphaned).toBe(1)
+    expect(status.ready).toBe(false)
+
+    const repaired = await backfillEmbeddings()
+    expect(repaired.pruned).toBe(1)
+    expect((await getEmbeddingsStatus()).orphaned).toBe(0)
   })
 })

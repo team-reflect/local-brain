@@ -49,6 +49,23 @@ describe('record-level Chat candidates (real SQLite)', () => {
     await expectRef('zephyr invoices', `task:${taskId}`)
   })
 
+  it('preserves raw-query FTS fallback for a single-character identifier', async () => {
+    const documentId = await createDocument({
+      title: 'Marker reference',
+      bodyText: 'The assigned classification is X.',
+    })
+    for (let index = 0; index < 6; index += 1) {
+      await createProject({ name: `Recent xylophone project ${index}` })
+    }
+
+    const result = await searchRecordCandidates('X', { mode: 'lexical', limit: 1 })
+    const candidate = result.candidates.find((item) => item.recordRef === `document:${documentId}`)
+
+    expect(result.candidates.map((item) => item.recordRef)).toEqual([`document:${documentId}`])
+    expect(candidate).toBeDefined()
+    expect(candidate?.matchReasons).toContain('chunk_lexical')
+  })
+
   it('makes ordinary Chat-equivalent interaction and memory writes immediately searchable', async () => {
     const interactionId = await createInteraction({
       kind: 'note',

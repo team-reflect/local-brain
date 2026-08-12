@@ -278,6 +278,9 @@ brain --json person phone add <person-id> --phone "+1 555 0100"
 
 brain --json repair participants relink --handle wrong@example.com \
   --person <right-person-id> --from-person <wrong-person-id>
+
+# Read-only preview; use after quoted-history imports created duplicate chunks.
+brain --json repair chunks dedupe-exact --record interaction:<id>
 ```
 
 Add `--force` only when the target is already linked in the same interaction and the
@@ -293,6 +296,11 @@ self instead.
 Archive bad shells after unlinking active relationships that should not survive.
 Organization archive blocks while active current affiliations remain; use
 `unlink` first when the affiliation itself was wrong.
+
+`repair chunks dedupe-exact` changes only the rebuildable search projection. It
+keeps durable source bodies intact, repoints citations to the earliest exact-text
+chunk, and is preview-only unless `--apply` is passed. Close Local Brain and back
+up the whole brain folder before applying it; rerunning `--apply` is a no-op.
 
 ## Projects
 

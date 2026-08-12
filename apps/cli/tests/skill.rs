@@ -26,6 +26,7 @@ const DOCUMENTED: &[&[&str]] = &[
     &["import", "transcript"],
     &["import", "audit"],
     &["import", "finalize"],
+    &["repair", "chunks", "dedupe-exact"],
     &["enrich", "person"],
     &["enrich", "organization"],
     &["promote", "fact"],

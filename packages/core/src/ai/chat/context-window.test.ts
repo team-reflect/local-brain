@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { ModelMessage } from 'ai'
+import type { JSONValue, ModelMessage } from 'ai'
 import {
+  ELIDED_CHAT_DISCOVERY_RESULT,
   ELIDED_CHAT_TOOL_RESULT,
   estimateChatMessageTokens,
   fitChatMessagesToContextWindow,
@@ -24,7 +25,11 @@ function turn(userChars: number, assistantChars: number): ModelMessage[] {
   ]
 }
 
-function toolExchange(callId: string, outputChars: number): ModelMessage[] {
+function namedToolExchange(
+  callId: string,
+  toolName: string,
+  outputChars: number,
+): ModelMessage[] {
   return [
     {
       role: 'assistant',
@@ -32,7 +37,7 @@ function toolExchange(callId: string, outputChars: number): ModelMessage[] {
         {
           type: 'tool-call',
           toolCallId: callId,
-          toolName: 'get_records',
+          toolName,
           input: { records: [{ recordType: 'document', recordId: 'document-1' }] },
         },
       ],
@@ -43,12 +48,41 @@ function toolExchange(callId: string, outputChars: number): ModelMessage[] {
         {
           type: 'tool-result',
           toolCallId: callId,
-          toolName: 'get_records',
+          toolName,
           output: { type: 'json', value: { records: [{ text: 'x'.repeat(outputChars) }] } },
         },
       ],
     },
   ]
+}
+
+function combinedToolExchange(
+  calls: Array<{ callId: string; toolName: string; value: JSONValue }>,
+): ModelMessage[] {
+  return [
+    {
+      role: 'assistant',
+      content: calls.map((call) => ({
+        type: 'tool-call' as const,
+        toolCallId: call.callId,
+        toolName: call.toolName,
+        input: {},
+      })),
+    },
+    {
+      role: 'tool',
+      content: calls.map((call) => ({
+        type: 'tool-result' as const,
+        toolCallId: call.callId,
+        toolName: call.toolName,
+        output: { type: 'json' as const, value: call.value },
+      })),
+    },
+  ]
+}
+
+function toolExchange(callId: string, outputChars: number): ModelMessage[] {
+  return namedToolExchange(callId, 'get_records', outputChars)
 }
 
 describe('estimateChatMessageTokens', () => {
@@ -88,6 +122,149 @@ describe('fitChatMessagesToContextWindow', () => {
       })],
     })
     expect(fitted.at(-1)).toEqual({ role: 'user', content: 'new question' })
+  })
+
+  it('elides earlier current-turn discovery payloads once record details are available', () => {
+    const messages: ModelMessage[] = [
+      { role: 'user', content: 'What is my mortgage rate?' },
+      ...namedToolExchange('search-call', 'search_records', 20_000),
+      ...combinedToolExchange([{
+        callId: 'details-call',
+        toolName: 'get_records',
+        value: { records: [{ found: true, text: 'x'.repeat(2_000) }] },
+      }]),
+    ]
+    const fitted = fitChatMessagesToContextWindow(messages, {
+      contextWindow: 1_000_000,
+      systemPrompt: '',
+    })
+    const results = fitted
+      .filter((message) => message.role === 'tool')
+      .flatMap((message) => (message.role === 'tool' ? message.content : []))
+      .filter((part) => part.type === 'tool-result')
+
+    expect(fitted).not.toBe(messages)
+    expect(results).toHaveLength(2)
+    expect(results[0]).toMatchObject({
+      toolName: 'search_records',
+      output: { type: 'text', value: ELIDED_CHAT_DISCOVERY_RESULT },
+    })
+    expect(results[1]).toMatchObject({
+      toolName: 'get_records',
+      output: { type: 'json' },
+    })
+  })
+
+  it('retains discovery results that share a parallel tool message with empty record details', () => {
+    const messages: ModelMessage[] = [
+      { role: 'user', content: 'What is my mortgage rate?' },
+      ...combinedToolExchange([
+        {
+          callId: 'search-call',
+          toolName: 'search_records',
+          value: { records: [{ title: 'Mortgage statement' }] },
+        },
+        {
+          callId: 'details-call',
+          toolName: 'get_records',
+          value: { records: [] },
+        },
+      ]),
+    ]
+    const fitted = fitChatMessagesToContextWindow(messages, {
+      contextWindow: 1_000_000,
+      systemPrompt: '',
+    })
+
+    expect(fitted).toBe(messages)
+    const toolMessage = fitted.find((message) => message.role === 'tool')
+    expect(toolMessage?.content).toEqual([
+      expect.objectContaining({
+        toolName: 'search_records',
+        output: { type: 'json', value: { records: [{ title: 'Mortgage statement' }] } },
+      }),
+      expect.objectContaining({
+        toolName: 'get_records',
+        output: { type: 'json', value: { records: [] } },
+      }),
+    ])
+  })
+
+  it('retains an earlier discovery payload when a sequential detail read is empty', () => {
+    const messages: ModelMessage[] = [
+      { role: 'user', content: 'What is my mortgage rate?' },
+      ...namedToolExchange('search-call', 'search_records', 2_000),
+      ...combinedToolExchange([
+        {
+          callId: 'details-call',
+          toolName: 'get_records',
+          value: { records: [] },
+        },
+      ]),
+    ]
+
+    expect(fitChatMessagesToContextWindow(messages, {
+      contextWindow: 1_000_000,
+      systemPrompt: '',
+    })).toBe(messages)
+  })
+
+  it('retains discovery when every sequential detail record is missing', () => {
+    const messages: ModelMessage[] = [
+      { role: 'user', content: 'What is my mortgage rate?' },
+      ...namedToolExchange('search-call', 'search_records', 2_000),
+      ...combinedToolExchange([{
+        callId: 'details-call',
+        toolName: 'get_records',
+        value: { records: [{ recordId: 'stale', found: false }] },
+      }]),
+    ]
+
+    expect(fitChatMessagesToContextWindow(messages, {
+      contextWindow: 1_000_000,
+      systemPrompt: '',
+    })).toBe(messages)
+  })
+
+  it('elides discovery from prior tool messages but keeps all discovery beside latest details', () => {
+    const messages: ModelMessage[] = [
+      { role: 'user', content: 'Find the supporting records' },
+      ...namedToolExchange('old-search', 'search_records', 2_000),
+      ...combinedToolExchange([
+        {
+          callId: 'parallel-details',
+          toolName: 'get_records',
+          value: { records: [{ found: true, title: 'Loaded source' }] },
+        },
+        {
+          callId: 'parallel-browse',
+          toolName: 'browse_records',
+          value: { records: [{ title: 'Fallback candidate' }] },
+        },
+      ]),
+    ]
+    const fitted = fitChatMessagesToContextWindow(messages, {
+      contextWindow: 1_000_000,
+      systemPrompt: '',
+    })
+    const results = fitted
+      .filter((message) => message.role === 'tool')
+      .flatMap((message) => (message.role === 'tool' ? message.content : []))
+      .filter((part) => part.type === 'tool-result')
+
+    expect(results).toHaveLength(3)
+    expect(results[0]).toMatchObject({
+      toolName: 'search_records',
+      output: { type: 'text', value: ELIDED_CHAT_DISCOVERY_RESULT },
+    })
+    expect(results[1]).toMatchObject({
+      toolName: 'get_records',
+      output: { type: 'json', value: { records: [{ found: true, title: 'Loaded source' }] } },
+    })
+    expect(results[2]).toMatchObject({
+      toolName: 'browse_records',
+      output: { type: 'json', value: { records: [{ title: 'Fallback candidate' }] } },
+    })
   })
 
   it('drops complete oldest turns rather than splitting message pairs', () => {

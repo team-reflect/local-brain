@@ -4,6 +4,8 @@
 //! the app. The shared SQLite schema is the contract; this keeps the derived
 //! data byte-compatible across both writers.
 
+use std::collections::HashSet;
+
 use sha2::{Digest, Sha256};
 
 const DEFAULT_MAX_CHARS: usize = 1000;
@@ -123,7 +125,15 @@ pub fn chunk_text_with(text: &str, max_chars: usize) -> Vec<String> {
     if !current.is_empty() {
         chunks.push(current);
     }
+    // Preserve the complete source body, but index only the earliest occurrence
+    // of byte-identical chunks. Quoted email history otherwise creates hundreds
+    // of redundant FTS rows and embeddings for one interaction. This is the
+    // Rust twin of the exact-text de-duplication in the TypeScript `chunkText`.
+    let mut seen = HashSet::new();
     chunks
+        .into_iter()
+        .filter(|chunk| seen.insert(chunk.clone()))
+        .collect()
 }
 
 #[cfg(test)]
@@ -150,7 +160,12 @@ mod tests {
         let packed = chunk_text("one\n\ntwo");
         assert_eq!(packed, vec!["one\n\ntwo".to_string()]);
 
-        let big = "x".repeat(2500);
+        let big = format!(
+            "{}{}{}",
+            "a".repeat(1000),
+            "b".repeat(1000),
+            "c".repeat(500)
+        );
         let pieces = chunk_text_with(&big, 1000);
         assert_eq!(pieces.len(), 3);
         assert_eq!(char_len(&pieces[0]), 1000);
@@ -171,5 +186,23 @@ mod tests {
         for piece in &pieces {
             assert!(char_len(piece) <= 1000);
         }
+    }
+
+    #[test]
+    fn keeps_only_the_earliest_byte_identical_searchable_chunk() {
+        let repeated = "x".repeat(10);
+        let text = format!("{repeated}\n\nunique text\n\n{repeated}");
+        assert_eq!(
+            chunk_text_with(&text, 10),
+            vec![repeated, "unique tex".to_string(), "t".to_string()]
+        );
+    }
+
+    #[test]
+    fn exact_chunk_dedupe_is_case_sensitive() {
+        assert_eq!(
+            chunk_text_with("Quoted text\n\nquoted text", 11),
+            vec!["Quoted text".to_string(), "quoted text".to_string()]
+        );
     }
 }

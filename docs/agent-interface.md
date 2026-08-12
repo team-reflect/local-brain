@@ -319,6 +319,25 @@ target gets an explicit merge provenance event. It refuses to merge away the sel
 person; merge duplicate shells into self instead. Always dry-run large cleanup
 merges first.
 
+Repair repeated searchable chunks left by historical quoted-thread imports without
+changing the imported body:
+
+```bash
+# Preview one record (default is read-only).
+brain --json repair chunks dedupe-exact --record interaction:<id>
+
+# After closing Local Brain and backing up the whole brain folder:
+brain --json repair chunks dedupe-exact --record interaction:<id> --apply
+
+# Omit --record to scan every projected record.
+brain --json repair chunks dedupe-exact --apply
+```
+
+The repair keeps the earliest byte-identical chunk, repoints evidence refs before
+deleting later copies, compacts later unique chunks without changing their ids, and
+removes duplicate embedding rows/vectors. Its JSON reports before/after duplicate
+counts and the number of citations affected. Re-running `--apply` is idempotent.
+
 Facts remain append-only by default. For low-level import facts that should be
 stable across reruns, include a source identity and pass `--refresh` only when the
 source-keyed fact should be replaced:

@@ -10,6 +10,7 @@ import {
   chunkVisibilityFilter,
   type ChunkFilters,
 } from '../retrieval/chunk-sources'
+import { normalizedEvidenceText } from '../retrieval/record-candidate-evidence'
 import type { NavigableRecordType } from '../retrieval/record-candidate-types'
 import type { RetrievedChunk, SourceRecordType } from '../retrieval/retrieve'
 import { EMBEDDING_MODEL_ID } from './model'
@@ -47,6 +48,7 @@ export const RRF_K = 60
 interface SemanticHitRow {
   chunkId: string
   text: string
+  contentHash: string | null
   recordType: SourceRecordType
   recordId: string
   recordTitle: string | null
@@ -55,6 +57,10 @@ interface SemanticHitRow {
   navigationRecordId: string | null
   chunkIndex: number
   distance: number
+}
+
+interface SemanticChunk extends RetrievedChunk {
+  contentHash: string | null
 }
 
 /** Bounds and structural filters for one semantic chunk query. */
@@ -98,6 +104,7 @@ async function semanticRows(
     SELECT
       cc.id           AS "chunkId",
       cc.text         AS "text",
+      cc.content_hash AS "contentHash",
       cc.record_type  AS "recordType",
       cc.record_id    AS "recordId",
       cc.chunk_index  AS "chunkIndex",
@@ -117,7 +124,7 @@ async function semanticRows(
   return result.rows
 }
 
-function mapSemanticRows(rows: readonly SemanticHitRow[]): RetrievedChunk[] {
+function mapSemanticRows(rows: readonly SemanticHitRow[]): SemanticChunk[] {
   return rows
     .filter((row) => Number(row.distance) <= MAX_COSINE_DISTANCE)
     .map((row) => {
@@ -125,6 +132,7 @@ function mapSemanticRows(rows: readonly SemanticHitRow[]): RetrievedChunk[] {
       return {
         chunkId: row.chunkId,
         text: row.text,
+        contentHash: row.contentHash,
         snippet: previewOf(row.text),
         recordType: row.recordType,
         recordId: row.recordId,
@@ -140,18 +148,49 @@ function mapSemanticRows(rows: readonly SemanticHitRow[]): RetrievedChunk[] {
     })
 }
 
-function capChunksPerRecord(
-  hits: readonly RetrievedChunk[],
+function roundRobinUniqueChunks(
+  hits: readonly SemanticChunk[],
   maxChunksPerRecord: number,
-): RetrievedChunk[] {
-  const counts = new Map<string, number>()
-  return hits.filter((hit) => {
+  limit: number,
+): SemanticChunk[] {
+  const records = new Map<string, {
+    hits: SemanticChunk[]
+    contentHashes: Set<string>
+    texts: Set<string>
+  }>()
+  for (const hit of hits) {
     const key = `${hit.recordType}:${hit.recordId}`
-    const count = counts.get(key) ?? 0
-    if (count >= maxChunksPerRecord) return false
-    counts.set(key, count + 1)
-    return true
-  })
+    const record = records.get(key) ?? {
+      hits: [],
+      contentHashes: new Set<string>(),
+      texts: new Set<string>(),
+    }
+    if (record.hits.length >= maxChunksPerRecord) continue
+
+    const contentHash = hit.contentHash?.trim()
+    const normalizedText = normalizedEvidenceText(hit.text)
+    if ((contentHash && record.contentHashes.has(contentHash)) || record.texts.has(normalizedText)) continue
+    if (contentHash) record.contentHashes.add(contentHash)
+    record.texts.add(normalizedText)
+    record.hits.push(hit)
+    records.set(key, record)
+  }
+
+  const selected: SemanticChunk[] = []
+  for (let rank = 0; rank < maxChunksPerRecord && selected.length < limit; rank += 1) {
+    for (const record of records.values()) {
+      const hit = record.hits[rank]
+      if (hit) selected.push(hit)
+      if (selected.length >= limit) break
+    }
+  }
+  // Round-robin decides which chunks survive the fixed-size diversity budget;
+  // callers still expect semantic hits themselves to be ranked by similarity.
+  return selected.sort((left, right) => right.score - left.score)
+}
+
+function stripContentHash(hits: readonly SemanticChunk[]): RetrievedChunk[] {
+  return hits.map(({ contentHash: _contentHash, ...hit }) => hit)
 }
 
 /**
@@ -171,14 +210,17 @@ export async function semanticHits(
 
   while (true) {
     const hits = mapSemanticRows(await semanticRows(vectorJson, k, options.filters))
-    if (!options.minUniqueRecords) return hits.slice(0, options.limit)
+    if (!options.minUniqueRecords) return stripContentHash(hits.slice(0, options.limit))
 
     const uniqueRecords = new Set(hits.map((hit) => `${hit.recordType}:${hit.recordId}`)).size
     if (uniqueRecords >= options.minUniqueRecords || k >= maxK) {
-      return capChunksPerRecord(
-        hits,
-        options.maxChunksPerRecord ?? DEFAULT_RECORD_CHUNK_CAP,
-      ).slice(0, options.limit)
+      return stripContentHash(
+        roundRobinUniqueChunks(
+          hits,
+          options.maxChunksPerRecord ?? DEFAULT_RECORD_CHUNK_CAP,
+          options.limit,
+        ),
+      )
     }
     k = Math.min(k * 2, maxK)
   }

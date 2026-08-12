@@ -35,8 +35,28 @@ describe('chunkText', () => {
   })
 
   it('hard-splits a single paragraph larger than maxChars', () => {
-    const chunks = chunkText('x'.repeat(25), { maxChars: 10 })
+    const chunks = chunkText(`${'a'.repeat(10)}${'b'.repeat(10)}${'c'.repeat(5)}`, {
+      maxChars: 10,
+    })
     expect(chunks.map((chunk) => chunk.text.length)).toEqual([10, 10, 5])
     expect(chunks.map((chunk) => chunk.index)).toEqual([0, 1, 2])
+  })
+
+  it('keeps only the earliest byte-identical searchable chunk', () => {
+    const repeated = 'x'.repeat(10)
+    const chunks = chunkText(`${repeated}\n\nunique text\n\n${repeated}`, { maxChars: 10 })
+
+    expect(chunks).toEqual([
+      { index: 0, text: repeated },
+      { index: 1, text: 'unique tex' },
+      { index: 2, text: 't' },
+    ])
+  })
+
+  it('does not collapse chunks that differ by case', () => {
+    expect(chunkText('Quoted text\n\nquoted text', { maxChars: 11 })).toEqual([
+      { index: 0, text: 'Quoted text' },
+      { index: 1, text: 'quoted text' },
+    ])
   })
 })

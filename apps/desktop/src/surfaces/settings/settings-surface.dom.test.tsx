@@ -191,6 +191,38 @@ describe('SettingsSurface (Plan 08)', () => {
     )
   })
 
+  it('shows orphaned vectors as semantic index maintenance', async () => {
+    installFakeBridge({
+      respond: (command) => {
+        if (command === 'embed_status') {
+          return { status: 'ready', model: 'all-MiniLM-L6-v2' }
+        }
+        return undefined
+      },
+      query: (sql, params) => {
+        if (sql.includes('settings')) {
+          const key = params[0]
+          if (key === 'embeddings.enabled') return [{ valueJson: 'true' }]
+          return []
+        }
+        if (/select count\(\*\)/i.test(sql) && sql.includes('from "chunk_embeddings" as "ce"')) {
+          return [{ count: 1 }]
+        }
+        if (/select count\(\*\)/i.test(sql) && sql.includes('from "content_chunks" as "cc"')) {
+          return [{ count: 0 }]
+        }
+        if (/select count\(\*\)/i.test(sql)) return [{ count: 3 }]
+        return []
+      },
+    })
+
+    renderWithProviders(<SettingsSurface section="search" />)
+
+    expect(await screen.findByText('maintaining')).toBeDefined()
+    expect(screen.getByText('Orphaned')).toBeDefined()
+    expect(screen.getByText('1 to prune')).toBeDefined()
+  })
+
   it('shows CLI install status and installs the command', async () => {
     const commands: string[] = []
     installFakeBridge({
