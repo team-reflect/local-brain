@@ -134,6 +134,32 @@ Create a task when a source clearly introduces a missing follow-up. Use
 task. Use suggestions or human review for uncertain edits, priority changes,
 splits, and completion without explicit source evidence.
 
+## Recurring Task Reconciliation
+
+Daily imports must review the full active backlog after storing fresh evidence,
+including undated and waiting tasks. Match new actions against existing active and
+terminal tasks by obligation and source context before creating records. Repeated
+alerts should refresh a canonical task; different invoices or periods stay distinct.
+
+Complete tasks when evidence establishes their outcome. Cancel tasks when source
+context establishes that they were abandoned, superseded, or tied solely to an
+expired opportunity. Age or an overdue date alone is not completion. Consolidate
+confirmed duplicates by preserving source links/evidence on the canonical task and
+cancelling the others with its ID and the reason in their descriptions.
+
+The bundled [Task Reconciliation skill](../skills/brain-task-review/SKILL.md)
+includes a Python 3 stdlib helper for complete read-only SQLite snapshots and
+coverage/readback checks. Settings -> CLI & agents installs both the skill and
+its helper at `~/.agents/skills/brain-task-review`, detects missing/outdated
+helpers, and preserves customized files. Manual installs must copy the entire
+skill directory including `scripts/`. Writes continue through `brain tasks update` / `brain tasks complete`. Private snapshots
+and per-task ledgers belong in import scratch artifacts, not the repository.
+
+Record every initial and newly created task's disposition and sources checked.
+Audit missing coverage, changed state, unresolved source gaps, and actual final
+statuses before regenerating the brief. `import audit` checks import completeness;
+`tasks plan-day` is a prioritized view. Neither verifies task reconciliation.
+
 ## Identity And Provenance
 
 Source-backed imports should pass `--source`, `--external-kind`, and

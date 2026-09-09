@@ -14,7 +14,12 @@ use crate::error::{AppError, AppResult};
 const BRAIN_SKILL_SOURCE: &str = include_str!("../../../../skills/brain/SKILL.md");
 const BRAIN_BACKFILL_SKILL_SOURCE: &str =
     include_str!("../../../../skills/brain-backfill/SKILL.md");
+const TASK_REVIEW_SKILL_SOURCE: &str =
+    include_str!("../../../../skills/brain-task-review/SKILL.md");
+const TASK_REVIEW_SCRIPT_SOURCE: &str =
+    include_str!("../../../../skills/brain-task-review/scripts/task_review.py");
 const MANAGED_PREFIX: &str = "<!-- local-brain-managed: sha256=";
+const SCRIPT_MANAGED_PREFIX: &str = "# local-brain-managed: sha256=";
 const AGENT_SKILL_DIR: &str = ".agents";
 const BRAINS_MANIFEST_FILE: &str = "brains.json";
 
@@ -23,6 +28,13 @@ struct ManagedSkill {
     id: &'static str,
     source: &'static str,
     sync_brain_manifest: bool,
+    scripts: &'static [ManagedScript],
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ManagedScript {
+    path: &'static str,
+    source: &'static str,
 }
 
 const MANAGED_SKILLS: &[ManagedSkill] = &[
@@ -30,11 +42,22 @@ const MANAGED_SKILLS: &[ManagedSkill] = &[
         id: "brain",
         source: BRAIN_SKILL_SOURCE,
         sync_brain_manifest: true,
+        scripts: &[],
     },
     ManagedSkill {
         id: "brain-backfill",
         source: BRAIN_BACKFILL_SKILL_SOURCE,
         sync_brain_manifest: false,
+        scripts: &[],
+    },
+    ManagedSkill {
+        id: "brain-task-review",
+        source: TASK_REVIEW_SKILL_SOURCE,
+        sync_brain_manifest: false,
+        scripts: &[ManagedScript {
+            path: "scripts/task_review.py",
+            source: TASK_REVIEW_SCRIPT_SOURCE,
+        }],
     },
 ];
 
@@ -144,12 +167,30 @@ fn status_for(paths: &SkillPaths) -> AppResult<SkillStatus> {
 fn status_for_skill(paths: &SkillPaths, skill: &ManagedSkill) -> AppResult<ManagedSkillStatus> {
     let bundled_hash = source_hash(skill);
     let installed = read_installed_skill(paths, skill)?;
-    let install_state = classify_install(
+    let mut install_state = classify_install(
         installed.as_deref(),
         &bundled_hash,
         &managed_skill_content(skill),
         paths.supported,
     );
+    if paths.supported {
+        for script in skill.scripts {
+            let content = read_optional_file(&script_target(paths, skill, script), "skill script")?;
+            let script_state = classify_script(content.as_deref(), script);
+            install_state = match (install_state, script_state) {
+                (SkillInstallState::Conflict, _) | (_, SkillInstallState::Conflict) => {
+                    SkillInstallState::Conflict
+                }
+                (SkillInstallState::Missing, SkillInstallState::Missing) => {
+                    SkillInstallState::Missing
+                }
+                (SkillInstallState::Current, SkillInstallState::Current) => {
+                    SkillInstallState::Current
+                }
+                _ => SkillInstallState::Stale,
+            };
+        }
+    }
     Ok(ManagedSkillStatus {
         id: skill.id.to_string(),
         install_target_dir: display_path(&install_dir(paths, skill)),
@@ -192,6 +233,13 @@ fn install_for(paths: &SkillPaths) -> AppResult<SkillStatus> {
                     let dir = install_dir(paths, skill);
                     fs::create_dir_all(&dir)?;
                     fs::write(install_target(paths, skill), managed_skill_content(skill))?;
+                    for script in skill.scripts {
+                        let target = script_target(paths, skill, script);
+                        if let Some(parent) = target.parent() {
+                            fs::create_dir_all(parent)?;
+                        }
+                        fs::write(target, managed_script_content(script.source))?;
+                    }
                 }
             }
         }
@@ -265,7 +313,10 @@ fn remove_managed_skill_files(paths: &SkillPaths, status: &SkillStatus) -> AppRe
         .filter(|skill| is_removable_skill(skill))
     {
         let skill = managed_skill_by_id(&skill_status.id)?;
-        fs::remove_file(install_target(paths, skill))?;
+        remove_optional_file(&install_target(paths, skill))?;
+        for script in skill.scripts {
+            remove_optional_file(&script_target(paths, skill, script))?;
+        }
         if skill.sync_brain_manifest {
             remove_brain_manifest(paths)?;
         }
@@ -291,6 +342,13 @@ fn snapshot_install_files(paths: &SkillPaths) -> AppResult<Vec<FileSnapshot>> {
             content: read_optional_file(&path, "installed skill")?,
             path,
         });
+        for script in skill.scripts {
+            let path = script_target(paths, skill, script);
+            snapshots.push(FileSnapshot {
+                content: read_optional_file(&path, "skill script")?,
+                path,
+            });
+        }
     }
     if let Some(skill) = MANAGED_SKILLS
         .iter()
@@ -313,6 +371,14 @@ fn read_optional_file(path: &Path, label: &str) -> AppResult<Option<String>> {
             "Could not read {label} at {}: {err}",
             path.display()
         ))),
+    }
+}
+
+fn remove_optional_file(path: &Path) -> AppResult<()> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err.into()),
     }
 }
 
@@ -465,6 +531,22 @@ fn classify_install(
         return SkillInstallState::Conflict;
     };
 
+    let mut removed_marker = false;
+    let source: String = installed
+        .split_inclusive('\n')
+        .filter(|line| {
+            if !removed_marker && line.trim().starts_with(MANAGED_PREFIX) {
+                removed_marker = true;
+                false
+            } else {
+                true
+            }
+        })
+        .collect();
+    if hash != sha256_hex(source.as_bytes()) {
+        return SkillInstallState::Conflict;
+    }
+
     if hash != bundled_hash {
         return SkillInstallState::Stale;
     }
@@ -478,6 +560,38 @@ fn classify_install(
 
 fn managed_skill_content(skill: &ManagedSkill) -> String {
     insert_marker(skill.source, &source_hash(skill))
+}
+
+fn script_target(paths: &SkillPaths, skill: &ManagedSkill, script: &ManagedScript) -> PathBuf {
+    install_dir(paths, skill).join(script.path)
+}
+
+fn managed_script_content(source: &str) -> String {
+    format!(
+        "{SCRIPT_MANAGED_PREFIX}{}\n{source}",
+        sha256_hex(source.as_bytes())
+    )
+}
+
+fn classify_script(installed: Option<&str>, script: &ManagedScript) -> SkillInstallState {
+    let Some(installed) = installed else {
+        return SkillInstallState::Missing;
+    };
+    if installed == managed_script_content(script.source) {
+        return SkillInstallState::Current;
+    }
+    let Some((marker, source)) = installed.split_once('\n') else {
+        return SkillInstallState::Conflict;
+    };
+    let Some(hash) = marker.strip_prefix(SCRIPT_MANAGED_PREFIX) else {
+        return SkillInstallState::Conflict;
+    };
+    // Like Reflect Open's skill marker, verify ownership against the file's own
+    // bytes before replacing an old version. User edits must survive upgrades.
+    if hash != sha256_hex(source.as_bytes()) {
+        return SkillInstallState::Conflict;
+    }
+    SkillInstallState::Stale
 }
 
 fn insert_marker(source: &str, hash: &str) -> String {
@@ -565,6 +679,14 @@ mod tests {
         managed_skill_by_id("brain-backfill").unwrap()
     }
 
+    fn review_skill() -> &'static ManagedSkill {
+        managed_skill_by_id("brain-task-review").unwrap()
+    }
+
+    fn review_script_target(paths: &SkillPaths) -> PathBuf {
+        script_target(paths, review_skill(), &review_skill().scripts[0])
+    }
+
     fn brain_info(root: &Path, name: &str, is_active: bool) -> BrainInfo {
         BrainInfo {
             root_path: root.display().to_string(),
@@ -609,7 +731,7 @@ mod tests {
 
     #[test]
     fn classifies_stale_managed_skill() {
-        let content = insert_marker(BRAIN_SKILL_SOURCE, "old");
+        let content = insert_marker("# old skill\n", &sha256_hex(b"# old skill\n"));
 
         assert_eq!(
             classify_install(
@@ -633,6 +755,23 @@ mod tests {
                 &source_hash(brain_skill()),
                 &managed_skill_content(brain_skill()),
                 true
+            ),
+            SkillInstallState::Conflict
+        );
+    }
+
+    #[test]
+    fn preserves_edited_skill_even_when_bundled_version_changed() {
+        let content = format!(
+            "{}\nUser edit\n",
+            insert_marker("# old skill\n", &sha256_hex(b"# old skill\n"))
+        );
+        assert_eq!(
+            classify_install(
+                Some(&content),
+                &source_hash(review_skill()),
+                &managed_skill_content(review_skill()),
+                true,
             ),
             SkillInstallState::Conflict
         );
@@ -667,6 +806,104 @@ mod tests {
             fs::read_to_string(install_target(&paths, backfill_skill())).unwrap(),
             managed_skill_content(backfill_skill())
         );
+        assert_eq!(
+            fs::read_to_string(install_target(&paths, review_skill())).unwrap(),
+            managed_skill_content(review_skill())
+        );
+        let script = review_script_target(&paths);
+        assert_eq!(
+            fs::read_to_string(&script).unwrap(),
+            managed_script_content(TASK_REVIEW_SCRIPT_SOURCE)
+        );
+        let output = std::process::Command::new("python3")
+            .arg(script)
+            .arg("--help")
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stdout).contains("snapshot"));
+    }
+
+    #[test]
+    fn repairs_missing_or_stale_review_script() {
+        let temp = TempDir::new().unwrap();
+        let paths = paths_for(temp.path());
+        install_for(&paths).unwrap();
+        let target = review_script_target(&paths);
+
+        fs::remove_file(&target).unwrap();
+        assert_eq!(
+            status_for(&paths).unwrap().install_state,
+            SkillInstallState::Stale
+        );
+        assert_eq!(
+            install_for(&paths).unwrap().install_state,
+            SkillInstallState::Current
+        );
+
+        fs::write(&target, managed_script_content("# old version\n")).unwrap();
+        assert_eq!(
+            status_for(&paths).unwrap().install_state,
+            SkillInstallState::Stale
+        );
+        install_for(&paths).unwrap();
+        assert_eq!(
+            fs::read_to_string(target).unwrap(),
+            managed_script_content(TASK_REVIEW_SCRIPT_SOURCE)
+        );
+    }
+
+    #[test]
+    fn preserves_custom_review_scripts_during_install_and_uninstall() {
+        let temp = TempDir::new().unwrap();
+        let paths = paths_for(temp.path());
+        let target = review_script_target(&paths);
+        for content in [
+            "# my unmanaged script\n".to_string(),
+            format!(
+                "{}# user edit\n",
+                managed_script_content(TASK_REVIEW_SCRIPT_SOURCE)
+            ),
+            format!("{}# user edit\n", managed_script_content("# old version\n")),
+        ] {
+            fs::create_dir_all(target.parent().unwrap()).unwrap();
+            fs::write(&target, &content).unwrap();
+            assert_eq!(
+                status_for(&paths).unwrap().install_state,
+                SkillInstallState::Conflict
+            );
+            assert!(install_for(&paths).is_err());
+            assert!(uninstall_for(&paths).is_err());
+            assert_eq!(fs::read_to_string(&target).unwrap(), content);
+            assert!(!install_target(&paths, brain_skill()).exists());
+        }
+    }
+
+    #[test]
+    fn rollback_restores_review_script_bytes() {
+        let temp = TempDir::new().unwrap();
+        let paths = paths_for(temp.path());
+        install_for(&paths).unwrap();
+        let target = review_script_target(&paths);
+        let old = managed_script_content("# old version\n");
+        fs::write(&target, &old).unwrap();
+        let snapshot = snapshot_install_files(&paths).unwrap();
+        install_for(&paths).unwrap();
+        restore_file_snapshot(&snapshot).unwrap();
+        assert_eq!(fs::read_to_string(target).unwrap(), old);
+    }
+
+    #[test]
+    fn uninstalls_review_script_when_skill_document_is_missing() {
+        let temp = TempDir::new().unwrap();
+        let paths = paths_for(temp.path());
+        install_for(&paths).unwrap();
+        fs::remove_file(install_target(&paths, review_skill())).unwrap();
+        assert_eq!(
+            uninstall_for(&paths).unwrap().install_state,
+            SkillInstallState::Missing
+        );
+        assert!(!review_script_target(&paths).exists());
     }
 
     #[test]
@@ -710,7 +947,7 @@ mod tests {
         fs::create_dir_all(install_dir(&paths, brain_skill())).unwrap();
         fs::write(
             install_target(&paths, brain_skill()),
-            insert_marker(BRAIN_SKILL_SOURCE, "old"),
+            insert_marker("# old skill\n", &sha256_hex(b"# old skill\n")),
         )
         .unwrap();
         fs::create_dir_all(install_dir(&paths, backfill_skill())).unwrap();
@@ -805,17 +1042,18 @@ mod tests {
             fs::read_to_string(brain_manifest_target(&paths, brain_skill())).unwrap(),
             manifest
         );
+        assert!(!install_target(&paths, review_skill()).exists());
+        assert!(!review_script_target(&paths).exists());
     }
 
     #[test]
     fn uninstalls_current_managed_skill() {
         let temp = TempDir::new().unwrap();
         let paths = paths_for(temp.path());
-        for skill in MANAGED_SKILLS {
-            fs::create_dir_all(install_dir(&paths, skill)).unwrap();
-            fs::write(install_target(&paths, skill), managed_skill_content(skill)).unwrap();
-        }
+        install_for(&paths).unwrap();
         fs::write(brain_manifest_target(&paths, brain_skill()), "{}").unwrap();
+        let user_file = install_dir(&paths, review_skill()).join("notes.txt");
+        fs::write(&user_file, "keep this").unwrap();
 
         let status = uninstall_for(&paths).unwrap();
 
@@ -823,6 +1061,9 @@ mod tests {
         assert!(!install_target(&paths, brain_skill()).exists());
         assert!(!install_target(&paths, backfill_skill()).exists());
         assert!(!brain_manifest_target(&paths, brain_skill()).exists());
+        assert!(!install_target(&paths, review_skill()).exists());
+        assert!(!review_script_target(&paths).exists());
+        assert_eq!(fs::read_to_string(user_file).unwrap(), "keep this");
     }
 
     #[test]

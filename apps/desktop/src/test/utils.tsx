@@ -105,6 +105,13 @@ export function installFakeBridge(options: FakeBridgeOptions = {}): void {
                 installedHash: null,
                 installState: 'missing',
               },
+              {
+                id: 'brain-task-review',
+                installTargetDir: '/Users/alex/.agents/skills/brain-task-review',
+                bundledHash: '789abc789abc789abc',
+                installedHash: null,
+                installState: 'missing',
+              },
             ],
           })
         case 'skill_install':
@@ -127,6 +134,13 @@ export function installFakeBridge(options: FakeBridgeOptions = {}): void {
                 installedHash: 'def456def456def456',
                 installState: 'current',
               },
+              {
+                id: 'brain-task-review',
+                installTargetDir: '/Users/alex/.agents/skills/brain-task-review',
+                bundledHash: '789abc789abc789abc',
+                installedHash: '789abc789abc789abc',
+                installState: 'current',
+              },
             ],
           })
         case 'skill_uninstall':
@@ -146,6 +160,13 @@ export function installFakeBridge(options: FakeBridgeOptions = {}): void {
                 id: 'brain-backfill',
                 installTargetDir: '/Users/alex/.agents/skills/brain-backfill',
                 bundledHash: 'def456def456def456',
+                installedHash: null,
+                installState: 'missing',
+              },
+              {
+                id: 'brain-task-review',
+                installTargetDir: '/Users/alex/.agents/skills/brain-task-review',
+                bundledHash: '789abc789abc789abc',
                 installedHash: null,
                 installState: 'missing',
               },

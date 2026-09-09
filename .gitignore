@@ -31,6 +31,7 @@ dist-ssr
 .turbo
 /target
 *.tsbuildinfo
+__pycache__/
 
 # Local Brain durable data + exports (durable user data; never committed)
 *.sqlite

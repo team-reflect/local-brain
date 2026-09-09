@@ -307,6 +307,7 @@ describe('SettingsSurface (Plan 08)', () => {
     expect(await screen.findByText('Agent skills are not installed')).toBeDefined()
     expect(screen.getByText('/Users/alex/.agents/skills/brain')).toBeDefined()
     expect(screen.getByText('/Users/alex/.agents/skills/brain-backfill')).toBeDefined()
+    expect(screen.getByText('/Users/alex/.agents/skills/brain-task-review')).toBeDefined()
 
     fireEvent.click(screen.getByRole('button', { name: 'Install skills' }))
 

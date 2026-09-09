@@ -46,8 +46,9 @@ notarization, and release-bump commands.
 
 From the app, open **Settings → CLI & agents** and install the command and the
 agent skills. The app symlinks the bundled sidecar to `~/.local/bin/brain`,
-installs the managed skills at `~/.agents/skills/brain` and
-`~/.agents/skills/brain-backfill`, and writes the known brain list to
+installs the managed skills at `~/.agents/skills/brain`,
+`~/.agents/skills/brain-backfill`, and `~/.agents/skills/brain-task-review`
+(including its Python 3 audit helper), and writes the known brain list to
 `~/.agents/skills/brain/brains.json`; it never needs sudo and does not edit
 shell profile files. If `~/.local/bin` is not already on your `PATH`, add this
 line to your shell profile:
@@ -64,8 +65,14 @@ cargo install --path apps/cli --locked
 
 If you need to install the skills manually, copy `skills/brain` to
 `~/.agents/skills/brain` and `skills/brain-backfill` to
-`~/.agents/skills/brain-backfill`. The app-generated `brains.json` is optional
+`~/.agents/skills/brain-backfill`, plus the whole `skills/brain-task-review`
+directory (including `scripts/`) to `~/.agents/skills/brain-task-review`.
+The app-generated `brains.json` is optional
 but lets local agents pick the active brain without asking.
+
+Manual copies are unmanaged. Settings reports them as conflicts and preserves
+them during install and uninstall. To switch to app-managed updates, move the
+manual skill directories aside, then install through Settings.
 
 ## Local storage
 
@@ -111,10 +118,13 @@ brain add document --title "Pricing model" --text "..." --json
 ## Using it with a local agent
 
 The agent contract is the `brain` CLI plus the agent skills installed from
-[`skills/brain`](../../skills/brain) and
-[`skills/brain-backfill`](../../skills/brain-backfill). The main skill teaches
+[`skills/brain`](../../skills/brain),
+[`skills/brain-backfill`](../../skills/brain-backfill), and
+[`skills/brain-task-review`](../../skills/brain-task-review). The main skill teaches
 the nouns, query-before-write, the stdout/stderr contract, and daily-automation
-recipes; the backfill skill guides first-run and large historical imports. Core
+recipes; the backfill skill guides first-run and large historical imports.
+The task-review skill reconciles the full backlog during recurring imports and
+audits evidence, final statuses, duplicates, and missing coverage. Core
 commands:
 
 ```bash
