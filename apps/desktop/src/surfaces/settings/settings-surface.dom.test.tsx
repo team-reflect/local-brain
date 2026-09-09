@@ -60,7 +60,7 @@ describe('SettingsSurface (Plan 08)', () => {
     expect(screen.getByText('API key')).toBeDefined()
   })
 
-  it('edits the default model for an existing provider without replacing it', async () => {
+  it('selects Astra for an existing provider without replacing its key', async () => {
     const batches: Array<Array<{ params: unknown[] }>> = []
     const keychainWrites: string[] = []
     installFakeBridge({
@@ -116,7 +116,8 @@ describe('SettingsSurface (Plan 08)', () => {
     const model = screen.getByLabelText('Default model')
     expect(model.getAttribute('value')).toBe('gpt-5.4')
 
-    fireEvent.change(model, { target: { value: 'gpt-5.6' } })
+    expect(screen.getByText('GPT-6 Astra').getAttribute('value')).toBe('gpt-6-astra')
+    fireEvent.change(model, { target: { value: 'gpt-6-astra' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save model' }))
 
     await waitFor(() => expect(batches).toHaveLength(1))
@@ -128,7 +129,7 @@ describe('SettingsSurface (Plan 08)', () => {
         {
           id: 'provider-1',
           provider: 'openai',
-          model: 'gpt-5.6',
+          model: 'gpt-6-astra',
           keyHint: '12345',
         },
         {

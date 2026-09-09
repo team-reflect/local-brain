@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { aiProvider, modelContextWindow } from './provider-catalog'
+import { aiModelLabel, aiProvider, modelContextWindow } from './provider-catalog'
 
 describe('AI provider catalog', () => {
   it('offers the GPT-5.6 family and defaults new OpenAI configs to the Sol alias', () => {
@@ -14,5 +14,10 @@ describe('AI provider catalog', () => {
     expect(modelContextWindow('openai', 'gpt-5.6')).toBe(1_050_000)
     expect(modelContextWindow('openai', 'gpt-5.6-terra')).toBe(1_050_000)
     expect(modelContextWindow('openai', 'gpt-5.6-luna')).toBe(1_050_000)
+  })
+
+  it('resolves Astra for model selection and token budgeting', () => {
+    expect(aiModelLabel('openai', 'gpt-6-astra')).toBe('GPT-6 Astra')
+    expect(modelContextWindow('openai', 'gpt-6-astra')).toBe(1_050_000)
   })
 })

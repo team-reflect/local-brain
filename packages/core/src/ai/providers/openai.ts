@@ -15,15 +15,21 @@ interface OpenAiResponse {
   usage?: { prompt_tokens?: number; completion_tokens?: number }
 }
 
+/** Build a Chat Completions request with model-compatible sampling and token limits. */
 export function buildOpenAiBody(request: ModelRequest, model: string): Record<string, unknown> {
+  const maxTokens = request.maxTokens ?? 1024
   return {
     model,
     messages: [
       { role: 'system', content: request.system },
       ...request.messages.map((message) => ({ role: message.role, content: message.content })),
     ],
-    max_tokens: request.maxTokens ?? 1024,
-    temperature: request.temperature ?? 0,
+    ...(model === 'gpt-6-astra'
+      ? {
+          // OpenAI recommends an initial 25k allowance for reasoning plus visible output.
+          max_completion_tokens: Math.max(maxTokens, 25_000),
+        }
+      : { max_tokens: maxTokens, temperature: request.temperature ?? 0 }),
   }
 }
 

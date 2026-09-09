@@ -46,6 +46,12 @@ Chat conversations, daily report/todo retrieval, and model boundary settings.
 - Extracted memories and tasks cite `content_chunks` through `evidence_refs`.
 - Daily reports and todo lists should use retrieval/citation machinery where useful.
 - Settings controls AI providers.
+- OpenAI includes [GPT-6 Astra](https://developers.openai.com/api/docs/models/gpt-6-astra)
+  (`gpt-6-astra`, 1,050,000-token context). Chat, titles, and briefs use Responses;
+  extraction uses text-only Chat Completions. Astra requests omit sampling settings
+  and allow at least 25,000 tokens for reasoning plus output, following OpenAI's
+  [reasoning guidance](https://developers.openai.com/api/docs/guides/reasoning).
+  Existing provider selections and the default for new configurations are unchanged.
 - There is no row-level sensitivity label schema for launch.
 
 ## Reflect Open Patterns To Reuse
