@@ -56,7 +56,7 @@ export function ConversationRail({
             onClick={onNew}
             aria-label="New chat"
             title="New chat"
-            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"
+            className="inline-flex size-10 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"
           >
             <Plus className="size-4" />
           </button>

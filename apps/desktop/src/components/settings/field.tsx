@@ -19,7 +19,7 @@ export function SettingsField({ legend, description, children }: SettingsFieldPr
   return (
     <div className="px-4 py-3.5">
       <div className="text-sm font-medium text-foreground">{legend}</div>
-      {description ? <p className="mt-0.5 text-xs text-muted-foreground">{description}</p> : null}
+      {description ? <p className="mt-0.5 text-xs text-pretty text-muted-foreground">{description}</p> : null}
       {children}
     </div>
   )

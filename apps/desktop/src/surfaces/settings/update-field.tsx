@@ -50,6 +50,7 @@ export function UpdateField(): ReactNode {
           type="button"
           variant="outline"
           size="sm"
+          className="tabular-nums"
           disabled={run === undefined}
           onClick={run ? () => void run() : undefined}
         >

@@ -16,7 +16,7 @@ export const metaText = 'font-mono text-[11px] text-muted-foreground'
 
 /** Standard text input / textarea field. */
 export const controlClass =
-  'w-full rounded-md border border-input bg-card px-2.5 py-1.5 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/25'
+  'w-full min-w-0 rounded-md border border-input bg-card px-2.5 py-1.5 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/25 disabled:cursor-not-allowed disabled:bg-secondary disabled:opacity-50'
 
 /** A monospace keyboard keycap (⌘K, ↩, etc.). */
 export const keycapClass =

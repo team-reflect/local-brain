@@ -49,11 +49,11 @@ const NAV: readonly NavItem[] = [
 ]
 
 const HISTORY_BUTTON_CLASS =
-  'rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent'
+  'inline-flex size-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent'
 
 const SEARCH_TRIGGER_CLASS = cn(
   controlClass,
-  'window-drag-control flex h-8 w-full cursor-text items-center gap-2 px-2.5 py-0 text-xs text-muted-foreground hover:text-foreground',
+  'window-drag-control flex h-10 w-full cursor-text items-center gap-2 px-2.5 py-0 text-xs text-muted-foreground hover:text-foreground',
 )
 
 export function AppShell(): ReactNode {
@@ -147,7 +147,7 @@ export function AppShell(): ReactNode {
         </nav>
         <div className="mt-auto" />
         <UpdateNotice />
-        <div className="flex items-center gap-1 px-4 pt-2">
+        <div className="flex items-start gap-1 px-4 pt-2">
           <BrainSwitcher />
           <button
             type="button"
@@ -156,7 +156,7 @@ export function AppShell(): ReactNode {
             aria-current={settingsCurrent ? 'page' : settingsActive ? 'location' : undefined}
             title="Settings"
             className={cn(
-              'inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground',
+              'inline-flex size-10 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground',
               settingsActive ? 'bg-secondary text-foreground' : null,
             )}
           >
@@ -200,7 +200,7 @@ export function AppShell(): ReactNode {
                 <kbd className={keycapClass}>⌘K</kbd>
               </button>
             </div>
-            <Button variant="outline" onClick={openTaskCreate}>
+            <Button variant="outline" className="h-10" onClick={openTaskCreate}>
               <Plus aria-hidden className="size-3.5" />
               Add task
             </Button>

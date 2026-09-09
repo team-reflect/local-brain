@@ -16,7 +16,7 @@ export function UpdateNotice(): ReactNode {
 
   if (state.phase === 'downloading') {
     return (
-      <div role="status" className="px-6 py-1.5 text-xs font-medium text-muted-foreground">
+      <div role="status" className="px-6 py-1.5 text-xs font-medium text-muted-foreground tabular-nums">
         Downloading update{state.percent !== null ? ` ${state.percent}%` : '...'}
       </div>
     )

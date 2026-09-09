@@ -203,19 +203,25 @@ describe('TaskDetail inline editing', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit title' }))
     const titleInput = screen.getByLabelText('Title')
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Complete Send deck' }))
+    const completion = screen.getByRole('checkbox', { name: 'Complete Send deck' })
+    fireEvent.click(completion)
 
     const details = screen.getByRole('group', { name: 'Task details' })
     await waitFor(() => expect(details).toHaveProperty('disabled', true))
     expect(titleInput.matches(':disabled')).toBe(true)
     expect(details.contains(screen.getByRole('button', { name: 'Edit status' }))).toBe(true)
+    expect(screen.getByRole('checkbox')).toBe(completion)
+    expect(completion.getAttribute('aria-busy')).toBe('true')
+    expect(screen.getByLabelText('Updating Send deck')).toBeDefined()
 
     resolveCompletion(1)
 
     await waitFor(() => expect(details).toHaveProperty('disabled', false))
     await waitFor(() => {
-      expect(screen.getByRole('checkbox', { name: 'Reopen Send deck' })).toBeDefined()
+      expect(screen.getByRole('checkbox', { name: 'Reopen Send deck' })).toBe(completion)
+      expect(completion.getAttribute('aria-busy')).toBe('false')
     })
+    expect(screen.queryByLabelText('Updating Send deck')).toBeNull()
     expect(updateCalls(calls)).toHaveLength(1)
   })
 

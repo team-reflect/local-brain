@@ -35,6 +35,12 @@ const DEFAULT_VIEWPORT = { offsetX: 0, offsetY: 0, scale: 1 }
 const DRAG_CLICK_THRESHOLD = 3
 const MIN_NODE_HIT_RADIUS = 16
 
+function handleActivationKey(event: KeyboardEvent<SVGGElement>, activate: () => void): void {
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  event.preventDefault()
+  activate()
+}
+
 interface GraphViewport {
   offsetX: number
   offsetY: number
@@ -263,15 +269,6 @@ export function GraphSurface({
     [consumeSuppressedClick],
   )
 
-  const handleNodeKeyDown = useCallback(
-    (event: KeyboardEvent<SVGGElement>, nodeId: string): void => {
-      if (event.key !== 'Enter' && event.key !== ' ') return
-      event.preventDefault()
-      setSelectedNodeId(nodeId)
-    },
-    [],
-  )
-
   const handleEdgeClick = useCallback(
     (event: ReactMouseEvent, route: Route): void => {
       event.stopPropagation()
@@ -358,7 +355,7 @@ export function GraphSurface({
               viewBox={`0 0 ${layout.width} ${layout.height}`}
               preserveAspectRatio="xMidYMid meet"
               className="h-full w-full cursor-grab touch-none select-none active:cursor-grabbing"
-              role="img"
+              role="group"
               aria-label="User-centered knowledge graph"
               onClick={handleBackgroundClick}
               onPointerDown={handlePointerDown}
@@ -412,8 +409,12 @@ export function GraphSurface({
                       return (
                         <g
                           key={`interaction-${edge.source.id}-${edge.target.id}-${index}`}
-                          className={route ? 'cursor-pointer' : undefined}
+                          className={route ? 'group cursor-pointer' : undefined}
                           onClick={route ? (event) => handleEdgeClick(event, route) : undefined}
+                          onKeyDown={route ? (event) => handleActivationKey(event, () => navigate(route)) : undefined}
+                          role={route ? 'button' : undefined}
+                          tabIndex={route ? 0 : undefined}
+                          aria-label={route ? `Open interaction between ${edge.source.label} and ${edge.target.label}` : undefined}
                         >
                           {/* Wide transparent hit area so thin links are easy to click. */}
                           <line
@@ -433,6 +434,7 @@ export function GraphSurface({
                             strokeWidth={interactionEdgeWidth(edge.weight)}
                             strokeOpacity={0.55}
                             strokeLinecap="round"
+                            className="group-focus-visible:stroke-primary group-focus-visible:[stroke-opacity:1]"
                           />
                         </g>
                       )
@@ -447,7 +449,7 @@ export function GraphSurface({
                       transform={`translate(${node.x} ${node.y})`}
                       className={interactive ? 'cursor-pointer' : undefined}
                       onClick={interactive ? (event) => handleNodeClick(event, node.id) : undefined}
-                      onKeyDown={interactive ? (event) => handleNodeKeyDown(event, node.id) : undefined}
+                      onKeyDown={interactive ? (event) => handleActivationKey(event, () => setSelectedNodeId(node.id)) : undefined}
                       role={interactive ? 'button' : undefined}
                       aria-pressed={interactive ? isSelected : undefined}
                       tabIndex={interactive ? 0 : undefined}

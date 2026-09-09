@@ -71,7 +71,7 @@ export function ModelDownloadProgress({ progress }: ModelDownloadProgressProps):
         aria-valuetext={state.valueText}
         value={state.value}
       />
-      <p className="mt-1.5 text-xs text-muted-foreground">{state.detail}</p>
+      <p className="mt-1.5 text-xs text-muted-foreground tabular-nums">{state.detail}</p>
     </div>
   )
 }

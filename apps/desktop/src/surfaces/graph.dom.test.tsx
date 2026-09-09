@@ -41,7 +41,7 @@ beforeEach(() => {
 })
 
 async function findGraphSvg(): Promise<SVGSVGElement> {
-  return await screen.findByRole('img', {
+  return await screen.findByRole('group', {
     name: 'User-centered knowledge graph',
   }) as unknown as SVGSVGElement
 }
@@ -96,7 +96,7 @@ describe('GraphSurface', () => {
 
     expect(screen.getByRole('group', { name: 'Graph node filters' })).toBeDefined()
     expect(screen.getByText('Loading…')).toBeDefined()
-    expect(screen.queryByRole('img', { name: 'User-centered knowledge graph' })).toBeNull()
+    expect(screen.queryByRole('group', { name: 'User-centered knowledge graph' })).toBeNull()
     expect(layoutGraphMock).not.toHaveBeenCalled()
 
     await findGraphSvg()
@@ -376,6 +376,27 @@ describe('GraphSurface', () => {
 
     fireEvent.click(link as Element)
 
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/interactions/int1')
+    })
+  })
+
+  it.each(['Enter', ' '])('opens a focused interaction with the %j key', async (key) => {
+    window.history.pushState({}, '', '/network?tab=graph')
+    renderWithProviders(<GraphSurface showHeader={false} />)
+
+    const graph = await findGraphSvg()
+    const edge = screen.getByRole('button', {
+      name: 'Open interaction between You and Ada Lovelace',
+    })
+    expect(graph.contains(edge)).toBe(true)
+    edge.focus()
+    expect(document.activeElement).toBe(edge)
+
+    fireEvent.keyDown(edge, { key: 'ArrowRight' })
+    expect(window.location.pathname).toBe('/network')
+
+    expect(fireEvent.keyDown(edge, { key })).toBe(false)
     await waitFor(() => {
       expect(window.location.pathname).toBe('/interactions/int1')
     })

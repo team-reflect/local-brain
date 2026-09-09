@@ -123,7 +123,7 @@ export function NodeDetailsPanel({
           onClick={onClose}
           aria-label="Clear selection"
           title="Clear selection"
-          className="-mr-1 -mt-1 inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          className="-mr-1 -mt-1 inline-flex size-10 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
         >
           <X className="size-3.5" />
         </button>
@@ -135,7 +135,7 @@ export function NodeDetailsPanel({
       <Button
         variant="primary"
         size="sm"
-        className="w-full"
+        className="h-10 w-full"
         onClick={onOpen}
         aria-label={actionLabelForNode(node)}
       >

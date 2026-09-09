@@ -132,12 +132,20 @@ Rules:
   case — never uppercase, never mono**.
 - Mono is reserved for metadata: dates, counts, statuses, IDs, and keyboard hints.
 - Long readable bodies use comfortable sans line height; avoid viewport-scaled type.
+- Record titles wrap instead of hiding their identity behind an ellipsis. Balance
+  short headings, use pretty wrapping for short help/empty-state text, and allow
+  long URLs or identifiers to wrap inside bounded value columns.
+- Updating download counts and percentages use tabular numerals. Mono metadata
+  already has fixed-width digits.
 
 ## Shape and Spacing
 
 - Sidebar: 260px, sunken (`--lb-sidebar`), hairline right border.
 - Topbar: ~48px, hairline bottom border.
 - Dense row baseline ~32px; table rows compact with `px-3 py-2`.
+- Standalone toolbar, footer, and composer actions have 40px hit areas while icons
+  remain compact. Keep embedded row controls within their allocated space; never
+  overlap neighboring hit targets with invisible extensions.
 - House radius 8px (`--radius`): buttons/inputs `rounded-md` (6px), cards/tables
   `rounded-lg` (8px), overlays `rounded-xl` (12px), badges `rounded-full`.
 - Prefer hairline borders over shadows. Shadows only for overlays/popovers/modals.
@@ -205,6 +213,17 @@ Cmd/Ctrl+K, Escape, ArrowUp/Down, Enter.
 
 Use the shared `controlClass` from `lib/ui.ts`: bordered white field, indigo focus
 ring. Field labels use the quiet grey label style.
+Disabled fields use a muted surface and reduced opacity so pending forms still
+communicate which controls are available.
+
+### Interaction Feedback
+
+- Keyboard focus remains visible on individual controls, including the Chat model
+  picker. Interactive Graph edges support the same keyboard activation as nodes.
+- Brain switches and folder reveals show pending and recoverable error feedback.
+- Task completion uses one fixed checkbox footprint for idle and pending states.
+- Radix overlays use `data-state` selectors. Respect reduced motion and keep
+  high-frequency row feedback limited to short color transitions.
 
 ## Tailwind Usage
 
