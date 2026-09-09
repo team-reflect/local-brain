@@ -17,16 +17,14 @@
 // shadow tables are excluded — search uses raw SQL (Plan 06), not the typed
 // query builder. The sqlite-vec (vec0) virtual tables are likewise excluded;
 // their CREATE statements are stripped before replay because Node's built-in
-// SQLite lacks the extension (see stripVec0).
+// SQLite lacks the extension (see testing/database.mjs).
 
-import { DatabaseSync } from 'node:sqlite'
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { freshDatabase } from '../testing/database.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const repoRoot = join(here, '..', '..', '..')
-const migrationsDir = join(repoRoot, 'crates', 'brain-schema', 'migrations')
 const outputFile = join(here, '..', 'src', 'schema.gen.ts')
 
 /** Tables that never belong in the typed query builder. */
@@ -60,34 +58,17 @@ function tsTypeForColumn(declaredType, columnName) {
   return 'number'
 }
 
-/**
- * Strip `CREATE VIRTUAL TABLE … USING vec0(…)` statements before replaying a
- * migration. The vec0 virtual tables (sqlite-vec) need the extension, which the
- * Rust runtime registers but Node's built-in SQLite does not have. Like the
- * FTS5 tables, they are never part of the typed query builder (semantic search
- * uses raw SQL), so dropping them from codegen costs nothing and keeps the
- * generator a pure-JS, native-dependency-free replay.
- */
-function stripVec0(sql) {
-  return sql.replace(/CREATE\s+VIRTUAL\s+TABLE[^;]*USING\s+vec0[^;]*;/gi, '')
-}
-
-/** Apply every migration, in lexical order, to a fresh in-memory database. */
-function migratedDatabase() {
-  const db = new DatabaseSync(':memory:')
-  db.exec('PRAGMA foreign_keys = ON;')
-  const files = readdirSync(migrationsDir)
-    .filter((file) => file.endsWith('.sql'))
-    .sort()
-  for (const file of files) {
-    db.exec(stripVec0(readFileSync(join(migrationsDir, file), 'utf8')))
-  }
-  return db
-}
-
 /** Build the schema.gen.ts source string from the migrated database. */
 export function generateSchemaSource() {
-  const db = migratedDatabase()
+  const db = freshDatabase()
+  try {
+    return schemaSource(db)
+  } finally {
+    db.close()
+  }
+}
+
+function schemaSource(db) {
   const relations = db
     .prepare("SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY name")
     .all()
@@ -110,8 +91,6 @@ export function generateSchemaSource() {
     })
     interfaces.push(`export interface ${toPascalCase(relation.name)} {\n${lines.join('\n')}\n}`)
   }
-
-  db.close()
 
   const databaseFields = relations
     .map((relation) => `  ${toCamelCase(relation.name)}: ${toPascalCase(relation.name)}`)

@@ -624,13 +624,12 @@ fn switch_to(
     db: &DbState,
     brains: &BrainState,
     conn: Connection,
-    paths: impl crate::db::IntoActivePaths,
+    paths: brain_schema::BrainPaths,
     name: Option<&str>,
 ) -> AppResult<BrainInfo> {
     // One switch at a time: persist + swap is a single critical section so
     // overlapping switches can't interleave the two stores onto different brains.
     let _switch = brains.switch_guard()?;
-    let paths = paths.into_active_paths();
     let root = paths.root_path.clone();
     db.swap_after(conn, paths, || brains.register_active(&root, name))?;
     let info = brains.active_info(db)?.ok_or_else(|| {
@@ -1472,21 +1471,20 @@ mod tests {
         let dir = tempdir().unwrap();
 
         // A live DB already open on the "old" brain.
-        let old = dir.path().join("old.sqlite");
-        let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old.clone());
+        let old = dir.path().join("Old");
+        let (db, _) = live_db(&old);
 
         // A valid, migrated "new" brain we attempt to switch to.
-        let new = dir.path().join("new.sqlite");
-        let new_conn = brain_schema::open_and_migrate(&new).unwrap();
-        let canonical = new.canonicalize().unwrap();
+        let new = dir.path().join("New");
+        let (paths, new_conn) = brain_schema::open_brain_root(&new).unwrap();
 
         // The registry rejects writes → the switch fails...
         let brains = read_only_state();
-        let result = switch_to(&db, &brains, new_conn, &canonical, None);
+        let result = switch_to(&db, &brains, new_conn, paths, None);
         assert!(result.is_err());
 
         // ...and the live connection still points at the old brain.
-        assert_eq!(db.active_path().unwrap(), old);
+        assert_eq!(db.active_root_path().unwrap(), old.canonicalize().unwrap());
     }
 
     #[test]
@@ -1496,17 +1494,16 @@ mod tests {
         // committing `registry_meta`, otherwise next launch can reopen a brain
         // the app never actually switched to in this session.
         let dir = tempdir().unwrap();
-        let old = dir.path().join("old.sqlite");
-        let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old);
+        let old = dir.path().join("Old");
+        let (db, _) = live_db(&old);
 
-        let new = dir.path().join("new.sqlite");
-        let new_conn = brain_schema::open_and_migrate(&new).unwrap();
-        let canonical = new.canonicalize().unwrap();
+        let new = dir.path().join("New");
+        let (paths, new_conn) = brain_schema::open_brain_root(&new).unwrap();
 
         let brains = memory_state();
         db.poison_for_test();
 
-        let result = switch_to(&db, &brains, new_conn, &canonical, None);
+        let result = switch_to(&db, &brains, new_conn, paths, None);
         assert!(result.is_err());
 
         let conn = brains.lock().unwrap();
@@ -1523,8 +1520,8 @@ mod tests {
     #[test]
     fn switch_persists_then_swaps_on_success() {
         let dir = tempdir().unwrap();
-        let old = dir.path().join("old.sqlite");
-        let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old.clone());
+        let old = dir.path().join("Old");
+        let (db, _) = live_db(&old);
 
         let new = dir.path().join("Work");
         let (paths, new_conn) = brain_schema::open_brain_root(&new).unwrap();
@@ -1555,11 +1552,8 @@ mod tests {
         // switch to start wins *both* stores and they always agree.
         let dir = tempdir().unwrap();
 
-        let start = dir.path().join("start.sqlite");
-        let db = DbState::new(
-            brain_schema::open_and_migrate(&start).unwrap(),
-            start.clone(),
-        );
+        let start = dir.path().join("Start");
+        let (db, _) = live_db(&start);
 
         let a = dir.path().join("A");
         let b = dir.path().join("B");
@@ -1772,8 +1766,8 @@ mod tests {
         let brains = file_state(&registry_path);
 
         // A live DB already open on a real brain.
-        let old = dir.path().join("old.sqlite");
-        let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old.clone());
+        let old = dir.path().join("Old");
+        let (db, _) = live_db(&old);
 
         // Opening the registry path — even via a non-canonical spelling — is refused.
         let dotted = dir
@@ -1786,7 +1780,7 @@ mod tests {
         assert!(result.is_err(), "the registry must not open as a brain");
 
         // The live connection still points at the original brain, untouched.
-        assert_eq!(db.active_path().unwrap(), old);
+        assert_eq!(db.active_root_path().unwrap(), old.canonicalize().unwrap());
         // The registry was not catalogued or migrated as a brain.
         let conn = brains.lock().unwrap();
         assert!(all_records(&conn).unwrap().is_empty());
@@ -1832,8 +1826,8 @@ mod tests {
         let registry_path = dir.path().join("registry.sqlite");
         let brains = file_state(&registry_path);
 
-        let old = dir.path().join("old.sqlite");
-        let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old.clone());
+        let old = dir.path().join("Old");
+        let (db, _) = live_db(&old);
 
         let target = dir.path().join("Work");
         brain_schema::open_brain_root(&target).unwrap();
@@ -1851,8 +1845,8 @@ mod tests {
         // session and silently disappear on the next launch. switch_to must now
         // fail loudly and leave the live DB on the previous brain.
         let dir = tempdir().unwrap();
-        let old = dir.path().join("old.sqlite");
-        let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old.clone());
+        let old = dir.path().join("Old");
+        let (db, _) = live_db(&old);
 
         let new = dir.path().join("New");
         let (paths, new_conn) = brain_schema::open_brain_root(&new).unwrap();
@@ -1864,8 +1858,8 @@ mod tests {
             "a switch on a non-durable registry must fail"
         );
         assert_eq!(
-            db.active_path().unwrap(),
-            old,
+            db.active_root_path().unwrap(),
+            old.canonicalize().unwrap(),
             "the live DB must stay on the previous brain"
         );
     }
@@ -1899,8 +1893,8 @@ mod tests {
         // persist. If that persist fails, the previous brain stays active. The
         // selected folder is user-owned, so it is not deleted as cleanup.
         let dir = tempdir().unwrap();
-        let old = dir.path().join("old.sqlite");
-        let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old.clone());
+        let old = dir.path().join("Old");
+        let (db, _) = live_db(&old);
 
         let new = dir.path().join("Work");
         // A non-durable registry makes the registry persist inside switch_to fail.
@@ -1915,7 +1909,7 @@ mod tests {
         );
         assert!(new.join("assets").is_dir(), "bootstrap creates assets");
         // The live DB stays on the previous brain.
-        assert_eq!(db.active_path().unwrap(), old);
+        assert_eq!(db.active_root_path().unwrap(), old.canonicalize().unwrap());
     }
 
     #[test]
@@ -1923,8 +1917,8 @@ mod tests {
         // The cleanup must not regress the happy path: a successful create
         // leaves the new database in place and makes it active.
         let dir = tempdir().unwrap();
-        let old = dir.path().join("old.sqlite");
-        let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old);
+        let old = dir.path().join("Old");
+        let (db, _) = live_db(&old);
 
         let new = dir.path().join("Work");
         let brains = memory_state(); // durable
@@ -1945,8 +1939,8 @@ mod tests {
         // The guard must not regress normal operation: a durable registry accepts
         // a switch and the metadata edits exactly as before.
         let dir = tempdir().unwrap();
-        let old = dir.path().join("old.sqlite");
-        let db = DbState::new(brain_schema::open_and_migrate(&old).unwrap(), old.clone());
+        let old = dir.path().join("Old");
+        let (db, _) = live_db(&old);
 
         let new = dir.path().join("Work");
         let (paths, new_conn) = brain_schema::open_brain_root(&new).unwrap();

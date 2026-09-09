@@ -2,8 +2,8 @@
 
 Working name: **Local Brain**.
 
-This repo is currently a planning space for a consumer version of Company Brain built
-on Reflect Open's local-first desktop technology. The product direction is:
+Local Brain is a personal CRM built on Reflect Open's local-first desktop
+technology:
 
 > An agent-operated local brain with a private desktop UI.
 
@@ -12,6 +12,11 @@ SQLite is the durable local store. The main operating path is AI agents writing 
 reading from the brain through a CLI and local skills. The UI exists for quick
 browsing, correction, inspection, and showing someone else what the brain knows,
 including a graph view centered on the user.
+
+Start with the repository [README](../README.md) for setup and verification,
+[Architecture Conventions](plans/architecture-conventions.md) for code ownership,
+and [Frontend Architecture](frontend-architecture.md) for the desktop app.
+Numbered plans and build logs record the implementation history.
 
 ## Docs
 

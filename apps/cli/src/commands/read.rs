@@ -22,21 +22,6 @@ const NAME_HIT_SCORE: f64 = 0.6;
 const TAG_HIT_SCORE: f64 = 0.58;
 const DEFAULT_RECORD_DETAIL_CHARS: usize = 4000;
 const MAX_RECORD_DETAIL_CHARS: usize = 12000;
-const RETRIEVABLE_RECORD_TYPES: &[&str] = &[
-    "person",
-    "organization",
-    "organization_profile",
-    "project",
-    "task",
-    "document",
-    "interaction",
-    "interaction_transcript",
-    "ai_note",
-    "extracted_fact",
-    "memory",
-    "asset",
-];
-
 fn recency_score(age_days: Option<f64>) -> f64 {
     match age_days {
         Some(age) if age.is_finite() => 0.5_f64.powf(age.max(0.0) / RECENCY_HALF_LIFE_DAYS),
@@ -65,7 +50,7 @@ fn truncate_to_boundary(value: &str, max: usize) -> &str {
 }
 
 fn is_retrievable_record_type(record_type: &str) -> bool {
-    RETRIEVABLE_RECORD_TYPES.contains(&record_type)
+    super::record_ref::record_table(record_type).is_some()
 }
 
 fn record_ref(record_type: &str, record_id: &str) -> String {

@@ -21,6 +21,12 @@ path resolution, sidecar bundling, installation checks.
 - The CLI is expected to handle most writes and reads.
 - The CLI is a self-contained Rust binary, not a Node wrapper.
 - CLI writes use the same SQLite schema/migration crate as the desktop app.
+- CLI references, evidence, retrieval filters, and external identities share one
+  canonical record-type/table map in `apps/cli/src/commands/record_ref.rs`. Import
+  lookups distinguish a missing record from a database error; a failed lookup must
+  abort the import rather than permit a duplicate insert.
+- Task creation and updates share one typed-link writer. Repeated person and
+  organization links are idempotent, and assignee roles survive generic person links.
 - The CLI opens the SQLite database directly; it does not require the desktop app to be
   running and does not use Tauri IPC.
 - Agents can add people, documents, interactions, assets, tasks, and memories with direct

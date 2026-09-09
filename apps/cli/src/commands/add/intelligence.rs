@@ -11,8 +11,8 @@ use super::identity::{
     source_id, ExternalIdentityWrite, RecordProvenanceWrite,
 };
 use super::links::{insert_chunks, insert_evidence_refs, replace_chunks};
-use super::record_ref::{parse_record_ref, require_record, RECORD_TYPES};
 use super::text::normalize_optional;
+use crate::commands::record_ref::{parse_record_ref, record_table, require_record};
 use crate::commands::{now_iso, EvidenceRef};
 use crate::error::CliError;
 use crate::id::new_id;
@@ -688,7 +688,7 @@ pub fn promote_fact(
         ],
     )?;
     let count = insert_chunks(&tx, "memory", &id, &claim)?;
-    if RECORD_TYPES.contains(&subject_type.as_str()) {
+    if record_table(&subject_type).is_some() {
         tx.execute(
             "INSERT INTO memory_links (id, memory_id, record_type, record_id)
              VALUES (?1,?2,?3,?4)",

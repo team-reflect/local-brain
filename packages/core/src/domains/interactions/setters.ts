@@ -1,16 +1,14 @@
 import type { Interactions } from '@local-brain/db'
-import { db, dbForDatabase } from '../../db/client'
+import { db } from '../../db/client'
+import { updateContentRecord } from '../../db/content-records'
 import { batch } from '../../db/commands'
 import { activeDatabaseIdentity, type DatabaseIdentity } from '../../db/identity'
 import { newId } from '../../db/id'
 import {
   archiveRecord,
-  assertTitleOrBody,
-  updateRecord,
   type NewRecord,
   type RecordPatch,
 } from '../../db/records'
-import { nowIso } from '../../db/time'
 import { contentChunkProjection } from '../../ingest/content-projection'
 import { recomputeRelationshipIntelligence } from '../relationships/recompute'
 import { validateNewInteraction, validateInteractionPatch } from './validators'
@@ -143,35 +141,12 @@ export async function createInteraction(
  * Update an interaction, refreshing body chunks atomically when body text
  * changes. A supplied identity rejects stale work after a brain switch.
  */
-export async function updateInteraction(
+export function updateInteraction(
   id: string,
   patch: InteractionPatch,
   expectedIdentity?: DatabaseIdentity,
 ): Promise<number> {
-  const clean = validateInteractionPatch(patch)
-  const identity = expectedIdentity ?? (await activeDatabaseIdentity())
-  await assertTitleOrBody('interactions', id, clean, 'an interaction', identity)
-  if (clean.bodyText === undefined) return updateRecord('interactions', id, clean, identity)
-  const existing = await dbForDatabase(identity)
-    .selectFrom('interactions')
-    .select('id')
-    .where('id', '=', id)
-    .executeTakeFirst()
-  if (!existing) {
-    const [affected] = await batch([
-      db.updateTable('interactions').set({ ...clean, updatedAt: nowIso() }).where('id', '=', id),
-    ], identity)
-    return affected ?? 0
-  }
-
-  const projection = await contentChunkProjection('interaction', id, clean.bodyText, {
-    databaseIdentity: identity,
-  })
-  const [affected] = await batch([
-    db.updateTable('interactions').set({ ...clean, updatedAt: nowIso() }).where('id', '=', id),
-    ...projection.statements,
-  ], identity)
-  return affected ?? 0
+  return updateContentRecord('interactions', id, validateInteractionPatch(patch), expectedIdentity)
 }
 
 export function archiveInteraction(id: string): Promise<number> {

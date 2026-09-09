@@ -45,6 +45,10 @@ writes cannot land in the wrong brain. `$BRAIN_ROOT` pins one brain root for the
 and automations; `--db` / `$BRAIN_DB` remain advanced escape hatches for direct
 database testing. There is no implicit app-data brain fallback.
 
+The active connection, brain paths, generation, and startup error share one native
+mutex. Switching or closing a brain updates that state together; identity checks
+read it under the same lock used for database work.
+
 Long-running frontend workflows capture `(databasePath, generation)`. Guarded reads
 must reject their result if that identity changes; native writes must pass both values
 to Rust, which compares them while holding the active-connection lock and performs the
@@ -132,6 +136,9 @@ regardless of entry point:
 - `db/records.ts` provides the shared `insertRecord` / `updateRecord` /
   `archiveRecord` helpers (id generation, `updated_at`/`archived_at` stamping) so
   no domain re-implements that plumbing.
+- `db/content-records.ts` owns document/interaction updates: check that content
+  remains readable, then commit the record and refreshed body chunks together
+  against the captured brain identity. Domain setters normalize their own inputs.
 - The `brain` CLI mirrors the storage normalizers and the same preconditions in
   Rust (`apps/cli/src/commands/add.rs`), the documented twin of the TS boundary.
 
@@ -345,6 +352,9 @@ mono metadata, compact controls, a sunken sidebar, and token-derived graph chrom
 - CLI stdout carries data only; diagnostics and warnings go to stderr.
 - JSON output shapes should be stable and snapshot-tested.
 - The CLI should share the Rust schema/migration crate with the desktop app.
+- Agent instructions live in `skills/` and are bundled directly by the native
+  skill installer (`apps/desktop/src-tauri/src/skill.rs`). Its managed-skill list
+  owns installation; there is no separate TypeScript skill registry.
 - Agents should query before writing.
 - Agents should add documents, interactions, assets, tasks, and memories through the CLI.
 - The app does not need a top-level automation log view for launch.

@@ -41,18 +41,7 @@ pub struct CompleteTaskArgs<'a> {
 
 pub fn add_task(conn: &mut Connection, json: bool, args: AddTaskArgs) -> Result<(), CliError> {
     let status = normalize_status(args.status)?;
-    let project_links = args
-        .links
-        .iter()
-        .filter(|link| matches!(link.kind, LinkKind::Project))
-        .count();
-    if project_links > 1 {
-        return Err(CliError::Runtime(
-            "a task can link to only one project".into(),
-        ));
-    }
-    // Collect assignee ids up-front so person links can skip those already
-    // handled as assignees (prevents duplicate task_people rows).
+    validate_task_links(&args.links)?;
     use std::collections::HashSet;
     let assignee_set: HashSet<&str> = args.assignee_ids.iter().map(|s| s.as_str()).collect();
     let id = new_id();
@@ -61,61 +50,15 @@ pub fn add_task(conn: &mut Connection, json: bool, args: AddTaskArgs) -> Result<
         "INSERT INTO tasks (id, title, status, due_at, project_id) VALUES (?1,?2,?3,?4,?5)",
         params![id, args.title, status, args.due_at, args.project_id],
     )?;
-    for link in &args.links {
-        match link.kind {
-            LinkKind::Person => {
-                // Skip generic link if this person is already being inserted as
-                // an assignee; the assignee loop below writes the canonical row.
-                if assignee_set.contains(link.id.as_str()) {
-                    continue;
-                }
-                tx.execute(
-                    "INSERT INTO task_people (id, task_id, person_id) VALUES (?1,?2,?3)",
-                    params![new_id(), id, link.id],
-                )?;
-            }
-            LinkKind::Organization => {
-                tx.execute(
-                    "INSERT INTO task_organizations (id, task_id, organization_id) VALUES (?1,?2,?3)",
-                    params![new_id(), id, link.id],
-                )?;
-            }
-            LinkKind::Project => {
-                tx.execute(
-                    "UPDATE tasks SET project_id = ?1 WHERE id = ?2",
-                    params![link.id, id],
-                )?;
-            }
-            LinkKind::Task => {
-                return Err(CliError::Runtime(
-                    "a task cannot link to another task".into(),
-                ));
-            }
-            LinkKind::Document => {
-                tx.execute(
-                    "INSERT OR IGNORE INTO task_documents (id, task_id, document_id) VALUES (?1,?2,?3)",
-                    params![new_id(), id, link.id],
-                )?;
-            }
-            LinkKind::Interaction => {
-                tx.execute(
-                    "UPDATE tasks SET origin_interaction_id = COALESCE(origin_interaction_id, ?1) WHERE id = ?2",
-                    params![link.id, id],
-                )?;
-                tx.execute(
-                    "INSERT OR IGNORE INTO task_interactions (id, task_id, interaction_id) VALUES (?1,?2,?3)",
-                    params![new_id(), id, link.id],
-                )?;
-            }
-        }
-    }
-    // Iterate the deduplicated set so that repeating --assignee <id> does not
-    // attempt a second insert and hit the UNIQUE (task_id, person_id) constraint.
+    // Insert assignees first so idempotent generic links preserve their role.
     for assignee_id in &assignee_set {
         tx.execute(
             "INSERT INTO task_people (id, task_id, person_id, role) VALUES (?1,?2,?3,'assignee')",
             params![new_id(), id, assignee_id],
         )?;
+    }
+    for link in &args.links {
+        insert_task_link(&tx, &id, link)?;
     }
     insert_evidence_refs(&tx, "task", &id, &args.evidence)?;
     tx.commit()?;
@@ -153,6 +96,20 @@ fn normalize_status(raw: &str) -> Result<String, CliError> {
             "invalid task status '{raw}' (expected open, in_progress, waiting, blocked, done, or cancelled)"
         ))),
     }
+}
+
+fn validate_task_links(links: &[LinkRef]) -> Result<(), CliError> {
+    if links
+        .iter()
+        .filter(|link| link.kind == LinkKind::Project)
+        .count()
+        > 1
+    {
+        return Err(CliError::Runtime(
+            "a task can link to only one project".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn insert_task_link(conn: &Connection, task_id: &str, link: &LinkRef) -> Result<(), CliError> {
@@ -264,16 +221,7 @@ pub fn update_task(
             "tasks update requires at least one --evidence reference".into(),
         ));
     }
-    let project_links = args
-        .links
-        .iter()
-        .filter(|link| matches!(link.kind, LinkKind::Project))
-        .count();
-    if project_links > 1 {
-        return Err(CliError::Runtime(
-            "a task can link to only one project".into(),
-        ));
-    }
+    validate_task_links(&args.links)?;
 
     let title = args
         .title

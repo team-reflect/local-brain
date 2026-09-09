@@ -2,9 +2,9 @@ use rusqlite::{params, Connection};
 use serde_json::json;
 
 use super::super::identity::{insert_record_provenance, RecordProvenanceWrite};
-use super::super::record_ref::{parse_record_ref, require_record};
 use super::super::text::normalize_optional;
 use super::{sync_person_current_affiliation, UnlinkArgs};
+use crate::commands::record_ref::{parse_record_ref, require_record};
 use crate::error::CliError;
 use crate::output::print_json;
 

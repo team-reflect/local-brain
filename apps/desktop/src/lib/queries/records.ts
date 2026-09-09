@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query'
 import {
+  activeDatabaseIdentity,
   archiveTask,
+  assertActiveDatabaseIdentity,
   completeTask,
   createProject,
   createTask,
@@ -35,6 +37,7 @@ import {
   listTasks,
   setTaskCompleted,
   updateTask,
+  type DatabaseIdentity,
   type LinkedTask,
   type ListTasksOptions,
   type NewProject,
@@ -264,14 +267,28 @@ export function useTasks(options: ListTasksOptions = {}) {
   return useQuery({ queryKey: ['tasks', options], queryFn: () => listTasks(options) })
 }
 
-export function useTask(id: string) {
-  return useQuery({ queryKey: ['task', id], queryFn: () => getTask(id).then((t) => t ?? null) })
+/** A task and the exact database connection that supplied its editable fields. */
+export interface TaskWithIdentity extends Task {
+  databaseIdentity: DatabaseIdentity
 }
 
-export function useUpdateTask(id: string) {
+export function useTask(id: string) {
+  return useQuery({
+    queryKey: ['task', id],
+    queryFn: async (): Promise<TaskWithIdentity | null> => {
+      const databaseIdentity = await activeDatabaseIdentity()
+      const task = await getTask(id)
+      await assertActiveDatabaseIdentity(databaseIdentity)
+      return task ? { ...task, databaseIdentity } : null
+    },
+  })
+}
+
+/** Update only the brain that supplied the editor's task. */
+export function useUpdateTask(id: string, databaseIdentity: DatabaseIdentity) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (patch: TaskPatch) => updateTask(id, patch),
+    mutationFn: (patch: TaskPatch) => updateTask(id, patch, databaseIdentity),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['tasks'] }),

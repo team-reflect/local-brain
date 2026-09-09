@@ -6,7 +6,6 @@
 //! Module layout:
 //! - [`text`] — pure string normalization shared across writers.
 //! - [`identity`] — sources, content-hash dedupe, and `external_identities`.
-//! - [`record_ref`] — provider-neutral `kind:id` validation for typed records.
 //! - [`links`] — chunk + typed-link writers for documents/interactions.
 //! - [`import_completion`] — audit/finalize checks for staged imports.
 //! - [`person`] / [`person_import`] — person writes and untrusted-name guardrails.
@@ -28,7 +27,6 @@ mod participants;
 mod person;
 mod person_import;
 mod project;
-mod record_ref;
 mod suggestion;
 mod task;
 pub(crate) mod text;

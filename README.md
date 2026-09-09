@@ -17,9 +17,9 @@ apps/
 packages/
   core/               TS product logic, IPC `call()` boundary, AppError contract
   db/                 Kysely schema/types + read-only IPC dialect
-  skills/             local agent skill definitions (built out in Plan 07)
 crates/
   brain-schema/       durable SQLite migrations + open/migrate helpers
+skills/               bundled agent instructions, installed by the desktop app
 docs/                 planning and architecture docs
 ```
 
@@ -48,9 +48,19 @@ pnpm lint          # oxlint over apps + packages
 pnpm test          # vitest across every TS package (turbo)
 pnpm check         # typecheck + lint + test
 
+pnpm --filter @local-brain/desktop sidecar  # once before compiling the desktop crate
 cargo check --workspace    # Rust crates (desktop shell, CLI, schema)
-cargo test --workspace     # migration + schema tests
+cargo test --workspace     # CLI, desktop, and migration tests
 ```
+
+For check/test runs only, prefix the sidecar command with
+`LOCAL_BRAIN_SIDECAR_MODE=stub` to stage the same placeholder used by CI. A real
+desktop launch or package needs the built sidecar; `pnpm tauri dev` and
+`pnpm tauri build` build it automatically.
+
+Generated database types and core integration tests replay the same migrations
+through `@local-brain/db/testing`. Run `pnpm --filter @local-brain/db db:codegen`
+after adding a migration; `pnpm check` verifies that the committed types match.
 
 ## Develop
 
@@ -58,9 +68,14 @@ cargo test --workspace     # migration + schema tests
 pnpm --filter @local-brain/desktop dev   # Vite dev server only
 pnpm tauri dev                           # full desktop app (requires Rust + Tauri)
 
-cargo run -p brain-cli -- status         # the `brain` CLI against the default DB
-cargo run -p brain-cli -- --json status  # machine-readable output
+cargo run -p brain-cli -- --brain /path/to/brain status
+cargo run -p brain-cli -- --brain /path/to/brain --json status
 ```
+
+Select a brain folder with `--brain` or `BRAIN_ROOT`. For tests and diagnostics,
+`--db` and `BRAIN_DB` select the database file directly without either folder
+option. The Rust CLI reads and writes SQLite directly, using the same
+migrations as the desktop app; it does not execute the TypeScript core package.
 
 ## Conventions
 

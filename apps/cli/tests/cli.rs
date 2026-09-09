@@ -5245,6 +5245,48 @@ fn add_task_assignee_and_person_link_same_person_yields_one_assignee_row() {
 }
 
 #[test]
+fn add_task_duplicate_person_and_organization_links_are_idempotent() {
+    let dir = TempDir::new().unwrap();
+    let db = db_path(&dir);
+    let person = run_json(&db, &["--json", "add", "person", "--full-name", "Ada"]);
+    let organization = run_json(&db, &["--json", "add", "organization", "--name", "Acme"]);
+    let person_link = format!("person:{}", person["id"].as_str().unwrap());
+    let organization_link = format!("organization:{}", organization["id"].as_str().unwrap());
+
+    let task = run_json(
+        &db,
+        &[
+            "--json",
+            "add",
+            "task",
+            "--title",
+            "Send the deck",
+            "--link",
+            &person_link,
+            "--link",
+            &person_link,
+            "--link",
+            &organization_link,
+            "--link",
+            &organization_link,
+        ],
+    );
+
+    let conn = Connection::open(&db).unwrap();
+    let task_id = task["id"].as_str().unwrap();
+    for table in ["task_people", "task_organizations"] {
+        let count: i64 = conn
+            .query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE task_id = ?1"),
+                [task_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "repeated links must produce one {table} row");
+    }
+}
+
+#[test]
 fn add_task_duplicate_assignee_flag_succeeds_and_inserts_once() {
     // Passing --assignee <id> twice must not fail with a UNIQUE constraint
     // violation; it should succeed and produce exactly one task_people row.
