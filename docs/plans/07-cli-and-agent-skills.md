@@ -63,9 +63,11 @@ path resolution, sidecar bundling, installation checks.
 - There is no top-level automation log table or UI surface for launch.
 - Recurring imports reconcile the full active task backlog, match new actions against
   active and terminal tasks, and retire only source-backed resolved/obsolete work.
-  The standalone `brain-task-review` skill snapshots all tasks read-only and audits
+  The bundled `brain-task-review` skill snapshots all tasks read-only and audits
   per-task dispositions against live state. Private review ledgers remain import
   scratch artifacts; writes use the existing evidence-backed CLI commands.
+  Settings installs/repairs/removes the skill and its Python helper together,
+  includes helper files in rollback, and preserves edited or unmanaged helpers.
 
 ## Reflect Open Patterns To Reuse
 

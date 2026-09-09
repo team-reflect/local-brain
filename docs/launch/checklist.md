@@ -30,7 +30,8 @@ Run against a clean brain root (e.g. `BRAIN_ROOT=$(mktemp -d)`).
 - [ ] Citations open the exact document/interaction.
 - [ ] Settings → CLI & agents installs `~/.local/bin/brain`, reports PATH
       status clearly, and installs `~/.agents/skills/brain` and
-      `~/.agents/skills/brain-backfill` plus the adjacent `brains.json` manifest.
+      `~/.agents/skills/brain-backfill`, `~/.agents/skills/brain-task-review`
+      (with `scripts/task_review.py`), and the brain skill’s `brains.json` manifest.
 - [ ] `brain` CLI works with the app closed: `add`, `search`, `today`,
       `report daily`, `tasks plan-day`, `graph`, `show`.
 - [ ] A local agent automation updates records and produces a report + todo list.

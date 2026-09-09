@@ -147,11 +147,12 @@ expired opportunity. Age or an overdue date alone is not completion. Consolidate
 confirmed duplicates by preserving source links/evidence on the canonical task and
 cancelling the others with its ID and the reason in their descriptions.
 
-The standalone [Task Reconciliation skill](../skills/brain-task-review/SKILL.md)
+The bundled [Task Reconciliation skill](../skills/brain-task-review/SKILL.md)
 includes a Python 3 stdlib helper for complete read-only SQLite snapshots and
-coverage/readback checks. Copy that whole skill directory to the agent's skills
-directory to install it; it is separate from the desktop-managed skills. Writes
-continue through `brain tasks update` / `brain tasks complete`. Private snapshots
+coverage/readback checks. Settings -> CLI & agents installs both the skill and
+its helper at `~/.agents/skills/brain-task-review`, detects missing/outdated
+helpers, and preserves customized files. Manual installs must copy the entire
+skill directory including `scripts/`. Writes continue through `brain tasks update` / `brain tasks complete`. Private snapshots
 and per-task ledgers belong in import scratch artifacts, not the repository.
 
 Record every initial and newly created task's disposition and sources checked.

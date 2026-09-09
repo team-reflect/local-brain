@@ -9,8 +9,9 @@ Read the installed `brain` skill and verify the intended brain with `brain
 --brain <root> --json doctor` and `brain --brain <root> path`. All task writes
 use the CLI. The Python 3 stdlib helper below opens SQLite read-only for a
 complete snapshot and a readback audit; it never mutates tasks or infers closure.
-This is a standalone skill: copy this whole directory into the agent's skills
-directory to install it. It is not installed by the desktop's managed-skill flow.
+Local Brain installs this skill and its audit helper through Settings -> CLI &
+agents at `~/.agents/skills/brain-task-review`. For a manual installation, copy
+this whole directory, including `scripts/`, into the agent's skills directory.
 
 ## Review The Whole Backlog
 

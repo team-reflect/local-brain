@@ -104,7 +104,8 @@ jobs:
 
               case "$changed_path" in
                 Cargo.toml|Cargo.lock|crates/brain-schema/*|apps/desktop/src-tauri/*|\
-                apps/desktop/scripts/build-sidecar.mjs)
+                apps/desktop/scripts/build-sidecar.mjs|skills/brain/*|skills/brain-backfill/*|\
+                skills/brain-task-review/*)
                   rust_desktop=true
                   ;;
               esac

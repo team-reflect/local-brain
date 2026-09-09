@@ -155,7 +155,7 @@ resolved tasks, cancel source-backed obsolete tasks, and consolidate confirmed
 duplicates into one canonical task while preserving evidence. Age alone does not
 justify closure. Record per-task outcomes and explicit source gaps, then audit
 coverage before regenerating the daily brief. `tasks plan-day --limit 25` is a
-prioritized view, not proof that every task was reviewed. The standalone
+prioritized view, not proof that every task was reviewed. The bundled
 `brain-task-review` skill provides a full snapshot and readback audit for this pass.
 
 Older direct writes still work:
