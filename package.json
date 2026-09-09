@@ -11,7 +11,7 @@
     "dev": "turbo run dev",
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
-    "test": "turbo run test && node --test .github/scripts/maintain-release-pr.test.mjs",
+    "test": "turbo run test && node --test .github/scripts/maintain-release-pr.test.mjs && python3 -m unittest discover -s skills/brain-task-review/tests",
     "lint": "oxlint apps packages .github/scripts",
     "lint:fix": "oxlint --fix apps packages .github/scripts",
     "check": "pnpm typecheck && pnpm lint && pnpm test",

@@ -147,6 +147,17 @@ existing task, such as changing a logistics task to `waiting` after the user
 asked someone else to proceed. Use suggestions/prose review for uncertain edits,
 splits, priority changes, or completion without explicit evidence.
 
+During recurring imports, reconcile the entire active backlog after fresh sources
+are stored, including undated and waiting tasks. Match new actions against both
+active and terminal tasks by the underlying obligation and source context. Reuse
+existing tasks for repeated reminders; do not recreate completed work. Complete
+resolved tasks, cancel source-backed obsolete tasks, and consolidate confirmed
+duplicates into one canonical task while preserving evidence. Age alone does not
+justify closure. Record per-task outcomes and explicit source gaps, then audit
+coverage before regenerating the daily brief. `tasks plan-day --limit 25` is a
+prioritized view, not proof that every task was reviewed. The standalone
+`brain-task-review` skill provides a full snapshot and readback audit for this pass.
+
 Older direct writes still work:
 
 ```bash

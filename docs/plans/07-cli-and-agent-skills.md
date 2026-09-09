@@ -61,6 +61,11 @@ path resolution, sidecar bundling, installation checks.
 - stdout carries data only; diagnostics and warnings go to stderr.
 - `--json` output shapes are stable and snapshot-tested.
 - There is no top-level automation log table or UI surface for launch.
+- Recurring imports reconcile the full active task backlog, match new actions against
+  active and terminal tasks, and retire only source-backed resolved/obsolete work.
+  The standalone `brain-task-review` skill snapshots all tasks read-only and audits
+  per-task dispositions against live state. Private review ledgers remain import
+  scratch artifacts; writes use the existing evidence-backed CLI commands.
 
 ## Reflect Open Patterns To Reuse
 
