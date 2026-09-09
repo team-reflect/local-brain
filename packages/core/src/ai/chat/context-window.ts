@@ -8,9 +8,13 @@ const TURN_RESERVE_TOKENS = 72_000
 const ESTIMATE_HEADROOM = 0.8
 const KEEP_RECENT_TOOL_RESULTS = 2
 const TRUNCATED_CHAT_TEXT = '\n[Text truncated to fit the context window.]'
+const DISCOVERY_TOOL_NAMES = new Set(['search_records', 'browse_records'])
 
 /** Explicit replacement persisted in model history when a raw tool result is removed. */
 export const ELIDED_CHAT_TOOL_RESULT = '[Old tool result elided to fit the context window.]'
+/** Replacement sent when a detail read supersedes this turn's discovery candidates. */
+export const ELIDED_CHAT_DISCOVERY_RESULT =
+  '[Search candidates elided after bounded record details were loaded.]'
 
 /** Provider capacity and system-prompt cost used to budget model history. */
 export interface ChatContextWindowOptions {
@@ -82,7 +86,8 @@ function elideToolResults(message: ModelMessage): ModelMessage {
 function isElidedToolResult(part: ContentPart): boolean {
   return part.type === 'tool-result' &&
     part.output.type === 'text' &&
-    part.output.value === ELIDED_CHAT_TOOL_RESULT
+    (part.output.value === ELIDED_CHAT_TOOL_RESULT ||
+      part.output.value === ELIDED_CHAT_DISCOVERY_RESULT)
 }
 
 function hasToolResult(messages: readonly ModelMessage[]): boolean {
@@ -90,6 +95,26 @@ function hasToolResult(messages: readonly ModelMessage[]): boolean {
     (message) =>
       message.role === 'tool' &&
       message.content.some((part) => part.type === 'tool-result' && !isElidedToolResult(part)),
+  )
+}
+
+function hasLoadedRecords(part: ContentPart): boolean {
+  if (
+    part.type !== 'tool-result' ||
+    part.toolName !== 'get_records' ||
+    part.output.type !== 'json'
+  ) {
+    return false
+  }
+  const value: unknown = part.output.value
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const records = (value as Record<string, unknown>)['records']
+  return Array.isArray(records) && records.some(
+    (record) =>
+      typeof record === 'object' &&
+      record !== null &&
+      !Array.isArray(record) &&
+      (record as Record<string, unknown>)['found'] === true,
   )
 }
 
@@ -123,6 +148,60 @@ function elideOldestToolResults(
       ),
     }
   })
+}
+
+/**
+ * Once bounded record details are available, earlier discovery candidates have
+ * served their purpose. Keep the call/result pairing for provider validity and
+ * the local UI trace, but do not resend those large candidate lists to the
+ * model during synthesis or later detail rounds in the same turn.
+ */
+function elideDiscoveryResultsBeforeRecordDetails(
+  messages: readonly ModelMessage[],
+): ModelMessage[] {
+  let latestDetailsMessageIndex: number | null = null
+  for (let messageIndex = 0; messageIndex < messages.length; messageIndex += 1) {
+    const message = messages[messageIndex]
+    if (!message || message.role !== 'tool') continue
+    for (const part of message.content) {
+      if (
+        part &&
+        hasLoadedRecords(part) &&
+        !isElidedToolResult(part)
+      ) {
+        latestDetailsMessageIndex = messageIndex
+      }
+    }
+  }
+  if (latestDetailsMessageIndex === null) return messages as ModelMessage[]
+
+  let changed = false
+  const compacted = messages.map((message, messageIndex) => {
+    // All results in one tool message belong to the same parallel model step.
+    // A same-message discovery result may be the useful fallback when the
+    // parallel get_records call is empty, regardless of their part ordering.
+    if (message.role !== 'tool' || messageIndex >= latestDetailsMessageIndex) {
+      return message
+    }
+    let messageChanged = false
+    const content = message.content.map((part) => {
+      if (
+        part.type === 'tool-result' &&
+        DISCOVERY_TOOL_NAMES.has(part.toolName) &&
+        !isElidedToolResult(part)
+      ) {
+        changed = true
+        messageChanged = true
+        return {
+          ...part,
+          output: { type: 'text' as const, value: ELIDED_CHAT_DISCOVERY_RESULT },
+        }
+      }
+      return part
+    })
+    return messageChanged ? { ...message, content } as ModelMessage : message
+  })
+  return changed ? compacted : messages as ModelMessage[]
 }
 
 function replaceMessage(
@@ -384,15 +463,18 @@ export function fitChatMessagesToContextWindow(
     ? turns.map((turn, index) => (index < turns.length - 1 ? turn.map(elideToolResults) : turn))
     : turns
   const requestLocalMessages = requestLocal.flat()
-  if (totalTokens(requestLocalMessages) <= budget) {
-    return priorTurnsHaveResults ? requestLocalMessages : messages
+  const compactedCurrentTurn = elideDiscoveryResultsBeforeRecordDetails(requestLocalMessages)
+  const requestWasCompacted =
+    priorTurnsHaveResults || compactedCurrentTurn !== requestLocalMessages
+  if (totalTokens(compactedCurrentTurn) <= budget) {
+    return requestWasCompacted ? compactedCurrentTurn : messages
   }
 
   // A single user turn may perform several bounded reads. If their combined
   // payload still exceeds the moving budget, retain only the newest results;
   // earlier calls remain paired with an explicit elision marker.
   const elided = splitIntoTurns(
-    elideOldestToolResults(requestLocalMessages, KEEP_RECENT_TOOL_RESULTS),
+    elideOldestToolResults(compactedCurrentTurn, KEEP_RECENT_TOOL_RESULTS),
   )
 
   const newest = elided.at(-1)

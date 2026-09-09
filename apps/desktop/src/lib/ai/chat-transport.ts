@@ -41,11 +41,9 @@ import {
   type AssistantPersistenceTurn,
 } from './chat-persistence'
 import { resolveLanguageModel, type LanguageModelSelection } from './provider'
+import { chatTurnPolicy } from './chat-turn-policy'
 import { errorMessage } from '../utils'
 
-// Twelve rounds leave generous room for batched reads while bounding cost and
-// latency. The last round is synthesis-only (see prepareStep below).
-const TOOL_STEPS = 12
 const MAX_OUTPUT_TOKENS = 8192
 /** Backstop for an empty/tool-only provider completion. */
 export const CHAT_NO_REPLY_FALLBACK =
@@ -339,18 +337,25 @@ export function createChatTransport(options: ChatTransportOptions = {}): ChatTra
         }
         const turnResponseId = responseId
         const responseTurn = assistantTurn
+        const turnPolicy = chatTurnPolicy(messages)
+        const toolStepLimit = turnPolicy.toolStepLimit
         const result = streamText({
           model,
           system,
           messages: modelMessages,
-          tools: buildChatTools({ databaseIdentity: turnIdentity }),
-          stopWhen: stepCountIs(TOOL_STEPS),
+          tools: buildChatTools({
+            databaseIdentity: turnIdentity,
+            ...(turnPolicy.recordDetailBudget
+              ? { recordDetailBudget: turnPolicy.recordDetailBudget }
+              : {}),
+          }),
+          stopWhen: stepCountIs(toolStepLimit),
           prepareStep: ({ stepNumber, messages: stepMessages }) => ({
             messages: fitChatMessagesToContextWindow(stepMessages, {
               contextWindow,
               systemPrompt: system,
             }),
-            ...(stepNumber >= TOOL_STEPS - 1 ? { toolChoice: 'none' as const } : {}),
+            ...(stepNumber >= toolStepLimit - 1 ? { toolChoice: 'none' as const } : {}),
           }),
           maxOutputTokens: MAX_OUTPUT_TOKENS,
           temperature: 0,

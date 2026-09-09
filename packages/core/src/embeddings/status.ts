@@ -4,7 +4,7 @@ import { getSetting } from '../domains/settings/getters'
 import { setSetting } from '../domains/settings/setters'
 import { embedStatus } from './commands'
 import { type EmbedStatus, EMBEDDING_MODEL_ID } from './model'
-import { countPending } from './pipeline'
+import { countOrphanEmbeddings, countPending } from './pipeline'
 
 /**
  * The user-facing semantic-search status (Reflect-embeddings port, Local
@@ -41,7 +41,9 @@ export interface EmbeddingsStatus {
   totalChunks: number
   /** Chunks still awaiting an embedding for the current model. */
   pending: number
-  /** True once the runtime is ready and nothing is pending. */
+  /** Rebuildable embedding rows whose source chunk no longer exists. */
+  orphaned: number
+  /** True once the runtime is ready and no indexing or cleanup work remains. */
   ready: boolean
   /** Last incremental-backfill error message, or null when indexing is healthy. */
   backfillError: string | null
@@ -96,7 +98,7 @@ async function safeRuntimeStatus(): Promise<EmbedStatus> {
 }
 
 export async function getEmbeddingsStatus(): Promise<EmbeddingsStatus> {
-  const [enabled, runtime, totalRow, pending, backfillError, lastBackfillAttemptDay] = await Promise.all([
+  const [enabled, runtime, totalRow, pending, orphaned, backfillError, lastBackfillAttemptDay] = await Promise.all([
     isEmbeddingsEnabled(),
     safeRuntimeStatus(),
     db
@@ -104,6 +106,7 @@ export async function getEmbeddingsStatus(): Promise<EmbeddingsStatus> {
       .select((eb) => eb.fn.countAll<number>().as('count'))
       .executeTakeFirst(),
     countPending(EMBEDDING_MODEL_ID),
+    countOrphanEmbeddings(),
     getBackfillError(),
     getLastBackfillAttemptDay(),
   ])
@@ -117,7 +120,8 @@ export async function getEmbeddingsStatus(): Promise<EmbeddingsStatus> {
     indexed,
     totalChunks,
     pending,
-    ready: runtime.status === 'ready' && pending === 0,
+    orphaned,
+    ready: runtime.status === 'ready' && pending === 0 && orphaned === 0,
     backfillError,
     lastBackfillAttemptDay,
   }

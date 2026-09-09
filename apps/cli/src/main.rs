@@ -241,6 +241,18 @@ enum RepairCommand {
         #[command(subcommand)]
         what: RepairParticipantsCommand,
     },
+    /// Repair the rebuildable universal chunk projection.
+    Chunks {
+        #[command(subcommand)]
+        what: RepairChunksCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum RepairChunksCommand {
+    /// Preview/apply removal of byte-identical chunks within each record.
+    #[command(name = "dedupe-exact")]
+    DedupeExact(RepairExactChunksArgs),
 }
 
 #[derive(Subcommand)]
@@ -955,6 +967,16 @@ struct RepairParticipantsRelinkArgs {
     from_person: Option<String>,
     #[arg(long)]
     force: bool,
+}
+
+#[derive(Parser)]
+struct RepairExactChunksArgs {
+    /// Restrict repair to a record (`kind:id`); repeatable. Omit to scan all chunks.
+    #[arg(long = "record", value_name = "KIND:ID")]
+    records: Vec<String>,
+    /// Apply the repair. Without this flag the command is preview-only.
+    #[arg(long)]
+    apply: bool,
 }
 
 #[derive(Parser)]
@@ -1685,6 +1707,15 @@ impl RepairParticipantsRelinkArgs {
     }
 }
 
+impl RepairExactChunksArgs {
+    fn to_command(&self) -> add::RepairExactChunksArgs<'_> {
+        add::RepairExactChunksArgs {
+            records: self.records.iter().map(String::as_str).collect(),
+            apply: self.apply,
+        }
+    }
+}
+
 impl MergePersonArgs {
     fn to_command(&self) -> add::MergePersonArgs<'_> {
         add::MergePersonArgs {
@@ -1995,6 +2026,11 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 RepairCommand::Participants { what } => match what {
                     RepairParticipantsCommand::Relink(a) => {
                         add::repair_participants_relink(&mut conn, json, a.to_command())
+                    }
+                },
+                RepairCommand::Chunks { what } => match what {
+                    RepairChunksCommand::DedupeExact(a) => {
+                        add::repair_exact_chunks(&mut conn, json, a.to_command())
                     }
                 },
             }
@@ -2407,6 +2443,11 @@ fn contract(storage: &db::StoragePaths, _json: bool) -> Result<(), CliError> {
             "repairParticipantsRelink": {
                 "usage": "brain --json repair participants relink --handle <email|phone> --person <person-id> [--from-person <person-id>] [--force]",
                 "purpose": "Relink unresolved participant rows for one handle to an existing person. Use --from-person to move rows from a wrong person; add --force only when the target is already linked and duplicate participant rows must be merged.",
+            },
+            "repairChunksDedupeExact": {
+                "usage": "brain --json repair chunks dedupe-exact [--record <kind:id>...] [--apply]",
+                "purpose": "Preview by default, or transactionally remove later byte-identical content chunks while preserving durable source bodies, repointing citations to the earliest exact chunk, retaining unique chunk ids, and pruning duplicate embeddings.",
+                "safety": "Back up the whole brain folder before --apply. Re-running --apply is a no-op once exact duplicates and stale hashes are repaired.",
             },
             "mergePerson": {
                 "usage": "brain --json merge person --from <source-person-id> --to <target-person-id> [--dry-run] [--reason <text>]",

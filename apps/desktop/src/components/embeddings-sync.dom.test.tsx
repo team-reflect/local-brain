@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { type BrainInfo, type EmbedStatus, setBridge } from '@local-brain/core'
+import {
+  type BrainInfo,
+  type EmbeddingsStatus,
+  type EmbedStatus,
+  setBridge,
+} from '@local-brain/core'
 import { act, render, waitFor } from '@testing-library/react'
 import { EmbeddingsSync } from './embeddings-sync'
 import {
@@ -22,6 +27,34 @@ import { ACTIVE_BRAIN_KEY } from '../lib/queries/brains'
  * swallow it, so the status/UI stop pretending indexing is progressing and the
  * same failing backfill is not re-attempted on every poll.
  */
+
+function isCountQuery(sql: string): boolean {
+  return /select count\(\*\)/i.test(sql)
+}
+
+function isTotalChunkCountQuery(sql: string): boolean {
+  return (
+    isCountQuery(sql) &&
+    sql.includes('from "content_chunks"') &&
+    !sql.includes('from "content_chunks" as "cc"')
+  )
+}
+
+function isPendingChunkCountQuery(sql: string): boolean {
+  return isCountQuery(sql) && sql.includes('from "content_chunks" as "cc"')
+}
+
+function isOrphanEmbeddingCountQuery(sql: string): boolean {
+  return isCountQuery(sql) && sql.includes('from "chunk_embeddings" as "ce"')
+}
+
+function isOrphanEmbeddingRowsQuery(sql: string): boolean {
+  return !isCountQuery(sql) && sql.includes('from "chunk_embeddings" as "ce"')
+}
+
+function isPendingChunkRowsQuery(sql: string): boolean {
+  return !isCountQuery(sql) && sql.includes('from "content_chunks" as "cc"')
+}
 
 /** A bridge that reports `runtime` for the embedding commands, enabled + empty. */
 function installStatusBridge(
@@ -96,9 +129,14 @@ function installFailingBackfillBridge() {
               persistedError === null ? [] : [{ valueJson: JSON.stringify(persistedError) }],
             )
           }
-          if (/count/i.test(sql)) return Promise.resolve([{ count: 1 }]) // one chunk total
-          if (sql.includes('from "chunk_embeddings"')) return Promise.resolve([]) // no orphans to prune
-          return Promise.resolve([{ chunkId: 'c1', text: 'hello', storedHash: null }]) // pending
+          if (isTotalChunkCountQuery(sql)) return Promise.resolve([{ count: 1 }])
+          if (isPendingChunkCountQuery(sql)) return Promise.resolve([{ count: 1 }])
+          if (isOrphanEmbeddingCountQuery(sql)) return Promise.resolve([{ count: 0 }])
+          if (isOrphanEmbeddingRowsQuery(sql)) return Promise.resolve([])
+          if (isPendingChunkRowsQuery(sql)) {
+            return Promise.resolve([{ chunkId: 'c1', text: 'hello', storedHash: null }])
+          }
+          return Promise.resolve([])
         }
         case 'db_execute': {
           const sql = String((args as { sql?: unknown }).sql ?? '')
@@ -190,14 +228,18 @@ function installPendingBackfillBridge(
             }
             return Promise.resolve([])
           }
-          if (/count/i.test(sql)) {
-            const isPendingCount = sql.includes('chunk_embeddings')
-            return Promise.resolve([{ count: isPendingCount && !pending ? 0 : 1 }])
+          if (isTotalChunkCountQuery(sql)) return Promise.resolve([{ count: 1 }])
+          if (isPendingChunkCountQuery(sql)) {
+            return Promise.resolve([{ count: pending ? 1 : 0 }])
           }
-          if (sql.includes('from "chunk_embeddings"')) return Promise.resolve([])
-          return Promise.resolve(
-            pending ? [{ chunkId: 'c1', text: 'hello', storedHash: null }] : [],
-          )
+          if (isOrphanEmbeddingCountQuery(sql)) return Promise.resolve([{ count: 0 }])
+          if (isOrphanEmbeddingRowsQuery(sql)) return Promise.resolve([])
+          if (isPendingChunkRowsQuery(sql)) {
+            return Promise.resolve(
+              pending ? [{ chunkId: 'c1', text: 'hello', storedHash: null }] : [],
+            )
+          }
+          return Promise.resolve([])
         }
         case 'db_execute': {
           const sql = String((args as { sql?: unknown }).sql ?? '')
@@ -234,6 +276,95 @@ function installPendingBackfillBridge(
     setPending: (value: boolean) => {
       pending = value
     },
+  }
+}
+
+function installOrphanPruneBridge() {
+  const commands: string[] = []
+  const orphanCountResults: number[] = []
+  let orphaned = true
+  let maintenanceRuns = 0
+  let persistedError: string | null = null
+  let persistedDay: string | null = null
+
+  setBridge({
+    invoke: (command, args) => {
+      commands.push(command)
+      const params = ((args as { params?: unknown[] }).params ?? []) as unknown[]
+      switch (command) {
+        case 'embed_database_identity':
+          return Promise.resolve({ databasePath: '/test/brain.sqlite', generation: 1 })
+        case 'embed_status':
+        case 'embed_ensure':
+          return Promise.resolve({ status: 'ready', model: 'all-MiniLM-L6-v2' })
+        case 'embed_delete':
+          expect(args).toMatchObject({
+            expectedDatabasePath: '/test/brain.sqlite',
+            expectedGeneration: 1,
+            chunkIds: ['orphan-chunk'],
+          })
+          orphaned = false
+          return Promise.resolve(1)
+        case 'embed_texts':
+          return Promise.resolve([])
+        case 'db_query': {
+          const sql = String((args as { sql?: unknown }).sql ?? '')
+          if (sql.includes('settings')) {
+            const key = params[0]
+            if (key === 'embeddings.enabled') return Promise.resolve([{ valueJson: 'true' }])
+            if (key === 'embeddings.backfillError') {
+              return Promise.resolve(
+                persistedError === null ? [] : [{ valueJson: JSON.stringify(persistedError) }],
+              )
+            }
+            if (key === 'embeddings.lastBackfillAttemptDay') {
+              return Promise.resolve(
+                persistedDay === null ? [] : [{ valueJson: JSON.stringify(persistedDay) }],
+              )
+            }
+            return Promise.resolve([])
+          }
+          if (isTotalChunkCountQuery(sql)) return Promise.resolve([{ count: 1 }])
+          if (isPendingChunkCountQuery(sql)) return Promise.resolve([{ count: 0 }])
+          if (isOrphanEmbeddingCountQuery(sql)) {
+            const count = orphaned ? 1 : 0
+            orphanCountResults.push(count)
+            return Promise.resolve([{ count }])
+          }
+          if (isOrphanEmbeddingRowsQuery(sql)) {
+            return Promise.resolve(orphaned ? [{ chunkId: 'orphan-chunk' }] : [])
+          }
+          return Promise.resolve([])
+        }
+        case 'db_execute': {
+          const sql = String((args as { sql?: unknown }).sql ?? '')
+          if (sql.includes('settings')) {
+            expect(args).toMatchObject({
+              expectedDatabasePath: '/test/brain.sqlite',
+              expectedGeneration: 1,
+            })
+          }
+          if (sql.includes('settings') && params[0] === 'embeddings.backfillError') {
+            persistedError = JSON.parse(String(params[1])) as string | null
+          }
+          if (sql.includes('settings') && params[0] === 'embeddings.lastBackfillAttemptDay') {
+            maintenanceRuns += 1
+            persistedDay = JSON.parse(String(params[1])) as string | null
+          }
+          return Promise.resolve(1)
+        }
+        case 'db_batch':
+          return Promise.resolve([])
+        default:
+          return Promise.resolve(null)
+      }
+    },
+  })
+
+  return {
+    commands,
+    orphanCountResults,
+    maintenanceRuns: () => maintenanceRuns,
   }
 }
 
@@ -312,6 +443,34 @@ describe('EmbeddingsSync', () => {
     renderSync()
     await waitFor(() => expect(bridge.commands).toContain('embed_texts'))
     expect(bridge.persistedDay()).toBe(todayLocalDayKey())
+  })
+
+  it('prunes orphan embeddings when no chunks are pending and settles ready', async () => {
+    const bridge = installOrphanPruneBridge()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+    renderSync(client)
+
+    await waitFor(() => {
+      expect(bridge.commands.filter((command) => command === 'embed_delete')).toHaveLength(1)
+    })
+    await waitFor(() => {
+      expect(client.getQueryData<EmbeddingsStatus>(EMBEDDINGS_STATUS_KEY)).toMatchObject({
+        pending: 0,
+        orphaned: 0,
+        ready: true,
+      })
+    })
+
+    expect(bridge.orphanCountResults).toContain(1)
+    expect(bridge.orphanCountResults.at(-1)).toBe(0)
+    expect(bridge.maintenanceRuns()).toBe(1)
+    expect(bridge.commands).not.toContain('embed_texts')
+
+    // Wait beyond the coordinator's success cooldown: the settled zero-orphan
+    // status must cancel the scheduled retry rather than start a second pass.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 1_100)))
+    expect(bridge.commands.filter((command) => command === 'embed_delete')).toHaveLength(1)
+    expect(bridge.maintenanceRuns()).toBe(1)
   })
 
   it('retries a rejected identity capture on the slow catch-up cadence without hot-looping', async () => {
@@ -496,9 +655,16 @@ describe('EmbeddingsSync', () => {
               }
               return Promise.resolve([]) // no sticky backfill error
             }
-            if (/count/i.test(sql)) return Promise.resolve([{ count: pending.length }])
-            if (sql.includes('from "chunk_embeddings"')) return Promise.resolve([]) // no orphans to prune
-            return Promise.resolve(pending) // pending chunks for the backfill
+            if (isTotalChunkCountQuery(sql)) {
+              return Promise.resolve([{ count: pending.length }])
+            }
+            if (isPendingChunkCountQuery(sql)) {
+              return Promise.resolve([{ count: pending.length }])
+            }
+            if (isOrphanEmbeddingCountQuery(sql)) return Promise.resolve([{ count: 0 }])
+            if (isOrphanEmbeddingRowsQuery(sql)) return Promise.resolve([])
+            if (isPendingChunkRowsQuery(sql)) return Promise.resolve(pending)
+            return Promise.resolve([])
           }
           case 'db_execute':
             return Promise.resolve(1)

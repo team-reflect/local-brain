@@ -108,6 +108,12 @@ function chatTools(): Record<string, TestTool> {
   return buildChatTools() as unknown as Record<string, TestTool>
 }
 
+function factualChatTools(): Record<string, TestTool> {
+  return buildChatTools({
+    recordDetailBudget: { maxCalls: 1, maxRecords: 6, maxTotalChars: 24000 },
+  }) as unknown as Record<string, TestTool>
+}
+
 function toolByName(tools: Record<string, TestTool>, name: string): TestTool {
   const found = tools[name]
   if (!found) throw new Error(`missing tool: ${name}`)
@@ -266,7 +272,7 @@ describe('buildChatTools', () => {
     expect(coreMocks.searchRecordCandidates).toHaveBeenCalledWith('pricing', {
       mode: 'hybrid',
       sort: 'relevance',
-      limit: 20,
+      limit: 12,
       recordTypes: ['interaction'],
       kinds: ['email'],
       after: '2026-06-07T00:00:00.000Z',
@@ -290,14 +296,14 @@ describe('buildChatTools', () => {
         recordTypes: ['interaction'],
         kinds: ['email'],
         after: '2026-06-01',
-        limit: 50,
+        limit: 16,
       }),
     )
 
     expect(coreMocks.searchRecordCandidates).toHaveBeenCalledWith('', {
       mode: 'hybrid',
       sort: 'recency',
-      limit: 50,
+      limit: 16,
       recordTypes: ['interaction'],
       kinds: ['email'],
       after: '2026-06-01',
@@ -305,7 +311,25 @@ describe('buildChatTools', () => {
     await expect(browseRecords.execute(browseRecords.inputSchema.parse({}))).rejects.toThrow(
       /Choose at least one browse filter/,
     )
-    expect(() => browseRecords.inputSchema.parse({ recordTypes: ['interaction'], limit: 51 })).toThrow()
+    expect(() => browseRecords.inputSchema.parse({ recordTypes: ['interaction'], limit: 17 })).toThrow()
+  })
+
+  it('caps search and browse to two discovery calls per turn', async () => {
+    coreMocks.searchRecordCandidates.mockResolvedValue({ candidates: [], semanticAvailable: true })
+    const tools = chatTools()
+    const searchRecords = toolByName(tools, 'search_records')
+    const browseRecords = toolByName(tools, 'browse_records')
+
+    await searchRecords.execute(searchRecords.inputSchema.parse({ query: 'mortgage' }))
+    await browseRecords.execute(
+      browseRecords.inputSchema.parse({ recordTypes: ['interaction'] }),
+    )
+
+    await expect(
+      searchRecords.execute(searchRecords.inputSchema.parse({ query: 'home loan' })),
+    ).rejects.toThrow(/already used its two discovery calls/)
+    expect(coreMocks.searchRecordCandidates).toHaveBeenCalledTimes(2)
+    expect(() => searchRecords.inputSchema.parse({ query: 'mortgage', limit: 17 })).toThrow()
   })
 
   it('keeps retrieval mode and sort out of the model-selectable search contract', async () => {
@@ -382,6 +406,92 @@ describe('buildChatTools', () => {
         maxTotalChars: 32001,
       }),
     ).toThrow()
+  })
+
+  it('allows only one bounded record-detail batch per turn', async () => {
+    coreMocks.getChatRecords.mockResolvedValue([])
+    const getRecords = toolByName(factualChatTools(), 'get_records')
+    const first = getRecords.inputSchema.parse({
+      records: [{ recordType: 'interaction', recordId: 'first' }],
+    })
+    const second = getRecords.inputSchema.parse({
+      records: [{ recordType: 'interaction', recordId: 'second' }],
+    })
+
+    const firstResult = getRecords.execute(first)
+    await expect(getRecords.execute(second)).rejects.toThrow(
+      /already loaded its record-detail batch/,
+    )
+    await expect(firstResult).resolves.toMatchObject({ count: 0 })
+
+    expect(coreMocks.getChatRecords).toHaveBeenCalledTimes(1)
+    expect(coreMocks.getChatRecords).toHaveBeenCalledWith(
+      [expect.objectContaining({ recordId: 'first' })],
+      { maxTotalChars: 24000 },
+    )
+  })
+
+  it('bounds factual detail batches to six unique records and 24k characters', async () => {
+    coreMocks.getChatRecords.mockResolvedValue([])
+    const getRecords = toolByName(factualChatTools(), 'get_records')
+    const sixRecords = Array.from({ length: 6 }, (_, index) => ({
+      recordType: 'interaction',
+      recordId: `record-${index}`,
+    }))
+
+    expect(() => getRecords.inputSchema.parse({ records: sixRecords })).not.toThrow()
+    expect(() => getRecords.inputSchema.parse({
+      records: [...sixRecords, { recordType: 'interaction', recordId: 'record-6' }],
+    })).toThrow()
+    expect(() => getRecords.inputSchema.parse({
+      records: [sixRecords[0], sixRecords[0]],
+    })).toThrow(/Each record may be loaded only once/)
+    expect(() => getRecords.inputSchema.parse({
+      records: [sixRecords[0]],
+      maxTotalChars: 24001,
+    })).toThrow()
+
+    await getRecords.execute(getRecords.inputSchema.parse({
+      records: sixRecords,
+      maxTotalChars: 24000,
+    }))
+    expect(coreMocks.getChatRecords).toHaveBeenCalledWith(sixRecords, { maxTotalChars: 24000 })
+  })
+
+  it('retains flexible detail rounds for explicit write workflows', async () => {
+    coreMocks.getChatRecords.mockResolvedValue([])
+    const getRecords = toolByName(chatTools(), 'get_records')
+    const tenRecords = Array.from({ length: 10 }, (_, index) => ({
+      recordType: 'interaction',
+      recordId: `record-${index}`,
+    }))
+
+    await getRecords.execute(getRecords.inputSchema.parse({
+      records: tenRecords,
+      maxTotalChars: 32000,
+    }))
+    await getRecords.execute(getRecords.inputSchema.parse({
+      records: [{ recordType: 'project', recordId: 'project-1' }],
+    }))
+
+    expect(coreMocks.getChatRecords).toHaveBeenCalledTimes(2)
+  })
+
+  it('enforces a lower configured aggregate character budget when input omits it', async () => {
+    coreMocks.getChatRecords.mockResolvedValue([])
+    const tools = buildChatTools({
+      recordDetailBudget: { maxCalls: 1, maxRecords: 3, maxTotalChars: 5000 },
+    }) as unknown as Record<string, TestTool>
+    const getRecords = toolByName(tools, 'get_records')
+
+    await getRecords.execute(getRecords.inputSchema.parse({
+      records: [{ recordType: 'interaction', recordId: 'record-1' }],
+    }))
+
+    expect(coreMocks.getChatRecords).toHaveBeenCalledWith(
+      [expect.objectContaining({ recordId: 'record-1' })],
+      { maxTotalChars: 5000 },
+    )
   })
 
   it('requires a non-blank topic query for search_records', () => {

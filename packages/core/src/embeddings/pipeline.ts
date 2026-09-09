@@ -137,6 +137,17 @@ export async function countPending(modelId: string = EMBEDDING_MODEL_ID): Promis
   return Number(row?.count ?? 0)
 }
 
+/** Count embedding rows whose source chunk was removed from the durable projection. */
+export async function countOrphanEmbeddings(): Promise<number> {
+  const row = await db
+    .selectFrom('chunkEmbeddings as ce')
+    .leftJoin('contentChunks as cc', 'cc.id', 'ce.chunkId')
+    .where('cc.id', 'is', null)
+    .select((eb) => eb.fn.countAll<number>().as('count'))
+    .executeTakeFirst()
+  return Number(row?.count ?? 0)
+}
+
 /**
  * Drop embeddings whose source content chunk was removed. Surviving projected
  * chunks keep stable ids; shorter projections and hard deletes can leave vector

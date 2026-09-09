@@ -32,6 +32,7 @@ export {
   backfillEmbeddings,
   clearEmbeddings,
   countPending,
+  countOrphanEmbeddings,
   pruneOrphanEmbeddings,
   type BackfillOptions,
   type BackfillProgress,

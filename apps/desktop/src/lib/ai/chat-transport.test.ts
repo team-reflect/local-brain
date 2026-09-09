@@ -314,11 +314,15 @@ describe('createChatTransport', () => {
       expect.objectContaining({
         system: expect.stringContaining('Local Brain'),
         tools: stubTools,
-        stopWhen: { type: 'stepCount', stepCount: 12 },
+        stopWhen: { type: 'stepCount', stepCount: 4 },
         prepareStep: expect.any(Function),
         maxOutputTokens: 8192,
       }),
     )
+    expect(coreMocks.buildChatTools).toHaveBeenCalledWith({
+      databaseIdentity,
+      recordDetailBudget: { maxCalls: 1, maxRecords: 6, maxTotalChars: 24000 },
+    })
     expect(coreMocks.modelContextWindow).toHaveBeenCalledWith('openai', 'gpt-5.5')
     expect(coreMocks.fitChatMessagesToContextWindow).toHaveBeenCalledWith(
       [{ role: 'user', content: 'What did Maya promise?' }],
@@ -444,11 +448,83 @@ describe('createChatTransport', () => {
       }
     }]
     const stepMessages: ModelMessage[] = [{ role: 'user', content: 'question' }]
+    expect(prepareStep({ stepNumber: 2, messages: stepMessages })).not.toHaveProperty('toolChoice')
+    expect(prepareStep({ stepNumber: 3, messages: stepMessages })).toMatchObject({
+      toolChoice: 'none',
+      messages: stepMessages,
+    })
+  })
+
+  it('retains the extended loop and synthesis-only final step for explicit write workflows', async () => {
+    const createTaskMessage: UIMessage = {
+      id: 'user-write',
+      role: 'user',
+      parts: [{ type: 'text', text: 'Create a task to send Maya the budget.', state: 'done' }],
+    }
+    const transport = createChatTransport()
+
+    await transport.sendMessages({
+      trigger: 'submit-message',
+      chatId: 'chat-1',
+      messageId: undefined,
+      messages: [createTaskMessage],
+      abortSignal: undefined,
+    })
+
+    const [{ stopWhen, prepareStep }] = aiMocks.streamText.mock.calls[0] as [{
+      stopWhen: { type: string; stepCount: number }
+      prepareStep: (input: { stepNumber: number; messages: ModelMessage[] }) => {
+        toolChoice?: 'none'
+        messages: ModelMessage[]
+      }
+    }]
+    const stepMessages: ModelMessage[] = [{ role: 'user', content: 'create it' }]
+    expect(stopWhen).toEqual({ type: 'stepCount', stepCount: 12 })
+    expect(coreMocks.buildChatTools).toHaveBeenCalledWith({
+      databaseIdentity,
+      recordDetailBudget: { maxCalls: 1, maxRecords: 6, maxTotalChars: 24000 },
+    })
     expect(prepareStep({ stepNumber: 10, messages: stepMessages })).not.toHaveProperty('toolChoice')
     expect(prepareStep({ stepNumber: 11, messages: stepMessages })).toMatchObject({
       toolChoice: 'none',
       messages: stepMessages,
     })
+  })
+
+  it('uses the factual-turn bound after an earlier turn used a write tool', async () => {
+    const priorWriteAssistant = {
+      id: 'assistant-write',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-create_task',
+          toolCallId: 'tool-prior',
+          state: 'output-available',
+          input: { title: 'Send budget' },
+          output: { kind: 'task', action: 'created', id: 'task-1' },
+        },
+      ],
+    } as unknown as UIMessage
+    const latestQuestion: UIMessage = {
+      id: 'user-factual',
+      role: 'user',
+      parts: [{ type: 'text', text: 'What is my mortgage rate?', state: 'done' }],
+    }
+    const transport = createChatTransport()
+
+    await transport.sendMessages({
+      trigger: 'submit-message',
+      chatId: 'chat-1',
+      messageId: undefined,
+      messages: [userMessage, priorWriteAssistant, latestQuestion],
+      abortSignal: undefined,
+    })
+
+    expect(aiMocks.streamText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stopWhen: { type: 'stepCount', stepCount: 4 },
+      }),
+    )
   })
 
   it('streams and persists a fallback when a turn finishes with tool activity but no reply', async () => {
@@ -1857,6 +1933,7 @@ describe('createChatTransport', () => {
       expect.anything(),
     )
     expect(aiMocks.convertToModelMessages).toHaveBeenCalledWith([userMessage, approvalResponseMessage])
+    expect(coreMocks.buildChatTools).toHaveBeenCalledWith({ databaseIdentity })
     expect(coreMocks.listMessages).not.toHaveBeenCalled()
     expect(coreMocks.replaceChatAssistantMessage).not.toHaveBeenCalled()
     await eventually(() => {

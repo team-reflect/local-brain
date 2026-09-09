@@ -38,6 +38,9 @@ storage.
 - Original path, URL, external ID, and content hash are optional metadata on the
   document or interaction.
 - Chunking writes `content_chunks` with `record_type` and `record_id`.
+- Chunking indexes only the earliest byte-identical chunk within a record. The
+  complete imported body remains durable; repeated quoted email history is
+  removed only from the rebuildable retrieval projection.
 - File reads happen through Rust primitives with path traversal guards.
 - Imported files are copied into SQLite as readable text; the original file remains
   optional provenance, not durable storage.
@@ -122,6 +125,8 @@ storage.
 ## Tests or Verification
 
 - Unit test text normalization and chunking.
+- Regression test exact chunk de-duplication, stable surviving ids, and evidence
+  ref preservation during projection refresh and maintenance repair.
 - Unit test path validation and unsupported-file handling.
 - Integration test paste/import into SQLite.
 - Integration test asset import writes bytes and metadata, then links the asset.

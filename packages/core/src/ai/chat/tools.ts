@@ -17,6 +17,7 @@ import {
   type ChatRecordRequest,
 } from './record-details'
 import { listChatTasks } from './task-browser'
+import { createChatReadBudget, type ChatRecordDetailBudget } from './read-budget'
 import {
   completeTaskSchema,
   createOrganizationSchema,
@@ -39,18 +40,11 @@ export {
   type ChatWriteToolName,
   type ChatWriteToolOutput,
 } from './write-tools'
+export type { ChatRecordDetailBudget } from './read-budget'
 
-/**
- * AI SDK tools for Local Brain chat. One module owns tool names,
- * input/output shapes, and the execute implementations so the transport and
- * UI chip only need to import from here.
- *
- * Write tools are approval-gated with `needsApproval: true`; the UI must collect
- * an explicit Approve response before the execute function mutates SQLite.
- */
-
-const DEFAULT_SEARCH_LIMIT = 20
-const MAX_SEARCH_LIMIT = 50
+/** Local Brain Chat tools; writes require UI approval before SQLite mutation. */
+const DEFAULT_SEARCH_LIMIT = 12
+const MAX_SEARCH_LIMIT = 16
 const MAX_GET_RECORDS = 10
 const MAX_RECORD_CHUNK_IDS = 5
 const DEFAULT_PROJECTS_LIMIT = 30
@@ -97,16 +91,42 @@ async function guardedRead<T>(
 export interface BuildChatToolsOptions {
   /** Bind every tool read/write in this model turn to one open brain. */
   databaseIdentity?: DatabaseIdentity
+  /** Optional stricter aggregate detail budget for factual/read-only turns. */
+  recordDetailBudget?: ChatRecordDetailBudget
 }
 
 /** Build the bounded read/write tool set for one optionally brain-pinned Chat turn. */
 export function buildChatTools(options: BuildChatToolsOptions = {}) {
   const identity = options.databaseIdentity
+  const readBudget = createChatReadBudget(options.recordDetailBudget, {
+    maxRecords: MAX_GET_RECORDS,
+    maxTotalChars: MAX_RECORD_DETAIL_TOTAL_CHARS,
+  })
+
+  const recordRequestsSchema = z
+    .array(recordLookupSchema)
+    .min(1)
+    .max(readBudget.maxRecords)
+    .superRefine((records, context) => {
+      const seen = new Set<string>()
+      for (const [index, record] of records.entries()) {
+        const key = `${record.recordType}:${record.recordId}`
+        if (seen.has(key)) {
+          context.addIssue({
+            code: 'custom',
+            message: 'Each record may be loaded only once per detail batch.',
+            path: [index],
+          })
+        }
+        seen.add(key)
+      }
+    })
+
   return {
     search_records: tool({
       description:
         'Search Local Brain records by topic, names, or keywords. Meaning-based recall is added when local embeddings are ready; lexical search remains available otherwise. ' +
-        'Use one broad query and raise limit to widen recall; use filters when the topic must be scoped to a person, project, record type, interaction kind, or date. The output reports whether semantic results contributed.',
+        'Use one broad query; at most one materially different retry is available. Use filters when the topic must be scoped to a person, project, record type, interaction kind, or date. The output reports whether semantic results contributed.',
       inputSchema: z.object({
         query: z.string().trim().min(1).describe('One broad topic, name, phrase, or keyword query.'),
         recordTypes: z
@@ -136,6 +156,7 @@ export function buildChatTools(options: BuildChatToolsOptions = {}) {
           .describe(`Max results to return (default ${DEFAULT_SEARCH_LIMIT})`),
       }),
       execute: async ({ query, recordTypes, kinds, after, before, relatedTo, limit }) => {
+        readBudget.reserveDiscoveryCall()
         const afterValue = optionalNonBlank(after)
         const beforeValue = optionalNonBlank(before)
         const result = await guardedRead(identity, () =>
@@ -202,6 +223,7 @@ export function buildChatTools(options: BuildChatToolsOptions = {}) {
             'Choose at least one browse filter: recordTypes, kinds, after, before, or relatedTo.',
           )
         }
+        readBudget.reserveDiscoveryCall()
         const result = await guardedRead(identity, () =>
           searchRecordCandidates('', {
             mode: 'hybrid',
@@ -232,10 +254,7 @@ export function buildChatTools(options: BuildChatToolsOptions = {}) {
         'Use this after search_records when a question needs details from promising hits. Pass recordType and recordId, ' +
         'and include chunkIds from search_records to focus the returned context around matched chunks.',
       inputSchema: z.object({
-        records: z
-          .array(recordLookupSchema)
-          .min(1)
-          .max(MAX_GET_RECORDS)
+        records: recordRequestsSchema
           .describe('Records to load, usually chosen from search_records hits.'),
         maxCharsPerRecord: z
           .number()
@@ -248,11 +267,12 @@ export function buildChatTools(options: BuildChatToolsOptions = {}) {
           .number()
           .int()
           .min(1000)
-          .max(MAX_RECORD_DETAIL_TOTAL_CHARS)
+          .max(readBudget.maxTotalChars)
           .optional()
           .describe(`Total chunk text budget for this batched call (default ${DEFAULT_RECORD_DETAIL_TOTAL_CHARS})`),
       }),
       execute: async ({ records, maxCharsPerRecord, maxTotalChars }) => {
+        readBudget.reserveRecordDetailCall()
         const requests: ChatRecordRequest[] = records.map((record) => ({
           recordType: record.recordType as SourceRecordType,
           recordId: record.recordId,
@@ -261,7 +281,11 @@ export function buildChatTools(options: BuildChatToolsOptions = {}) {
         const details = await guardedRead(identity, () =>
           getChatRecords(requests, {
             ...(maxCharsPerRecord === undefined ? {} : { maxCharsPerRecord }),
-            ...(maxTotalChars === undefined ? {} : { maxTotalChars }),
+            ...(options.recordDetailBudget
+              ? { maxTotalChars: maxTotalChars ?? readBudget.maxTotalChars }
+              : maxTotalChars === undefined
+                ? {}
+                : { maxTotalChars }),
           }),
         )
         return {

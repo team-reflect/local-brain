@@ -86,9 +86,11 @@ export function SemanticSearchSettings(): ReactNode {
                     ? 'error'
                     : status.ready
                       ? 'ready'
-                      : status.pending > 0
-                        ? 'indexing'
-                        : 'preparing'}
+                      : status.orphaned > 0
+                        ? 'maintaining'
+                        : status.pending > 0
+                          ? 'indexing'
+                          : 'preparing'}
                 </dd>
                 <dt className="text-muted-foreground">Model</dt>
                 <dd className="font-mono text-foreground">{status.modelId}</dd>
@@ -100,6 +102,12 @@ export function SemanticSearchSettings(): ReactNode {
                   <>
                     <dt className="text-muted-foreground">Pending</dt>
                     <dd className="font-mono text-foreground">{status.pending} to embed</dd>
+                  </>
+                ) : null}
+                {status.orphaned > 0 ? (
+                  <>
+                    <dt className="text-muted-foreground">Orphaned</dt>
+                    <dd className="font-mono text-foreground">{status.orphaned} to prune</dd>
                   </>
                 ) : null}
                 <dt className="text-muted-foreground">Last backfill</dt>

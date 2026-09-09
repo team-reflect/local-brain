@@ -74,5 +74,17 @@ export function chunkText(text: string, options: ChunkOptions = {}): Chunk[] {
   }
   if (current) chunks.push(current)
 
-  return chunks.map((chunk, index) => ({ index, text: chunk }))
+  // A source body remains durable and unchanged, but its retrieval projection
+  // does not need the same byte-identical passage more than once. Long email
+  // threads commonly repeat quoted history on every reply; indexing every copy
+  // wastes FTS/vector work and lets one source crowd out more useful evidence.
+  // Keep the earliest occurrence so the projection stays deterministic.
+  const seen = new Set<string>()
+  const unique = chunks.filter((chunk) => {
+    if (seen.has(chunk)) return false
+    seen.add(chunk)
+    return true
+  })
+
+  return unique.map((chunk, index) => ({ index, text: chunk }))
 }

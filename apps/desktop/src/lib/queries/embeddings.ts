@@ -65,7 +65,7 @@ export function embeddingsRefetchInterval(data: EmbeddingsStatus | undefined): n
   if (data.runtime.status === 'failed' || data.backfillError) return false
   // Actively working: model still loading or an incremental pass is draining.
   if (data.runtime.status === 'loading') return ACTIVE_REFETCH_MS
-  if (activeBackfills > 0 && data.pending > 0) return ACTIVE_REFETCH_MS
+  if (activeBackfills > 0 && (data.pending > 0 || data.orphaned > 0)) return ACTIVE_REFETCH_MS
   // Keep a low-frequency heartbeat even after a successful pass. In-app
   // mutations invalidate this query immediately; the heartbeat is the durable
   // catch-up path for CLI/external writers that cannot signal React Query.
