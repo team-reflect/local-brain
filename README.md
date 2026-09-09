@@ -72,8 +72,9 @@ cargo run -p brain-cli -- --brain /path/to/brain status
 cargo run -p brain-cli -- --brain /path/to/brain --json status
 ```
 
-The CLI requires an explicit brain: use `--brain` or set `BRAIN_ROOT` to the
-brain folder. The Rust CLI reads and writes SQLite directly, using the same
+Select a brain folder with `--brain` or `BRAIN_ROOT`. For tests and diagnostics,
+`--db` and `BRAIN_DB` select the database file directly without either folder
+option. The Rust CLI reads and writes SQLite directly, using the same
 migrations as the desktop app; it does not execute the TypeScript core package.
 
 ## Conventions
