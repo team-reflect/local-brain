@@ -74,6 +74,15 @@ class TaskReviewTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'different brain'):
             review.audit(other, self.before, self.ledger())
 
+    def test_newly_created_terminal_tasks_still_require_review(self):
+        for status in ['done', 'cancelled']:
+            self.change("INSERT INTO tasks(id,title,status,created_at) VALUES (?, 'New', ?, '2026-02-01')",
+                        ('new-'+status, status))
+        result = review.audit(self.before, review.snapshot(self.root), self.ledger())
+        self.assertEqual(result['required'], 33)
+        self.assertEqual(result['missingTaskIds'], ['new-cancelled', 'new-done'])
+        self.assertFalse(result['complete'])
+
     def test_stale_readback_and_changed_task_cannot_be_kept(self):
         self.change("UPDATE tasks SET title = 'Changed' WHERE id = '0'")
         current = review.snapshot(self.root)

@@ -93,8 +93,8 @@ python3 <skill-dir>/scripts/task_review.py --brain <root> audit \
   --before tasks-before.json --ledger task-review.json > task-review-audit.json
 ```
 
-The audit re-reads the live database and checks the union of initially active
-and currently active tasks, unique coverage, state digests, outcome/status
+The audit re-reads the live database and checks initially active, currently active,
+and newly created tasks (even if already closed), unique coverage, state digests, outcome/status
 consistency, and valid canonical tasks. Exit 0 means complete coverage with no
 unresolved entries; exit 1 means incomplete reconciliation; exit 2 means a helper
 or input error. Read the JSON even on exit 1. Fix missing/invalid entries; preserve

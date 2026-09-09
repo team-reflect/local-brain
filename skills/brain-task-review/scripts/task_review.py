@@ -67,9 +67,10 @@ def audit(before, current, ledger):
         raise ValueError("snapshot targets a different brain")
     if not isinstance(ledger, list):
         raise ValueError("ledger must be a JSON array")
-    required = set(before["activeIds"]) | set(current["activeIds"])
     original = {t["id"]: t for t in before["tasks"]}
     live = {t["id"]: t for t in current["tasks"]}
+    # A task created and closed during the pass still needs a disposition.
+    required = set(before["activeIds"]) | set(current["activeIds"]) | (live.keys() - original.keys())
     seen = set()
     errors = []
     counts = Counter()
