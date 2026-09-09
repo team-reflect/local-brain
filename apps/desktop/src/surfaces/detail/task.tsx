@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { TASK_STATUSES, type Task } from '@local-brain/core'
+import { useState, type ReactNode } from 'react'
+import { TASK_STATUSES } from '@local-brain/core'
 import { AlertCircle, Loader2 } from 'lucide-react'
 import { StatusBadge } from '../../components/badge'
 import { DetailPage } from '../../components/detail-page'
@@ -9,28 +9,17 @@ import { InlineEditableTextarea } from '../../components/inline-edit-textarea'
 import { LinkedRecords } from '../../components/linked-records'
 import { PageHead } from '../../components/page-head'
 import { TaskCompletionControl } from '../../components/task-completion-control'
-import { useProjects, useTask, useTaskLinks, useUnlinkFrom, useUpdateTask } from '../../lib/queries'
+import { useProjects, useTask, useTaskLinks, useUnlinkFrom, type TaskWithIdentity } from '../../lib/queries'
+
+import { todayDate, useTaskDraft } from './use-task-draft'
 
 const PRIORITY_OPTIONS = [
   { value: '1', label: 'High' },
   { value: '2', label: 'Normal' },
   { value: '3', label: 'Low' },
 ] as const
-const AUTOSAVE_DELAY_MS = 350
-
-interface TaskFormState {
-  title: string
-  description: string
-  status: string
-  priority: string
-  projectId: string
-  dueAt: string
-  scheduledFor: string
-  completedAt: string
-}
-
-type EditableField = keyof TaskFormState
-type SaveState = 'idle' | 'saving' | 'error'
+type EditableField = keyof ReturnType<typeof useTaskDraft>['form']
+type SaveState = ReturnType<typeof useTaskDraft>['saveState']
 
 export function TaskDetail({ id }: { id: string }): ReactNode {
   const task = useTask(id)
@@ -41,7 +30,10 @@ export function TaskDetail({ id }: { id: string }): ReactNode {
     <DetailPage query={task} notFoundTitle="Task not found">
       {(t) => (
         <>
-          <TaskInlineEditor key={t.id} task={t} />
+          <TaskInlineEditor
+            key={`${t.databaseIdentity.databasePath}:${t.databaseIdentity.generation}:${t.id}`}
+            task={t}
+          />
           {links.data ? (
             <>
               <LinkedRecords title="Project" records={links.data.projects} onUnlink={onUnlink} />
@@ -63,180 +55,24 @@ export function TaskDetail({ id }: { id: string }): ReactNode {
   )
 }
 
-function TaskInlineEditor({ task }: { task: Task }): ReactNode {
+function TaskInlineEditor({ task }: { task: TaskWithIdentity }): ReactNode {
   const projects = useProjects()
-  const updateTask = useUpdateTask(task.id)
+  const { form, error, saveState, patchForm, flush } = useTaskDraft(task)
   const [activeField, setActiveField] = useState<EditableField | null>(null)
-  const [form, setForm] = useState<TaskFormState>(() => stateFromTask(task))
-  const [error, setError] = useState<string | null>(null)
-  const [saveState, setSaveState] = useState<SaveState>('idle')
   const [completionPending, setCompletionPending] = useState(false)
-  const formRef = useRef(form)
-  const taskRef = useRef(task)
-  const taskIdRef = useRef(task.id)
-  const mountedRef = useRef(true)
-  const inFlightSaveRef = useRef(false)
-  const pendingSaveRef = useRef<TaskFormState | null>(null)
-  const skipAutosaveRef = useRef(true)
-  const savedSnapshotRef = useRef(serializeState(stateFromTask(task)))
-
-  useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-      requestSave(formRef.current)
-    }
-  }, [])
-
-  useEffect(() => {
-    taskRef.current = task
-    const next = stateFromTask(task)
-    if (task.id !== taskIdRef.current) {
-      taskIdRef.current = task.id
-      pendingSaveRef.current = null
-      resetForm(next, { clearActiveField: true })
-      return
-    }
-
-    if (!hasUnsavedChanges(formRef.current) && !inFlightSaveRef.current && pendingSaveRef.current === null) {
-      resetForm(next, { clearActiveField: false })
-    }
-  }, [task])
-
-  useEffect(() => {
-    if (skipAutosaveRef.current) {
-      skipAutosaveRef.current = false
-      return undefined
-    }
-
-    const serialized = serializeState(form)
-    if (serialized === savedSnapshotRef.current) {
-      if (mountedRef.current) {
-        setError(null)
-        setSaveState('idle')
-      }
-      return undefined
-    }
-
-    const validation = validateForm(form)
-    if (validation !== null) {
-      if (mountedRef.current) {
-        setError(validation)
-        setSaveState('error')
-      }
-      return undefined
-    }
-
-    if (mountedRef.current) {
-      setError(null)
-      setSaveState('saving')
-    }
-    const timeout = window.setTimeout(() => {
-      requestSave(form)
-    }, AUTOSAVE_DELAY_MS)
-    return () => window.clearTimeout(timeout)
-  }, [form])
-
-  async function drainSaveQueue(): Promise<void> {
-    if (inFlightSaveRef.current) return
-    const next = pendingSaveRef.current
-    if (next === null) return
-
-    pendingSaveRef.current = null
-    const serialized = serializeState(next)
-    if (serialized === savedSnapshotRef.current) {
-      if (mountedRef.current) setSaveState('idle')
-      if (pendingSaveRef.current !== null) void drainSaveQueue()
-      return
-    }
-
-    const validation = validateForm(next)
-    if (validation !== null) {
-      if (mountedRef.current) {
-        setError(validation)
-        setSaveState('error')
-      }
-      return
-    }
-
-    inFlightSaveRef.current = true
-    try {
-      await updateTask.mutateAsync(toTaskPatch(next))
-      savedSnapshotRef.current = serializeState(next)
-      if (mountedRef.current) {
-        setError(null)
-        setSaveState(pendingSaveRef.current === null ? 'idle' : 'saving')
-      }
-    } catch (cause) {
-      if (mountedRef.current) {
-        setError(cause instanceof Error ? cause.message : 'Could not save task')
-        setSaveState('error')
-      }
-    } finally {
-      inFlightSaveRef.current = false
-      if (pendingSaveRef.current !== null) void drainSaveQueue()
-    }
-  }
-
-  function requestSave(next: TaskFormState): void {
-    if (serializeState(next) === savedSnapshotRef.current) return
-    const validation = validateForm(next)
-    if (validation !== null) {
-      if (mountedRef.current) {
-        setError(validation)
-        setSaveState('error')
-      }
-      return
-    }
-
-    pendingSaveRef.current = next
-    if (mountedRef.current) {
-      setError(null)
-      setSaveState('saving')
-    }
-    void drainSaveQueue()
-  }
-
-  function resetForm(next: TaskFormState, { clearActiveField }: { clearActiveField: boolean }): void {
-    formRef.current = next
-    savedSnapshotRef.current = serializeState(next)
-    skipAutosaveRef.current = true
-    if (clearActiveField) setActiveField(null)
-    setForm(next)
-    setError(null)
-    setSaveState('idle')
-  }
-
-  function hasUnsavedChanges(next: TaskFormState): boolean {
-    return serializeState(next) !== savedSnapshotRef.current
-  }
-
-  function patchForm(patch: Partial<TaskFormState>): void {
-    setForm((current) => {
-      const next = { ...current, ...patch }
-      formRef.current = next
-      return next
-    })
-  }
 
   function patchStatus(status: string): void {
-    setForm((current) => {
-      const next = {
-        ...current,
-        status,
-        completedAt:
-          status === 'done'
-            ? current.completedAt || toDateInput(taskRef.current.completedAt) || todayDate()
-            : '',
-      }
-      formRef.current = next
-      return next
+    patchForm({
+      status,
+      completedAt: status === 'done'
+        ? form.completedAt || task.completedAt?.slice(0, 10) || todayDate()
+        : '',
     })
   }
 
   function closeActiveField(): void {
     setActiveField(null)
-    requestSave(formRef.current)
+    void flush()
   }
 
   const currentProjectName = projects.data?.find((project) => project.id === form.projectId)?.name
@@ -254,7 +90,7 @@ function TaskInlineEditor({ task }: { task: Task }): ReactNode {
                 id={task.id}
                 title={displayTitle(form.title)}
                 status={form.status}
-                disabled={saveState !== 'idle' || hasUnsavedChanges(form)}
+                disabled={saveState !== 'idle'}
                 onPendingChange={setCompletionPending}
               />
               {form.status === 'done' ? 'Completed' : 'Mark complete'}
@@ -349,33 +185,24 @@ function TaskInlineEditor({ task }: { task: Task }): ReactNode {
         </InlineEditableSelect>
 
         <div className="grid gap-2 sm:grid-cols-3">
-          <DateEditableShell
-            label="Due"
-            field="dueAt"
-            value={form.dueAt}
-            activeField={activeField}
-            setActiveField={setActiveField}
-            closeActiveField={closeActiveField}
-            patchForm={patchForm}
-          />
-          <DateEditableShell
-            label="Scheduled"
-            field="scheduledFor"
-            value={form.scheduledFor}
-            activeField={activeField}
-            setActiveField={setActiveField}
-            closeActiveField={closeActiveField}
-            patchForm={patchForm}
-          />
-          <DateEditableShell
-            label="Completed"
-            field="completedAt"
-            value={form.completedAt}
-            activeField={activeField}
-            setActiveField={setActiveField}
-            closeActiveField={closeActiveField}
-            patchForm={patchForm}
-          />
+          {([
+            ['dueAt', 'Due'],
+            ['scheduledFor', 'Scheduled'],
+            ['completedAt', 'Completed'],
+          ] as const).map(([field, label]) => (
+            <InlineEditableInput
+              key={field}
+              label={label}
+              type="date"
+              value={form[field]}
+              display={form[field] || '—'}
+              muted={!form[field]}
+              isEditing={activeField === field}
+              onEdit={() => setActiveField(field)}
+              onBlur={closeActiveField}
+              onChange={(value) => patchForm({ [field]: value })}
+            />
+          ))}
         </div>
 
         {error ? (
@@ -386,38 +213,6 @@ function TaskInlineEditor({ task }: { task: Task }): ReactNode {
         ) : null}
       </fieldset>
     </>
-  )
-}
-
-function DateEditableShell({
-  label,
-  field,
-  value,
-  activeField,
-  setActiveField,
-  closeActiveField,
-  patchForm,
-}: {
-  label: string
-  field: Extract<EditableField, 'dueAt' | 'scheduledFor' | 'completedAt'>
-  value: string
-  activeField: EditableField | null
-  setActiveField: (field: EditableField) => void
-  closeActiveField: () => void
-  patchForm: (patch: Partial<TaskFormState>) => void
-}): ReactNode {
-  return (
-    <InlineEditableInput
-      label={label}
-      type="date"
-      value={value}
-      display={value || '—'}
-      muted={!value}
-      isEditing={activeField === field}
-      onEdit={() => setActiveField(field)}
-      onBlur={closeActiveField}
-      onChange={(nextValue) => patchForm({ [field]: nextValue })}
-    />
   )
 }
 
@@ -436,47 +231,6 @@ function SaveIndicator({ state }: { state: SaveState }): ReactNode {
   return null
 }
 
-function validateForm(form: TaskFormState): string | null {
-  if (!form.title.trim()) return 'Title is required'
-  const priority = form.priority.trim()
-  if (priority === '') return null
-  const parsedPriority = Number(priority)
-  return Number.isInteger(parsedPriority) && parsedPriority >= 0
-    ? null
-    : 'Priority must be a whole number'
-}
-
-function toTaskPatch(form: TaskFormState) {
-  const priority = form.priority.trim()
-  return {
-    title: form.title.trim(),
-    description: form.description,
-    status: form.status,
-    priority: priority === '' ? null : Number(priority),
-    projectId: form.projectId || null,
-    dueAt: form.dueAt || null,
-    scheduledFor: form.scheduledFor || null,
-    completedAt: form.status === 'done' ? form.completedAt || todayDate() : form.completedAt || null,
-  }
-}
-
-function stateFromTask(task: Task): TaskFormState {
-  return {
-    title: task.title,
-    description: task.description ?? '',
-    status: task.status,
-    priority: task.priority == null ? '' : String(task.priority),
-    projectId: task.projectId ?? '',
-    dueAt: toDateInput(task.dueAt),
-    scheduledFor: toDateInput(task.scheduledFor),
-    completedAt: toDateInput(task.completedAt),
-  }
-}
-
-function serializeState(state: TaskFormState): string {
-  return JSON.stringify(state)
-}
-
 function displayTitle(title: string): string {
   return title.trim() || 'Untitled task'
 }
@@ -488,12 +242,4 @@ function priorityLabel(priority: string): string {
 
 function statusLabel(status: string): string {
   return status.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
-}
-
-function toDateInput(value: string | null | undefined): string {
-  return value ? value.slice(0, 10) : ''
-}
-
-function todayDate(): string {
-  return new Date().toLocaleDateString('en-CA')
 }

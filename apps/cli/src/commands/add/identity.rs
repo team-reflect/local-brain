@@ -4,9 +4,10 @@
 //! is unique per source, so re-importing the same upstream row resolves to the
 //! same Local Brain record instead of forking a duplicate.
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use super::text::{normalize_optional, normalize_source_slug};
+use crate::commands::record_ref::record_table;
 use crate::error::CliError;
 use crate::id::new_id;
 
@@ -45,70 +46,8 @@ pub(super) fn find_duplicate(
         format!("SELECT id FROM {table} WHERE content_hash = ?1 AND archived_at IS NULL LIMIT 1");
     let id = conn
         .query_row(&sql, params![hash], |row| row.get::<_, String>(0))
-        .ok();
+        .optional()?;
     Ok(id)
-}
-
-/// Map an `external_identities.entity_type` to its owning table. Every typed
-/// record table carries an `archived_at` column, so callers can scope an
-/// external-id lookup to active records.
-struct EntityTable {
-    table: &'static str,
-    has_archived_at: bool,
-}
-
-fn entity_table(entity_type: &str) -> Option<EntityTable> {
-    match entity_type {
-        "person" => Some(EntityTable {
-            table: "people",
-            has_archived_at: true,
-        }),
-        "organization" => Some(EntityTable {
-            table: "organizations",
-            has_archived_at: true,
-        }),
-        "organization_profile" => Some(EntityTable {
-            table: "organization_profiles",
-            has_archived_at: false,
-        }),
-        "project" => Some(EntityTable {
-            table: "projects",
-            has_archived_at: true,
-        }),
-        "task" => Some(EntityTable {
-            table: "tasks",
-            has_archived_at: true,
-        }),
-        "document" => Some(EntityTable {
-            table: "documents",
-            has_archived_at: true,
-        }),
-        "interaction" => Some(EntityTable {
-            table: "interactions",
-            has_archived_at: true,
-        }),
-        "interaction_transcript" => Some(EntityTable {
-            table: "interaction_transcripts",
-            has_archived_at: false,
-        }),
-        "ai_note" => Some(EntityTable {
-            table: "ai_notes",
-            has_archived_at: false,
-        }),
-        "extracted_fact" => Some(EntityTable {
-            table: "extracted_facts",
-            has_archived_at: true,
-        }),
-        "memory" => Some(EntityTable {
-            table: "memories",
-            has_archived_at: true,
-        }),
-        "asset" => Some(EntityTable {
-            table: "assets",
-            has_archived_at: true,
-        }),
-        _ => None,
-    }
 }
 
 /// Resolve a record by its external identity, scoped to *active* records.
@@ -130,7 +69,7 @@ pub(super) fn find_external_identity(
     // `archived_at IS NULL`; without the join here a re-import with the same
     // --source/--external-id would enrich an archived record and report a
     // duplicate, leaving the data off normal active lists.
-    let entity = entity_table(entity_type).ok_or_else(|| {
+    let entity = record_table(entity_type).ok_or_else(|| {
         CliError::Runtime(format!(
             "unknown external identity entity type '{entity_type}'"
         ))
@@ -158,7 +97,7 @@ pub(super) fn find_external_identity(
             params![entity_type, source_id, kind, external_id],
             |row| row.get::<_, String>(0),
         )
-        .ok();
+        .optional()?;
     Ok(id)
 }
 
@@ -239,7 +178,7 @@ pub(super) fn insert_external_identity(
     ) else {
         return Ok(());
     };
-    let entity = entity_table(entity_type).ok_or_else(|| {
+    let entity = record_table(entity_type).ok_or_else(|| {
         CliError::Runtime(format!(
             "unknown external identity entity type '{entity_type}'"
         ))
@@ -328,4 +267,33 @@ pub(super) fn insert_external_identity(
         ],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duplicate_lookups_distinguish_missing_records_from_database_errors() {
+        let conn = brain_schema::open_in_memory().unwrap();
+        assert_eq!(find_duplicate(&conn, "documents", "unknown").unwrap(), None);
+        assert_eq!(
+            find_external_identity(&conn, "document", Some("source"), "record", Some("unknown"))
+                .unwrap(),
+            None
+        );
+
+        // An unusable database must abort the import rather than authorize a
+        // duplicate insert by pretending no record matched.
+        let conn = Connection::open_in_memory().unwrap();
+        assert!(find_duplicate(&conn, "documents", "unknown").is_err());
+        assert!(find_external_identity(
+            &conn,
+            "document",
+            Some("source"),
+            "record",
+            Some("unknown")
+        )
+        .is_err());
+    }
 }

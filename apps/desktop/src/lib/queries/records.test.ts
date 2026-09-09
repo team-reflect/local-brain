@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { setBridge, type Task } from '@local-brain/core'
 import { PALETTE_SEARCH_QUERY_KEY } from './search'
-import { useCreateTask, useSetTaskCompleted } from './records'
+import { useCreateTask, useSetTaskCompleted, useTask } from './records'
 
 const TASK: Task = {
   id: 'task-1',
@@ -133,5 +133,44 @@ describe('useCreateTask', () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['graph'] })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: PALETTE_SEARCH_QUERY_KEY })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['project', 'project-1', 'links'] })
+  })
+})
+
+
+describe('useTask database identity', () => {
+  function Wrapper({ children }: { children: ReactNode }): ReactNode {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    return createElement(QueryClientProvider, { client: queryClient }, children)
+  }
+
+  it('rejects a task read if the database switches while it is loading', async () => {
+    let generation = 1
+    setBridge({
+      invoke: async (command) => {
+        if (command === 'active_database_identity') {
+          return { databasePath: '/brain.sqlite', generation }
+        }
+        if (command === 'db_query') {
+          generation = 2
+          return [{ id: TASK.id, title: TASK.title }]
+        }
+        throw new Error(`Unexpected command: ${command}`)
+      },
+    })
+    const { result } = renderHook(() => useTask(TASK.id), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    expect(result.current.data).toBeUndefined()
+    expect(result.current.error).toMatchObject({ kind: 'stale' })
+  })
+
+  it('fails closed when the task read cannot capture a database identity', async () => {
+    const invoke = vi.fn(async () => {
+      throw new Error('Identity unavailable')
+    })
+    setBridge({ invoke })
+    const { result } = renderHook(() => useTask(TASK.id), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    expect(result.current.data).toBeUndefined()
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('active_database_identity', {})
   })
 })

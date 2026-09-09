@@ -6,6 +6,7 @@
 pub mod add;
 pub mod graph;
 pub mod read;
+mod record_ref;
 pub mod report;
 pub mod source;
 
@@ -112,21 +113,6 @@ pub fn parse_links(raw: &[String]) -> Result<Vec<LinkRef>, CliError> {
     raw.iter().map(|r| parse_link(r)).collect()
 }
 
-const EVIDENCE_RECORD_TYPES: &[&str] = &[
-    "person",
-    "organization",
-    "organization_profile",
-    "project",
-    "task",
-    "document",
-    "interaction",
-    "interaction_transcript",
-    "ai_note",
-    "extracted_fact",
-    "memory",
-    "asset",
-];
-
 /// Parse an evidence pointer. Two locator forms are accepted after the source
 /// chunk owner: `#<chunk_index>` for an exact chunk, or `~<quote>` to resolve the
 /// chunk that contains the quote substring at write time. The `~` form is tried
@@ -182,7 +168,7 @@ fn parse_evidence_record(record: &str, raw: &str) -> Result<(String, String), Cl
         "doc" => "document",
         other => other,
     };
-    if !EVIDENCE_RECORD_TYPES.contains(&record_type) {
+    if record_ref::record_table(record_type).is_none() {
         return Err(CliError::Runtime(format!(
             "invalid --evidence '{raw}' (unknown evidence record type '{kind}')"
         )));

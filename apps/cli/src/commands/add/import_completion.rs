@@ -10,7 +10,7 @@ use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 
 use super::identity::{insert_record_provenance, RecordProvenanceWrite};
-use super::record_ref::{parse_record_ref, require_record};
+use crate::commands::record_ref::{parse_record_ref, require_record};
 use crate::error::CliError;
 use crate::output::print_json;
 

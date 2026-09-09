@@ -34,9 +34,10 @@ main.tsx → App.tsx
 1. **Bridge (`lib/ipc/tauri-bridge.ts`, `lib/db.ts`).** All native IPC goes through
    Tauri's `invoke`. snake_case from SQLite/Rust is normalized to camelCase here so
    the rest of the app speaks one casing. Zod validates at this boundary.
-2. **Domain logic (`@local-brain/core`).** Shared with the CLI. Surfaces call core
+2. **Domain logic (`@local-brain/core`).** Surfaces call core
    functions (`listTasks`, `searchRecords`, `getModelStatus`, …) rather than issuing
-   raw SQL.
+   raw SQL. The Rust CLI implements its own typed operations over the shared
+   schema; it does not call the TypeScript package.
 3. **Query hooks (`lib/queries/*`).** TanStack Query wrappers — one module per
    concern (`brains`, `records`, `search`, `settings`, `embeddings`,
    `corrections`, `ingest`). Surfaces consume hooks (`useActiveBrain`,
@@ -47,6 +48,12 @@ main.tsx → App.tsx
 
 Keep this direction one-way: components/surfaces never reach past the query hooks
 to the bridge, and the bridge never imports React.
+
+Task detail uses `use-task-draft.ts` for autosave. It owns the current draft,
+last saved values, and one pending write. Edits made during a save replace the
+next draft; debounce, blur, and unmount all flush through the same path. The
+record's captured database identity follows every save so switching brains
+rejects stale edits in Rust.
 
 ## Component conventions
 

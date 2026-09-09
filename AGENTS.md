@@ -117,7 +117,6 @@ local-brain/
 +-- packages/
 |   +-- core/             # TS actions, product policy, retrieval, AI orchestration
 |   +-- db/               # Kysely schema/types, codegen, and drift checks
-|   +-- skills/           # packaged local skill helpers
 +-- crates/
 |   +-- brain-schema/     # SQLite migrations, open/migrate helpers, schema version
 +-- skills/               # local agent skills

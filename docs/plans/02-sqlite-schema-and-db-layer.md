@@ -164,6 +164,9 @@ indexes are rebuildable.
 - Run foreign-key enforcement tests.
 - Run generated-type checks.
 - Run schema/codegen drift check.
+- Codegen and TypeScript integration tests share `@local-brain/db/testing`, which
+  replays the migration files into Node SQLite. It omits vec0 virtual tables;
+  native Rust tests cover the real vector extension.
 - Run IPC query/execute/batch integration tests.
 - Run transaction rollback tests.
 - Run `pnpm check` and Cargo tests once the workspace exists.

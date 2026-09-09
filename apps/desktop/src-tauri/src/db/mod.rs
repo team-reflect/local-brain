@@ -11,7 +11,6 @@ mod convert;
 mod query;
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use rusqlite::Connection;
@@ -34,9 +33,37 @@ struct Active {
 /// [`crate::brains`]) replaces the connection in place. Unguarded work follows
 /// that active connection; identity-guarded work prepared earlier is rejected.
 pub struct DbState {
-    active: Mutex<Option<Active>>,
-    generation: AtomicU64,
-    startup_error: Mutex<Option<String>>,
+    inner: Mutex<DbInner>,
+}
+
+/// Connection identity and startup status change together under the same lock.
+/// Keep the generation even while closed so reopening never revives stale work.
+#[derive(Default)]
+struct DbInner {
+    active: Option<Active>,
+    generation: u64,
+    startup_error: Option<String>,
+}
+
+impl DbInner {
+    fn active(&self) -> AppResult<&Active> {
+        self.active.as_ref().ok_or_else(DbState::no_active)
+    }
+
+    fn active_mut(&mut self) -> AppResult<&mut Active> {
+        self.active.as_mut().ok_or_else(DbState::no_active)
+    }
+
+    fn ensure_expected_identity(&self, path: &str, generation: u64) -> AppResult<()> {
+        if self.active()?.paths.database_path.as_path() != Path::new(path)
+            || self.generation != generation
+        {
+            return Err(AppError::stale(
+                "the active brain changed while database work was in flight",
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Stable identity of one open database connection. The generation changes on
@@ -49,70 +76,34 @@ pub struct ActiveDatabaseIdentity {
     pub generation: u64,
 }
 
-pub(crate) trait IntoActivePaths {
-    fn into_active_paths(self) -> brain_schema::BrainPaths;
-}
-
-impl IntoActivePaths for brain_schema::BrainPaths {
-    fn into_active_paths(self) -> brain_schema::BrainPaths {
-        self
-    }
-}
-
-impl IntoActivePaths for PathBuf {
-    fn into_active_paths(self) -> brain_schema::BrainPaths {
-        let root = self
-            .parent()
-            .map(PathBuf::from)
-            .unwrap_or_else(|| self.clone());
-        let mut paths = brain_schema::BrainPaths::for_root(root);
-        paths.database_path = self;
-        paths
-    }
-}
-
-impl IntoActivePaths for &std::path::Path {
-    fn into_active_paths(self) -> brain_schema::BrainPaths {
-        self.to_path_buf().into_active_paths()
-    }
-}
-
-impl IntoActivePaths for &PathBuf {
-    fn into_active_paths(self) -> brain_schema::BrainPaths {
-        self.to_path_buf().into_active_paths()
-    }
-}
-
 impl DbState {
-    pub fn new(conn: Connection, paths: impl IntoActivePaths) -> Self {
+    pub fn new(conn: Connection, paths: brain_schema::BrainPaths) -> Self {
         Self {
-            active: Mutex::new(Some(Active {
-                conn,
-                paths: paths.into_active_paths(),
-            })),
-            generation: AtomicU64::new(1),
-            startup_error: Mutex::new(None),
+            inner: Mutex::new(DbInner {
+                active: Some(Active { conn, paths }),
+                generation: 1,
+                startup_error: None,
+            }),
         }
     }
 
     pub fn empty() -> Self {
         Self {
-            active: Mutex::new(None),
-            generation: AtomicU64::new(0),
-            startup_error: Mutex::new(None),
+            inner: Mutex::new(DbInner::default()),
         }
     }
 
     pub fn empty_with_startup_error(message: impl Into<String>) -> Self {
         Self {
-            active: Mutex::new(None),
-            generation: AtomicU64::new(0),
-            startup_error: Mutex::new(Some(message.into())),
+            inner: Mutex::new(DbInner {
+                startup_error: Some(message.into()),
+                ..DbInner::default()
+            }),
         }
     }
 
-    fn lock(&self) -> AppResult<MutexGuard<'_, Option<Active>>> {
-        self.active
+    fn lock(&self) -> AppResult<MutexGuard<'_, DbInner>> {
+        self.inner
             .lock()
             .map_err(|_| AppError::io("the database lock was poisoned by an earlier panic"))
     }
@@ -123,20 +114,12 @@ impl DbState {
 
     /// The startup brain-load failure, if the remembered brain could not open.
     pub fn startup_error(&self) -> AppResult<Option<String>> {
-        self.startup_error
-            .lock()
-            .map(|message| message.clone())
-            .map_err(|_| {
-                AppError::io("the startup database error lock was poisoned by an earlier panic")
-            })
+        Ok(self.lock()?.startup_error.clone())
     }
 
     /// The paths of the currently open brain.
     pub fn active_paths(&self) -> AppResult<brain_schema::BrainPaths> {
-        self.lock()?
-            .as_ref()
-            .map(|active| active.paths.clone())
-            .ok_or_else(Self::no_active)
+        Ok(self.lock()?.active()?.paths.clone())
     }
 
     /// The database path of the currently open brain.
@@ -148,28 +131,11 @@ impl DbState {
     /// derived-index work to the brain it was prepared against.
     pub fn active_database_identity(&self) -> AppResult<ActiveDatabaseIdentity> {
         let guard = self.lock()?;
-        let active = guard.as_ref().ok_or_else(Self::no_active)?;
+        let active = guard.active()?;
         Ok(ActiveDatabaseIdentity {
             database_path: active.paths.database_path.display().to_string(),
-            generation: self.generation.load(Ordering::SeqCst),
+            generation: guard.generation,
         })
-    }
-
-    fn ensure_expected_identity(
-        &self,
-        active: &Active,
-        expected_database_path: &str,
-        expected_generation: u64,
-    ) -> AppResult<()> {
-        let current_generation = self.generation.load(Ordering::SeqCst);
-        if active.paths.database_path.as_path() != Path::new(expected_database_path)
-            || current_generation != expected_generation
-        {
-            return Err(AppError::stale(
-                "the active brain changed while database work was in flight",
-            ));
-        }
-        Ok(())
     }
 
     /// The root path of the currently open brain.
@@ -180,7 +146,7 @@ impl DbState {
     /// The applied schema version of the open brain.
     pub fn schema_version(&self) -> AppResult<i64> {
         let guard = self.lock()?;
-        let active = guard.as_ref().ok_or_else(Self::no_active)?;
+        let active = guard.active()?;
         brain_schema::schema_version(&active.conn).map_err(AppError::from)
     }
 
@@ -191,7 +157,7 @@ impl DbState {
     pub fn swap_after<F>(
         &self,
         conn: Connection,
-        paths: impl IntoActivePaths,
+        paths: brain_schema::BrainPaths,
         before_swap: F,
     ) -> AppResult<()>
     where
@@ -199,14 +165,9 @@ impl DbState {
     {
         let mut guard = self.lock()?;
         before_swap()?;
-        self.generation.fetch_add(1, Ordering::SeqCst);
-        *guard = Some(Active {
-            conn,
-            paths: paths.into_active_paths(),
-        });
-        if let Ok(mut startup_error) = self.startup_error.lock() {
-            *startup_error = None;
-        }
+        guard.generation += 1;
+        guard.active = Some(Active { conn, paths });
+        guard.startup_error = None;
         Ok(())
     }
 
@@ -220,11 +181,9 @@ impl DbState {
     {
         let mut guard = self.lock()?;
         before_clear()?;
-        *guard = None;
-        self.generation.fetch_add(1, Ordering::SeqCst);
-        if let Ok(mut startup_error) = self.startup_error.lock() {
-            *startup_error = None;
-        }
+        guard.active = None;
+        guard.generation += 1;
+        guard.startup_error = None;
         Ok(())
     }
 
@@ -238,8 +197,8 @@ impl DbState {
         f: impl FnOnce(&Connection) -> AppResult<T>,
     ) -> AppResult<T> {
         let mut guard = self.lock()?;
-        let active = guard.as_mut().ok_or_else(Self::no_active)?;
-        self.ensure_expected_identity(active, expected_database_path, expected_generation)?;
+        guard.ensure_expected_identity(expected_database_path, expected_generation)?;
+        let active = guard.active_mut()?;
         let tx = active.conn.transaction()?;
         let result = f(&tx)?;
         tx.commit()?;
@@ -247,14 +206,9 @@ impl DbState {
     }
 
     #[cfg(test)]
-    pub fn active_path(&self) -> AppResult<PathBuf> {
-        self.active_database_path()
-    }
-
-    #[cfg(test)]
     pub fn poison_for_test(&self) {
         let _ = std::panic::catch_unwind(|| {
-            let _guard = self.active.lock().unwrap();
+            let _guard = self.inner.lock().unwrap();
             panic!("poison database lock for test");
         });
     }
@@ -320,13 +274,12 @@ pub fn db_query(
     expected_generation: Option<u64>,
 ) -> AppResult<Vec<Map<String, JsonValue>>> {
     let guard = state.lock()?;
-    let active = guard.as_ref().ok_or_else(DbState::no_active)?;
     if let Some((path, generation)) =
         expected_identity(expected_database_path, expected_generation)?
     {
-        state.ensure_expected_identity(active, &path, generation)?;
+        guard.ensure_expected_identity(&path, generation)?;
     }
-    run_query(&active.conn, &sql, &params)
+    run_query(&guard.active()?.conn, &sql, &params)
 }
 
 /// Run one write statement. An optional expected path + generation pair binds
@@ -345,8 +298,7 @@ pub fn db_execute(
         }),
         None => {
             let guard = state.lock()?;
-            let active = guard.as_ref().ok_or_else(DbState::no_active)?;
-            run_execute(&active.conn, &sql, &params)
+            run_execute(&guard.active()?.conn, &sql, &params)
         }
     }
 }
@@ -361,13 +313,12 @@ pub fn db_batch(
     expected_generation: Option<u64>,
 ) -> AppResult<Vec<usize>> {
     let mut guard = state.lock()?;
-    let active = guard.as_mut().ok_or_else(DbState::no_active)?;
     if let Some((path, generation)) =
         expected_identity(expected_database_path, expected_generation)?
     {
-        state.ensure_expected_identity(active, &path, generation)?;
+        guard.ensure_expected_identity(&path, generation)?;
     }
-    run_batch(&mut active.conn, &statements)
+    run_batch(&mut guard.active_mut()?.conn, &statements)
 }
 
 #[cfg(test)]
@@ -386,38 +337,23 @@ mod tests {
     #[test]
     fn swap_switches_the_active_brain() {
         let dir = tempfile::tempdir().unwrap();
-        let first = dir.path().join("first.sqlite");
-        let second = dir.path().join("second.sqlite");
-        let state = DbState::new(
-            brain_schema::open_and_migrate(&first).unwrap(),
-            paths(first.parent().unwrap().join("first")),
-        );
+        let (first, conn) = brain_schema::open_brain_root(&dir.path().join("First")).unwrap();
+        let state = DbState::new(conn, first.clone());
 
         // A row written to the first brain.
         {
             let guard = state.lock().unwrap();
-            insert_person(&guard.as_ref().unwrap().conn, "p1", "Ada").unwrap();
+            insert_person(&guard.active().unwrap().conn, "p1", "Ada").unwrap();
         }
-        assert_eq!(
-            state.active_root_path().unwrap(),
-            first.parent().unwrap().join("first")
-        );
+        assert_eq!(state.active_paths().unwrap(), first);
 
         // After switching, the second brain is empty and the path updates.
-        state
-            .swap_after(
-                brain_schema::open_and_migrate(&second).unwrap(),
-                paths(second.parent().unwrap().join("second")),
-                || Ok(()),
-            )
-            .unwrap();
-        assert_eq!(
-            state.active_root_path().unwrap(),
-            second.parent().unwrap().join("second")
-        );
+        let (second, conn) = brain_schema::open_brain_root(&dir.path().join("Second")).unwrap();
+        state.swap_after(conn, second.clone(), || Ok(())).unwrap();
+        assert_eq!(state.active_paths().unwrap(), second);
         let guard = state.lock().unwrap();
         let rows = run_query(
-            &guard.as_ref().unwrap().conn,
+            &guard.active().unwrap().conn,
             "SELECT count(*) AS n FROM people",
             &[],
         )
@@ -443,7 +379,7 @@ mod tests {
         // Reopening even the same path gets a new generation. Path-only guards
         // would accept this ABA switch and let old async work mutate the new
         // connection.
-        state.swap_after(db(), paths, || Ok(())).unwrap();
+        state.swap_after(db(), paths.clone(), || Ok(())).unwrap();
         let second = state.active_database_identity().unwrap();
         assert_eq!(second.database_path, first.database_path);
         assert_ne!(second.generation, first.generation);
@@ -453,6 +389,23 @@ mod tests {
                 Ok(())
             });
         assert!(matches!(stale, Err(AppError::Stale { .. })));
+
+        // Closing also invalidates the identity, including after the same brain
+        // is reopened. The generation belongs to the state, not the connection.
+        state.clear_after(|| Ok(())).unwrap();
+        assert!(matches!(
+            state.with_expected_connection_mut(&second.database_path, second.generation, |_| {
+                Ok(())
+            }),
+            Err(AppError::NoDatabase { .. })
+        ));
+        state.swap_after(db(), paths, || Ok(())).unwrap();
+        assert!(matches!(
+            state.with_expected_connection_mut(&second.database_path, second.generation, |_| {
+                Ok(())
+            }),
+            Err(AppError::Stale { .. })
+        ));
     }
 
     #[test]
@@ -483,6 +436,7 @@ mod tests {
     #[test]
     fn clear_after_keeps_active_brain_when_callback_fails() {
         let state = DbState::new(db(), paths(PathBuf::from("/tmp/active")));
+        let identity = state.active_database_identity().unwrap();
 
         let result = state.clear_after(|| Err(AppError::io("registry write failed")));
 
@@ -491,6 +445,42 @@ mod tests {
             state.active_root_path().unwrap(),
             PathBuf::from("/tmp/active")
         );
+        assert_eq!(state.active_database_identity().unwrap(), identity);
+    }
+
+    #[test]
+    fn failed_swap_preserves_startup_error_and_generation() {
+        let state = DbState::empty_with_startup_error("could not open remembered brain");
+        let result = state.swap_after(db(), paths(PathBuf::from("/tmp/new")), || {
+            Err(AppError::io("registry write failed"))
+        });
+
+        assert!(result.is_err());
+        assert!(state.active_paths().is_err());
+        assert_eq!(state.lock().unwrap().generation, 0);
+        assert_eq!(
+            state.startup_error().unwrap().as_deref(),
+            Some("could not open remembered brain")
+        );
+    }
+
+    #[test]
+    fn guarded_transaction_rolls_back_on_failure() {
+        let state = DbState::new(db(), paths(PathBuf::from("/tmp/active")));
+        let identity = state.active_database_identity().unwrap();
+        let result: AppResult<()> = state.with_expected_connection_mut(
+            &identity.database_path,
+            identity.generation,
+            |conn| {
+                insert_person(conn, "p1", "Ada")?;
+                Err(AppError::io("later write failed"))
+            },
+        );
+
+        assert!(result.is_err());
+        let guard = state.lock().unwrap();
+        let rows = run_query(&guard.active().unwrap().conn, "SELECT id FROM people", &[]).unwrap();
+        assert!(rows.is_empty());
     }
 
     fn insert_person(conn: &Connection, id: &str, name: &str) -> AppResult<usize> {
