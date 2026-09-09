@@ -97,11 +97,11 @@ test('beta on a non-beta prerelease is rejected', () => {
   expect(() => computeNextVersion('0.2.0-rc.1', 'beta')).toThrow(/beta\.N/)
 })
 
-test('release requests dispatch the rolling workflow with an explicit target', () => {
+test('release requests dispatch the automatic workflow with an explicit target', () => {
   expect(workflowDispatchArgs('0.3.0')).toEqual([
     'workflow',
     'run',
-    'release-pr.yml',
+    'auto-release.yml',
     '--ref',
     'master',
     '-f',

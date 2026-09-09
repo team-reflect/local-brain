@@ -1,6 +1,5 @@
-// Request a version for the rolling release PR, or recover an already-merged
-// version bump by pushing its tag. The Release PR workflow owns normal version
-// edits so local release commands cannot race a second short-lived PR.
+// Request an automatic release version, or recover a committed version bump
+// by pushing its tag. Automatic release owns version edits and waits for master CI.
 //
 // Usage:
 //   pnpm release:bump                         Request the next stable patch
@@ -35,7 +34,7 @@ const DESKTOP_CRATE = 'local-brain-desktop'
 
 const PREID = 'beta'
 const RELEASE_BRANCH = 'master'
-const RELEASE_PR_WORKFLOW = 'release-pr.yml'
+const AUTOMATIC_RELEASE_WORKFLOW = 'auto-release.yml'
 const LEVELS = ['beta', 'stable', 'patch', 'minor', 'major', 'prepatch', 'preminor', 'premajor']
 
 function log(message) {
@@ -340,7 +339,7 @@ async function pushTagOnly({ skipPrompt }) {
 
   log(`version: ${version}`)
   log(`release commit: ${releaseCommit}`)
-  log(`plan: tag that exact reviewed version transition as ${tag} and trigger the Release workflow`)
+  log(`plan: tag that exact version transition as ${tag} and trigger the Release workflow`)
   if (!skipPrompt && !(await confirm('Proceed? [y/N] '))) {
     log('aborted - nothing changed')
     return
@@ -354,7 +353,7 @@ async function pushTagOnly({ skipPrompt }) {
 }
 
 export function workflowDispatchArgs(targetVersion) {
-  return ['workflow', 'run', RELEASE_PR_WORKFLOW, '--ref', RELEASE_BRANCH, '-f', `bump=${targetVersion}`]
+  return ['workflow', 'run', AUTOMATIC_RELEASE_WORKFLOW, '--ref', RELEASE_BRANCH, '-f', `bump=${targetVersion}`]
 }
 
 async function main() {
@@ -371,7 +370,7 @@ async function main() {
   }
   if (flags.includes('--direct') || flags.includes('--no-tag')) {
     fail(
-      '--direct and --no-tag were retired by the rolling Release PR; use the reviewed PR, or run Release with an exact ref for recovery',
+      '--direct and --no-tag are retired; use Automatic release, or run Release with an exact ref for recovery',
     )
   }
 
@@ -406,7 +405,7 @@ async function main() {
 
   log(`current version: ${current}`)
   log(`requested version: ${target} (${bump})`)
-  log('plan: dispatch the Release PR workflow to create or update the reviewed rolling PR')
+  log('plan: dispatch Automatic release to bump, build, and publish after master CI passes')
   if (dryRun) {
     log('dry run - nothing changed')
     return
@@ -418,8 +417,8 @@ async function main() {
   }
 
   const dispatch = run('gh', workflowDispatchArgs(target))
-  if (dispatch.status !== 0) fail(`could not dispatch the Release PR workflow:\n${dispatch.output.trim()}`)
-  log('release PR request queued - track it in GitHub -> Actions -> Release PR')
+  if (dispatch.status !== 0) fail(`could not dispatch Automatic release:\n${dispatch.output.trim()}`)
+  log('release request queued - track it in GitHub -> Actions -> Automatic release')
 }
 
 const USAGE = `Usage: pnpm release:bump [level|version] [flags]
@@ -436,12 +435,12 @@ Levels:
   <version>  explicit version, for example 0.5.0-beta.1
 
 Flags:
-  --dry-run   show the release PR request without dispatching it
+  --dry-run   show the automatic release request without dispatching it
   --tag-only  recovery: tag the current merged version and trigger Release
   --yes       skip the confirmation prompt
   --help      show this help
 
-Normal releases are reviewed in the rolling Release PR and ship when it is merged.
+Normal releases ship automatically after CI passes on master. This command also publishes.
 Docs: docs/macos-distribution.md`
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
