@@ -31,6 +31,7 @@ export const AI_PROVIDERS: NonEmptyArray<AiProviderInfo> = [
       { id: 'gpt-5.6', label: 'GPT-5.6 Sol', contextWindow: 1_050_000 },
       { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', contextWindow: 1_050_000 },
       { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', contextWindow: 1_050_000 },
+      { id: 'gpt-6-astra', label: 'GPT-6 Astra', contextWindow: 1_050_000 },
       { id: 'gpt-5.5', label: 'GPT-5.5', contextWindow: 1_000_000 },
       { id: 'gpt-5.4', label: 'GPT-5.4', contextWindow: 1_000_000 },
       { id: 'gpt-5.4-mini', label: 'GPT-5.4 mini', contextWindow: 400_000 },

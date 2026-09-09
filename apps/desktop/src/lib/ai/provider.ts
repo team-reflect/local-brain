@@ -1,7 +1,7 @@
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { createOpenAI } from '@ai-sdk/openai'
-import type { LanguageModel } from 'ai'
+import { wrapLanguageModel, type LanguageModel } from 'ai'
 import {
   aiKeySecretName,
   defaultAiProvider,
@@ -15,17 +15,47 @@ export interface LanguageModelSelection {
   modelId: string
 }
 
-export function languageModelFor(config: AiProviderConfig, apiKey: string): LanguageModel {
+/** Creates a provider model with request settings supported by the selected model. */
+export function languageModelFor(
+  config: AiProviderConfig,
+  apiKey: string,
+  fetchImpl: typeof fetch = globalThis.fetch,
+): LanguageModel {
   switch (config.provider) {
-    case 'openai':
-      return createOpenAI({ apiKey })(config.model)
+    case 'openai': {
+      const model = createOpenAI({ apiKey, fetch: fetchImpl })(config.model)
+      if (config.model !== 'gpt-6-astra') return model
+
+      // This SDK predates Astra. Mark it as reasoning and reserve room for thinking
+      // as well as visible output, including short title and briefing requests.
+      return wrapLanguageModel({
+        model,
+        middleware: {
+          specificationVersion: 'v3',
+          transformParams: async ({ params }) => {
+            const settings = {
+              ...params,
+              maxOutputTokens: Math.max(params.maxOutputTokens ?? 0, 25_000),
+              providerOptions: {
+                ...params.providerOptions,
+                openai: { ...params.providerOptions?.['openai'], forceReasoning: true },
+              },
+            }
+            delete settings.temperature
+            delete settings.topP
+            return settings
+          },
+        },
+      })
+    }
     case 'anthropic':
       return createAnthropic({
         apiKey,
+        fetch: fetchImpl,
         headers: { 'anthropic-dangerous-direct-browser-access': 'true' },
       })(config.model)
     case 'google':
-      return createGoogleGenerativeAI({ apiKey })(config.model)
+      return createGoogleGenerativeAI({ apiKey, fetch: fetchImpl })(config.model)
   }
   const unreachable: never = config.provider
   return unreachable
