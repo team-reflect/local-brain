@@ -12,6 +12,9 @@ complete snapshot and a readback audit; it never mutates tasks or infers closure
 Local Brain installs this skill and its audit helper through Settings -> CLI &
 agents at `~/.agents/skills/brain-task-review`. For a manual installation, copy
 this whole directory, including `scripts/`, into the agent's skills directory.
+A manual copy is unmanaged: Settings reports a conflict, refuses to overwrite
+it, and leaves it in place during uninstall. To switch to app-managed updates,
+move the manual directory aside first, then install through Settings.
 
 ## Review The Whole Backlog
 

@@ -70,6 +70,10 @@ directory (including `scripts/`) to `~/.agents/skills/brain-task-review`.
 The app-generated `brains.json` is optional
 but lets local agents pick the active brain without asking.
 
+Manual copies are unmanaged. Settings reports them as conflicts and preserves
+them during install and uninstall. To switch to app-managed updates, move the
+manual skill directories aside, then install through Settings.
+
 ## Local storage
 
 Each **brain** is one root folder — your top-level workspace:
