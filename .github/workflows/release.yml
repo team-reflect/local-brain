@@ -98,6 +98,29 @@ jobs:
             exit 1
           fi
 
+      # Preparation can wait behind a manual release on this workflow's lock.
+      # Recheck after acquiring it, so a newer stable release cannot be replaced
+      # by an older prepared version when publishing starts.
+      - name: Prevent stable updater rollback
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { readFileSync } = await import('node:fs')
+            const { compareSemver } = await import(
+              `${process.env.GITHUB_WORKSPACE}/apps/desktop/scripts/release-bump.mjs`
+            )
+            const { version } = JSON.parse(readFileSync('apps/desktop/src-tauri/tauri.conf.json', 'utf8'))
+            if (version.includes('-')) return
+            try {
+              const { data: latest } = await github.rest.repos.getLatestRelease(context.repo)
+              if (compareSemver(version, latest.tag_name.replace(/^v/, '')) < 0) {
+                core.setFailed(`Refusing to replace ${latest.tag_name} with older stable v${version}`)
+              }
+            } catch (error) {
+              if (error.status !== 404) throw error
+            }
+
       # Without the certificate, signing only fails at codesign time - after
       # the whole Rust build. Check every required secret up front instead.
       # docs/macos-distribution.md describes how to produce each one.

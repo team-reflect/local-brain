@@ -144,7 +144,8 @@ use `--latest=false` and do not reach stable installs.
   and SHA are reused. An already-published version is a no-op.
 - If a draft already exists, finish or delete that draft before retrying. Existing tags
   must match the exact release commit; the automation never replaces a published release
-  or moves the stable updater feed back to an older version.
+  or moves the stable updater feed back to an older version. The shared publisher rechecks
+  the latest stable version after acquiring its release lock, including manual/tag runs.
 - **Actions -> Release -> Run workflow** with an exact ref remains the manual recovery
   path. `pnpm release:bump --tag-only` can also tag the exact version transition already
   committed on `master`, even if newer code has landed. All three declarations must
