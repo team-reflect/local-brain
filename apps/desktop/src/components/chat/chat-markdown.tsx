@@ -13,13 +13,13 @@ import {
 /** Tailwind-styled component overrides for react-markdown — no raw HTML. */
 const components = {
   h1: ({ children }: ComponentPropsWithoutRef<'h1'>) => (
-    <h1 className="mt-4 mb-1 text-sm font-semibold leading-5">{children}</h1>
+    <h1 className="mt-4 mb-1 text-sm font-semibold leading-5 text-balance">{children}</h1>
   ),
   h2: ({ children }: ComponentPropsWithoutRef<'h2'>) => (
-    <h2 className="mt-3 mb-1 text-sm font-semibold leading-5">{children}</h2>
+    <h2 className="mt-3 mb-1 text-sm font-semibold leading-5 text-balance">{children}</h2>
   ),
   h3: ({ children }: ComponentPropsWithoutRef<'h3'>) => (
-    <h3 className="mt-2 mb-0.5 text-sm font-medium leading-5">{children}</h3>
+    <h3 className="mt-2 mb-0.5 text-sm font-medium leading-5 text-balance">{children}</h3>
   ),
   p: ({ children }: ComponentPropsWithoutRef<'p'>) => (
     <p className="my-1 leading-6">{children}</p>
@@ -123,7 +123,7 @@ export function ChatMarkdown({
   )
 
   return (
-    <div className={cn('text-sm leading-6 text-foreground', className)}>
+    <div className={cn('min-w-0 text-sm leading-6 text-foreground [overflow-wrap:anywhere]', className)}>
       <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={markdownComponents}>
         {citationMarkdown}
       </ReactMarkdown>

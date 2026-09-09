@@ -45,26 +45,37 @@ export function TaskCompletionControl({
 
   return (
     <span className="inline-flex shrink-0 items-center gap-1.5">
-      <Checkbox
-        checked={completed}
-        disabled={disabled || mutation.isPending}
-        onClick={stopRowClick}
-        onCheckedChange={(checked) => {
-          feedback?.clearFailure(id)
-          mutation.reset()
-          onPendingChange?.(true)
-          mutation.mutate(
-            { id, completed: checked === true },
-            { onSettled: () => onPendingChange?.(false) },
-          )
-        }}
-        aria-label={label}
-        aria-describedby={mutationError ? errorId : undefined}
-        className={cn('size-4 rounded-full', className)}
-      />
-      {mutation.isPending ? (
-        <LoaderCircle aria-label={`Updating ${title}`} className="size-3 animate-spin text-muted-foreground" />
-      ) : null}
+      <span className="relative inline-flex shrink-0 items-center justify-center">
+        <Checkbox
+          checked={completed}
+          disabled={disabled || mutation.isPending}
+          onClick={stopRowClick}
+          onCheckedChange={(checked) => {
+            feedback?.clearFailure(id)
+            mutation.reset()
+            onPendingChange?.(true)
+            mutation.mutate(
+              { id, completed: checked === true },
+              { onSettled: () => onPendingChange?.(false) },
+            )
+          }}
+          aria-label={label}
+          aria-busy={mutation.isPending}
+          aria-describedby={mutationError ? errorId : undefined}
+          className={cn(
+            'size-4 rounded-full',
+            mutation.isPending &&
+              'border-transparent bg-transparent data-[state=checked]:border-transparent data-[state=checked]:bg-transparent [&_[data-slot=checkbox-indicator]]:opacity-0',
+            className,
+          )}
+        />
+        {mutation.isPending ? (
+          <LoaderCircle
+            aria-label={`Updating ${title}`}
+            className="pointer-events-none absolute size-3 animate-spin text-muted-foreground"
+          />
+        ) : null}
+      </span>
       {mutationError ? (
         <span
           id={errorId}

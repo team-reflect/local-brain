@@ -22,8 +22,8 @@ export function EmptyState({
         variant === 'panel' && 'rounded-lg border border-dashed border-border bg-secondary/30',
       )}
     >
-      <p className="text-sm font-medium text-foreground">{title}</p>
-      {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+      <p className="max-w-prose text-sm font-medium text-balance text-foreground">{title}</p>
+      {hint ? <p className="max-w-prose text-xs text-pretty text-muted-foreground">{hint}</p> : null}
       {action ? <div className="mt-3">{action}</div> : null}
     </div>
   )

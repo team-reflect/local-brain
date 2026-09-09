@@ -142,7 +142,7 @@ export function ChatComposer({
               value={selectedModelValue ?? ''}
               disabled={pending}
               onChange={(event) => setSelectedModelValue(event.target.value)}
-              className="h-7 w-auto max-w-64 border-none bg-transparent py-1 pr-7 pl-1 text-xs text-muted-foreground shadow-none focus:border-transparent focus:ring-0"
+              className="h-10 w-auto max-w-64 border-none bg-transparent py-1 pr-7 pl-1 text-xs text-muted-foreground shadow-none"
             >
               {optionGroups.map((group) => (
                 <optgroup key={group[0]?.configId} label={group[0]?.groupLabel}>
@@ -161,7 +161,7 @@ export function ChatComposer({
             variant="primary"
             disabled={empty || pending}
             aria-label="Send"
-            className="size-8 rounded-md px-0"
+            className="size-10 shrink-0 rounded-md px-0"
           >
             <ArrowUp aria-hidden className="size-4" />
           </Button>
