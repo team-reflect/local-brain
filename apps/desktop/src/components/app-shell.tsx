@@ -13,7 +13,6 @@ import {
   ChevronRight,
   ListTodo,
   MessageSquare,
-  Plus,
   Search,
   Settings,
   Users,
@@ -25,7 +24,6 @@ import type { CommandContext } from '../lib/commands/types'
 import { routesEqual, sectionForRoute, type Route } from '../routing/route'
 import { useRouter } from '../routing/router'
 import { BrainSwitcher } from './brain-switcher'
-import { Button } from './button'
 import { CommandPalette } from './command-palette'
 import { FirstRun } from './first-run'
 import { RouteContent } from './route-content'
@@ -200,10 +198,6 @@ export function AppShell(): ReactNode {
                 <kbd className={keycapClass}>⌘K</kbd>
               </button>
             </div>
-            <Button variant="outline" className="h-10" onClick={openTaskCreate}>
-              <Plus aria-hidden className="size-3.5" />
-              Add task
-            </Button>
           </div>
         </header>
         <main
